@@ -1,8 +1,4 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
-import {
-  Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell,
-  WidthType, ShadingType, AlignmentType, BorderStyle, ImageRun, VerticalAlign,
-} from "docx";
 
 /* Logo HT Maintenance (charte graphique fournie par l'utilisateur), encodé en base64 pour un artefact autonome */
 const LOGO_DARK = "data:image/png;base64,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";
@@ -21,13 +17,14 @@ import {
 
 const EQUIPMENT_TYPES = [
   "Sécurité",
-  "Interrupteur",
-  "Comptage",
-  "Interrupteur Fusible",
-  "Disjoncteur",
-  "Contacteur",
-  "BRK",
-  "TOL TDY",
+  "Interrupteur HTA",
+  "Comptage HTA",
+  "Interrupteur Fusible HTA",
+  "Disjoncteur HTA",
+  "Contacteur HTA",
+  "Disjoncteur BT",
+  "Interrupteur BT",
+  "Transformateur",
 ];
 
 // petit constructeur : un contrôle avec Action + État final (+ champs de mesure optionnels)
@@ -58,14 +55,16 @@ const LISTE_COURBE_RELAIS = ["Constant", "Inverse Normale CEI", "Très Inverse C
 const LISTE_TYPE_RELAIS = ["Indépendant", "Dépendant"];
 const LISTE_TEMPO_UNITE = ["ms", "s"];
 const LISTE_ETAT_SEUIL = ["", "Actif"];
+const LISTE_TR_MODE = ["Ajustable", "Fixe"];
+const LISTE_TR_CLASSE = ["2", "3", "6"];
 const LISTE_RELAIS_MARQUE = ["SEPAM", "MICOM"];
 const LISTE_REF_DISJONCTEUR = ["SF1", "ORTHOFLUOR"];
 const LISTE_TYPE_CELLULE = {
-  "Interrupteur": ["INTERRUPTEUR - IM", "INTERRUPTEUR - IS", "INTERRUPTEUR - N1G", "INTERRUPTEUR - SDC"],
-  "Comptage": ["COMPTAGE - CM", "COMPTAGE - CM2", "COMPTAGE - LT", "COMPTAGE - N5G", "COMPTAGE - TM"],
-  "Interrupteur Fusible": ["INTERRUPTEUR-FUSIBLE - QM", "INTERRUPTEUR-FUSIBLE - PM", "INTERRUPTEUR-FUSIBLE - PFA", "INTERRUPTEUR-FUSIBLE - PF", "INTERRUPTEUR-FUSIBLE - P3G", "INTERRUPTEUR-FUSIBLE - N3G", "INTERRUPTEUR-FUSIBLE - SDF"],
-  "Disjoncteur": ["DISJONCTEUR - DM1", "DISJONCTEUR - D1G", "DISJONCTEUR - DM2", "DISJONCTEUR - D2G", "DISJONCTEUR - PGC", "DISJONCTEUR - PGB", "DISJONCTEUR - SBC"],
-  "Contacteur": ["DISJONCTEUR - DM1", "DISJONCTEUR - D1G", "DISJONCTEUR - DM2", "DISJONCTEUR - D2G", "DISJONCTEUR - PGC", "DISJONCTEUR - PGB", "DISJONCTEUR - SBC"],
+  "Interrupteur HTA": ["INTERRUPTEUR - IM", "INTERRUPTEUR - IS", "INTERRUPTEUR - N1G", "INTERRUPTEUR - SDC"],
+  "Comptage HTA": ["COMPTAGE - CM", "COMPTAGE - CM2", "COMPTAGE - LT", "COMPTAGE - N5G", "COMPTAGE - TM"],
+  "Interrupteur Fusible HTA": ["INTERRUPTEUR-FUSIBLE - QM", "INTERRUPTEUR-FUSIBLE - PM", "INTERRUPTEUR-FUSIBLE - PFA", "INTERRUPTEUR-FUSIBLE - PF", "INTERRUPTEUR-FUSIBLE - P3G", "INTERRUPTEUR-FUSIBLE - N3G", "INTERRUPTEUR-FUSIBLE - SDF"],
+  "Disjoncteur HTA": ["DISJONCTEUR - DM1", "DISJONCTEUR - D1G", "DISJONCTEUR - DM2", "DISJONCTEUR - D2G", "DISJONCTEUR - PGC", "DISJONCTEUR - PGB", "DISJONCTEUR - SBC"],
+  "Contacteur HTA": ["DISJONCTEUR - DM1", "DISJONCTEUR - D1G", "DISJONCTEUR - DM2", "DISJONCTEUR - D2G", "DISJONCTEUR - PGC", "DISJONCTEUR - PGB", "DISJONCTEUR - SBC"],
 };
 const LISTE_MARQUE_BRK = ["MASTERPACT", "COMPACT", "IZM", "NZM", "MEGAMAX", "ISOMAX", "EMAX", "EMAX 2", "SPECTRONIC", "MPACT", "3WL", "3WN", "DMX", "DMX³", "DPX"];
 const LISTE_TYPE_TRANSFORMATEUR = ["TRANSFORMATEUR DE DISTRIBUTION", "TRANSFORMATEUR", "AUTO-TRANSFORMATEUR", "TRANSFORMATEUR A DOUBLE SECONDAIRE", "TRANSFORMATEUR SEC ENROBÉ"];
@@ -141,18 +140,23 @@ function emptySeuilEntry(label) {
 }
 // Contrôle du relais de protection non lié à un seuil précis (toujours affiché)
 const CIRCUIT_MESURES_COMMANDE = C("circuit_mesures_commande", "Contrôle du circuit de mesures et commande");
-const TYPES_AVEC_RELAIS = ["Disjoncteur", "Contacteur", "Interrupteur", "Interrupteur Fusible"];
-function calcToleranceEssai(reglage, unite) {
+const TYPES_AVEC_RELAIS = ["Disjoncteur HTA", "Contacteur HTA", "Interrupteur HTA", "Interrupteur Fusible HTA"];
+// Reproduit fidèlement le fichier Excel : seuls les 1er et 2ème seuils de courant de phase ont une
+// formule de tolérance qui s'adapte à l'unité choisie (s/ms) ; le 3ème seuil de phase et les 3 seuils
+// homopolaires utilisent toujours la formule en ms, quelle que soit l'unité sélectionnée sur ces lignes.
+const SEUILS_TOLERANCE_ADAPTATIVE = ["Premier seuil de courant de phase", "Deuxième seuil de courant de phase"];
+function calcToleranceEssai(reglage, unite, label) {
   const r = numOf(reglage);
   if (r === null) return null;
-  if (unite === "ms") return { min: Math.round((r * 0.9 + 30) * 100) / 100, max: Math.round((r + 120) * 100) / 100, unite: "ms" };
+  const adaptatif = SEUILS_TOLERANCE_ADAPTATIVE.includes(label);
+  if (!adaptatif || unite === "ms") return { min: Math.round((r * 0.9 + 30) * 100) / 100, max: Math.round((r + 120) * 100) / 100, unite: "ms" };
   return { min: Math.round((r * 0.9 + 0.03) * 100) / 100, max: Math.round((r * 1.1 + 0.12) * 100) / 100, unite: "s" };
 }
 
 
 const SCHEMAS = {
-  "Interrupteur": {
-    identification: [{ key: "repere", label: "Repère / Nom de l'équipement" }, { key: "typeCellule", label: "Type de cellule", options: LISTE_TYPE_CELLULE["Interrupteur"] }, { key: "numeroSerie", label: "Numéro de série" }],
+  "Interrupteur HTA": {
+    identification: [{ key: "repere", label: "Repère / Nom de l'équipement" }, { key: "typeCellule", label: "Type de cellule", options: LISTE_TYPE_CELLULE["Interrupteur HTA"] }, { key: "numeroSerie", label: "Numéro de série" }],
     sections: [
       { key: "mecaniques", title: "Contrôles mécaniques", items: MECA_CELLULE },
       { key: "electriques", title: "Contrôles électriques", items: [
@@ -167,8 +171,8 @@ const SCHEMAS = {
       { key: "controles_relais", title: "Contrôles du relais de protection", items: [CIRCUIT_MESURES_COMMANDE] },
     ],
   },
-  "Comptage": {
-    identification: [{ key: "repere", label: "Repère / Nom de l'équipement" }, { key: "typeCellule", label: "Type de cellule", options: LISTE_TYPE_CELLULE["Comptage"] }, { key: "numeroSerie", label: "Numéro de série" }],
+  "Comptage HTA": {
+    identification: [{ key: "repere", label: "Repère / Nom de l'équipement" }, { key: "typeCellule", label: "Type de cellule", options: LISTE_TYPE_CELLULE["Comptage HTA"] }, { key: "numeroSerie", label: "Numéro de série" }],
     sections: [
       { key: "mecaniques", title: "Contrôles mécaniques", items: MECA_CELLULE },
       { key: "electriques", title: "Contrôles électriques", items: [
@@ -182,8 +186,8 @@ const SCHEMAS = {
       { key: "securite", title: "Contrôles de sécurité", items: SECURITE_CELLULE },
     ],
   },
-  "Interrupteur Fusible": {
-    identification: [{ key: "repere", label: "Repère / Nom de l'équipement" }, { key: "typeCellule", label: "Type de cellule", options: LISTE_TYPE_CELLULE["Interrupteur Fusible"] }, { key: "numeroSerie", label: "Numéro de série" }],
+  "Interrupteur Fusible HTA": {
+    identification: [{ key: "repere", label: "Repère / Nom de l'équipement" }, { key: "typeCellule", label: "Type de cellule", options: LISTE_TYPE_CELLULE["Interrupteur Fusible HTA"] }, { key: "numeroSerie", label: "Numéro de série" }],
     sections: [
       { key: "mecaniques", title: "Contrôles mécaniques", items: MECA_CELLULE },
       { key: "electriques", title: "Contrôles électriques", items: [
@@ -199,10 +203,10 @@ const SCHEMAS = {
       { key: "controles_relais", title: "Contrôles du relais de protection", items: [CIRCUIT_MESURES_COMMANDE] },
     ],
   },
-  "Disjoncteur": {
+  "Disjoncteur HTA": {
     identification: [
       { key: "repere", label: "Repère / Nom de l'équipement" }, 
-      { key: "typeCellule", label: "Type de cellule", options: LISTE_TYPE_CELLULE["Disjoncteur"] }, { key: "numeroSerie", label: "Numéro de série" },
+      { key: "typeCellule", label: "Type de cellule", options: LISTE_TYPE_CELLULE["Disjoncteur HTA"] }, { key: "numeroSerie", label: "Numéro de série" },
       { key: "referenceDisjoncteur", label: "Référence du disjoncteur", options: LISTE_REF_DISJONCTEUR }, { key: "numeroSerieDisjoncteur", label: "Numéro de série (disjoncteur)" },
       { key: "referenceRelais", label: "Référence du relais", options: LISTE_RELAIS_MARQUE }, { key: "numeroSerieRelais", label: "Numéro de série (relais)" },
     ],
@@ -227,10 +231,10 @@ const SCHEMAS = {
       { key: "controles_relais", title: "Contrôles du relais de protection", items: [CIRCUIT_MESURES_COMMANDE] },
     ],
   },
-  "Contacteur": {
+  "Contacteur HTA": {
     identification: [
       { key: "repere", label: "Repère / Nom de l'équipement" }, 
-      { key: "typeCellule", label: "Type de cellule", options: LISTE_TYPE_CELLULE["Contacteur"] }, { key: "numeroSerie", label: "Numéro de série" },
+      { key: "typeCellule", label: "Type de cellule", options: LISTE_TYPE_CELLULE["Contacteur HTA"] }, { key: "numeroSerie", label: "Numéro de série" },
       { key: "referenceContacteur", label: "Référence du contacteur", options: LISTE_REF_DISJONCTEUR }, { key: "numeroSerieContacteur", label: "Numéro de série (contacteur)" },
       { key: "referenceRelais", label: "Référence du relais", options: LISTE_RELAIS_MARQUE }, { key: "numeroSerieRelais", label: "Numéro de série (relais)" },
     ],
@@ -255,7 +259,7 @@ const SCHEMAS = {
       { key: "controles_relais", title: "Contrôles du relais de protection", items: [CIRCUIT_MESURES_COMMANDE] },
     ],
   },
-  "BRK": {
+  "Disjoncteur BT": {
     identification: [
       { key: "repere", label: "Repère / Nom de l'équipement" }, 
       { key: "nomTGBT", label: "Nom du TGBT" }, { key: "utilisation", label: "Utilisation" },
@@ -280,7 +284,7 @@ const SCHEMAS = {
       ]},
       { key: "organes", title: "Organes internes", items: ORGANES_INTERNES },
       { key: "reglage_disjoncteur", title: "Réglage du disjoncteur", items: [
-        S("surcharge_longue", "Surcharge longue", [F("inominal", "I nominal", "A"), F("k1", "K1"), F("k2", "K2"), F("ineutre", "Ineutre", "A")]),
+        S("surcharge_longue", "Surcharge longue", [F("inominal", "I nominal", "A"), F("k1", "K1"), F("k2", "K2"), F("ineutre", "Ineutre", "A"), F("tr_mode", "tr", null, LISTE_TR_MODE), F("tr", "tr", "s"), F("tr_classe", "à (x Ir)", null, LISTE_TR_CLASSE)]),
         S("cc_temporise", "Court-circuit temporisé", [F("im_fonction_de", "Im fonction de", null, ["Ir", "In"]), F("k", "K"), F("tsd", "tsd", "ms"), F("i2t", "I²t")]),
         S("instantane", "Instantané", [F("ii", "Ii", "kA")]),
         S("pouvoir_coupure", "Pouvoir de coupure", [F("icu", "Icu", "kA")]),
@@ -295,7 +299,32 @@ const SCHEMAS = {
       ]},
     ],
   },
-  "TOL TDY": {
+  "Interrupteur BT": {
+    identification: [
+      { key: "repere", label: "Repère / Nom de l'équipement" },
+      { key: "nomTGBT", label: "Nom du TGBT" }, { key: "utilisation", label: "Utilisation" },
+      { key: "typeDisjoncteur", label: "Type", options: LISTE_MARQUE_BRK }, { key: "numeroSerieDisjoncteur", label: "Numéro de série" },
+      { key: "intensiteNominale", label: "Intensité nominale (A)", numeric: true }, { key: "debrochable", label: "Débrochable", options: OUI_NON_LIST },
+    ],
+    sections: [
+      { key: "mecaniques", title: "Contrôles mécaniques", items: [
+        C("manoeuvre_int_sect", "Manœuvres de l'interrupteur"),
+        C("graissage_plages", "Graissage des plages de puissance"),
+        C("connexions_puissance", "Contrôle des connexions de puissance"),
+        C("nettoyage_general", "Nettoyage général externe et interne"),
+        C("contact_puissances", "Contact de puissances"),
+      ]},
+      { key: "electriques", title: "Contrôles électriques", items: [
+        C("contacts_auxiliaires", "Contacts auxiliaires"),
+        C("resistances_contacts", "Résistances des contacts", [...L1L2L3("µΩ"), F("n", "N", "µΩ")]),
+        C("verif_unite_controle", "Vérification unité de contrôle"),
+        C("tension_aux_unite", "Tension auxiliaire de l'unité de contrôle"),
+        C("signalisation", "Signalisation"),
+      ]},
+      { key: "organes", title: "Organes internes", items: ORGANES_INTERNES },
+    ],
+  },
+  "Transformateur": {
     identification: [
       { key: "repere", label: "Repère / Nom de l'équipement" }, 
       { key: "typeTransformateur", label: "Type de transformateur", options: LISTE_TYPE_TRANSFORMATEUR }, { key: "numeroSerie", label: "Numéro de série" },
@@ -426,7 +455,7 @@ function itemAgreement(label) {
 
 const RANK_OF = { "Conforme": 0, "À corriger": 1, "Dégradé": 1, "Conforme avec réserves": 1, "Non conforme": 2, "Défaillant": 2, "Non réalisé": -1, "Non présent": -1 };
 const RANK_COLOR = {
-  "-1": { color: "#8FA3B8", bg: "rgba(143,163,184,0.14)", icon: MinusCircle },
+  "-1": { color: "#5B6B7D", bg: "rgba(143,163,184,0.14)", icon: MinusCircle },
   0: { color: "#2DD4BF", bg: "rgba(45,212,191,0.12)", icon: CheckCircle2 },
   1: { color: "#FB923C", bg: "rgba(251,146,60,0.12)", icon: AlertTriangle },
   2: { color: "#EF4444", bg: "rgba(239,68,68,0.14)", icon: AlertOctagon },
@@ -617,7 +646,7 @@ function StatusBadge({ label, size = "md", gender = "m", plural = false }) {
 function Field({ label, children, span }) {
   return (
     <div style={{ gridColumn: span ? `span ${span}` : undefined }}>
-      <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#8FA3B8", letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 6 }}>
+      <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#5B6B7D", letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 6 }}>
         {label}
       </label>
       {children}
@@ -626,8 +655,8 @@ function Field({ label, children, span }) {
 }
 
 const inputStyle = {
-  width: "100%", background: "#14181E", border: "1px solid #333B47", borderRadius: 8,
-  padding: "9px 11px", color: "#E8EEF5", fontSize: 13.5, outline: "none", boxSizing: "border-box", fontFamily: "inherit",
+  width: "100%", background: "#F7F8FA", border: "1px solid #D8DEE5", borderRadius: 8,
+  padding: "9px 11px", color: "#1A1F26", fontSize: 13.5, outline: "none", boxSizing: "border-box", fontFamily: "inherit",
 };
 function TextInput(props) { return <input {...props} style={{ ...inputStyle, ...(props.style || {}) }} />; }
 function Select(props) { return <select {...props} style={{ ...inputStyle, ...(props.style || {}) }}>{props.children}</select>; }
@@ -683,7 +712,7 @@ function NumberWithUnit({ value, unit, onValueChange, onUnitChange, width }) {
           {family.map((u) => <option key={u} value={u}>{u}</option>)}
         </select>
       ) : unit ? (
-        <span style={{ fontSize: 11, color: "#63748A" }}>{unit}</span>
+        <span style={{ fontSize: 11, color: "#8B96A3" }}>{unit}</span>
       ) : null}
     </span>
   );
@@ -769,7 +798,7 @@ function FileGallery({ files, onChange, idPrefix }) {
         />
       </div>
       {list.length === 0 ? (
-        <div style={{ textAlign: "center", padding: 22, color: "#63748A", fontSize: 12.5, border: "1px dashed #333B47", borderRadius: 10 }}>
+        <div style={{ textAlign: "center", padding: 22, color: "#8B96A3", fontSize: 12.5, border: "1px dashed #D8DEE5", borderRadius: 10 }}>
           Aucune pièce jointe
         </div>
       ) : (
@@ -780,13 +809,13 @@ function FileGallery({ files, onChange, idPrefix }) {
                 {f.isPdf ? (
                   <a href={f.dataUrl} download={f.name || "document.pdf"} style={{
                     display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6,
-                    width: "100%", height: 96, borderRadius: 8, border: "1px solid #333B47", background: "#14181E", textDecoration: "none",
+                    width: "100%", height: 96, borderRadius: 8, border: "1px solid #D8DEE5", background: "#F7F8FA", textDecoration: "none",
                   }}>
-                    <FileText size={22} color="#8FA3B8" />
-                    <span style={{ fontSize: 10, color: "#8FA3B8", padding: "0 6px", textAlign: "center", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "100%" }}>{f.name || "document.pdf"}</span>
+                    <FileText size={22} color="#5B6B7D" />
+                    <span style={{ fontSize: 10, color: "#5B6B7D", padding: "0 6px", textAlign: "center", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "100%" }}>{f.name || "document.pdf"}</span>
                   </a>
                 ) : (
-                  <img src={f.dataUrl} alt="" style={{ width: "100%", height: 96, objectFit: "cover", borderRadius: 8, border: "1px solid #333B47", display: "block" }} />
+                  <img src={f.dataUrl} alt="" style={{ width: "100%", height: 96, objectFit: "cover", borderRadius: 8, border: "1px solid #D8DEE5", display: "block" }} />
                 )}
                 <button
                   onClick={() => onChange(list.filter((x) => x.id !== f.id))}
@@ -852,7 +881,7 @@ function PhotoGallery({ photos, onChange, idPrefix }) {
         />
       </div>
       {list.length === 0 ? (
-        <div style={{ textAlign: "center", padding: 22, color: "#63748A", fontSize: 12.5, border: "1px dashed #333B47", borderRadius: 10 }}>
+        <div style={{ textAlign: "center", padding: 22, color: "#8B96A3", fontSize: 12.5, border: "1px dashed #D8DEE5", borderRadius: 10 }}>
           Aucune photo
         </div>
       ) : (
@@ -860,7 +889,7 @@ function PhotoGallery({ photos, onChange, idPrefix }) {
           {list.map((p) => (
             <div key={p.id}>
               <div style={{ position: "relative" }}>
-                <img src={p.dataUrl} alt="" style={{ width: "100%", height: 96, objectFit: "cover", borderRadius: 8, border: "1px solid #2B323C", display: "block" }} />
+                <img src={p.dataUrl} alt="" style={{ width: "100%", height: 96, objectFit: "cover", borderRadius: 8, border: "1px solid #D8DEE5", display: "block" }} />
                 <button
                   onClick={() => onChange(list.filter((x) => x.id !== p.id))}
                   style={{ position: "absolute", top: 4, right: 4, background: "rgba(10,15,25,0.85)", border: "none", borderRadius: 6, padding: 3, cursor: "pointer", color: "#EF4444", display: "flex" }}
@@ -967,7 +996,7 @@ function SignatureCanvas({ value, onSave, width = 340, height = 120 }) {
         ref={canvasRef}
         width={width}
         height={height}
-        style={{ width: "100%", maxWidth: width, height, background: "#fff", borderRadius: 8, border: "1px solid #333B47", touchAction: "none", cursor: "crosshair", display: "block" }}
+        style={{ width: "100%", maxWidth: width, height, background: "#fff", borderRadius: 8, border: "1px solid #D8DEE5", touchAction: "none", cursor: "crosshair", display: "block" }}
         onMouseDown={start} onMouseMove={move} onMouseUp={end} onMouseLeave={end}
       />
       <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
@@ -1009,10 +1038,10 @@ function SignatureField({ label, value, onChange }) {
 
   return (
     <div>
-      <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#8FA3B8", letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 6 }}>{label}</label>
+      <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#5B6B7D", letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 6 }}>{label}</label>
       {value ? (
         <div>
-          <img src={value} alt={label} style={{ width: "100%", maxWidth: 260, height: 90, objectFit: "contain", background: "#fff", borderRadius: 8, border: "1px solid #333B47", display: "block" }} />
+          <img src={value} alt={label} style={{ width: "100%", maxWidth: 260, height: 90, objectFit: "contain", background: "#fff", borderRadius: 8, border: "1px solid #D8DEE5", display: "block" }} />
           <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
             <button onClick={() => setOpen(true)} style={{ ...btnGhost(), fontSize: 11, padding: "5px 10px" }}><PenLine size={12} /> Modifier la signature</button>
             <button onClick={() => onChange(null)} style={{ ...btnGhost("#EF4444"), fontSize: 11, padding: "5px 10px" }}><Trash2 size={12} /> Effacer</button>
@@ -1026,9 +1055,9 @@ function SignatureField({ label, value, onChange }) {
 
       {open && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(4,9,16,0.85)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 220, padding: 16, touchAction: "none" }} onClick={() => setOpen(false)}>
-          <div onClick={(e) => e.stopPropagation()} style={{ background: "#14181E", border: "1px solid #333B47", borderRadius: 14, padding: 20, maxWidth: 420, width: "100%", boxShadow: "0 20px 50px rgba(0,0,0,0.5)" }}>
-            <div style={{ fontSize: 14, fontWeight: 700, color: "#E8EEF5", marginBottom: 2 }}>{label}</div>
-            <div style={{ fontSize: 12, color: "#8FA3B8", marginBottom: 14 }}>Signez avec le doigt ou la souris ci-dessous</div>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: "#F7F8FA", border: "1px solid #D8DEE5", borderRadius: 14, padding: 20, maxWidth: 420, width: "100%", boxShadow: "0 20px 50px rgba(0,0,0,0.5)" }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "#1A1F26", marginBottom: 2 }}>{label}</div>
+            <div style={{ fontSize: 12, color: "#5B6B7D", marginBottom: 14 }}>Signez avec le doigt ou la souris ci-dessous</div>
             <SignatureCanvas
               value={value}
               width={360}
@@ -1049,8 +1078,8 @@ function SignatureField({ label, value, onChange }) {
 function ConfirmDialog({ message, confirmLabel = "Supprimer", onConfirm, onCancel }) {
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(4,9,16,0.72)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200, padding: 16 }} onClick={onCancel}>
-      <div onClick={(e) => e.stopPropagation()} style={{ background: "#14181E", border: "1px solid #333B47", borderRadius: 14, padding: 22, maxWidth: 380, width: "100%", boxShadow: "0 20px 50px rgba(0,0,0,0.5)" }}>
-        <div style={{ fontSize: 14, color: "#E8EEF5", marginBottom: 20, lineHeight: 1.5 }}>{message}</div>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: "#F7F8FA", border: "1px solid #D8DEE5", borderRadius: 14, padding: 22, maxWidth: 380, width: "100%", boxShadow: "0 20px 50px rgba(0,0,0,0.5)" }}>
+        <div style={{ fontSize: 14, color: "#1A1F26", marginBottom: 20, lineHeight: 1.5 }}>{message}</div>
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
           <button onClick={onCancel} style={btnGhost()}>Annuler</button>
           <button onClick={onConfirm} style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "#EF4444", border: "none", color: "#fff", borderRadius: 8, padding: "9px 16px", fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>
@@ -1076,14 +1105,14 @@ function InlineConfirmButton({ icon: Icon, label, color = "#EF4444", onConfirm }
   }
   return (
     <span style={{ display: "inline-flex", alignItems: "center", gap: 8, background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.35)", borderRadius: 8, padding: "5px 8px" }}>
-      <span style={{ fontSize: 12, color: "#FCA5A5", fontWeight: 600 }}>Confirmer ?</span>
+      <span style={{ fontSize: 12, color: "#B91C1C", fontWeight: 600 }}>Confirmer ?</span>
       <button
         onClick={onConfirm}
         style={{ background: "#EF4444", border: "none", color: "#fff", borderRadius: 6, padding: "5px 10px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}
       >
         Oui, supprimer
       </button>
-      <button onClick={() => setConfirming(false)} style={{ background: "none", border: "none", color: "#8FA3B8", fontSize: 12, cursor: "pointer", padding: "5px 6px" }}>
+      <button onClick={() => setConfirming(false)} style={{ background: "none", border: "none", color: "#5B6B7D", fontSize: 12, cursor: "pointer", padding: "5px 6px" }}>
         Annuler
       </button>
     </span>
@@ -1091,28 +1120,28 @@ function InlineConfirmButton({ icon: Icon, label, color = "#EF4444", onConfirm }
 }
 
 function Card({ children, style }) {
-  return <div style={{ background: "#1A1F26", border: "1px solid #2B323C", borderRadius: 14, padding: 20, ...(style || {}) }}>{children}</div>;
+  return <div style={{ background: "#FFFFFF", border: "1px solid #D8DEE5", borderRadius: 14, padding: 20, ...(style || {}) }}>{children}</div>;
 }
 function SectionTitle({ children }) {
-  return <div style={{ fontSize: 11.5, fontWeight: 700, color: "#8FA3B8", letterSpacing: 0.6, textTransform: "uppercase", marginBottom: 12, fontFamily: "'Rajdhani', 'Inter', sans-serif" }}>{children}</div>;
+  return <div style={{ fontSize: 11.5, fontWeight: 700, color: "#5B6B7D", letterSpacing: 0.6, textTransform: "uppercase", marginBottom: 12, fontFamily: "'Rajdhani', 'Inter', sans-serif" }}>{children}</div>;
 }
 function btnPrimary() {
   return { display: "inline-flex", alignItems: "center", gap: 6, background: "#FFC107", border: "none", color: "#1A1F26", borderRadius: 10, padding: "10px 16px", fontSize: 13, fontWeight: 700, cursor: "pointer" };
 }
 function btnGhost(color) {
-  return { display: "inline-flex", alignItems: "center", gap: 6, background: "#242A33", border: "1px solid #333B47", color: color || "#C7D3E0", borderRadius: 8, padding: "7px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer" };
+  return { display: "inline-flex", alignItems: "center", gap: 6, background: "#E2E6EB", border: "1px solid #D8DEE5", color: color || "#3E4A5C", borderRadius: 8, padding: "7px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer" };
 }
 
 function KpiCard({ icon: Icon, label, value, accent }) {
   return (
-    <div style={{ background: "#1A1F26", border: "1px solid #2B323C", borderRadius: 14, padding: "16px 18px", flex: 1, minWidth: 150 }}>
+    <div style={{ background: "#FFFFFF", border: "1px solid #D8DEE5", borderRadius: 14, padding: "16px 18px", flex: 1, minWidth: 150 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
         <div style={{ width: 26, height: 26, borderRadius: 7, background: (accent || "#FFC107") + "1F", display: "flex", alignItems: "center", justifyContent: "center" }}>
           <Icon size={13} color={accent || "#FFC107"} />
         </div>
-        <span style={{ fontSize: 10.5, fontWeight: 700, color: "#8FA3B8", letterSpacing: 0.5, textTransform: "uppercase" }}>{label}</span>
+        <span style={{ fontSize: 10.5, fontWeight: 700, color: "#5B6B7D", letterSpacing: 0.5, textTransform: "uppercase" }}>{label}</span>
       </div>
-      <div style={{ fontSize: 27, fontWeight: 700, color: "#E8EEF5", fontVariantNumeric: "tabular-nums", fontFamily: "'Rajdhani', 'Inter', sans-serif" }}>{value}</div>
+      <div style={{ fontSize: 27, fontWeight: 700, color: "#1A1F26", fontVariantNumeric: "tabular-nums", fontFamily: "'Rajdhani', 'Inter', sans-serif" }}>{value}</div>
     </div>
   );
 }
@@ -1121,15 +1150,15 @@ function KpiCard({ icon: Icon, label, value, accent }) {
 function ControlRow({ item, value, onChange, idPrefix }) {
   const setField = (k, v) => onChange({ ...value, fields: { ...value.fields, [k]: v } });
   return (
-    <div style={{ padding: "10px 0", borderBottom: "1px solid #242A3380" }}>
+    <div style={{ padding: "10px 0", borderBottom: "1px solid #E2E6EB" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-        <span style={{ fontSize: 12.5, color: "#C7D3E0", flex: "1 1 240px" }}>{item.label}</span>
+        <span style={{ fontSize: 12.5, color: "#3E4A5C", flex: "1 1 240px" }}>{item.label}</span>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
           {(item.fields || []).map((f) =>
             f.compute ? (
-              <label key={f.key} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#63748A" }}>
+              <label key={f.key} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#8B96A3" }}>
                 {f.label}
-                <span style={{ ...inputStyle, width: 66, padding: "5px 7px", fontSize: 12, background: "#10141A", color: "#FFC107", fontWeight: 700, display: "inline-block", textAlign: "center" }}>
+                <span style={{ ...inputStyle, width: 66, padding: "5px 7px", fontSize: 12, background: "#EEF2F6", color: "#0A5DA8", fontWeight: 700, display: "inline-block", textAlign: "center" }}>
                   {f.compute(value.fields) ?? "—"}
                 </span>
                 {(() => {
@@ -1138,7 +1167,7 @@ function ControlRow({ item, value, onChange, idPrefix }) {
                 })()}
               </label>
             ) : f.options ? (
-              <label key={f.key} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#63748A" }}>
+              <label key={f.key} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#8B96A3" }}>
                 {f.label}
                 <Combo
                   value={value.fields[f.key]}
@@ -1149,7 +1178,7 @@ function ControlRow({ item, value, onChange, idPrefix }) {
                 />
               </label>
             ) : (
-              <label key={f.key} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#63748A" }}>
+              <label key={f.key} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#8B96A3" }}>
                 {f.label}
                 {f.unit ? (
                   <NumberWithUnit
@@ -1194,7 +1223,7 @@ function CustomActionsList({ custom, onAdd, onChange, onRemove, idPrefix }) {
   return (
     <div style={{ marginTop: custom.length > 0 ? 4 : 10 }}>
       {custom.map((c) => (
-        <div key={c.id} style={{ padding: "10px 0", borderBottom: "1px solid #242A3380" }}>
+        <div key={c.id} style={{ padding: "10px 0", borderBottom: "1px solid #E2E6EB" }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
             <input
               value={c.label}
@@ -1287,7 +1316,7 @@ function Overview({ sites, onOpen, onNew }) {
 
       <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap" }}>
         <div style={{ flex: "1 1 220px", position: "relative" }}>
-          <Search size={15} style={{ position: "absolute", left: 11, top: 10, color: "#63748A" }} />
+          <Search size={15} style={{ position: "absolute", left: 11, top: 10, color: "#8B96A3" }} />
           <TextInput placeholder="Rechercher client, site, intervenant…" value={query} onChange={(e) => setQuery(e.target.value)} style={{ paddingLeft: 32 }} />
         </div>
         <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} style={{ width: 170 }}>
@@ -1303,12 +1332,12 @@ function Overview({ sites, onOpen, onNew }) {
       </div>
 
       {filtered.length === 0 ? (
-        <div style={{ textAlign: "center", padding: "60px 20px", background: "#1A1F26", border: "1px dashed #333B47", borderRadius: 14 }}>
-          <MapPin size={28} color="#4A5361" style={{ marginBottom: 10 }} />
-          <div style={{ fontSize: 14, fontWeight: 600, color: "#C7D3E0", marginBottom: 4 }}>
+        <div style={{ textAlign: "center", padding: "60px 20px", background: "#FFFFFF", border: "1px dashed #D8DEE5", borderRadius: 14 }}>
+          <MapPin size={28} color="#9AA5B1" style={{ marginBottom: 10 }} />
+          <div style={{ fontSize: 14, fontWeight: 600, color: "#3E4A5C", marginBottom: 4 }}>
             {sites.length === 0 ? "Aucun site enregistré" : "Aucun résultat pour ces filtres"}
           </div>
-          <div style={{ fontSize: 12.5, color: "#63748A", marginBottom: 16 }}>
+          <div style={{ fontSize: 12.5, color: "#8B96A3", marginBottom: 16 }}>
             {sites.length === 0 ? "Ajoutez votre premier site pour commencer le suivi." : "Essayez d'élargir votre recherche."}
           </div>
           {sites.length === 0 && <button onClick={onNew} style={btnPrimary()}><Plus size={15} /> Ajouter un site</button>}
@@ -1317,26 +1346,26 @@ function Overview({ sites, onOpen, onNew }) {
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {filtered.map((s) => {
             const days = daysUntil(s._prochaine);
-            const urgentColor = days !== null && days <= 30 ? "#EF4444" : days !== null && days <= 60 ? "#FB923C" : "#8FA3B8";
+            const urgentColor = days !== null && days <= 30 ? "#EF4444" : days !== null && days <= 60 ? "#FB923C" : "#5B6B7D";
             return (
               <div key={s.id} onClick={() => onOpen(s.id)} className="site-row"
-                style={{ background: "#1A1F26", border: "1px solid #2B323C", borderRadius: 12, padding: "13px 16px", cursor: "pointer" }}
-                onMouseEnter={(e) => (e.currentTarget.style.borderColor = "#3E4650")} onMouseLeave={(e) => (e.currentTarget.style.borderColor = "#2B323C")}
+                style={{ background: "#FFFFFF", border: "1px solid #D8DEE5", borderRadius: 12, padding: "13px 16px", cursor: "pointer" }}
+                onMouseEnter={(e) => (e.currentTarget.style.borderColor = "#9AA5B1")} onMouseLeave={(e) => (e.currentTarget.style.borderColor = "#D8DEE5")}
               >
                 <div className="site-row-main" style={{ flex: "1 1 220px", minWidth: 0 }}>
-                  <div style={{ fontSize: 13.5, fontWeight: 700, color: "#E8EEF5", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.local || "Site sans nom"}</div>
-                  <div style={{ fontSize: 12, color: "#8FA3B8" }}>{s.client || "Client non renseigné"}</div>
+                  <div style={{ fontSize: 13.5, fontWeight: 700, color: "#1A1F26", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.local || "Site sans nom"}</div>
+                  <div style={{ fontSize: 12, color: "#5B6B7D" }}>{s.client || "Client non renseigné"}</div>
                 </div>
                 <div className="site-row-meta hide-mobile" style={{ flex: "0 0 130px", fontSize: 12 }}>
-                  <div style={{ color: "#63748A", fontSize: 10.5, textTransform: "uppercase", fontWeight: 600 }}>Intervenant</div>
+                  <div style={{ color: "#8B96A3", fontSize: 10.5, textTransform: "uppercase", fontWeight: 600 }}>Intervenant</div>
                   <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.rapport.intervenant || "—"}</div>
                 </div>
                 <div className="site-row-meta" style={{ flex: "0 0 150px", fontSize: 12, color: urgentColor, fontWeight: 600 }}>
-                  <div style={{ color: "#63748A", fontSize: 10.5, textTransform: "uppercase", fontWeight: 600 }}>Prochaine maint.</div>
+                  <div style={{ color: "#8B96A3", fontSize: 10.5, textTransform: "uppercase", fontWeight: 600 }}>Prochaine maint.</div>
                   {s._prochaine} {days !== null && <span style={{ fontWeight: 500 }}>({days < 0 ? `${-days}j retard` : `${days}j`})</span>}
                 </div>
                 <div className="site-row-meta" style={{ flex: "0 0 90px" }}><StatusBadge label={rankToLabel(s._rank)} /></div>
-                <ChevronRight size={16} color="#4A5361" className="hide-mobile" />
+                <ChevronRight size={16} color="#9AA5B1" className="hide-mobile" />
               </div>
             );
           })}
@@ -1414,7 +1443,7 @@ function RapportTab({ site, update }) {
 /* ---- Panneau spécialisé : essais de déclenchement avec tolérance calculée depuis le paramétrage du relais ---- */
 function MiniField({ label, unit, children }) {
   return (
-    <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#63748A" }}>
+    <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#8B96A3" }}>
       {label}
       {children}
       {unit && <span>{unit}</span>}
@@ -1423,7 +1452,7 @@ function MiniField({ label, unit, children }) {
 }
 function MiniInputUnit({ label, value, unit, onValueChange, onUnitChange }) {
   return (
-    <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#63748A" }}>
+    <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#8B96A3" }}>
       {label}
       <NumberWithUnit value={value} unit={unit} onValueChange={onValueChange} onUnitChange={onUnitChange} />
     </label>
@@ -1432,7 +1461,7 @@ function MiniInputUnit({ label, value, unit, onValueChange, onUnitChange }) {
 function MiniComputed({ label, unit, value }) {
   return (
     <MiniField label={label} unit={unit}>
-      <span style={{ ...inputStyle, width: 74, padding: "5px 7px", fontSize: 12, background: "#10141A", color: "#FFC107", fontWeight: 700, display: "inline-block", textAlign: "center" }}>
+      <span style={{ ...inputStyle, width: 74, padding: "5px 7px", fontSize: 12, background: "#EEF2F6", color: "#0A5DA8", fontWeight: 700, display: "inline-block", textAlign: "center" }}>
         {value === null || value === undefined || Number.isNaN(value) ? "—" : value}
       </span>
     </MiniField>
@@ -1474,7 +1503,7 @@ function ParametrageRelaisPanel({ eq, update, idPrefix }) {
         <button onClick={addSeuil} style={btnGhost(BRAND.amber)}><Plus size={13} /> Ajouter un seuil</button>
       </div>
       {seuils.length === 0 ? (
-        <div style={{ textAlign: "center", padding: 18, color: "#63748A", fontSize: 12.5, border: "1px dashed #333B47", borderRadius: 10 }}>
+        <div style={{ textAlign: "center", padding: 18, color: "#8B96A3", fontSize: 12.5, border: "1px dashed #D8DEE5", borderRadius: 10 }}>
           Aucun seuil paramétré
         </div>
       ) : (
@@ -1483,7 +1512,7 @@ function ParametrageRelaisPanel({ eq, update, idPrefix }) {
             const used = seuils.filter((x) => x.id !== s.id).map((x) => x.label);
             const options = PARAM_SEUIL_TYPES.filter((t) => !used.includes(t));
             return (
-              <div key={s.id} style={{ padding: "10px 0", borderBottom: "1px solid #242A3380" }}>
+              <div key={s.id} style={{ padding: "10px 0", borderBottom: "1px solid #E2E6EB" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
                   <div style={{ flex: "1 1 220px" }}>
                     <Combo value={s.label} onChange={(v) => setSeuilLabel(s.id, v)} options={options} listId={`${idPrefix}-seuil-${s.id}`} placeholder="Type de seuil (ou saisie libre)" />
@@ -1524,16 +1553,16 @@ function DisjoncteurRelaisPanel({ eq, update, custom, onAddCustom, onChangeCusto
       <SectionTitle>Contrôles du relais de protection</SectionTitle>
       <div>
         {renseignes.length === 0 && (
-          <div style={{ textAlign: "center", padding: 18, color: "#63748A", fontSize: 12.5, border: "1px dashed #333B47", borderRadius: 10, marginBottom: 10 }}>
+          <div style={{ textAlign: "center", padding: 18, color: "#8B96A3", fontSize: 12.5, border: "1px dashed #D8DEE5", borderRadius: 10, marginBottom: 10 }}>
             Ajoutez un seuil dans le paramétrage du relais pour faire apparaître son essai ici.
           </div>
         )}
         {renseignes.map((s) => {
-          const tol = calcToleranceEssai(s.fields.reglage, s.fields.temporisation_unite);
+          const tol = calcToleranceEssai(s.fields.reglage, s.fields.temporisation_unite, s.label);
           return (
-            <div key={s.id} style={{ padding: "10px 0", borderBottom: "1px solid #242A3380" }}>
+            <div key={s.id} style={{ padding: "10px 0", borderBottom: "1px solid #E2E6EB" }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-                <span style={{ fontSize: 12.5, color: "#C7D3E0", flex: "1 1 240px" }}>Essai de déclenchement — {s.label}</span>
+                <span style={{ fontSize: 12.5, color: "#3E4A5C", flex: "1 1 240px" }}>Essai de déclenchement — {s.label}</span>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                   <MiniInput label="L1" value={s.essai.fields.l1} onChange={(v) => setEssaiField(s.id, "l1", v)} />
                   <MiniInput label="L2" value={s.essai.fields.l2} onChange={(v) => setEssaiField(s.id, "l2", v)} />
@@ -1551,7 +1580,7 @@ function DisjoncteurRelaisPanel({ eq, update, custom, onAddCustom, onChangeCusto
         })}
         <div style={{ padding: "10px 0" }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-            <span style={{ fontSize: 12.5, color: "#C7D3E0", flex: "1 1 240px" }}>Contrôle du circuit de mesures et commande</span>
+            <span style={{ fontSize: 12.5, color: "#3E4A5C", flex: "1 1 240px" }}>Contrôle du circuit de mesures et commande</span>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
               <input placeholder="Action" value={circuit.action} onChange={(e) => setCircuit({ action: e.target.value })} style={{ ...inputStyle, width: 150, padding: "5px 7px", fontSize: 12 }} />
               <Select value={circuit.etat} onChange={(e) => setCircuit({ etat: e.target.value })} style={{ width: 120, padding: "5px 7px", fontSize: 12 }}>
@@ -1598,28 +1627,31 @@ function BRKReglagePanel({ eq, update, custom, onAddCustom, onChangeCustom, onRe
       <Card style={{ marginBottom: 14 }}>
         <SectionTitle>Réglage du disjoncteur</SectionTitle>
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "8px 0", borderBottom: "1px solid #242A3380" }}>
-            <span style={{ fontSize: 12.5, color: "#C7D3E0", flex: "1 1 160px" }}>Surcharge longue</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "8px 0", borderBottom: "1px solid #E2E6EB" }}>
+            <span style={{ fontSize: 12.5, color: "#3E4A5C", flex: "1 1 160px" }}>Surcharge longue</span>
             <MiniInputUnit label="I nominal" value={sl.inominal} unit={sl.inominalUnite || "A"} onValueChange={(v) => setR("surcharge_longue", "inominal", v)} onUnitChange={(u) => setR("surcharge_longue", "inominalUnite", u)} />
             <MiniInput label="K1" value={sl.k1} onChange={(v) => setR("surcharge_longue", "k1", v)} />
             <MiniInput label="K2" value={sl.k2} onChange={(v) => setR("surcharge_longue", "k2", v)} />
             <MiniInputUnit label="Ineutre" value={sl.ineutre} unit={sl.ineutreUnite || "A"} onValueChange={(v) => setR("surcharge_longue", "ineutre", v)} onUnitChange={(u) => setR("surcharge_longue", "ineutreUnite", u)} />
+            <MiniSelect label="tr" options={LISTE_TR_MODE} value={sl.tr_mode} onChange={(v) => setR("surcharge_longue", "tr_mode", v)} />
+            <MiniInput label="tr" unit="s" value={sl.tr} onChange={(v) => setR("surcharge_longue", "tr", v)} />
+            <MiniSelect label="à (x Ir)" options={LISTE_TR_CLASSE} value={sl.tr_classe} onChange={(v) => setR("surcharge_longue", "tr_classe", v)} />
             <MiniComputed label="Ir (calculé)" unit="A" value={Ir || null} />
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "8px 0", borderBottom: "1px solid #242A3380" }}>
-            <span style={{ fontSize: 12.5, color: "#C7D3E0", flex: "1 1 160px" }}>Court-circuit temporisé</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "8px 0", borderBottom: "1px solid #E2E6EB" }}>
+            <span style={{ fontSize: 12.5, color: "#3E4A5C", flex: "1 1 160px" }}>Court-circuit temporisé</span>
             <MiniSelect label="Im fonction de" options={["Ir", "In"]} value={cc.im_fonction_de || "Ir"} onChange={(v) => setR("cc_temporise", "im_fonction_de", v)} />
             <MiniInput label="K" value={cc.k} onChange={(v) => setR("cc_temporise", "k", v)} />
             <MiniInput label="tsd" unit="ms" value={cc.tsd} onChange={(v) => setR("cc_temporise", "tsd", v)} />
             <MiniInput label="I²t" value={cc.i2t} onChange={(v) => setR("cc_temporise", "i2t", v)} />
             <MiniComputed label="Im (calculé)" unit="A" value={Im || null} />
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "8px 0", borderBottom: "1px solid #242A3380" }}>
-            <span style={{ fontSize: 12.5, color: "#C7D3E0", flex: "1 1 160px" }}>Instantané</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "8px 0", borderBottom: "1px solid #E2E6EB" }}>
+            <span style={{ fontSize: 12.5, color: "#3E4A5C", flex: "1 1 160px" }}>Instantané</span>
             <MiniInputUnit label="Ii" value={inst.ii} unit={inst.iiUnite || "kA"} onValueChange={(v) => setR("instantane", "ii", v)} onUnitChange={(u) => setR("instantane", "iiUnite", u)} />
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "8px 0" }}>
-            <span style={{ fontSize: 12.5, color: "#C7D3E0", flex: "1 1 160px" }}>Pouvoir de coupure</span>
+            <span style={{ fontSize: 12.5, color: "#3E4A5C", flex: "1 1 160px" }}>Pouvoir de coupure</span>
             <MiniInputUnit label="Icu" value={reglage.pouvoir_coupure.fields.icu} unit={reglage.pouvoir_coupure.fields.icuUnite || "kA"} onValueChange={(v) => setR("pouvoir_coupure", "icu", v)} onUnitChange={(u) => setR("pouvoir_coupure", "icuUnite", u)} />
           </div>
         </div>
@@ -1628,8 +1660,8 @@ function BRKReglagePanel({ eq, update, custom, onAddCustom, onChangeCustom, onRe
       <Card style={{ marginBottom: 14 }}>
         <SectionTitle>Tests du disjoncteur</SectionTitle>
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "8px 0", borderBottom: "1px solid #242A3380" }}>
-            <span style={{ fontSize: 12.5, color: "#C7D3E0", flex: "1 1 160px" }}>Surcharge longue</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "8px 0", borderBottom: "1px solid #E2E6EB" }}>
+            <span style={{ fontSize: 12.5, color: "#3E4A5C", flex: "1 1 160px" }}>Surcharge longue</span>
             <MiniInput label="Test à" unit="x Ir" value={tSL.test_a} onChange={(v) => setT("test_surcharge_longue", "test_a", v)} />
             <MiniInput label="Tr max attendu" unit="x Ir" value={tSL.tr_max} onChange={(v) => setT("test_surcharge_longue", "tr_max", v)} />
             <MiniComputed label="Valise STR" unit="mA" value={valiseSTR_SL} />
@@ -1639,8 +1671,8 @@ function BRKReglagePanel({ eq, update, custom, onAddCustom, onChangeCustom, onRe
               {EQUIP_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
             </Select>
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "8px 0", borderBottom: "1px solid #242A3380" }}>
-            <span style={{ fontSize: 12.5, color: "#C7D3E0", flex: "1 1 160px" }}>Court-circuit temporisé</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "8px 0", borderBottom: "1px solid #E2E6EB" }}>
+            <span style={{ fontSize: 12.5, color: "#3E4A5C", flex: "1 1 160px" }}>Court-circuit temporisé</span>
             <MiniInput label="Test à" unit="x Im" value={tCC.test_a} onChange={(v) => setT("test_cc_temporise", "test_a", v)} />
             <MiniComputed label="Valise STR" unit="mA" value={valiseSTR_CC} />
             <MiniComputed label="Valise IS" unit="A" value={valiseIS_CC} />
@@ -1651,7 +1683,7 @@ function BRKReglagePanel({ eq, update, custom, onAddCustom, onChangeCustom, onRe
             </Select>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "8px 0" }}>
-            <span style={{ fontSize: 12.5, color: "#C7D3E0", flex: "1 1 160px" }}>Instantané</span>
+            <span style={{ fontSize: 12.5, color: "#3E4A5C", flex: "1 1 160px" }}>Instantané</span>
             <MiniInput label="Valise STR" unit="mA" value={tests.test_instantane.fields.valise_str} onChange={(v) => setT("test_instantane", "valise_str", v)} />
             <MiniComputed label="Valise IS" unit="A" value={valiseIS_Inst} />
             <MiniInput label="Déclenchement" unit="ms" value={tests.test_instantane.fields.declenchement} onChange={(v) => setT("test_instantane", "declenchement", v)} />
@@ -1686,11 +1718,11 @@ function EquipementCard({ eq, update, remove, removable = true }) {
     <Card>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer" }} onClick={() => setOpen((o) => !o)}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <ChevronDown size={15} color="#63748A" style={{ transform: open ? "rotate(0deg)" : "rotate(-90deg)", transition: "transform .15s" }} />
-          <span style={{ fontSize: 14, fontWeight: 700, color: "#E8EEF5" }}>
+          <ChevronDown size={15} color="#8B96A3" style={{ transform: open ? "rotate(0deg)" : "rotate(-90deg)", transition: "transform .15s" }} />
+          <span style={{ fontSize: 14, fontWeight: 700, color: "#1A1F26" }}>
             {titleField ? eq.identification[titleField.key] || eq.type : eq.type}
             {titleField && subtitleField && eq.identification[subtitleField.key] && (
-              <span style={{ color: "#8FA3B8", fontWeight: 400 }}> · {eq.identification[subtitleField.key]}</span>
+              <span style={{ color: "#5B6B7D", fontWeight: 400 }}> · {eq.identification[subtitleField.key]}</span>
             )}
           </span>
         </div>
@@ -1748,7 +1780,7 @@ function EquipementCard({ eq, update, remove, removable = true }) {
                 />
               );
             }
-            if (eq.type === "BRK" && sec.key === "reglage_disjoncteur") {
+            if (eq.type === "Disjoncteur BT" && sec.key === "reglage_disjoncteur") {
               return (
                 <BRKReglagePanel
                   key="brk-reglage"
@@ -1762,10 +1794,10 @@ function EquipementCard({ eq, update, remove, removable = true }) {
                 />
               );
             }
-            if (eq.type === "BRK" && sec.key === "tests_disjoncteur") {
+            if (eq.type === "Disjoncteur BT" && sec.key === "tests_disjoncteur") {
               return null; // rendu conjointement par BRKReglagePanel ci-dessus
             }
-            if (eq.type === "BRK" && sec.key === "courbe_declenchement") {
+            if (eq.type === "Disjoncteur BT" && sec.key === "courbe_declenchement") {
               return (
                 <SectionBlock
                   key={sec.key}
@@ -1832,7 +1864,7 @@ function EquipementTypeTab({ type, site, update }) {
         <button onClick={addItem} style={btnGhost("#FFC107")}><Plus size={13} /> Ajouter un {type.toLowerCase()}</button>
       </div>
       {items.length === 0 ? (
-        <div style={{ textAlign: "center", padding: 40, background: "#1A1F26", border: "1px dashed #333B47", borderRadius: 14, color: "#63748A", fontSize: 13 }}>
+        <div style={{ textAlign: "center", padding: 40, background: "#FFFFFF", border: "1px dashed #D8DEE5", borderRadius: 14, color: "#8B96A3", fontSize: 13 }}>
           Aucun équipement de type « {type} » enregistré pour ce site.
         </div>
       ) : (
@@ -1934,7 +1966,7 @@ function computeBRKValues(eq) {
 function PrintEquipement({ eq }) {
   const schema = SCHEMAS[eq.type];
   const isRelaisSeuils = TYPES_AVEC_RELAIS.includes(eq.type);
-  const brk = eq.type === "BRK" ? computeBRKValues(eq) : null;
+  const brk = eq.type === "Disjoncteur BT" ? computeBRKValues(eq) : null;
   return (
     <div style={{ marginBottom: 22, breakInside: "avoid", pageBreakBefore: "always" }}>
       <div style={{ background: BRAND.dark, color: "#fff", padding: "9px 14px", borderRadius: 6, marginBottom: 14, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
@@ -1965,7 +1997,7 @@ function PrintEquipement({ eq }) {
           {isRelaisSeuils && sec.key === "controles_relais" && (
             <>
               {eq.controles.parametrage_relais_seuils.filter((s) => s.label).map((s) => {
-                const tol = calcToleranceEssai(s.fields.reglage, s.fields.temporisation_unite);
+                const tol = calcToleranceEssai(s.fields.reglage, s.fields.temporisation_unite, s.label);
                 const parts = [s.essai.fields.l1 && `L1 : ${s.essai.fields.l1}`, s.essai.fields.l2 && `L2 : ${s.essai.fields.l2}`, s.essai.fields.l3 && `L3 : ${s.essai.fields.l3}`, s.essai.fields.courant_injecte && `Courant injecté : ${s.essai.fields.courant_injecte} A`].filter(Boolean);
                 return (
                   <div key={s.id}>
@@ -2018,7 +2050,7 @@ function PrintEquipement({ eq }) {
       </div>
       {eq.remarques && <div style={{ fontSize: 11, marginTop: 6 }}><b>Remarques et préconisations :</b><br />{eq.remarques}</div>}
       <PrintPhotos photos={eq.photos} />
-      {eq.type === "BRK" && eq.courbeFiles && eq.courbeFiles.length > 0 && (
+      {eq.type === "Disjoncteur BT" && eq.courbeFiles && eq.courbeFiles.length > 0 && (
         <div style={{ marginTop: 10 }}>
           <div style={{ fontSize: 10.5, fontWeight: 700, color: "#555", marginBottom: 6 }}>Courbe de déclenchement — pièces jointes</div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
@@ -2331,19 +2363,19 @@ function SiteDetail({ site, update, onBack, onDelete, onPrint, onCreateIntervent
       </Card>
 
       <div style={{ marginBottom: 18 }}>
-        <div className="tab-bar-scroll" style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", borderBottom: "1px solid #2B323C", paddingBottom: 12 }}>
+        <div className="tab-bar-scroll" style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", borderBottom: "1px solid #D8DEE5", paddingBottom: 12 }}>
           {tabs.map((t) => {
             const Icon = t.icon;
             const active = activeTab === t.key;
             return (
               <button key={t.key} onClick={() => setActiveTab(t.key)} style={{
                 display: "flex", alignItems: "center", gap: 6, padding: "8px 14px", borderRadius: 999, flexShrink: 0,
-                border: active ? "1px solid #FFC10755" : "1px solid #2B323C", background: active ? "rgba(245,166,35,0.12)" : "transparent",
-                color: active ? "#FFC107" : "#8FA3B8", fontSize: 12.5, fontWeight: 600, cursor: "pointer",
+                border: active ? "1px solid #FFC10755" : "1px solid #D8DEE5", background: active ? "rgba(245,166,35,0.12)" : "transparent",
+                color: active ? "#FFC107" : "#5B6B7D", fontSize: 12.5, fontWeight: 600, cursor: "pointer",
               }}>
                 <Icon size={13} /> {t.label}
                 {t.key !== "rapport" && (
-                  <span style={{ fontSize: 10.5, color: active ? "#FFC107" : "#63748A" }}>
+                  <span style={{ fontSize: 10.5, color: active ? "#FFC107" : "#8B96A3" }}>
                     ({site.equipements.filter((e) => e.type === t.key).length})
                   </span>
                 )}
@@ -2359,10 +2391,10 @@ function SiteDetail({ site, update, onBack, onDelete, onPrint, onCreateIntervent
               <Plus size={13} /> Type d'équipement
             </button>
             {addMenuOpen && remainingTypes.length > 0 && (
-              <div style={{ position: "absolute", right: 0, top: "110%", background: "#14181E", border: "1px solid #333B47", borderRadius: 10, overflow: "hidden", zIndex: 50, minWidth: 200, boxShadow: "0 12px 30px rgba(0,0,0,0.4)" }}>
+              <div style={{ position: "absolute", right: 0, top: "110%", background: "#F7F8FA", border: "1px solid #D8DEE5", borderRadius: 10, overflow: "hidden", zIndex: 50, minWidth: 200, boxShadow: "0 12px 30px rgba(0,0,0,0.4)" }}>
                 {remainingTypes.map((t) => (
-                  <div key={t} onClick={() => addEquipmentType(t)} style={{ padding: "9px 14px", fontSize: 12.5, color: "#C7D3E0", cursor: "pointer" }}
-                    onMouseEnter={(e) => (e.currentTarget.style.background = "#242A3380")} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
+                  <div key={t} onClick={() => addEquipmentType(t)} style={{ padding: "9px 14px", fontSize: 12.5, color: "#3E4A5C", cursor: "pointer" }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = "#E2E6EB")} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
                     {t}
                   </div>
                 ))}
@@ -2384,7 +2416,7 @@ function SiteDetail({ site, update, onBack, onDelete, onPrint, onCreateIntervent
 function IvField({ label, children, span }) {
   return (
     <div style={{ gridColumn: span ? `span ${span}` : undefined }}>
-      <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#8FA3B8", letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 6 }}>{label}</label>
+      <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#5B6B7D", letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 6 }}>{label}</label>
       {children}
     </div>
   );
@@ -2417,8 +2449,8 @@ function InterventionEditor({ iv, update, onBack, onDelete, onPrint }) {
       <Card style={{ marginBottom: 18 }}>
         <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
           <div>
-            <div style={{ fontSize: 11, color: "#8FA3B8", fontWeight: 600, letterSpacing: 0.5, textTransform: "uppercase" }}>{iv.numeroRI}</div>
-            <h2 style={{ margin: "2px 0 0", fontSize: 18, fontWeight: 700, color: "#E8EEF5" }}>{iv.client || "Client à renseigner"}</h2>
+            <div style={{ fontSize: 11, color: "#5B6B7D", fontWeight: 600, letterSpacing: 0.5, textTransform: "uppercase" }}>{iv.numeroRI}</div>
+            <h2 style={{ margin: "2px 0 0", fontSize: 18, fontWeight: 700, color: "#1A1F26" }}>{iv.client || "Client à renseigner"}</h2>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
             <StatusBadge label={iv.conclusion} />
@@ -2465,7 +2497,7 @@ function InterventionEditor({ iv, update, onBack, onDelete, onPrint }) {
         <SectionTitle>Nature de l'intervention</SectionTitle>
         <div style={{ display: "flex", gap: 18, flexWrap: "wrap" }}>
           {NATURE_INTERVENTION.map((n) => (
-            <label key={n.key} style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 13, color: "#C7D3E0", cursor: "pointer" }}>
+            <label key={n.key} style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 13, color: "#3E4A5C", cursor: "pointer" }}>
               <input type="checkbox" checked={iv.nature[n.key]} onChange={(e) => setNature(n.key, e.target.checked)} style={{ width: 15, height: 15, accentColor: BRAND.blue }} />
               {n.label}
             </label>
@@ -2480,7 +2512,7 @@ function InterventionEditor({ iv, update, onBack, onDelete, onPrint }) {
         </div>
 
         {(!iv.travauxActions || iv.travauxActions.length === 0) ? (
-          <div style={{ textAlign: "center", padding: 18, color: "#63748A", fontSize: 12.5, border: "1px dashed #333B47", borderRadius: 10, marginBottom: 14 }}>
+          <div style={{ textAlign: "center", padding: 18, color: "#8B96A3", fontSize: 12.5, border: "1px dashed #D8DEE5", borderRadius: 10, marginBottom: 14 }}>
             Aucune action ajoutée au tableau.
           </div>
         ) : (
@@ -2536,7 +2568,7 @@ function InterventionEditor({ iv, update, onBack, onDelete, onPrint }) {
         <SectionTitle>Conclusion</SectionTitle>
         <div style={{ display: "flex", gap: 18, flexWrap: "wrap" }}>
           {CONCLUSION_INTERVENTION.map((c) => (
-            <label key={c} style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 13, color: "#C7D3E0", cursor: "pointer" }}>
+            <label key={c} style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 13, color: "#3E4A5C", cursor: "pointer" }}>
               <input type="radio" name={`conclusion-${iv.id}`} checked={iv.conclusion === c} onChange={() => set("conclusion", c)} style={{ width: 15, height: 15, accentColor: BRAND.blue }} />
               {c}
             </label>
@@ -2562,7 +2594,7 @@ function InterventionEditor({ iv, update, onBack, onDelete, onPrint }) {
             </div>
           </div>
         </div>
-        <div style={{ fontSize: 11, color: "#63748A", marginTop: 12 }}>
+        <div style={{ fontSize: 11, color: "#8B96A3", marginTop: 12 }}>
           Signature indisponible ? Générez le document Word et faites-le signer à la main après impression.
         </div>
       </Card>
@@ -2578,10 +2610,10 @@ function InterventionPrefillPicker({ sites, onCancel, onConfirm }) {
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(4,9,16,0.72)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "32px 16px", overflowY: "auto", zIndex: 50 }} onClick={(e) => e.target === e.currentTarget && onCancel()}>
-      <div style={{ background: "#1A1F26", border: "1px solid #2B323C", borderRadius: 16, width: "100%", maxWidth: 480 }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "18px 24px", borderBottom: "1px solid #2B323C" }}>
-          <h2 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: "#E8EEF5" }}>Pré-remplir depuis un site</h2>
-          <button onClick={onCancel} style={{ background: "none", border: "none", cursor: "pointer", color: "#8FA3B8" }}><X size={18} /></button>
+      <div style={{ background: "#FFFFFF", border: "1px solid #D8DEE5", borderRadius: 16, width: "100%", maxWidth: 480 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "18px 24px", borderBottom: "1px solid #D8DEE5" }}>
+          <h2 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: "#1A1F26" }}>Pré-remplir depuis un site</h2>
+          <button onClick={onCancel} style={{ background: "none", border: "none", cursor: "pointer", color: "#5B6B7D" }}><X size={18} /></button>
         </div>
         <div style={{ padding: 24 }}>
           <IvField label="Site">
@@ -2601,7 +2633,7 @@ function InterventionPrefillPicker({ sites, onCancel, onConfirm }) {
             </div>
           )}
         </div>
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, padding: "16px 24px", borderTop: "1px solid #2B323C" }}>
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, padding: "16px 24px", borderTop: "1px solid #D8DEE5" }}>
           <button onClick={onCancel} style={btnGhost()}>Annuler</button>
           <button
             disabled={!site}
@@ -2632,7 +2664,7 @@ function InterventionsOverview({ interventions, sites, onOpen, onCreate }) {
     <div>
       <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
         <div style={{ flex: "1 1 220px", position: "relative" }}>
-          <Search size={15} style={{ position: "absolute", left: 11, top: 10, color: "#63748A" }} />
+          <Search size={15} style={{ position: "absolute", left: 11, top: 10, color: "#8B96A3" }} />
           <TextInput placeholder="Rechercher N° RI, client, site, technicien…" value={query} onChange={(e) => setQuery(e.target.value)} style={{ paddingLeft: 32 }} />
         </div>
         <button onClick={() => onCreate(null, null)} style={btnGhost("#FFC107")}><Plus size={14} /> Rapport vierge</button>
@@ -2640,28 +2672,28 @@ function InterventionsOverview({ interventions, sites, onOpen, onCreate }) {
       </div>
 
       {sorted.length === 0 ? (
-        <div style={{ textAlign: "center", padding: "60px 20px", background: "#1A1F26", border: "1px dashed #333B47", borderRadius: 14 }}>
-          <ClipboardList size={28} color="#3A4C61" style={{ marginBottom: 10 }} />
-          <div style={{ fontSize: 14, fontWeight: 600, color: "#C7D3E0", marginBottom: 4 }}>
+        <div style={{ textAlign: "center", padding: "60px 20px", background: "#FFFFFF", border: "1px dashed #D8DEE5", borderRadius: 14 }}>
+          <ClipboardList size={28} color="#9AA5B1" style={{ marginBottom: 10 }} />
+          <div style={{ fontSize: 14, fontWeight: 600, color: "#3E4A5C", marginBottom: 4 }}>
             {interventions.length === 0 ? "Aucun rapport d'intervention" : "Aucun résultat pour cette recherche"}
           </div>
-          <div style={{ fontSize: 12.5, color: "#63748A" }}>Créez votre premier rapport à transmettre au client.</div>
+          <div style={{ fontSize: 12.5, color: "#8B96A3" }}>Créez votre premier rapport à transmettre au client.</div>
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {sorted.map((iv) => (
             <div key={iv.id} onClick={() => onOpen(iv.id)} className="iv-row"
-              style={{ background: "#1A1F26", border: "1px solid #2B323C", borderRadius: 12, padding: "13px 16px", cursor: "pointer" }}
-              onMouseEnter={(e) => (e.currentTarget.style.borderColor = "#454F5D")} onMouseLeave={(e) => (e.currentTarget.style.borderColor = "#2B323C")}
+              style={{ background: "#FFFFFF", border: "1px solid #D8DEE5", borderRadius: 12, padding: "13px 16px", cursor: "pointer" }}
+              onMouseEnter={(e) => (e.currentTarget.style.borderColor = "#9AA5B1")} onMouseLeave={(e) => (e.currentTarget.style.borderColor = "#D8DEE5")}
             >
-              <div className="iv-row-meta hide-mobile" style={{ flex: "0 0 100px", fontSize: 11.5, color: "#8FA3B8", fontWeight: 700 }}>{iv.numeroRI}</div>
+              <div className="iv-row-meta hide-mobile" style={{ flex: "0 0 100px", fontSize: 11.5, color: "#5B6B7D", fontWeight: 700 }}>{iv.numeroRI}</div>
               <div className="iv-row-main" style={{ flex: "1 1 220px", minWidth: 0 }}>
-                <div style={{ fontSize: 13.5, fontWeight: 700, color: "#E8EEF5", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{iv.client || "Client non renseigné"}</div>
-                <div style={{ fontSize: 12, color: "#8FA3B8" }}>{iv.numeroRI} · {iv.site || "—"}</div>
+                <div style={{ fontSize: 13.5, fontWeight: 700, color: "#1A1F26", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{iv.client || "Client non renseigné"}</div>
+                <div style={{ fontSize: 12, color: "#5B6B7D" }}>{iv.numeroRI} · {iv.site || "—"}</div>
               </div>
-              <div className="iv-row-meta" style={{ flex: "0 0 100px", fontSize: 12, color: "#A9B9CA" }}>{iv.date}</div>
+              <div className="iv-row-meta" style={{ flex: "0 0 100px", fontSize: 12, color: "#3E4A5C" }}>{iv.date}</div>
               <div className="iv-row-meta" style={{ flex: "0 0 120px" }}><StatusBadge label={iv.conclusion} /></div>
-              <ChevronRight size={16} color="#3A4C61" className="hide-mobile" />
+              <ChevronRight size={16} color="#9AA5B1" className="hide-mobile" />
             </div>
           ))}
         </div>
@@ -2710,7 +2742,7 @@ function EventChip({ ev, onClick }) {
   return (
     <div onClick={(e) => { e.stopPropagation(); onClick(); }} style={{
       display: "flex", alignItems: "center", gap: 5, padding: "2px 6px", borderRadius: 5, background: `${color}1F`,
-      fontSize: 10.5, color: "#E8EEF5", cursor: "pointer", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis",
+      fontSize: 10.5, color: "#1A1F26", cursor: "pointer", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis",
     }}>
       <span style={{ width: 6, height: 6, borderRadius: "50%", background: color, flexShrink: 0 }} />
       <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{ev.label}</span>
@@ -2731,18 +2763,18 @@ function DayDetailPanel({ dateISO, events, onOpenSite, onOpenIntervention, onCre
         </div>
       </div>
       {events.length === 0 ? (
-        <div style={{ textAlign: "center", padding: 18, color: "#63748A", fontSize: 12.5, border: "1px dashed #333B47", borderRadius: 10 }}>
+        <div style={{ textAlign: "center", padding: 18, color: "#8B96A3", fontSize: 12.5, border: "1px dashed #D8DEE5", borderRadius: 10 }}>
           Aucune intervention prévue ce jour
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {events.map((ev) => (
             <div key={ev.id} onClick={() => (ev.kind === "site" ? onOpenSite(ev.refId) : onOpenIntervention(ev.refId))}
-              style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", background: "#14181E", border: "1px solid #2B323C", borderRadius: 10, cursor: "pointer" }}>
-              {ev.kind === "site" ? <Building2 size={14} color="#8FA3B8" /> : <ClipboardList size={14} color="#8FA3B8" />}
+              style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", background: "#F7F8FA", border: "1px solid #D8DEE5", borderRadius: 10, cursor: "pointer" }}>
+              {ev.kind === "site" ? <Building2 size={14} color="#5B6B7D" /> : <ClipboardList size={14} color="#5B6B7D" />}
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: "#E8EEF5", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{ev.label}</div>
-                <div style={{ fontSize: 11, color: "#8FA3B8" }}>{ev.kind === "site" ? "Site" : "Rapport d'intervention"} {ev.sub ? "· " + ev.sub : ""}</div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: "#1A1F26", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{ev.label}</div>
+                <div style={{ fontSize: 11, color: "#5B6B7D" }}>{ev.kind === "site" ? "Site" : "Rapport d'intervention"} {ev.sub ? "· " + ev.sub : ""}</div>
               </div>
               <StatusBadge label={ev.statusLabel} size="sm" />
             </div>
@@ -2788,8 +2820,8 @@ function CalendarView({ sites, interventions, onOpenSite, onOpenIntervention, on
 
   const modeBtn = (key, label) => (
     <button onClick={() => setMode(key)} style={{
-      padding: "6px 13px", borderRadius: 999, border: mode === key ? "1px solid #FFC10755" : "1px solid #2B323C",
-      background: mode === key ? "rgba(255,193,7,0.12)" : "transparent", color: mode === key ? BRAND.amber : "#8FA3B8",
+      padding: "6px 13px", borderRadius: 999, border: mode === key ? "1px solid #FFC10755" : "1px solid #D8DEE5",
+      background: mode === key ? "rgba(255,193,7,0.12)" : "transparent", color: mode === key ? BRAND.amber : "#5B6B7D",
       fontSize: 12, fontWeight: 600, cursor: "pointer",
     }}>{label}</button>
   );
@@ -2799,7 +2831,7 @@ function CalendarView({ sites, interventions, onOpenSite, onOpenIntervention, on
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, flexWrap: "wrap", gap: 10 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <button onClick={() => shift(-1)} style={btnGhost()}><ArrowLeft size={14} /></button>
-          <div style={{ fontSize: 15, fontWeight: 700, color: "#E8EEF5", minWidth: 180 }}>{headerLabel}</div>
+          <div style={{ fontSize: 15, fontWeight: 700, color: "#1A1F26", minWidth: 180 }}>{headerLabel}</div>
           <button onClick={() => shift(1)} style={{ ...btnGhost(), transform: "scaleX(-1)" }}><ArrowLeft size={14} /></button>
           <button onClick={() => { setRef(new Date()); setSelectedDay(todayIso); }} style={btnGhost()}>Aujourd'hui</button>
         </div>
@@ -2817,7 +2849,7 @@ function CalendarView({ sites, interventions, onOpenSite, onOpenIntervention, on
         return (
           <div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 6, marginBottom: 6 }}>
-              {WEEKDAYS_FR.map((w) => <div key={w} style={{ textAlign: "center", fontSize: 10.5, fontWeight: 700, color: "#63748A", textTransform: "uppercase" }}>{w}</div>)}
+              {WEEKDAYS_FR.map((w) => <div key={w} style={{ textAlign: "center", fontSize: 10.5, fontWeight: 700, color: "#8B96A3", textTransform: "uppercase" }}>{w}</div>)}
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 6 }}>
               {cells.map((d) => {
@@ -2829,14 +2861,14 @@ function CalendarView({ sites, interventions, onOpenSite, onOpenIntervention, on
                 return (
                   <div key={iso} onClick={() => setSelectedDay(iso)} style={{
                     minHeight: 74, borderRadius: 8, padding: 6, cursor: "pointer",
-                    background: isSelected ? "rgba(255,193,7,0.10)" : "#14181E",
-                    border: isSelected ? "1px solid #FFC10788" : isToday ? "1px solid #0A5DA8" : "1px solid #232A33",
+                    background: isSelected ? "rgba(255,193,7,0.10)" : "#F7F8FA",
+                    border: isSelected ? "1px solid #FFC10788" : isToday ? "1px solid #0A5DA8" : "1px solid #D8DEE5",
                     opacity: inMonth ? 1 : 0.4,
                   }}>
-                    <div style={{ fontSize: 11, fontWeight: isToday ? 800 : 600, color: isToday ? "#FFC107" : "#C7D3E0", marginBottom: 4 }}>{d.getDate()}</div>
+                    <div style={{ fontSize: 11, fontWeight: isToday ? 800 : 600, color: isToday ? "#FFC107" : "#3E4A5C", marginBottom: 4 }}>{d.getDate()}</div>
                     <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
                       {dayEvents.slice(0, 2).map((ev) => <EventChip key={ev.id} ev={ev} onClick={() => (ev.kind === "site" ? onOpenSite(ev.refId) : onOpenIntervention(ev.refId))} />)}
-                      {dayEvents.length > 2 && <div style={{ fontSize: 10, color: "#63748A" }}>+{dayEvents.length - 2}</div>}
+                      {dayEvents.length > 2 && <div style={{ fontSize: 10, color: "#8B96A3" }}>+{dayEvents.length - 2}</div>}
                     </div>
                   </div>
                 );
@@ -2857,11 +2889,11 @@ function CalendarView({ sites, interventions, onOpenSite, onOpenIntervention, on
               const isToday = iso === todayIso;
               return (
                 <div key={iso} onClick={() => setSelectedDay(iso)} style={{
-                  minHeight: 140, borderRadius: 10, padding: 10, cursor: "pointer", background: "#14181E",
-                  border: iso === selectedDay ? "1px solid #FFC10788" : isToday ? "1px solid #0A5DA8" : "1px solid #232A33",
+                  minHeight: 140, borderRadius: 10, padding: 10, cursor: "pointer", background: "#F7F8FA",
+                  border: iso === selectedDay ? "1px solid #FFC10788" : isToday ? "1px solid #0A5DA8" : "1px solid #D8DEE5",
                 }}>
-                  <div style={{ fontSize: 10.5, fontWeight: 700, color: "#63748A", textTransform: "uppercase" }}>{WEEKDAYS_FR[(d.getDay() + 6) % 7]}</div>
-                  <div style={{ fontSize: 15, fontWeight: isToday ? 800 : 600, color: isToday ? "#FFC107" : "#E8EEF5", marginBottom: 8 }}>{d.getDate()}</div>
+                  <div style={{ fontSize: 10.5, fontWeight: 700, color: "#8B96A3", textTransform: "uppercase" }}>{WEEKDAYS_FR[(d.getDay() + 6) % 7]}</div>
+                  <div style={{ fontSize: 15, fontWeight: isToday ? 800 : 600, color: isToday ? "#FFC107" : "#1A1F26", marginBottom: 8 }}>{d.getDate()}</div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                     {dayEvents.map((ev) => <EventChip key={ev.id} ev={ev} onClick={() => (ev.kind === "site" ? onOpenSite(ev.refId) : onOpenIntervention(ev.refId))} />)}
                   </div>
@@ -2894,6 +2926,16 @@ function CalendarView({ sites, interventions, onOpenSite, onOpenIntervention, on
    Microsoft Word ET Pages sur Mac (contrairement à l'ancienne astuce HTML
    qui n'était comprise que par Word).
    ========================================================================= */
+// La bibliothèque "docx" est chargée dynamiquement (pas en import statique) : l'aperçu
+// d'artefact de Claude n'autorise qu'une liste fixe de bibliothèques et planterait au
+// chargement si "docx" était importée en haut du fichier. Une fois l'app réellement
+// déployée (Vercel, etc.), ce chargement dynamique résout normalement le vrai paquet npm.
+let DOCX = null;
+async function ensureDocx() {
+  if (!DOCX) DOCX = await import("docx");
+  return DOCX;
+}
+
 const DOCX_BLUE = "0A5DA8", DOCX_DARK = "1A1F26", DOCX_SILVER = "C0C6CE", DOCX_AMBER = "FFC107";
 const DOCX_GREEN = "0F8A5F", DOCX_ORANGE = "B5730A", DOCX_RED = "C0392B", DOCX_WHITE = "FFFFFF", DOCX_LIGHT = "F4F6F8";
 
@@ -2905,45 +2947,45 @@ function docxEtatColor(label) {
   return DOCX_GREEN;
 }
 function docxHeading(text) {
-  return new Paragraph({
+  return new DOCX.Paragraph({
     spacing: { before: 260, after: 120 },
-    border: { bottom: { color: DOCX_BLUE, space: 4, style: BorderStyle.SINGLE, size: 12 } },
-    children: [new TextRun({ text: "  ", color: DOCX_AMBER }), new TextRun({ text: (text || "").toUpperCase(), bold: true, color: DOCX_DARK, size: 22 })],
+    border: { bottom: { color: DOCX_BLUE, space: 4, style: DOCX.BorderStyle.SINGLE, size: 12 } },
+    children: [new DOCX.TextRun({ text: "  ", color: DOCX_AMBER }), new DOCX.TextRun({ text: (text || "").toUpperCase(), bold: true, color: DOCX_DARK, size: 22 })],
   });
 }
 function docxFieldRow(label, value) {
-  return new TableRow({ children: [
-    new TableCell({ width: { size: 3200, type: WidthType.DXA }, shading: { type: ShadingType.CLEAR, fill: DOCX_LIGHT }, children: [new Paragraph({ children: [new TextRun({ text: label, size: 18, color: "555555" })] })] }),
-    new TableCell({ width: { size: 5600, type: WidthType.DXA }, children: [new Paragraph({ children: [new TextRun({ text: value || "—", size: 18, bold: true, color: DOCX_DARK })] })] }),
+  return new DOCX.TableRow({ children: [
+    new DOCX.TableCell({ width: { size: 3200, type: DOCX.WidthType.DXA }, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_LIGHT }, children: [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: label, size: 18, color: "555555" })] })] }),
+    new DOCX.TableCell({ width: { size: 5600, type: DOCX.WidthType.DXA }, children: [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: value || "—", size: 18, bold: true, color: DOCX_DARK })] })] }),
   ]});
 }
 function docxFieldTable(rows) {
   const filtered = rows.filter((r) => r[1]);
   if (filtered.length === 0) return null;
-  return new Table({ width: { size: 8800, type: WidthType.DXA }, columnWidths: [3200, 5600], rows: filtered.map(([l, v]) => docxFieldRow(l, v)) });
+  return new DOCX.Table({ width: { size: 8800, type: DOCX.WidthType.DXA }, columnWidths: [3200, 5600], rows: filtered.map(([l, v]) => docxFieldRow(l, v)) });
 }
 function docxControlRow(label, detail, action, etat) {
-  const children = [new Paragraph({ children: [new TextRun({ text: label, size: 18, color: DOCX_DARK })] })];
-  if (detail) children.push(new Paragraph({ children: [new TextRun({ text: detail, size: 16, color: "666666", italics: true })] }));
-  if (action) children.push(new Paragraph({ children: [new TextRun({ text: "Action : " + action, size: 16, color: "666666" })] }));
-  return new TableRow({ children: [
-    new TableCell({ width: { size: 7000, type: WidthType.DXA }, children }),
+  const children = [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: label, size: 18, color: DOCX_DARK })] })];
+  if (detail) children.push(new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: detail, size: 16, color: "666666", italics: true })] }));
+  if (action) children.push(new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: "Action : " + action, size: 16, color: "666666" })] }));
+  return new DOCX.TableRow({ children: [
+    new DOCX.TableCell({ width: { size: 7000, type: DOCX.WidthType.DXA }, children }),
     etat
-      ? new TableCell({ width: { size: 1800, type: WidthType.DXA }, shading: { type: ShadingType.CLEAR, fill: docxEtatColor(etat) }, verticalAlign: VerticalAlign.CENTER, children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: (etat || "").toUpperCase(), bold: true, color: DOCX_WHITE, size: 16 })] })] })
-      : new TableCell({ width: { size: 1800, type: WidthType.DXA }, children: [new Paragraph("")] }),
+      ? new DOCX.TableCell({ width: { size: 1800, type: DOCX.WidthType.DXA }, shading: { type: DOCX.ShadingType.CLEAR, fill: docxEtatColor(etat) }, verticalAlign: DOCX.VerticalAlign.CENTER, children: [new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, children: [new DOCX.TextRun({ text: (etat || "").toUpperCase(), bold: true, color: DOCX_WHITE, size: 16 })] })] })
+      : new DOCX.TableCell({ width: { size: 1800, type: DOCX.WidthType.DXA }, children: [new DOCX.Paragraph("")] }),
   ]});
 }
 function docxControlTable(rows) {
   if (rows.length === 0) return null;
-  return new Table({ width: { size: 8800, type: WidthType.DXA }, columnWidths: [7000, 1800], rows: rows.map((r) => docxControlRow(...r)) });
+  return new DOCX.Table({ width: { size: 8800, type: DOCX.WidthType.DXA }, columnWidths: [7000, 1800], rows: rows.map((r) => docxControlRow(...r)) });
 }
 function docxEquipHeader(name) {
-  return new Table({ width: { size: 8800, type: WidthType.DXA }, columnWidths: [8800], rows: [new TableRow({ children: [new TableCell({
-    width: { size: 8800, type: WidthType.DXA }, shading: { type: ShadingType.CLEAR, fill: DOCX_DARK },
-    children: [new Paragraph({ spacing: { before: 80, after: 80 }, children: [new TextRun({ text: (name || "").toUpperCase(), bold: true, color: DOCX_WHITE, size: 24 })] })],
+  return new DOCX.Table({ width: { size: 8800, type: DOCX.WidthType.DXA }, columnWidths: [8800], rows: [new DOCX.TableRow({ children: [new DOCX.TableCell({
+    width: { size: 8800, type: DOCX.WidthType.DXA }, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_DARK },
+    children: [new DOCX.Paragraph({ spacing: { before: 80, after: 80 }, children: [new DOCX.TextRun({ text: (name || "").toUpperCase(), bold: true, color: DOCX_WHITE, size: 24 })] })],
   })] })] });
 }
-function docxSpacer(h) { return new Paragraph({ spacing: { after: h || 120 }, children: [] }); }
+function docxSpacer(h) { return new DOCX.Paragraph({ spacing: { after: h || 120 }, children: [] }); }
 function base64ToUint8(dataUrl) {
   try {
     const base64 = dataUrl.split(",")[1];
@@ -2958,7 +3000,7 @@ function docxImage(dataUrl, w, h) {
   if (!bytes) return null;
   const type = dataUrl.includes("image/png") ? "png" : dataUrl.includes("image/jpeg") || dataUrl.includes("image/jpg") ? "jpg" : null;
   if (!type) return null;
-  try { return new ImageRun({ data: bytes, type, transformation: { width: w || 160, height: h || 120 } }); } catch (e) { return null; }
+  try { return new DOCX.ImageRun({ data: bytes, type, transformation: { width: w || 160, height: h || 120 } }); } catch (e) { return null; }
 }
 
 function docxEquipementElements(eq) {
@@ -2974,12 +3016,12 @@ function docxEquipementElements(eq) {
       elements.push(docxHeading(sec.title));
       const seuils = eq.controles.parametrage_relais_seuils || [];
       if (seuils.length === 0) {
-        elements.push(new Paragraph({ children: [new TextRun({ text: "Aucun seuil paramétré", size: 18, color: "666666" })] }));
+        elements.push(new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: "Aucun seuil paramétré", size: 18, color: "666666" })] }));
       } else {
         seuils.forEach((s) => {
           const detail = [s.fields.etat && `État : ${s.fields.etat}`, s.fields.courbe && `Courbe : ${s.fields.courbe}`, s.fields.type && `Type : ${s.fields.type}`,
             s.fields.reglage && `Réglage : ${s.fields.reglage} A`, s.fields.temporisation && `Temporisation : ${s.fields.temporisation} ${s.fields.temporisation_unite || ""}`].filter(Boolean).join(" · ");
-          elements.push(new Paragraph({ spacing: { after: 60 }, children: [new TextRun({ text: (s.label || "(seuil sans nom)") + (detail ? " — " + detail : ""), size: 18 })] }));
+          elements.push(new DOCX.Paragraph({ spacing: { after: 60 }, children: [new DOCX.TextRun({ text: (s.label || "(seuil sans nom)") + (detail ? " — " + detail : ""), size: 18 })] }));
         });
       }
       elements.push(docxSpacer());
@@ -2989,7 +3031,7 @@ function docxEquipementElements(eq) {
       elements.push(docxHeading(sec.title));
       const rows = [];
       (eq.controles.parametrage_relais_seuils || []).filter((s) => s.label).forEach((s) => {
-        const tol = calcToleranceEssai(s.fields.reglage, s.fields.temporisation_unite);
+        const tol = calcToleranceEssai(s.fields.reglage, s.fields.temporisation_unite, s.label);
         const detail = [s.essai.fields.l1 && `L1 : ${s.essai.fields.l1}`, s.essai.fields.l2 && `L2 : ${s.essai.fields.l2}`, s.essai.fields.l3 && `L3 : ${s.essai.fields.l3}`,
           s.essai.fields.courant_injecte && `Courant injecté : ${s.essai.fields.courant_injecte} A`, tol && `Tolérance attendue : ${tol.min} – ${tol.max} ${tol.unite}`].filter(Boolean).join(" · ");
         rows.push(["Essai de déclenchement — " + s.label, detail, s.essai.action, s.essai.etat]);
@@ -3013,32 +3055,33 @@ function docxEquipementElements(eq) {
     if (t) elements.push(t);
     elements.push(docxSpacer());
   });
-  if (eq.type === "BRK") {
+  if (eq.type === "Disjoncteur BT") {
     const brk = computeBRKValues(eq);
-    elements.push(new Paragraph({ spacing: { after: 60 }, children: [new TextRun({ text: `Ir (calculé) : ${brk.Ir || "—"} A · Im (calculé) : ${brk.Im || "—"} A`, size: 18, bold: true })] }));
-    elements.push(new Paragraph({ children: [new TextRun({ text: `Surcharge longue — Valise STR : ${brk.valiseSTR_SL} mA · Valise IS : ${brk.valiseIS_SL} A`, size: 16 })] }));
-    elements.push(new Paragraph({ children: [new TextRun({ text: `Court-circuit temporisé — Valise STR : ${brk.valiseSTR_CC} mA · Valise IS : ${brk.valiseIS_CC} A`, size: 16 })] }));
-    elements.push(new Paragraph({ spacing: { after: 80 }, children: [new TextRun({ text: `Instantané — Valise IS : ${brk.valiseIS_Inst} A`, size: 16 })] }));
+    elements.push(new DOCX.Paragraph({ spacing: { after: 60 }, children: [new DOCX.TextRun({ text: `Ir (calculé) : ${brk.Ir || "—"} A · Im (calculé) : ${brk.Im || "—"} A`, size: 18, bold: true })] }));
+    elements.push(new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: `Surcharge longue — Valise STR : ${brk.valiseSTR_SL} mA · Valise IS : ${brk.valiseIS_SL} A`, size: 16 })] }));
+    elements.push(new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: `Court-circuit temporisé — Valise STR : ${brk.valiseSTR_CC} mA · Valise IS : ${brk.valiseIS_CC} A`, size: 16 })] }));
+    elements.push(new DOCX.Paragraph({ spacing: { after: 80 }, children: [new DOCX.TextRun({ text: `Instantané — Valise IS : ${brk.valiseIS_Inst} A`, size: 16 })] }));
   }
-  elements.push(new Paragraph({
-    border: { top: { color: DOCX_BLUE, space: 4, style: BorderStyle.SINGLE, size: 8 } }, spacing: { before: 120, after: 60 },
-    children: [new TextRun({ text: "Synthèse de l'état — à l'issue de la maintenance : ", bold: true, size: 18, color: DOCX_DARK }), new TextRun({ text: (eq.etatFinal || "").toUpperCase(), bold: true, size: 18, color: docxEtatColor(eq.etatFinal) })],
+  elements.push(new DOCX.Paragraph({
+    border: { top: { color: DOCX_BLUE, space: 4, style: DOCX.BorderStyle.SINGLE, size: 8 } }, spacing: { before: 120, after: 60 },
+    children: [new DOCX.TextRun({ text: "Synthèse de l'état — à l'issue de la maintenance : ", bold: true, size: 18, color: DOCX_DARK }), new DOCX.TextRun({ text: (eq.etatFinal || "").toUpperCase(), bold: true, size: 18, color: docxEtatColor(eq.etatFinal) })],
   }));
-  if (eq.remarques) elements.push(new Paragraph({ spacing: { after: 80 }, children: [new TextRun({ text: "Remarques : ", bold: true, size: 18 }), new TextRun({ text: eq.remarques, size: 18 })] }));
-  (eq.photos || []).forEach((p) => { const img = docxImage(p.dataUrl, 200, 150); if (img) elements.push(new Paragraph({ spacing: { after: 40 }, children: [img] })); });
+  if (eq.remarques) elements.push(new DOCX.Paragraph({ spacing: { after: 80 }, children: [new DOCX.TextRun({ text: "Remarques : ", bold: true, size: 18 }), new DOCX.TextRun({ text: eq.remarques, size: 18 })] }));
+  (eq.photos || []).forEach((p) => { const img = docxImage(p.dataUrl, 200, 150); if (img) elements.push(new DOCX.Paragraph({ spacing: { after: 40 }, children: [img] })); });
   return elements;
 }
 
 async function generateSiteDocx(site) {
+  await ensureDocx();
   const rank = overallRank(site);
   const rankLabel = rankToLabel(rank);
   const logoImg = docxImage(LOGO_DARK, 46, 46);
-  const headerTable = new Table({ width: { size: 8800, type: WidthType.DXA }, columnWidths: [8800], rows: [new TableRow({ children: [new TableCell({
-    width: { size: 8800, type: WidthType.DXA }, shading: { type: ShadingType.CLEAR, fill: DOCX_DARK },
+  const headerTable = new DOCX.Table({ width: { size: 8800, type: DOCX.WidthType.DXA }, columnWidths: [8800], rows: [new DOCX.TableRow({ children: [new DOCX.TableCell({
+    width: { size: 8800, type: DOCX.WidthType.DXA }, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_DARK },
     children: [
-      new Paragraph({ spacing: { before: 160, after: 20 }, children: [...(logoImg ? [logoImg] : []), new TextRun({ text: "   RAPPORT DE MAINTENANCE PRÉVENTIVE HT — " + rankLabel.toUpperCase(), color: DOCX_SILVER, size: 16 })] }),
-      new Paragraph({ spacing: { after: 10 }, children: [new TextRun({ text: site.local || "Site", bold: true, color: DOCX_WHITE, size: 30 })] }),
-      new Paragraph({ spacing: { after: 160 }, children: [new TextRun({ text: site.client || "", color: DOCX_SILVER, size: 20 })] }),
+      new DOCX.Paragraph({ spacing: { before: 160, after: 20 }, children: [...(logoImg ? [logoImg] : []), new DOCX.TextRun({ text: "   RAPPORT DE MAINTENANCE PRÉVENTIVE HT — " + rankLabel.toUpperCase(), color: DOCX_SILVER, size: 16 })] }),
+      new DOCX.Paragraph({ spacing: { after: 10 }, children: [new DOCX.TextRun({ text: site.local || "Site", bold: true, color: DOCX_WHITE, size: 30 })] }),
+      new DOCX.Paragraph({ spacing: { after: 160 }, children: [new DOCX.TextRun({ text: site.client || "", color: DOCX_SILVER, size: 20 })] }),
     ],
   })] })] });
 
@@ -3060,27 +3103,28 @@ async function generateSiteDocx(site) {
   children.push(docxHeading("Rapport"));
   const rapportTable = docxFieldTable(rapportRows);
   if (rapportTable) children.push(rapportTable);
-  if (site.rapport.syntheseRemarques) children.push(new Paragraph({ spacing: { before: 80, after: 80 }, children: [new TextRun({ text: "Synthèse des remarques et préconisations : ", bold: true, size: 18 }), new TextRun({ text: site.rapport.syntheseRemarques, size: 18 })] }));
+  if (site.rapport.syntheseRemarques) children.push(new DOCX.Paragraph({ spacing: { before: 80, after: 80 }, children: [new DOCX.TextRun({ text: "Synthèse des remarques et préconisations : ", bold: true, size: 18 }), new DOCX.TextRun({ text: site.rapport.syntheseRemarques, size: 18 })] }));
   else children.push(docxSpacer());
 
   site.equipements.forEach((eq) => { children.push(...docxEquipementElements(eq)); });
 
   children.push(docxSpacer(200));
-  children.push(new Paragraph({ border: { top: { color: DOCX_SILVER, space: 4, style: BorderStyle.SINGLE, size: 4 } }, spacing: { before: 100 }, children: [new TextRun({ text: "HT Maintenance — Maintenance électrique HTA / BT", size: 14, color: "888888", italics: true })] }));
+  children.push(new DOCX.Paragraph({ border: { top: { color: DOCX_SILVER, space: 4, style: DOCX.BorderStyle.SINGLE, size: 4 } }, spacing: { before: 100 }, children: [new DOCX.TextRun({ text: "HT Maintenance — Maintenance électrique HTA / BT", size: 14, color: "888888", italics: true })] }));
 
-  const doc = new Document({ sections: [{ properties: { page: { margin: { top: 500, bottom: 500, left: 600, right: 600 } } }, children }] });
-  return Packer.toBlob(doc);
+  const doc = new DOCX.Document({ sections: [{ properties: { page: { margin: { top: 500, bottom: 500, left: 600, right: 600 } } }, children }] });
+  return DOCX.Packer.toBlob(doc);
 }
 
 async function generateInterventionDocx(iv) {
+  await ensureDocx();
   const duree = dureeIntervention(iv.heureDebut, iv.heureFin);
   const logoImg = docxImage(LOGO_DARK, 46, 46);
-  const headerTable = new Table({ width: { size: 8800, type: WidthType.DXA }, columnWidths: [8800], rows: [new TableRow({ children: [new TableCell({
-    width: { size: 8800, type: WidthType.DXA }, shading: { type: ShadingType.CLEAR, fill: DOCX_DARK },
+  const headerTable = new DOCX.Table({ width: { size: 8800, type: DOCX.WidthType.DXA }, columnWidths: [8800], rows: [new DOCX.TableRow({ children: [new DOCX.TableCell({
+    width: { size: 8800, type: DOCX.WidthType.DXA }, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_DARK },
     children: [
-      new Paragraph({ spacing: { before: 160, after: 20 }, children: [...(logoImg ? [logoImg] : []), new TextRun({ text: "   RAPPORT D'INTERVENTION", color: DOCX_SILVER, size: 16 })] }),
-      new Paragraph({ spacing: { after: 10 }, children: [new TextRun({ text: iv.numeroRI || "", bold: true, color: DOCX_WHITE, size: 30 })] }),
-      new Paragraph({ spacing: { after: 160 }, children: [new TextRun({ text: `${iv.client || ""} — ${iv.site || ""}`, color: DOCX_SILVER, size: 20 })] }),
+      new DOCX.Paragraph({ spacing: { before: 160, after: 20 }, children: [...(logoImg ? [logoImg] : []), new DOCX.TextRun({ text: "   RAPPORT D'INTERVENTION", color: DOCX_SILVER, size: 16 })] }),
+      new DOCX.Paragraph({ spacing: { after: 10 }, children: [new DOCX.TextRun({ text: iv.numeroRI || "", bold: true, color: DOCX_WHITE, size: 30 })] }),
+      new DOCX.Paragraph({ spacing: { after: 160 }, children: [new DOCX.TextRun({ text: `${iv.client || ""} — ${iv.site || ""}`, color: DOCX_SILVER, size: 20 })] }),
     ],
   })] })] });
 
@@ -3110,13 +3154,13 @@ async function generateInterventionDocx(iv) {
   children.push(docxSpacer());
 
   children.push(docxHeading("Nature de l'intervention"));
-  children.push(new Paragraph({ spacing: { after: 80 }, children: [new TextRun({ text: natureText, size: 18 })] }));
+  children.push(new DOCX.Paragraph({ spacing: { after: 80 }, children: [new DOCX.TextRun({ text: natureText, size: 18 })] }));
 
   children.push(docxHeading("Travaux réalisés"));
   (iv.travauxActions || []).forEach((a) => {
-    children.push(new Paragraph({ spacing: { after: 20 }, children: [new TextRun({ text: "• " + (a.action || "(action)") + (a.detail ? " — " + a.detail : ""), size: 18 })] }));
+    children.push(new DOCX.Paragraph({ spacing: { after: 20 }, children: [new DOCX.TextRun({ text: "• " + (a.action || "(action)") + (a.detail ? " — " + a.detail : ""), size: 18 })] }));
   });
-  if (iv.travauxRealises) children.push(new Paragraph({ spacing: { before: 60, after: 80 }, children: [new TextRun({ text: iv.travauxRealises, size: 18 })] }));
+  if (iv.travauxRealises) children.push(new DOCX.Paragraph({ spacing: { before: 60, after: 80 }, children: [new DOCX.TextRun({ text: iv.travauxRealises, size: 18 })] }));
   else children.push(docxSpacer());
 
   children.push(docxHeading("Mesures / Contrôles"));
@@ -3125,10 +3169,10 @@ async function generateInterventionDocx(iv) {
   children.push(docxSpacer());
 
   children.push(docxHeading("Anomalies et recommandations"));
-  children.push(new Paragraph({ spacing: { after: 80 }, children: [new TextRun({ text: iv.anomaliesRecommandations || "—", size: 18 })] }));
+  children.push(new DOCX.Paragraph({ spacing: { after: 80 }, children: [new DOCX.TextRun({ text: iv.anomaliesRecommandations || "—", size: 18 })] }));
 
   children.push(docxHeading("Conclusion"));
-  children.push(new Paragraph({ spacing: { after: 80 }, children: [new TextRun({ text: (iv.conclusion || "").toUpperCase(), bold: true, size: 20, color: docxEtatColor(iv.conclusion) })] }));
+  children.push(new DOCX.Paragraph({ spacing: { after: 80 }, children: [new DOCX.TextRun({ text: (iv.conclusion || "").toUpperCase(), bold: true, size: 20, color: docxEtatColor(iv.conclusion) })] }));
 
   children.push(docxHeading("Validation"));
   const validationRows = [["Nom client", iv.validation.nomClient], ["Technicien HT Maintenance", iv.validation.technicienHT]];
@@ -3137,11 +3181,11 @@ async function generateInterventionDocx(iv) {
   children.push(docxSpacer(80));
   const sigClient = iv.validation.signatureClient ? docxImage(iv.validation.signatureClient, 220, 90) : null;
   const sigHT = iv.validation.signatureHT ? docxImage(iv.validation.signatureHT, 220, 90) : null;
-  if (sigClient) { children.push(new Paragraph({ children: [new TextRun({ text: "Signature client :", size: 16, color: "666666" })] })); children.push(new Paragraph({ spacing: { after: 80 }, children: [sigClient] })); }
-  if (sigHT) { children.push(new Paragraph({ children: [new TextRun({ text: "Signature technicien :", size: 16, color: "666666" })] })); children.push(new Paragraph({ spacing: { after: 80 }, children: [sigHT] })); }
+  if (sigClient) { children.push(new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: "Signature client :", size: 16, color: "666666" })] })); children.push(new DOCX.Paragraph({ spacing: { after: 80 }, children: [sigClient] })); }
+  if (sigHT) { children.push(new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: "Signature technicien :", size: 16, color: "666666" })] })); children.push(new DOCX.Paragraph({ spacing: { after: 80 }, children: [sigHT] })); }
 
-  const doc = new Document({ sections: [{ properties: { page: { margin: { top: 500, bottom: 500, left: 600, right: 600 } } }, children } ] });
-  return Packer.toBlob(doc);
+  const doc = new DOCX.Document({ sections: [{ properties: { page: { margin: { top: 500, bottom: 500, left: 600, right: 600 } } }, children } ] });
+  return DOCX.Packer.toBlob(doc);
 }
 
 function downloadBlob(blob, filename) {
@@ -3301,7 +3345,7 @@ export default function App() {
         }
       `}</style>
 
-      <div className="no-print app-shell" style={{ position: "relative", minHeight: "100%", background: "#0C0E12", fontFamily: "'Inter', system-ui, -apple-system, sans-serif", color: "#E8EEF5" }}>
+      <div className="no-print app-shell" style={{ position: "relative", minHeight: "100%", background: "#F1F3F6", fontFamily: "'Inter', system-ui, -apple-system, sans-serif", color: "#1A1F26" }}>
         <div style={{ maxWidth: 1100, margin: "0 auto" }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18, flexWrap: "wrap", gap: 12 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
@@ -3310,7 +3354,7 @@ export default function App() {
                 <h1 style={{ margin: 0, fontSize: 20, fontWeight: 800, letterSpacing: 0.3, fontFamily: "'Rajdhani', 'Inter', sans-serif", textTransform: "uppercase" }}>
                   HT <span style={{ color: BRAND.amber }}>Maintenance</span>
                 </h1>
-                <div style={{ fontSize: 12, color: "#8FA3B8" }}>
+                <div style={{ fontSize: 12, color: "#5B6B7D" }}>
                   {selected ? "Fiche site" : selectedIv ? "Rapport d'intervention" : view === "sites" ? "Suivi des interventions de maintenance préventive HT" : view === "interventions" ? "Rapports d'intervention" : "Calendrier des interventions"}
                 </div>
               </div>
@@ -3322,22 +3366,22 @@ export default function App() {
             <div style={{ display: "flex", gap: 6, marginBottom: 20, flexWrap: "wrap" }}>
               <button onClick={() => setView("sites")} style={{
                 display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: 999,
-                border: view === "sites" ? "1px solid #FFC10755" : "1px solid #2B323C", background: view === "sites" ? "rgba(255,193,7,0.12)" : "transparent",
-                color: view === "sites" ? BRAND.amber : "#8FA3B8", fontSize: 12.5, fontWeight: 600, cursor: "pointer",
+                border: view === "sites" ? "1px solid #FFC10755" : "1px solid #D8DEE5", background: view === "sites" ? "rgba(255,193,7,0.12)" : "transparent",
+                color: view === "sites" ? BRAND.amber : "#5B6B7D", fontSize: 12.5, fontWeight: 600, cursor: "pointer",
               }}>
                 <Building2 size={13} /> Sites
               </button>
               <button onClick={() => setView("interventions")} style={{
                 display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: 999,
-                border: view === "interventions" ? "1px solid #FFC10755" : "1px solid #2B323C", background: view === "interventions" ? "rgba(255,193,7,0.12)" : "transparent",
-                color: view === "interventions" ? BRAND.amber : "#8FA3B8", fontSize: 12.5, fontWeight: 600, cursor: "pointer",
+                border: view === "interventions" ? "1px solid #FFC10755" : "1px solid #D8DEE5", background: view === "interventions" ? "rgba(255,193,7,0.12)" : "transparent",
+                color: view === "interventions" ? BRAND.amber : "#5B6B7D", fontSize: 12.5, fontWeight: 600, cursor: "pointer",
               }}>
                 <ClipboardList size={13} /> Rapports d'intervention
               </button>
               <button onClick={() => setView("calendrier")} style={{
                 display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: 999,
-                border: view === "calendrier" ? "1px solid #FFC10755" : "1px solid #2B323C", background: view === "calendrier" ? "rgba(255,193,7,0.12)" : "transparent",
-                color: view === "calendrier" ? BRAND.amber : "#8FA3B8", fontSize: 12.5, fontWeight: 600, cursor: "pointer",
+                border: view === "calendrier" ? "1px solid #FFC10755" : "1px solid #D8DEE5", background: view === "calendrier" ? "rgba(255,193,7,0.12)" : "transparent",
+                color: view === "calendrier" ? BRAND.amber : "#5B6B7D", fontSize: 12.5, fontWeight: 600, cursor: "pointer",
               }}>
                 <Clock size={13} /> Calendrier
               </button>
@@ -3345,7 +3389,7 @@ export default function App() {
           )}
 
           {saveError && (
-            <div style={{ background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)", color: "#FCA5A5", borderRadius: 10, padding: "10px 14px", fontSize: 12.5, marginBottom: 14 }}>
+            <div style={{ background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)", color: "#B91C1C", borderRadius: 10, padding: "10px 14px", fontSize: 12.5, marginBottom: 14 }}>
               La sauvegarde a échoué — vos dernières modifications ne sont peut-être pas enregistrées.
             </div>
           )}
@@ -3355,11 +3399,11 @@ export default function App() {
           ) : selectedIv ? (
             <InterventionEditor iv={selectedIv} update={(updater) => updateIntervention(selectedIv.id, updater)} onBack={() => setSelectedIvId(null)} onDelete={deleteIntervention} onPrint={setPrintIv} />
           ) : view === "sites" ? (
-            !loaded ? <div style={{ textAlign: "center", padding: 60, color: "#63748A", fontSize: 13 }}>Chargement…</div> : <Overview sites={sites} onOpen={setSelectedId} onNew={addSite} />
+            !loaded ? <div style={{ textAlign: "center", padding: 60, color: "#8B96A3", fontSize: 13 }}>Chargement…</div> : <Overview sites={sites} onOpen={setSelectedId} onNew={addSite} />
           ) : view === "interventions" ? (
-            !ivLoaded ? <div style={{ textAlign: "center", padding: 60, color: "#63748A", fontSize: 13 }}>Chargement…</div> : <InterventionsOverview interventions={interventions} sites={sites} onOpen={setSelectedIvId} onCreate={createIntervention} />
+            !ivLoaded ? <div style={{ textAlign: "center", padding: 60, color: "#8B96A3", fontSize: 13 }}>Chargement…</div> : <InterventionsOverview interventions={interventions} sites={sites} onOpen={setSelectedIvId} onCreate={createIntervention} />
           ) : (
-            !loaded || !ivLoaded ? <div style={{ textAlign: "center", padding: 60, color: "#63748A", fontSize: 13 }}>Chargement…</div> : (
+            !loaded || !ivLoaded ? <div style={{ textAlign: "center", padding: 60, color: "#8B96A3", fontSize: 13 }}>Chargement…</div> : (
               <CalendarView sites={sites} interventions={interventions} onOpenSite={setSelectedId} onOpenIntervention={setSelectedIvId} onCreateForDate={addSiteForDate} onCreateInterventionForDate={addInterventionForDate} />
             )
           )}
