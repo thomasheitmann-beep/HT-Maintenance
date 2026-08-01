@@ -83,8 +83,8 @@ const FUSIBLE_FIELDS = [
   F("un", "Un", "kV", LISTE_UN_FUSIBLE),
   ...L1L2L3("µΩ"),
   F("valeur", "R mesurée à 20°C", "mΩ"),
-  { key: "tol_min", label: "Tolérance min", unit: "mΩ", compute: (f) => { const v = numOf(f.valeur); return v === null ? "" : Math.floor(v * 0.9); } },
-  { key: "tol_max", label: "Tolérance max", unit: "mΩ", compute: (f) => { const v = numOf(f.valeur); return v === null ? "" : Math.ceil(v * 1.1); } },
+  { key: "tol_min", label: "Tolérance min", unit: "mΩ", unitFrom: "valeur", compute: (f) => { const v = numOf(f.valeur); return v === null ? "" : Math.floor(v * 0.9); } },
+  { key: "tol_max", label: "Tolérance max", unit: "mΩ", unitFrom: "valeur", compute: (f) => { const v = numOf(f.valeur); return v === null ? "" : Math.ceil(v * 1.1); } },
 ];
 const TC_FIELDS = [F("type", "Type"), F("couplage", "Couplage"), F("puissance", "Puissance", "VA"), F("classe", "Classe")];
 
@@ -111,22 +111,6 @@ const FUSIBLES = [
   C("fusibles_rechange", "Fusibles de rechange", FUSIBLE_FIELDS),
   C("fusion_fusibles", "Fusion fusibles"),
 ];
-const SEUIL_FIELDS = (defaultUnit) => [
-  F("etat", "État", null, LISTE_ETAT_SEUIL),
-  F("courbe", "Courbe à temps", null, LISTE_COURBE_RELAIS),
-  F("type", "Type", null, LISTE_TYPE_RELAIS),
-  F("reglage", "Réglage", "A"),
-  F("temporisation", "Temporisation"),
-  F("temporisation_unite", "Unité", null, LISTE_TEMPO_UNITE),
-];
-const PARAM_RELAIS_SEUILS = () => [
-  S("seuil_phase_1", "Premier seuil de courant de phase", SEUIL_FIELDS("s")),
-  S("seuil_phase_2", "Deuxième seuil de courant de phase", SEUIL_FIELDS("ms")),
-  S("seuil_phase_3", "Troisième seuil de courant de phase", SEUIL_FIELDS("ms")),
-  S("seuil_homopolaire_1", "Premier seuil de courant homopolaire", SEUIL_FIELDS("ms")),
-  S("seuil_homopolaire_2", "Deuxième seuil de courant homopolaire", SEUIL_FIELDS("ms")),
-  S("seuil_homopolaire_3", "Troisième seuil de courant homopolaire", SEUIL_FIELDS("ms")),
-];
 const CONTROLES_DISJONCTEUR = [
   C("moteur_rearmement", "Contrôle du moteur de réarmement"),
   C("telecommande", "Contrôle de la télécommande"),
@@ -137,21 +121,23 @@ const CONTROLES_DISJONCTEUR = [
   C("resistance_contact_chambres", "Résistances de contact des chambres de coupure", [...L1L2L3("µΩ"), F("tolerance", "Tolérance", "µΩ")]),
   C("synchronisme_coupure", "Contrôle du synchronisme de coupure"),
 ];
-// Clés explicites (seuil_phase_1 ↔ essai_phase_1, etc.) pour permettre le calcul croisé de tolérance
-const CONTROLES_RELAIS_PROTECTION = [
-  C("essai_phase_1", "Essai de déclenchement 1er seuil courant de phase", [F("l1", "L1"), F("l2", "L2"), F("l3", "L3"), F("courant_injecte", "Courant injecté", "A")]),
-  C("essai_phase_2", "Essai de déclenchement 2ème seuil courant de phase", [F("l1", "L1"), F("l2", "L2"), F("l3", "L3"), F("courant_injecte", "Courant injecté", "A")]),
-  C("essai_phase_3", "Essai de déclenchement 3ème seuil courant de phase", [F("l1", "L1"), F("l2", "L2"), F("l3", "L3"), F("courant_injecte", "Courant injecté", "A")]),
-  C("essai_homopolaire_1", "Essai de déclenchement 1er seuil courant homopolaire", [F("l1", "L1"), F("l2", "L2"), F("l3", "L3"), F("courant_injecte", "Courant injecté", "A")]),
-  C("essai_homopolaire_2", "Essai de déclenchement 2ème seuil courant homopolaire", [F("l1", "L1"), F("l2", "L2"), F("l3", "L3"), F("courant_injecte", "Courant injecté", "A")]),
-  C("essai_homopolaire_3", "Essai de déclenchement 3ème seuil courant homopolaire", [F("l1", "L1"), F("l2", "L2"), F("l3", "L3"), F("courant_injecte", "Courant injecté", "A")]),
-  C("circuit_mesures_commande", "Contrôle du circuit de mesures et commande"),
+// Seuils du relais de protection : liste dynamique (un seul affiché par défaut, ajout au besoin)
+// plutôt que les 6 lignes fixes de l'Excel — chaque seuil ajouté fait apparaître automatiquement
+// sa ligne d'essai correspondante dans "Contrôles du relais de protection".
+const PARAM_SEUIL_TYPES = [
+  "Premier seuil de courant de phase", "Deuxième seuil de courant de phase", "Troisième seuil de courant de phase",
+  "Premier seuil de courant homopolaire", "Deuxième seuil de courant homopolaire", "Troisième seuil de courant homopolaire",
 ];
-// seuil correspondant à chaque essai, pour le calcul de tolérance (Excel : ±10% ou +30/+120 selon l'unité)
-const ESSAI_TO_SEUIL = {
-  essai_phase_1: "seuil_phase_1", essai_phase_2: "seuil_phase_2", essai_phase_3: "seuil_phase_3",
-  essai_homopolaire_1: "seuil_homopolaire_1", essai_homopolaire_2: "seuil_homopolaire_2", essai_homopolaire_3: "seuil_homopolaire_3",
-};
+function emptySeuilEntry(label) {
+  return {
+    id: uid(), label: label || "",
+    fields: { etat: "", courbe: "", type: "", reglage: "", temporisation: "", temporisation_unite: "ms" },
+    essai: { action: "", etat: "Conforme", fields: { l1: "", l2: "", l3: "", courant_injecte: "" } },
+  };
+}
+// Contrôle du relais de protection non lié à un seuil précis (toujours affiché)
+const CIRCUIT_MESURES_COMMANDE = C("circuit_mesures_commande", "Contrôle du circuit de mesures et commande");
+const TYPES_AVEC_RELAIS = ["Disjoncteur", "Contacteur", "Interrupteur", "Interrupteur Fusible"];
 function calcToleranceEssai(reglage, unite) {
   const r = numOf(reglage);
   if (r === null) return null;
@@ -173,6 +159,8 @@ const SCHEMAS = {
       ]},
       { key: "organes", title: "Organes internes", items: ORGANES_INTERNES },
       { key: "securite", title: "Contrôles de sécurité", items: SECURITE_CELLULE },
+      { key: "parametrage_relais", title: "Paramétrage du relais de protection", items: [] },
+      { key: "controles_relais", title: "Contrôles du relais de protection", items: [CIRCUIT_MESURES_COMMANDE] },
     ],
   },
   "Comptage": {
@@ -203,6 +191,8 @@ const SCHEMAS = {
       ]},
       { key: "organes", title: "Organes internes", items: ORGANES_INTERNES },
       { key: "securite", title: "Contrôles de sécurité", items: SECURITE_CELLULE },
+      { key: "parametrage_relais", title: "Paramétrage du relais de protection", items: [] },
+      { key: "controles_relais", title: "Contrôles du relais de protection", items: [CIRCUIT_MESURES_COMMANDE] },
     ],
   },
   "Disjoncteur": {
@@ -228,9 +218,9 @@ const SCHEMAS = {
         C("interverrouillage", "Contrôle de l'interverrouillage de sécurité"),
         C("fiche_manoeuvre", "Présence et exactitude de la fiche de manœuvre"),
       ]},
-      { key: "parametrage_relais", title: "Paramétrage du relais de protection", items: PARAM_RELAIS_SEUILS() },
+      { key: "parametrage_relais", title: "Paramétrage du relais de protection", items: [] },
       { key: "controles_disjoncteur", title: "Contrôles du disjoncteur", items: CONTROLES_DISJONCTEUR },
-      { key: "controles_relais", title: "Contrôles du relais de protection", items: CONTROLES_RELAIS_PROTECTION },
+      { key: "controles_relais", title: "Contrôles du relais de protection", items: [CIRCUIT_MESURES_COMMANDE] },
     ],
   },
   "Contacteur": {
@@ -256,9 +246,9 @@ const SCHEMAS = {
         C("interverrouillage", "Contrôle de l'interverrouillage de sécurité"),
         C("fiche_manoeuvre", "Présence et exactitude de la fiche de manœuvre"),
       ]},
-      { key: "parametrage_relais", title: "Paramétrage du relais de protection", items: PARAM_RELAIS_SEUILS() },
+      { key: "parametrage_relais", title: "Paramétrage du relais de protection", items: [] },
       { key: "controles_disjoncteur", title: "Contrôles du disjoncteur", items: CONTROLES_DISJONCTEUR },
-      { key: "controles_relais", title: "Contrôles du relais de protection", items: CONTROLES_RELAIS_PROTECTION },
+      { key: "controles_relais", title: "Contrôles du relais de protection", items: [CIRCUIT_MESURES_COMMANDE] },
     ],
   },
   "BRK": {
@@ -271,7 +261,7 @@ const SCHEMAS = {
     ],
     sections: [
       { key: "mecaniques", title: "Contrôles mécaniques", items: [
-        C("manoeuvre_int_sect", "Manœuvres de l'interrupteur-sectionneur"),
+        C("manoeuvre_int_sect", "Manœuvres du disjoncteur"),
         C("graissage_plages", "Graissage des plages de puissance"),
         C("connexions_puissance", "Contrôle des connexions de puissance"),
         C("nettoyage_general", "Nettoyage général externe et interne"),
@@ -410,7 +400,7 @@ const ITEM_GENDER = {
   "Extincteur (type B - feux électriques)": ["m", false], "Fusibles de rechange": ["m", true], "Fusibles installés": ["m", true],
   "Fusion fusibles": ["f", false], "Gants isolants": ["m", true], "Graissage des plages de puissance": ["m", false],
   "Indice de protection": ["m", false], "Instantané": ["m", false], "Intégrité de l'enveloppe de protection": ["f", false],
-  "Lampe de sécurité": ["f", false], "Manœuvres de l'interrupteur-sectionneur": ["f", true], "Manœuvres du sectionneur de terre": ["f", true],
+  "Lampe de sécurité": ["f", false], "Manœuvres de l'interrupteur-sectionneur": ["f", true], "Manœuvres du sectionneur de terre": ["f", true], "Manœuvres du disjoncteur": ["f", true],
   "Mises à la terre de l'enveloppe de protection": ["f", true], "Moteur": ["m", false], "Nettoyage général externe et interne": ["m", false],
   "Perche de sauvetage": ["f", false], "Perche de vérification d'absence de tension": ["f", false], "Pouvoir de coupure": ["m", false],
   "Premier seuil de courant de phase": ["m", false], "Premier seuil de courant homopolaire": ["m", false],
@@ -467,6 +457,7 @@ function createControlesDefaults(schema) {
         item.kind === "control" ? { action: "", etat: "Conforme", fields: fieldsDefault } : { fields: fieldsDefault };
     });
     controles[sec.key + "__custom"] = [];
+    if (sec.key === "parametrage_relais") controles.parametrage_relais_seuils = [emptySeuilEntry(PARAM_SEUIL_TYPES[0])];
   });
   return controles;
 }
@@ -1137,7 +1128,10 @@ function ControlRow({ item, value, onChange, idPrefix }) {
                 <span style={{ ...inputStyle, width: 66, padding: "5px 7px", fontSize: 12, background: "#10141A", color: "#FFC107", fontWeight: 700, display: "inline-block", textAlign: "center" }}>
                   {f.compute(value.fields) ?? "—"}
                 </span>
-                {f.unit && <span>{f.unit}</span>}
+                {(() => {
+                  const u = f.unitFrom ? (value.fields[f.unitFrom + "Unite"] || f.unit) : f.unit;
+                  return u ? <span>{u}</span> : null;
+                })()}
               </label>
             ) : f.options ? (
               <label key={f.key} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#63748A" }}>
@@ -1457,40 +1451,111 @@ function MiniSelect({ label, options, value, onChange }) {
   );
 }
 
-function DisjoncteurRelaisPanel({ items, paramSeuils, values, onChangeItem, custom, onAddCustom, onChangeCustom, onRemoveCustom, idPrefix }) {
+function ParametrageRelaisPanel({ eq, update, idPrefix }) {
+  const seuils = eq.controles.parametrage_relais_seuils;
+  const setSeuils = (next) => update({ ...eq, controles: { ...eq.controles, parametrage_relais_seuils: next } });
+  const setSeuilField = (id, k, v) => setSeuils(seuils.map((s) => (s.id === id ? { ...s, fields: { ...s.fields, [k]: v } } : s)));
+  const setSeuilLabel = (id, label) => setSeuils(seuils.map((s) => (s.id === id ? { ...s, label } : s)));
+  const removeSeuil = (id) => setSeuils(seuils.filter((s) => s.id !== id));
+  function addSeuil() {
+    const used = seuils.map((s) => s.label);
+    const remaining = PARAM_SEUIL_TYPES.filter((t) => !used.includes(t));
+    setSeuils([...seuils, emptySeuilEntry(remaining[0] || "")]);
+  }
+
+  return (
+    <Card style={{ marginBottom: 14 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+        <SectionTitle>Paramétrage du relais de protection</SectionTitle>
+        <button onClick={addSeuil} style={btnGhost(BRAND.amber)}><Plus size={13} /> Ajouter un seuil</button>
+      </div>
+      {seuils.length === 0 ? (
+        <div style={{ textAlign: "center", padding: 18, color: "#63748A", fontSize: 12.5, border: "1px dashed #333B47", borderRadius: 10 }}>
+          Aucun seuil paramétré
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          {seuils.map((s) => {
+            const used = seuils.filter((x) => x.id !== s.id).map((x) => x.label);
+            const options = PARAM_SEUIL_TYPES.filter((t) => !used.includes(t));
+            return (
+              <div key={s.id} style={{ padding: "10px 0", borderBottom: "1px solid #242A3380" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+                  <div style={{ flex: "1 1 220px" }}>
+                    <Combo value={s.label} onChange={(v) => setSeuilLabel(s.id, v)} options={options} listId={`${idPrefix}-seuil-${s.id}`} placeholder="Type de seuil (ou saisie libre)" />
+                  </div>
+                  <button onClick={() => removeSeuil(s.id)} style={{ background: "none", border: "none", color: "#EF4444", cursor: "pointer", padding: 4 }} title="Retirer ce seuil">
+                    <Trash2 size={15} />
+                  </button>
+                </div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                  <MiniSelect label="État" options={LISTE_ETAT_SEUIL} value={s.fields.etat} onChange={(v) => setSeuilField(s.id, "etat", v)} />
+                  <MiniSelect label="Courbe à temps" options={LISTE_COURBE_RELAIS} value={s.fields.courbe} onChange={(v) => setSeuilField(s.id, "courbe", v)} />
+                  <MiniSelect label="Type" options={LISTE_TYPE_RELAIS} value={s.fields.type} onChange={(v) => setSeuilField(s.id, "type", v)} />
+                  <MiniInput label="Réglage" unit="A" value={s.fields.reglage} onChange={(v) => setSeuilField(s.id, "reglage", v)} />
+                  <MiniInput label="Temporisation" value={s.fields.temporisation} onChange={(v) => setSeuilField(s.id, "temporisation", v)} />
+                  <MiniSelect label="Unité" options={LISTE_TEMPO_UNITE} value={s.fields.temporisation_unite} onChange={(v) => setSeuilField(s.id, "temporisation_unite", v)} />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function DisjoncteurRelaisPanel({ eq, update, custom, onAddCustom, onChangeCustom, onRemoveCustom, idPrefix }) {
+  const seuils = eq.controles.parametrage_relais_seuils;
+  const circuit = eq.controles.controles_relais.circuit_mesures_commande;
+  const setEssaiField = (seuilId, k, v) =>
+    update({ ...eq, controles: { ...eq.controles, parametrage_relais_seuils: seuils.map((s) => (s.id === seuilId ? { ...s, essai: { ...s.essai, fields: { ...s.essai.fields, [k]: v } } } : s)) } });
+  const setEssai = (seuilId, patch) =>
+    update({ ...eq, controles: { ...eq.controles, parametrage_relais_seuils: seuils.map((s) => (s.id === seuilId ? { ...s, essai: { ...s.essai, ...patch } } : s)) } });
+  const setCircuit = (patch) => update({ ...eq, controles: { ...eq.controles, controles_relais: { ...eq.controles.controles_relais, circuit_mesures_commande: { ...circuit, ...patch } } } });
+  const renseignes = seuils.filter((s) => s.label);
+
   return (
     <Card style={{ marginBottom: 14 }}>
       <SectionTitle>Contrôles du relais de protection</SectionTitle>
       <div>
-        {items.map((item) => {
-          const seuilKey = ESSAI_TO_SEUIL[item.key];
-          const seuil = seuilKey ? paramSeuils[seuilKey] : null;
-          const tol = seuil ? calcToleranceEssai(seuil.fields.reglage, seuil.fields.temporisation_unite) : null;
+        {renseignes.length === 0 && (
+          <div style={{ textAlign: "center", padding: 18, color: "#63748A", fontSize: 12.5, border: "1px dashed #333B47", borderRadius: 10, marginBottom: 10 }}>
+            Ajoutez un seuil dans le paramétrage du relais pour faire apparaître son essai ici.
+          </div>
+        )}
+        {renseignes.map((s) => {
+          const tol = calcToleranceEssai(s.fields.reglage, s.fields.temporisation_unite);
           return (
-            <div key={item.key} style={{ padding: "10px 0", borderBottom: "1px solid #242A3380" }}>
+            <div key={s.id} style={{ padding: "10px 0", borderBottom: "1px solid #242A3380" }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-                <span style={{ fontSize: 12.5, color: "#C7D3E0", flex: "1 1 240px" }}>{item.label}</span>
+                <span style={{ fontSize: 12.5, color: "#C7D3E0", flex: "1 1 240px" }}>Essai de déclenchement — {s.label}</span>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                  {(item.fields || []).map((f) => (
-                    <MiniInput key={f.key} label={f.label} unit={f.unit} value={values[item.key].fields[f.key]}
-                      onChange={(v) => onChangeItem(item.key, { ...values[item.key], fields: { ...values[item.key].fields, [f.key]: v } })} />
-                  ))}
+                  <MiniInput label="L1" value={s.essai.fields.l1} onChange={(v) => setEssaiField(s.id, "l1", v)} />
+                  <MiniInput label="L2" value={s.essai.fields.l2} onChange={(v) => setEssaiField(s.id, "l2", v)} />
+                  <MiniInput label="L3" value={s.essai.fields.l3} onChange={(v) => setEssaiField(s.id, "l3", v)} />
+                  <MiniInput label="Courant injecté" unit="A" value={s.essai.fields.courant_injecte} onChange={(v) => setEssaiField(s.id, "courant_injecte", v)} />
                   {tol && <MiniComputed label="Tolérance attendue" unit={tol.unite} value={`${tol.min} – ${tol.max}`} />}
-                  {values[item.key].action !== undefined && (
-                    <input placeholder="Action" value={values[item.key].action}
-                      onChange={(e) => onChangeItem(item.key, { ...values[item.key], action: e.target.value })}
-                      style={{ ...inputStyle, width: 150, padding: "5px 7px", fontSize: 12 }} />
-                  )}
-                  {values[item.key].etat !== undefined && (
-                    <Select value={values[item.key].etat} onChange={(e) => onChangeItem(item.key, { ...values[item.key], etat: e.target.value })} style={{ width: 120, padding: "5px 7px", fontSize: 12 }}>
-                      {EQUIP_STATUSES.map((s) => <option key={s} value={s}>{agree(s, itemAgreement(item.label).gender, itemAgreement(item.label).plural)}</option>)}
-                    </Select>
-                  )}
+                  <input placeholder="Action" value={s.essai.action} onChange={(e) => setEssai(s.id, { action: e.target.value })} style={{ ...inputStyle, width: 150, padding: "5px 7px", fontSize: 12 }} />
+                  <Select value={s.essai.etat} onChange={(e) => setEssai(s.id, { etat: e.target.value })} style={{ width: 120, padding: "5px 7px", fontSize: 12 }}>
+                    {EQUIP_STATUSES.map((st) => <option key={st} value={st}>{st}</option>)}
+                  </Select>
                 </div>
               </div>
             </div>
           );
         })}
+        <div style={{ padding: "10px 0" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 12.5, color: "#C7D3E0", flex: "1 1 240px" }}>Contrôle du circuit de mesures et commande</span>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+              <input placeholder="Action" value={circuit.action} onChange={(e) => setCircuit({ action: e.target.value })} style={{ ...inputStyle, width: 150, padding: "5px 7px", fontSize: 12 }} />
+              <Select value={circuit.etat} onChange={(e) => setCircuit({ etat: e.target.value })} style={{ width: 120, padding: "5px 7px", fontSize: 12 }}>
+                {EQUIP_STATUSES.map((st) => <option key={st} value={st}>{st}</option>)}
+              </Select>
+            </div>
+          </div>
+        </div>
       </div>
       {custom && <CustomActionsList custom={custom} onAdd={onAddCustom} onChange={onChangeCustom} onRemove={onRemoveCustom} idPrefix={idPrefix} />}
     </Card>
@@ -1662,14 +1727,15 @@ function EquipementCard({ eq, update, remove, removable = true }) {
           )}
 
           {schema.sections.map((sec) => {
-            if (sec.key === "controles_relais" && (eq.type === "Disjoncteur" || eq.type === "Contacteur")) {
+            if (sec.key === "parametrage_relais" && TYPES_AVEC_RELAIS.includes(eq.type)) {
+              return <ParametrageRelaisPanel key={sec.key} eq={eq} update={update} idPrefix={`${eq.id}-${sec.key}`} />;
+            }
+            if (sec.key === "controles_relais" && TYPES_AVEC_RELAIS.includes(eq.type)) {
               return (
                 <DisjoncteurRelaisPanel
                   key={sec.key}
-                  items={sec.items}
-                  paramSeuils={eq.controles.parametrage_relais}
-                  values={eq.controles[sec.key]}
-                  onChangeItem={(itemKey, v) => setControleItem(sec.key, itemKey, v)}
+                  eq={eq}
+                  update={update}
                   custom={eq.controles[sec.key + "__custom"] || []}
                   onAddCustom={() => addCustomAction(sec.key)}
                   onChangeCustom={(id, patch) => changeCustomAction(sec.key, id, patch)}
@@ -1782,7 +1848,8 @@ function printFieldParts(item, value) {
   const parts = [];
   (item.fields || []).forEach((f) => {
     const v = f.compute ? f.compute(value.fields) : value.fields ? value.fields[f.key] : "";
-    const unit = f.unit ? (value.fields && value.fields[f.key + "Unite"]) || f.unit : "";
+    const unitKey = f.unitFrom ? f.unitFrom + "Unite" : f.key + "Unite";
+    const unit = f.unit ? (value.fields && value.fields[unitKey]) || f.unit : "";
     if (v !== "" && v !== null && v !== undefined) parts.push(`${f.label} : ${v}${unit ? " " + unit : ""}`);
   });
   return parts;
@@ -1797,8 +1864,8 @@ function printEtatColor(label) {
   return "#0F8A5F";
 }
 
-function PrintControlLine({ item, value }) {
-  const parts = printFieldParts(item, value);
+function PrintControlLine({ item, value, extraParts }) {
+  const parts = extraParts || printFieldParts(item, value);
   return (
     <div style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "5px 0", borderBottom: "1px solid #e5e5e5", fontSize: 11 }}>
       <div style={{ flex: "1 1 260px" }}>
@@ -1862,7 +1929,7 @@ function computeBRKValues(eq) {
 
 function PrintEquipement({ eq }) {
   const schema = SCHEMAS[eq.type];
-  const isRelaisSeuils = eq.type === "Disjoncteur" || eq.type === "Contacteur";
+  const isRelaisSeuils = TYPES_AVEC_RELAIS.includes(eq.type);
   const brk = eq.type === "BRK" ? computeBRKValues(eq) : null;
   return (
     <div style={{ marginBottom: 22, breakInside: "avoid", pageBreakBefore: "always" }}>
@@ -1875,15 +1942,42 @@ function PrintEquipement({ eq }) {
       </div>
       {schema.sections.map((sec) => (
         <PrintSection key={sec.key} title={sec.title}>
-          {sec.items.map((item) => {
+          {isRelaisSeuils && sec.key === "parametrage_relais" && (
+            eq.controles.parametrage_relais_seuils.length === 0 ? (
+              <div style={{ fontSize: 10.5, color: "#666" }}>Aucun seuil paramétré</div>
+            ) : eq.controles.parametrage_relais_seuils.map((s) => (
+              <div key={s.id} style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "4px 0", borderBottom: "1px solid #e5e5e5", fontSize: 11 }}>
+                <div style={{ flex: "1 1 260px" }}>
+                  <div>{s.label || "(seuil sans nom)"}</div>
+                  <div style={{ color: "#666", fontSize: 10 }}>
+                    {[s.fields.etat && `État : ${s.fields.etat}`, s.fields.courbe && `Courbe : ${s.fields.courbe}`, s.fields.type && `Type : ${s.fields.type}`,
+                      s.fields.reglage && `Réglage : ${s.fields.reglage} A`, s.fields.temporisation && `Temporisation : ${s.fields.temporisation} ${s.fields.temporisation_unite || ""}`]
+                      .filter(Boolean).join(" · ")}
+                  </div>
+                </div>
+              </div>
+            ))
+          )}
+          {isRelaisSeuils && sec.key === "controles_relais" && (
+            <>
+              {eq.controles.parametrage_relais_seuils.filter((s) => s.label).map((s) => {
+                const tol = calcToleranceEssai(s.fields.reglage, s.fields.temporisation_unite);
+                const parts = [s.essai.fields.l1 && `L1 : ${s.essai.fields.l1}`, s.essai.fields.l2 && `L2 : ${s.essai.fields.l2}`, s.essai.fields.l3 && `L3 : ${s.essai.fields.l3}`, s.essai.fields.courant_injecte && `Courant injecté : ${s.essai.fields.courant_injecte} A`].filter(Boolean);
+                return (
+                  <div key={s.id}>
+                    <PrintControlLine item={{ label: "Essai de déclenchement — " + s.label, fields: [] }} value={{ action: s.essai.action, etat: s.essai.etat, fields: {} }} extraParts={parts} />
+                    {tol && <div style={{ fontSize: 10, color: "#666", marginTop: -3, marginBottom: 4 }}>Tolérance attendue : {tol.min} – {tol.max} {tol.unite}</div>}
+                  </div>
+                );
+              })}
+              <PrintControlLine item={{ label: "Contrôle du circuit de mesures et commande", fields: [] }} value={eq.controles.controles_relais.circuit_mesures_commande} />
+            </>
+          )}
+          {!(isRelaisSeuils && (sec.key === "parametrage_relais" || sec.key === "controles_relais")) && sec.items.map((item) => {
             const value = eq.controles[sec.key][item.key];
-            const tol = isRelaisSeuils && sec.key === "controles_relais" && ESSAI_TO_SEUIL[item.key]
-              ? calcToleranceEssai(eq.controles.parametrage_relais[ESSAI_TO_SEUIL[item.key]].fields.reglage, eq.controles.parametrage_relais[ESSAI_TO_SEUIL[item.key]].fields.temporisation_unite)
-              : null;
             return (
               <div key={item.key}>
                 <PrintControlLine item={item} value={value} />
-                {tol && <div style={{ fontSize: 10, color: "#666", marginTop: -3, marginBottom: 4 }}>Tolérance attendue : {tol.min} – {tol.max} {tol.unite}</div>}
               </div>
             );
           })}
@@ -2222,7 +2316,7 @@ function SiteDetail({ site, update, onBack, onDelete, onPrint, onCreateIntervent
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
             <StatusBadge label={rankToLabel(rank)} />
             <button onClick={() => onPrint(site)} style={btnGhost("#FFC107")}>
-              <Printer size={13} /> Rapport PDF
+              <FileText size={13} /> Rapport Word
             </button>
             <button onClick={() => onCreateIntervention(site, null)} style={btnGhost(BRAND.blue)}>
               <ClipboardList size={13} /> Rapport d'intervention
@@ -2306,7 +2400,7 @@ function InterventionEditor({ iv, update, onBack, onDelete, onPrint }) {
   function envoyerParMail() {
     const subject = encodeURIComponent(`Rapport d'intervention ${iv.numeroRI} — ${iv.client || ""}`);
     const body = encodeURIComponent(
-      `Bonjour,\n\nVeuillez trouver ci-joint le rapport d'intervention ${iv.numeroRI} du ${iv.date} concernant le site ${iv.site || ""}.\n\n(Pensez à joindre le PDF généré via le bouton « Rapport PDF » avant l'envoi.)\n\nCordialement,\n${iv.technicien || "HT Maintenance"}`
+      `Bonjour,\n\nVeuillez trouver ci-joint le rapport d'intervention ${iv.numeroRI} du ${iv.date} concernant le site ${iv.site || ""}.\n\n(Pensez à joindre le document Word généré via le bouton « Rapport Word » avant l'envoi.)\n\nCordialement,\n${iv.technicien || "HT Maintenance"}`
     );
     const to = iv.emailClient || "";
     window.open(`mailto:${to}?subject=${subject}&body=${body}`, "_blank");
@@ -2324,7 +2418,7 @@ function InterventionEditor({ iv, update, onBack, onDelete, onPrint }) {
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
             <StatusBadge label={iv.conclusion} />
-            <button onClick={() => onPrint(iv)} style={btnGhost("#FFC107")}><Printer size={13} /> Rapport PDF</button>
+            <button onClick={() => onPrint(iv)} style={btnGhost("#FFC107")}><FileText size={13} /> Rapport Word</button>
             <button onClick={envoyerParMail} style={btnGhost("#FFC107")}><Mail size={13} /> Préparer l'email</button>
             <InlineConfirmButton icon={Trash2} label="Supprimer" onConfirm={() => onDelete(iv.id)} />
           </div>
@@ -2465,7 +2559,7 @@ function InterventionEditor({ iv, update, onBack, onDelete, onPrint }) {
           </div>
         </div>
         <div style={{ fontSize: 11, color: "#63748A", marginTop: 12 }}>
-          Signature indisponible ? Générez le PDF et faites-le signer à la main après impression.
+          Signature indisponible ? Générez le document Word et faites-le signer à la main après impression.
         </div>
       </Card>
     </div>
@@ -2853,19 +2947,43 @@ export default function App() {
     return () => clearTimeout(ivSaveTimer.current);
   }, [interventions, ivLoaded]);
 
-  // Déclenche l'impression du navigateur (→ « Enregistrer au format PDF »).
+  // Génère le rapport (Rapport ou Rapport d'intervention) et le télécharge au format Word
+  // (.doc, reconnu nativement par Microsoft Word, entièrement modifiable).
   const printAreaRef = useRef(null);
   useEffect(() => {
     if (!printSite && !printIv) return;
-    const t = setTimeout(() => window.print(), 120);
+    const t = setTimeout(() => {
+      const node = printAreaRef.current;
+      if (!node) return;
+      const filename = printSite
+        ? `Rapport_${(printSite.local || "site").replace(/[^a-z0-9]+/gi, "_")}.doc`
+        : `RI_${(printIv.numeroRI || "intervention").replace(/[^a-z0-9]+/gi, "_")}.doc`;
+      // Format HTML reconnu nativement par Microsoft Word (et par Pages sur Mac, qui sait
+      // aussi l'ouvrir) : le fichier reste entièrement modifiable après téléchargement.
+      const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
+<head><meta charset="utf-8"><title>${filename}</title>
+<!--[if gte mso 9]><xml><w:WordDocument><w:View>Print</w:View><w:Zoom>100</w:Zoom><w:DoNotOptimizeForBrowser/></w:WordDocument></xml><![endif]-->
+<style>body{font-family:Arial,Helvetica,sans-serif;} table{border-collapse:collapse;}</style>
+</head>
+<body>${node.innerHTML}</body></html>`;
+      try {
+        const blob = new Blob(["\ufeff", html], { type: "application/msword" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 2000);
+      } catch (e) {
+        // best effort
+      }
+      setPrintSite(null);
+      setPrintIv(null);
+    }, 120);
     return () => clearTimeout(t);
   }, [printSite, printIv]);
-
-  useEffect(() => {
-    const handler = () => { setPrintSite(null); setPrintIv(null); };
-    window.addEventListener("afterprint", handler);
-    return () => window.removeEventListener("afterprint", handler);
-  }, []);
 
   function updateSite(id, updater) { setSites((prev) => prev.map((s) => (s.id === id ? updater(s) : s))); }
   function addSite() {
