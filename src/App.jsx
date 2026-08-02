@@ -44,6 +44,8 @@ const F = (key, label, unit, options) => ({ key, label, unit, options });
 /* ---- Listes déroulantes reprises des validations de données Excel ---- */
 const LISTE_INTERVENANTS = ["Thomas HEITMANN"];
 const LISTE_ETAT_INSTALLATION = ["Conforme (R.A.S)", "Dégradé (actions à prévoir)", "Défaillant (actions urgentes)"];
+const REMARQUE_STANDARD_EQUIPEMENT = "Équipement contrôlé, en bon état de fonctionnement. Aucune anomalie relevée lors de cette intervention.";
+const REMARQUE_STANDARD_INSTALLATION = "Installation en bon état général. Aucune anomalie majeure relevée lors de cette intervention.";
 const LISTE_MARQUES = ["ABB", "AREVA", "ALSTOM", "ALSTHOM", "BBC", "CALOR EMAG", "CEM GARDY", "DELLE", "EATON", "EIB", "FELTEN et GUILLAUME", "MAGRINI GALILEO", "MERLIN GERIN", "ORMAZABAL", "POMMIER", "SCHNEIDER ELECTRIC", "SIEMENS"];
 const LISTE_COURANT_ASSIGNE = ["200", "400", "630", "1250", "2500"];
 const LISTE_TENSION_ASSIGNEE = ["12", "24", "36"];
@@ -543,7 +545,10 @@ function itemAgreement(label) {
   return g ? { gender: g[0], plural: g[1] } : { gender: "m", plural: false };
 }
 
-const RANK_OF = { "Conforme": 0, "À corriger": 1, "Dégradé": 1, "Conforme avec réserves": 1, "Non conforme": 2, "Défaillant": 2, "Non réalisé": -1, "Non présent": -1 };
+const RANK_OF = {
+  "Conforme": 0, "À corriger": 1, "Dégradé": 1, "Conforme avec réserves": 1, "Non conforme": 2, "Défaillant": 2, "Non réalisé": -1, "Non présent": -1,
+  "Conforme (R.A.S)": 0, "Dégradé (actions à prévoir)": 1, "Défaillant (actions urgentes)": 2,
+};
 const RANK_COLOR = {
   "-1": { color: "#5B6B7D", bg: "rgba(143,163,184,0.14)", icon: MinusCircle },
   0: { color: "#2DD4BF", bg: "rgba(45,212,191,0.12)", icon: CheckCircle2 },
@@ -712,7 +717,7 @@ function prefillInterventionFromSite(site, eq, numeroRI) {
 }
 
 function overallRank(site) {
-  return worstRank(site.equipements.map((e) => e.etatFinal));
+  return worstRank([site.rapport.environnementEtat, site.rapport.fonctionnementEtat, ...site.equipements.map((e) => e.etatFinal)]);
 }
 function rankToLabel(rank) { return rank === 2 ? "Défaillant" : rank === 1 ? "Dégradé" : "Conforme"; }
 
@@ -1473,6 +1478,18 @@ function Overview({ sites, onOpen, onNew }) {
 function RapportTab({ site, update }) {
   const r = site.rapport;
   const set = (k, v) => update((d) => ({ ...d, rapport: { ...d.rapport, [k]: v } }));
+
+  function actualiserFonctionnement() {
+    const rang = Math.max(0, worstRank(site.equipements.map((e) => e.etatFinal)));
+    set("fonctionnementEtat", LISTE_ETAT_INSTALLATION[rang]);
+  }
+  function compilerRemarques() {
+    const lignes = site.equipements
+      .filter((e) => e.remarques && e.remarques.trim())
+      .map((e) => `${e.type}${e.identification.repere ? " (" + e.identification.repere + ")" : ""} : ${e.remarques.trim()}`);
+    set("syntheseRemarques", lignes.length ? lignes.join("\n") : "Aucune remarque particulière relevée sur les équipements.");
+  }
+
   return (
     <>
     <Card>
@@ -1502,7 +1519,12 @@ function RapportTab({ site, update }) {
         <Field label="Prochaine maintenance recommandée avant" span={2}><TextInput type="date" value={r.prochaineMaintenance} onChange={(e) => set("prochaineMaintenance", e.target.value)} /></Field>
       </div>
 
-      <SectionTitle>État de l'installation</SectionTitle>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
+        <SectionTitle>État de l'installation</SectionTitle>
+        <button onClick={actualiserFonctionnement} style={btnGhost(BRAND.blue)} title="Applique le pire état constaté parmi les équipements">
+          <RotateCcw size={13} /> Actualiser depuis les équipements
+        </button>
+      </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 14, marginBottom: 24 }}>
         <Field label="Environnement">
           <Select value={r.environnementEtat} onChange={(e) => set("environnementEtat", e.target.value)} style={{ marginBottom: 8 }}>
@@ -1518,9 +1540,18 @@ function RapportTab({ site, update }) {
         </Field>
       </div>
 
-      <Field label="Synthèse des remarques et préconisations">
-        <TextArea value={r.syntheseRemarques} onChange={(e) => set("syntheseRemarques", e.target.value)} style={{ minHeight: 100 }} />
-      </Field>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10, marginBottom: 6 }}>
+        <label style={{ fontSize: 11, fontWeight: 600, color: "#5B6B7D", letterSpacing: 0.5, textTransform: "uppercase" }}>Synthèse des remarques et préconisations</label>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button onClick={compilerRemarques} style={btnGhost(BRAND.blue)} title="Reprend les remarques saisies sur chaque équipement">
+            <RotateCcw size={13} /> Compiler les remarques des équipements
+          </button>
+          <button onClick={() => set("syntheseRemarques", REMARQUE_STANDARD_INSTALLATION)} style={btnGhost("#0F8A5F")} title="Insère une remarque type pour une installation conforme">
+            <CheckCircle2 size={13} /> Remarque standard (conforme)
+          </button>
+        </div>
+      </div>
+      <TextArea value={r.syntheseRemarques} onChange={(e) => set("syntheseRemarques", e.target.value)} style={{ minHeight: 100 }} />
     </Card>
     <div style={{ marginTop: 14 }}>
       <PhotoGallery photos={r.photos} onChange={(p) => set("photos", p)} idPrefix={`${site.id}-rapport`} />
@@ -1848,6 +1879,40 @@ function BRKReglagePanel({ eq, update, custom, onAddCustom, onChangeCustom, onRe
   );
 }
 
+// Parcourt tous les contrôles d'un équipement (y compris seuils dynamiques, essais liés,
+// et analyses d'huile cochées) et relève ceux dont l'état n'est pas "Conforme".
+function collectAnomalies(eq) {
+  const schema = SCHEMAS[eq.type];
+  const isRelais = TYPES_AVEC_RELAIS.includes(eq.type);
+  const lines = [];
+  schema.sections.forEach((sec) => {
+    if (isRelais && sec.key === "parametrage_relais") return;
+    if (isRelais && sec.key === "controles_relais") {
+      (eq.controles.parametrage_relais_seuils || []).filter((s) => s.label).forEach((s) => {
+        if (s.essai.etat && RANK_OF[s.essai.etat] > 0) lines.push(`Essai de déclenchement — ${s.label} : ${s.essai.etat}`);
+      });
+      const circuit = eq.controles.controles_relais.circuit_mesures_commande;
+      if (circuit && circuit.etat && RANK_OF[circuit.etat] > 0) lines.push(`Contrôle du circuit de mesures et commande : ${circuit.etat}`);
+      return;
+    }
+    if (eq.type === "Analyse d'huile" && sec.key === "resultats") {
+      sec.items.forEach((item) => {
+        const v = eq.controles[sec.key][item.key];
+        if (v.fields.realise === "OUI" && v.etat && RANK_OF[v.etat] > 0) lines.push(`${item.label} : ${v.etat}`);
+      });
+      return;
+    }
+    sec.items.forEach((item) => {
+      const v = eq.controles[sec.key][item.key];
+      if (v && v.etat !== undefined && RANK_OF[v.etat] > 0) lines.push(`${item.label} : ${v.etat}`);
+    });
+    (eq.controles[sec.key + "__custom"] || []).forEach((c) => {
+      if (c.etat && RANK_OF[c.etat] > 0) lines.push(`${c.label || "(action ajoutée)"} : ${c.etat}`);
+    });
+  });
+  return lines;
+}
+
 function EquipementCard({ eq, update, remove, removable = true }) {
   const [open, setOpen] = useState(true);
   const schema = SCHEMAS[eq.type];
@@ -1997,9 +2062,31 @@ function EquipementCard({ eq, update, remove, removable = true }) {
                   {EQUIP_STATUSES.map((s) => <option key={s} value={s}>{agree(s, equipGender(eq.type), false)}</option>)}
                 </Select>
               </Field>
-              <Field label="Remarques et préconisations">
+              <div>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8, marginBottom: 6 }}>
+                  <label style={{ fontSize: 11, fontWeight: 600, color: "#5B6B7D", letterSpacing: 0.5, textTransform: "uppercase" }}>Remarques et préconisations</label>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <button
+                      onClick={() => {
+                        const anomalies = collectAnomalies(eq);
+                        update({ ...eq, remarques: anomalies.length ? anomalies.join("\n") : "Aucune anomalie relevée." });
+                      }}
+                      style={btnGhost(BRAND.blue)}
+                      title="Reprend les contrôles non conformes de cet équipement"
+                    >
+                      <RotateCcw size={13} /> Compiler les anomalies
+                    </button>
+                    <button
+                      onClick={() => update({ ...eq, remarques: REMARQUE_STANDARD_EQUIPEMENT })}
+                      style={btnGhost("#0F8A5F")}
+                      title="Insère une remarque type pour un équipement conforme"
+                    >
+                      <CheckCircle2 size={13} /> Remarque standard (conforme)
+                    </button>
+                  </div>
+                </div>
                 <TextArea value={eq.remarques} onChange={(e) => update({ ...eq, remarques: e.target.value })} />
-              </Field>
+              </div>
             </div>
           </Card>
 
@@ -3140,10 +3227,31 @@ function docxControlTable(rows) {
   if (rows.length === 0) return null;
   return new DOCX.Table({ width: { size: 8800, type: DOCX.WidthType.DXA }, columnWidths: [7000, 1800], rows: rows.map((r) => docxControlRow(...r)) });
 }
-function docxEquipHeader(name) {
+// Table de synthèse : le nom de chaque équipement est un lien cliquable vers sa page dans le document.
+function docxSyntheseRow(label, etat, bookmarkId) {
+  const linkRun = new DOCX.TextRun({ text: label, size: 18, color: DOCX_BLUE, underline: {} });
+  return new DOCX.TableRow({ children: [
+    new DOCX.TableCell({ width: { size: 7000, type: DOCX.WidthType.DXA }, children: [new DOCX.Paragraph({ children: [
+      bookmarkId ? new DOCX.InternalHyperlink({ anchor: bookmarkId, children: [linkRun] }) : new DOCX.TextRun({ text: label, size: 18, color: DOCX_DARK }),
+    ] })] }),
+    etat
+      ? new DOCX.TableCell({ width: { size: 1800, type: DOCX.WidthType.DXA }, shading: { type: DOCX.ShadingType.CLEAR, fill: docxEtatColor(etat) }, verticalAlign: DOCX.VerticalAlign.CENTER, children: [new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, children: [new DOCX.TextRun({ text: (etat || "").toUpperCase(), bold: true, color: DOCX_WHITE, size: 16 })] })] })
+      : new DOCX.TableCell({ width: { size: 1800, type: DOCX.WidthType.DXA }, children: [new DOCX.Paragraph("")] }),
+  ]});
+}
+function docxSyntheseTable(site) {
+  if (site.equipements.length === 0) return null;
+  return new DOCX.Table({ width: { size: 8800, type: DOCX.WidthType.DXA }, columnWidths: [7000, 1800], rows: site.equipements.map((eq) =>
+    docxSyntheseRow(eq.type + (eq.identification.repere ? " — " + eq.identification.repere : ""), eq.etatFinal, docxBookmarkId(eq))
+  )});
+}
+// Word n'accepte que lettres/chiffres/underscore dans un nom de repère (bookmark), 40 caractères max.
+function docxBookmarkId(eq) { return "equip_" + eq.id.replace(/[^a-zA-Z0-9_]/g, "_").slice(0, 32); }
+function docxEquipHeader(name, bookmarkId) {
+  const title = new DOCX.TextRun({ text: (name || "").toUpperCase(), bold: true, color: DOCX_WHITE, size: 24 });
   return new DOCX.Table({ width: { size: 8800, type: DOCX.WidthType.DXA }, columnWidths: [8800], rows: [new DOCX.TableRow({ children: [new DOCX.TableCell({
     width: { size: 8800, type: DOCX.WidthType.DXA }, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_DARK },
-    children: [new DOCX.Paragraph({ spacing: { before: 80, after: 80 }, children: [new DOCX.TextRun({ text: (name || "").toUpperCase(), bold: true, color: DOCX_WHITE, size: 24 })] })],
+    children: [new DOCX.Paragraph({ spacing: { before: 80, after: 80 }, children: [bookmarkId ? new DOCX.Bookmark({ id: bookmarkId, children: [title] }) : title] })],
   })] })] });
 }
 function docxSpacer(h) { return new DOCX.Paragraph({ spacing: { after: h || 120 }, children: [] }); }
@@ -3166,7 +3274,7 @@ function docxImage(dataUrl, w, h) {
 
 function docxEquipementElements(eq) {
   const schema = SCHEMAS[eq.type];
-  const elements = [docxEquipHeader(eq.type), docxSpacer(80)];
+  const elements = [new DOCX.Paragraph({ children: [new DOCX.PageBreak()] }), docxEquipHeader(eq.type, docxBookmarkId(eq)), docxSpacer(80)];
   if (schema.identification.length) {
     const t = docxFieldTable(schema.identification.map((f) => [f.label, eq.identification[f.key]]));
     if (t) { elements.push(t); elements.push(docxSpacer()); }
@@ -3254,6 +3362,42 @@ function docxEquipementElements(eq) {
   return elements;
 }
 
+function docxCoverPage(site) {
+  const logoImg = docxImage(LOGO_DARK, 140, 140);
+  const dateGeneration = new Date().toLocaleDateString("fr-FR");
+  return [
+    new DOCX.Table({ width: { size: 12240, type: DOCX.WidthType.DXA }, columnWidths: [12240], rows: [new DOCX.TableRow({ children: [new DOCX.TableCell({
+      width: { size: 12240, type: DOCX.WidthType.DXA }, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_AMBER },
+      children: [new DOCX.Paragraph({ spacing: { before: 0, after: 0 }, children: [new DOCX.TextRun({ text: " ", size: 4 })] })],
+    })] })] }),
+    new DOCX.Paragraph({ spacing: { before: 2200, after: 0 }, children: [] }),
+    new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, children: logoImg ? [logoImg] : [] }),
+    new DOCX.Paragraph({ spacing: { before: 500, after: 0 }, alignment: DOCX.AlignmentType.CENTER, children: [
+      new DOCX.TextRun({ text: "RAPPORT DE MAINTENANCE PRÉVENTIVE HT", bold: true, color: "8B96A3", size: 20 }),
+    ]}),
+    new DOCX.Paragraph({ spacing: { before: 500, after: 0 }, alignment: DOCX.AlignmentType.CENTER, children: [
+      new DOCX.TextRun({ text: site.nom || "Site", bold: true, color: DOCX_DARK, size: 56 }),
+    ]}),
+    new DOCX.Paragraph({ spacing: { before: 260, after: 0 }, alignment: DOCX.AlignmentType.CENTER, children: [
+      new DOCX.TextRun({ text: site.client || "", color: "5B6B7D", size: 28 }),
+    ]}),
+    site.local ? new DOCX.Paragraph({ spacing: { before: 60, after: 0 }, alignment: DOCX.AlignmentType.CENTER, children: [
+      new DOCX.TextRun({ text: "Local : " + site.local, color: "8B96A3", size: 22 }),
+    ]}) : new DOCX.Paragraph({}),
+    new DOCX.Paragraph({ spacing: { before: 900, after: 0 }, alignment: DOCX.AlignmentType.CENTER, border: { top: { color: "D8DEE5", space: 8, style: DOCX.BorderStyle.SINGLE, size: 4 } }, children: [] }),
+    new DOCX.Paragraph({ spacing: { before: 300, after: 0 }, alignment: DOCX.AlignmentType.CENTER, children: [
+      new DOCX.TextRun({ text: "Rapport généré le " + dateGeneration, color: "8B96A3", size: 20, italics: true }),
+    ]}),
+    new DOCX.Paragraph({ spacing: { before: 2000, after: 0 }, alignment: DOCX.AlignmentType.CENTER, children: [
+      new DOCX.TextRun({ text: "HT MAINTENANCE", bold: true, color: DOCX_BLUE, size: 24 }),
+    ]}),
+    new DOCX.Paragraph({ spacing: { before: 40, after: 0 }, alignment: DOCX.AlignmentType.CENTER, children: [
+      new DOCX.TextRun({ text: "Maintenance électrique HTA / BT", color: "8B96A3", size: 18 }),
+    ]}),
+    new DOCX.Paragraph({ children: [new DOCX.PageBreak()] }),
+  ];
+}
+
 async function generateSiteDocx(site) {
   await ensureDocx();
   const rank = overallRank(site);
@@ -3268,8 +3412,7 @@ async function generateSiteDocx(site) {
     ],
   })] })] });
 
-  const syntheseRows = site.equipements.map((eq) => [eq.type + (eq.identification.repere ? " — " + eq.identification.repere : ""), "", "", eq.etatFinal]);
-  const syntheseTable = docxControlTable(syntheseRows);
+  const syntheseTable = docxSyntheseTable(site);
 
   const rapportRows = [
     ["Date", site.rapport.date], ["Intervenant", site.rapport.intervenant],
@@ -3281,7 +3424,7 @@ async function generateSiteDocx(site) {
     ["Fonctionnement de l'installation", [site.rapport.fonctionnementEtat, site.rapport.fonctionnementRemarque].filter(Boolean).join(" — ")],
   ];
 
-  const children = [headerTable, docxSpacer(160)];
+  const children = [...docxCoverPage(site), headerTable, docxSpacer(160)];
   if (syntheseTable) { children.push(docxHeading("Synthèse des équipements")); children.push(syntheseTable); children.push(docxSpacer()); }
   children.push(docxHeading("Rapport"));
   const rapportTable = docxFieldTable(rapportRows);
