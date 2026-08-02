@@ -875,13 +875,50 @@ function FileGallery({ files, onChange, idPrefix }) {
     setBusy(false);
   }
 
+  function handlePasteEvent(e) {
+    const items = e.clipboardData && e.clipboardData.items;
+    if (!items) return;
+    const imageFiles = [];
+    for (const item of items) {
+      if (item.type && item.type.startsWith("image/")) {
+        const file = item.getAsFile();
+        if (file) imageFiles.push(file);
+      }
+    }
+    if (imageFiles.length) { e.preventDefault(); handleFiles(imageFiles); }
+  }
+
+  async function pasteFromClipboard() {
+    if (!navigator.clipboard || !navigator.clipboard.read) return;
+    try {
+      const clipItems = await navigator.clipboard.read();
+      for (const item of clipItems) {
+        const imageType = item.types.find((t) => t.startsWith("image/"));
+        if (imageType) {
+          const blob = await item.getType(imageType);
+          const file = new File([blob], "capture-" + Date.now() + ".png", { type: imageType });
+          await handleFiles([file]);
+          return;
+        }
+      }
+    } catch (e) {
+      // accès presse-papiers refusé ou non pris en charge : l'utilisateur peut toujours
+      // utiliser Cmd/Ctrl+V directement dans cette zone, ou le bouton "Ajouter un fichier".
+    }
+  }
+
   return (
-    <div>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+    <div tabIndex={0} onPaste={handlePasteEvent} style={{ outline: "none" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
         <SectionTitle>Pièces jointes (photo, capture d'écran, PDF)</SectionTitle>
-        <button onClick={() => inputRef.current && inputRef.current.click()} disabled={busy} style={btnGhost(BRAND.amber)}>
-          <ImagePlus size={13} /> {busy ? "Import…" : "Ajouter un fichier"}
-        </button>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button onClick={pasteFromClipboard} disabled={busy} style={btnGhost(BRAND.blue)} title="Coller une image copiée (Cmd/Ctrl+V)">
+            <ClipboardList size={13} /> Coller
+          </button>
+          <button onClick={() => inputRef.current && inputRef.current.click()} disabled={busy} style={btnGhost(BRAND.amber)}>
+            <ImagePlus size={13} /> {busy ? "Import…" : "Ajouter un fichier"}
+          </button>
+        </div>
         <input
           ref={inputRef}
           type="file"
@@ -896,7 +933,7 @@ function FileGallery({ files, onChange, idPrefix }) {
       </div>
       {list.length === 0 ? (
         <div style={{ textAlign: "center", padding: 22, color: "#8B96A3", fontSize: 12.5, border: "1px dashed #D8DEE5", borderRadius: 10 }}>
-          Aucune pièce jointe
+          Aucune pièce jointe — cliquez ici puis faites Cmd/Ctrl+V pour coller une image, ou utilisez les boutons ci-dessus
         </div>
       ) : (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(120px, 1fr))", gap: 10 }}>
