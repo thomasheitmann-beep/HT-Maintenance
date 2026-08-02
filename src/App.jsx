@@ -8,7 +8,7 @@ import {
   Plus, Search, AlertTriangle, CheckCircle2, AlertOctagon,
   Trash2, ArrowLeft, Building2, Clock, ChevronRight, ChevronDown,
   MapPin, ShieldCheck, FileText, Settings2, Printer, ImagePlus,
-  Mail, PenLine, RotateCcw, ClipboardList, X, MinusCircle,
+  Mail, PenLine, RotateCcw, ClipboardList, X, MinusCircle, Download, Upload,
 } from "lucide-react";
 
 /* =========================================================================
@@ -3502,6 +3502,35 @@ export default function App() {
     setSelectedIvId(null);
   }
 
+  // Sauvegarde manuelle : exporte toutes les données (sites + rapports d'intervention) dans un
+  // fichier téléchargeable, et permet de les recharger ensuite (autre appareil, restauration…).
+  const importInputRef = useRef(null);
+  const [importError, setImportError] = useState(false);
+
+  function exportData() {
+    const payload = { app: "HT Maintenance", version: 1, exportedAt: new Date().toISOString(), sites, interventions };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const filename = `HT-Maintenance_sauvegarde_${todayISO()}.json`;
+    downloadBlob(blob, filename);
+  }
+
+  function importData(file) {
+    setImportError(false);
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const data = JSON.parse(e.target.result);
+        if (!Array.isArray(data.sites) || !Array.isArray(data.interventions)) throw new Error("format invalide");
+        setSites(data.sites);
+        setInterventions(data.interventions);
+      } catch (err) {
+        setImportError(true);
+      }
+    };
+    reader.onerror = () => setImportError(true);
+    reader.readAsText(file);
+  }
+
   const selected = sites.find((s) => s.id === selectedId) || null;
   const selectedIv = interventions.find((iv) => iv.id === selectedIvId) || null;
 
@@ -3542,8 +3571,32 @@ export default function App() {
                 </div>
               </div>
             </div>
-            {!selected && !selectedIv && view === "sites" && <button onClick={addSite} style={btnPrimary()}><Plus size={16} /> Nouveau site</button>}
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              {!selected && !selectedIv && (
+                <>
+                  <button onClick={exportData} style={btnGhost()} title="Télécharger une sauvegarde de toutes les données">
+                    <Download size={14} /> <span className="hide-mobile">Sauvegarder</span>
+                  </button>
+                  <button onClick={() => importInputRef.current && importInputRef.current.click()} style={btnGhost()} title="Recharger une sauvegarde précédente">
+                    <Upload size={14} /> <span className="hide-mobile">Restaurer</span>
+                  </button>
+                  <input
+                    ref={importInputRef}
+                    type="file"
+                    accept="application/json"
+                    style={{ display: "none" }}
+                    onChange={(e) => { if (e.target.files && e.target.files[0]) importData(e.target.files[0]); e.target.value = ""; }}
+                  />
+                </>
+              )}
+              {!selected && !selectedIv && view === "sites" && <button onClick={addSite} style={btnPrimary()}><Plus size={16} /> Nouveau site</button>}
+            </div>
           </div>
+          {importError && (
+            <div style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.3)", color: "#B91C1C", borderRadius: 10, padding: "10px 14px", fontSize: 12.5, marginBottom: 14 }}>
+              Le fichier sélectionné n'est pas une sauvegarde valide. Vérifiez que vous avez bien choisi un fichier exporté depuis cette application.
+            </div>
+          )}
 
           {!selected && !selectedIv && (
             <div style={{ display: "flex", gap: 6, marginBottom: 20, flexWrap: "wrap" }}>
