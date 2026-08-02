@@ -559,7 +559,7 @@ const EQUIP_STATUSES = ["Conforme", "Dégradé", "Défaillant", "Non réalisé",
 const CONFORMITE_STATUSES = ["Conforme", "À corriger", "Non conforme"];
 const OUI_NON = ["OUI", "NON"];
 
-const STORAGE_KEY = "ht-sites-v4";
+const STORAGE_KEY = "ht-sites-v5";
 
 function uid() { return Math.random().toString(36).slice(2, 10) + Date.now().toString(36); }
 function todayISO() { return new Date().toISOString().slice(0, 10); }
@@ -1282,7 +1282,9 @@ function KpiCard({ icon: Icon, label, value, accent }) {
 
 /* ---- ligne de contrôle générique (control / info / setting) ---- */
 function ControlRow({ item, value, onChange, idPrefix }) {
-  const setField = (k, v) => onChange({ ...value, fields: { ...value.fields, [k]: v } });
+  if (!value) return null; // donnée incompatible (ancien format) : on ignore plutôt que de planter
+  const fields = value.fields || {};
+  const setField = (k, v) => onChange({ ...value, fields: { ...fields, [k]: v } });
   return (
     <div style={{ padding: "10px 0", borderBottom: "1px solid #E2E6EB" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
@@ -1293,10 +1295,10 @@ function ControlRow({ item, value, onChange, idPrefix }) {
               <label key={f.key} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#8B96A3" }}>
                 {f.label}
                 <span style={{ ...inputStyle, width: 66, padding: "5px 7px", fontSize: 12, background: "#EEF2F6", color: "#0A5DA8", fontWeight: 700, display: "inline-block", textAlign: "center" }}>
-                  {f.compute(value.fields) ?? "—"}
+                  {f.compute(fields) ?? "—"}
                 </span>
                 {(() => {
-                  const u = f.unitFrom ? (value.fields[f.unitFrom + "Unite"] || f.unit) : f.unit;
+                  const u = f.unitFrom ? (fields[f.unitFrom + "Unite"] || f.unit) : f.unit;
                   return u ? <span>{u}</span> : null;
                 })()}
               </label>
@@ -1304,7 +1306,7 @@ function ControlRow({ item, value, onChange, idPrefix }) {
               <label key={f.key} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#8B96A3" }}>
                 {f.label}
                 <Combo
-                  value={value.fields[f.key]}
+                  value={fields[f.key]}
                   onChange={(v) => setField(f.key, v)}
                   options={f.options}
                   listId={`${idPrefix}-${item.key}-${f.key}`}
@@ -1316,15 +1318,15 @@ function ControlRow({ item, value, onChange, idPrefix }) {
                 {f.label}
                 {f.unit ? (
                   <NumberWithUnit
-                    value={value.fields[f.key]}
-                    unit={value.fields[f.key + "Unite"] || f.unit}
+                    value={fields[f.key]}
+                    unit={fields[f.key + "Unite"] || f.unit}
                     onValueChange={(v) => setField(f.key, v)}
                     onUnitChange={(u) => setField(f.key + "Unite", u)}
                   />
                 ) : (
                   <input
                     type="text"
-                    value={value.fields[f.key] ?? ""}
+                    value={fields[f.key] ?? ""}
                     onChange={(e) => setField(f.key, e.target.value)}
                     style={{ ...inputStyle, width: 70, padding: "5px 7px", fontSize: 12 }}
                   />
@@ -2166,10 +2168,12 @@ function EquipementTypeTab({ type, site, update }) {
    ========================================================================= */
 function printFieldParts(item, value) {
   const parts = [];
+  if (!value) return parts;
+  const fields = value.fields || {};
   (item.fields || []).forEach((f) => {
-    const v = f.compute ? f.compute(value.fields) : value.fields ? value.fields[f.key] : "";
+    const v = f.compute ? f.compute(fields) : fields[f.key];
     const unitKey = f.unitFrom ? f.unitFrom + "Unite" : f.key + "Unite";
-    const unit = f.unit ? (value.fields && value.fields[unitKey]) || f.unit : "";
+    const unit = f.unit ? fields[unitKey] || f.unit : "";
     if (v !== "" && v !== null && v !== undefined) parts.push(`${f.label} : ${v}${unit ? " " + unit : ""}`);
   });
   return parts;
