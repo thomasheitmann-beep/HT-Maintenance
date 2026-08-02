@@ -44,3 +44,27 @@ Puis ouvrez l'adresse affichée dans le terminal (ex. http://localhost:5173).
 Remplacer `storagePolyfill.js` par une vraie base de données partagée
 (ex. Firebase, Supabase) pour que toute l'équipe voie les mêmes données,
 sur n'importe quel appareil.
+
+## Fonctionnement hors ligne (PWA)
+L'application est maintenant une "Progressive Web App" : une fois ouverte au
+moins une fois avec une connexion internet, elle peut ensuite être utilisée
+sans connexion.
+
+### Installer sur l'écran d'accueil (iPhone / Android)
+- **iPhone (Safari)** : ouvrez le site → bouton Partager → "Sur l'écran d'accueil"
+- **Android (Chrome)** : ouvrez le site → menu ⋮ → "Ajouter à l'écran d'accueil"
+
+Une icône HT Maintenance apparaît alors, et l'app s'ouvre en plein écran, sans
+barre de navigateur.
+
+### Ce qui fonctionne hors ligne
+- Toute la saisie (sites, rapports, contrôles, photos, signatures) — déjà
+  stockée localement sur l'appareil
+- Le bouton "Rapport Word", **à condition d'avoir été utilisé au moins une
+  fois avec une connexion active** (le module de génération Word est alors
+  mis en cache pour les usages suivants)
+
+### Après une mise à jour du code
+Après chaque nouveau déploiement, il peut être nécessaire de fermer et
+rouvrir complètement l'app (ou de faire glisser vers le bas pour rafraîchir)
+pour que la nouvelle version hors-ligne soit bien téléchargée.

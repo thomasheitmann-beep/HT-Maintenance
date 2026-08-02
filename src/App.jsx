@@ -25,6 +25,8 @@ const EQUIPMENT_TYPES = [
   "Disjoncteur BT",
   "Interrupteur BT",
   "Transformateur",
+  "Analyse d'huile",
+  "Jeu de barre / Gaine à barre",
 ];
 
 // petit constructeur : un contrôle avec Action + État final (+ champs de mesure optionnels)
@@ -56,7 +58,7 @@ const LISTE_TYPE_RELAIS = ["Indépendant", "Dépendant"];
 const LISTE_TEMPO_UNITE = ["ms", "s"];
 const LISTE_ETAT_SEUIL = ["", "Actif"];
 const LISTE_TR_MODE = ["Ajustable", "Fixe"];
-const LISTE_TR_CLASSE = ["2", "3", "6"];
+const LISTE_TR_CLASSE = ["1.5", "6"];
 const LISTE_RELAIS_MARQUE = ["SEPAM", "MICOM"];
 const LISTE_REF_DISJONCTEUR = ["SF1", "ORTHOFLUOR"];
 const LISTE_TYPE_CELLULE = {
@@ -68,6 +70,8 @@ const LISTE_TYPE_CELLULE = {
 };
 const LISTE_MARQUE_BRK = ["MASTERPACT", "COMPACT", "IZM", "NZM", "MEGAMAX", "ISOMAX", "EMAX", "EMAX 2", "SPECTRONIC", "MPACT", "3WL", "3WN", "DMX", "DMX³", "DPX"];
 const LISTE_TYPE_TRANSFORMATEUR = ["TRANSFORMATEUR DE DISTRIBUTION", "TRANSFORMATEUR", "AUTO-TRANSFORMATEUR", "TRANSFORMATEUR A DOUBLE SECONDAIRE", "TRANSFORMATEUR SEC ENROBÉ"];
+const LISTE_TYPE_JDB = ["Jeu de barres", "Gaine à barres"];
+const LISTE_CONCLUSION_DGA = ["Normal", "Surveillance", "Alerte", "Critique"];
 const LISTE_MARQUE_TDY = ["ABB", "ALSTOM", "AREVA", "CAHORS", "CONTI TRANSFO", "EFACEC", "ELKIMA", "France TRANSFO", "GBE", "MATELEC", "MERLIN GERIN", "PAUWELS", "SCHNEIDER ELECTRIC", "SIEMENS", "SNT DURIEZ", "UNELEC"];
 const LISTE_COUPLAGE_TDY = ["Yzn11", "Dyn11", "Dzn10", "Dzn6", "Yyn6", "Yzn5", "Dyn5", "Yyn0", "Yz11", "Yd11", "Dy11", "Dz10", "Dz6", "Yy6", "Dd6", "Yz5", "Yd5", "Dy5", "Yy0", "Dd0"];
 const OUI_NON_LIST = ["OUI", "NON"];
@@ -123,6 +127,9 @@ const CONTROLES_DISJONCTEUR = [
   C("etat_chambres_coupure", "État général des chambres de coupures"),
   C("resistance_contact_chambres", "Résistances de contact des chambres de coupure", [...L1L2L3("µΩ"), F("tolerance", "Tolérance", "µΩ")]),
   C("synchronisme_coupure", "Contrôle du synchronisme de coupure"),
+  C("temps_fermeture", "Mesure du temps de fermeture", [...L1L2L3("ms")]),
+  C("courbe_compensation_sf6", "Courbe de compensation pression SF6 / température", [F("reference", "Référence / commentaire")]),
+  C("essai_dielectrique_pole", "Essai diélectrique après intervention sur le pôle"),
 ];
 // Seuils du relais de protection : liste dynamique (un seul affiché par défaut, ajout au besoin)
 // plutôt que les 6 lignes fixes de l'Excel — chaque seuil ajouté fait apparaître automatiquement
@@ -144,12 +151,10 @@ const TYPES_AVEC_RELAIS = ["Disjoncteur HTA", "Contacteur HTA", "Interrupteur HT
 // Reproduit fidèlement le fichier Excel : seuls les 1er et 2ème seuils de courant de phase ont une
 // formule de tolérance qui s'adapte à l'unité choisie (s/ms) ; le 3ème seuil de phase et les 3 seuils
 // homopolaires utilisent toujours la formule en ms, quelle que soit l'unité sélectionnée sur ces lignes.
-const SEUILS_TOLERANCE_ADAPTATIVE = ["Premier seuil de courant de phase", "Deuxième seuil de courant de phase"];
-function calcToleranceEssai(reglage, unite, label) {
+function calcToleranceEssai(reglage, unite) {
   const r = numOf(reglage);
   if (r === null) return null;
-  const adaptatif = SEUILS_TOLERANCE_ADAPTATIVE.includes(label);
-  if (!adaptatif || unite === "ms") return { min: Math.round((r * 0.9 + 30) * 100) / 100, max: Math.round((r + 120) * 100) / 100, unite: "ms" };
+  if (unite === "ms") return { min: Math.round((r * 0.9 + 30) * 100) / 100, max: Math.round((r + 120) * 100) / 100, unite: "ms" };
   return { min: Math.round((r * 0.9 + 0.03) * 100) / 100, max: Math.round((r * 1.1 + 0.12) * 100) / 100, unite: "s" };
 }
 
@@ -158,7 +163,12 @@ const SCHEMAS = {
   "Interrupteur HTA": {
     identification: [{ key: "repere", label: "Repère / Nom de l'équipement" }, { key: "typeCellule", label: "Type de cellule", options: LISTE_TYPE_CELLULE["Interrupteur HTA"] }, { key: "numeroSerie", label: "Numéro de série" }],
     sections: [
-      { key: "mecaniques", title: "Contrôles mécaniques", items: MECA_CELLULE },
+      { key: "mecaniques", title: "Contrôles mécaniques", items: [
+        ...MECA_CELLULE,
+        C("essai_manoeuvre_charge", "Essai de manœuvre en charge"),
+        C("essai_manoeuvre_hors_charge", "Essai de manœuvre hors charge"),
+        C("verrouillage_sect_terre", "Contrôle du verrouillage mécanique interrupteur / sectionneur de terre"),
+      ]},
       { key: "electriques", title: "Contrôles électriques", items: [
         C("indicateurs_capacitifs", "Contrôle des indicateurs capacitifs de présence tension"),
         C("connexions_puissance", "Contrôle des connexions de puissance"),
@@ -169,6 +179,10 @@ const SCHEMAS = {
       { key: "securite", title: "Contrôles de sécurité", items: SECURITE_CELLULE },
       { key: "parametrage_relais", title: "Paramétrage du relais de protection", items: [] },
       { key: "controles_relais", title: "Contrôles du relais de protection", items: [CIRCUIT_MESURES_COMMANDE] },
+      { key: "mesure_isolement", title: "Mesure d'isolement", items: [
+        C("hta_terre", "HTA - Terre", [F("v", "Tension", null, TENSION_ISOLEMENT), F("valeur", "Valeur"), F("unite", "Unité", null, UNITE_ISOLEMENT)]),
+        C("entre_phases", "Entre phases", [F("v", "Tension", null, TENSION_ISOLEMENT), F("valeur", "Valeur"), F("unite", "Unité", null, UNITE_ISOLEMENT)]),
+      ]},
     ],
   },
   "Comptage HTA": {
@@ -182,6 +196,9 @@ const SCHEMAS = {
         C("contacts_position", "Contrôle des contacts de position"),
         C("tp", "Contrôle des transformateurs de potentiel (TP)", TC_FIELDS),
         ...FUSIBLES,
+        C("rapport_tc_comptage", "Contrôle du rapport de transformation des TC de comptage", [...L1L2L3()]),
+        C("scelles_plombs", "Vérification des scellés / plombs réglementaires"),
+        C("etalonnage_compteur", "Contrôle de l'étalonnage du compteur", [F("date_verification", "Date de vérification métrologique")]),
       ]},
       { key: "securite", title: "Contrôles de sécurité", items: SECURITE_CELLULE },
     ],
@@ -189,7 +206,12 @@ const SCHEMAS = {
   "Interrupteur Fusible HTA": {
     identification: [{ key: "repere", label: "Repère / Nom de l'équipement" }, { key: "typeCellule", label: "Type de cellule", options: LISTE_TYPE_CELLULE["Interrupteur Fusible HTA"] }, { key: "numeroSerie", label: "Numéro de série" }],
     sections: [
-      { key: "mecaniques", title: "Contrôles mécaniques", items: MECA_CELLULE },
+      { key: "mecaniques", title: "Contrôles mécaniques", items: [
+        ...MECA_CELLULE,
+        C("essai_manoeuvre_charge", "Essai de manœuvre en charge"),
+        C("essai_manoeuvre_hors_charge", "Essai de manœuvre hors charge"),
+        C("verrouillage_sect_terre", "Contrôle du verrouillage mécanique interrupteur / sectionneur de terre"),
+      ]},
       { key: "electriques", title: "Contrôles électriques", items: [
         C("indicateurs_capacitifs", "Contrôle des indicateurs capacitifs de présence tension"),
         C("connexions_puissance", "Contrôle des connexions de puissance"),
@@ -201,6 +223,10 @@ const SCHEMAS = {
       { key: "securite", title: "Contrôles de sécurité", items: SECURITE_CELLULE },
       { key: "parametrage_relais", title: "Paramétrage du relais de protection", items: [] },
       { key: "controles_relais", title: "Contrôles du relais de protection", items: [CIRCUIT_MESURES_COMMANDE] },
+      { key: "mesure_isolement", title: "Mesure d'isolement", items: [
+        C("hta_terre", "HTA - Terre", [F("v", "Tension", null, TENSION_ISOLEMENT), F("valeur", "Valeur"), F("unite", "Unité", null, UNITE_ISOLEMENT)]),
+        C("entre_phases", "Entre phases", [F("v", "Tension", null, TENSION_ISOLEMENT), F("valeur", "Valeur"), F("unite", "Unité", null, UNITE_ISOLEMENT)]),
+      ]},
     ],
   },
   "Disjoncteur HTA": {
@@ -281,6 +307,9 @@ const SCHEMAS = {
         C("verif_unite_controle", "Vérification unité de contrôle"),
         C("tension_aux_unite", "Tension auxiliaire de l'unité de contrôle"),
         C("signalisation", "Signalisation"),
+        C("thermographie_connexions", "Contrôle thermographique des connexions", [F("temperature", "Température relevée", "°C")]),
+        C("contacts_aux_signalisation", "Vérification des contacts auxiliaires de signalisation (OF/SD)"),
+        C("bouton_test_rearmement", "Test du bouton test / réarmement"),
       ]},
       { key: "organes", title: "Organes internes", items: ORGANES_INTERNES },
       { key: "reglage_disjoncteur", title: "Réglage du disjoncteur", items: [
@@ -320,6 +349,9 @@ const SCHEMAS = {
         C("verif_unite_controle", "Vérification unité de contrôle"),
         C("tension_aux_unite", "Tension auxiliaire de l'unité de contrôle"),
         C("signalisation", "Signalisation"),
+        C("thermographie_connexions", "Contrôle thermographique des connexions", [F("temperature", "Température relevée", "°C")]),
+        C("contacts_aux_signalisation", "Vérification des contacts auxiliaires de signalisation (OF/SD)"),
+        C("bouton_test_rearmement", "Test du bouton test / réarmement"),
       ]},
       { key: "organes", title: "Organes internes", items: ORGANES_INTERNES },
     ],
@@ -343,6 +375,7 @@ const SCHEMAS = {
         C("raccordement_cables", "Raccordement des câbles HT et BT"),
         C("distances_refroidissement", "Distances extérieures nécessaires au refroidissement"),
         C("raccordement_sondes", "Raccordement des sondes de température aux relais thermiques"),
+        C("niveau_huile_silicagel", "Contrôle du niveau d'huile et de l'état du silicagel (respirateur)"),
       ]},
       { key: "electriques", title: "Contrôles électriques", items: [
         C("indicateurs_capacitifs", "Contrôle des indicateurs capacitifs de présence tension"),
@@ -360,6 +393,8 @@ const SCHEMAS = {
       { key: "rapport_transformation", title: "Rapport de transformation", items: [
         C("rapport_theorique", "Rapport théorique"),
         C("rapport_par_phase", "Rapport par phase", [F("l1", "L1"), F("l2", "L2"), F("l3", "L3")]),
+        C("resistance_enroulements_primaire", "Résistance des enroulements — Primaire", [...L1L2L3("mΩ")]),
+        C("resistance_enroulements_secondaire", "Résistance des enroulements — Secondaire", [...L1L2L3("mΩ")]),
       ]},
       { key: "mesure_isolement", title: "Mesure d'isolement", items: [
         C("hta_terre", "HTA - Terre", [F("v", "Tension", null, TENSION_ISOLEMENT), F("valeur", "Valeur"), F("unite", "Unité", null, UNITE_ISOLEMENT)]),
@@ -367,6 +402,56 @@ const SCHEMAS = {
         C("bt_terre_2", "HTA - BT", [F("v", "Tension", null, TENSION_ISOLEMENT), F("valeur", "Valeur"), F("unite", "Unité", null, UNITE_ISOLEMENT)]),
         C("pi", "PI (10/1min)", [F("v", "Tension", null, TENSION_ISOLEMENT)]),
         C("dar", "DAR (60/10sec)", [F("v", "Tension", null, TENSION_ISOLEMENT)]),
+      ]},
+    ],
+  },
+  "Analyse d'huile": {
+    identification: [
+      { key: "repere", label: "Repère / Nom de l'équipement" },
+      { key: "transformateurAssocie", label: "Transformateur associé (repère)" },
+      { key: "laboratoire", label: "Laboratoire" }, { key: "datePrelevement", label: "Date de prélèvement" },
+    ],
+    sections: [
+      { key: "resultats", title: "Résultats d'analyse", items: [
+        C("rigidite_dielectrique", "Rigidité diélectrique", [F("valeur", "Valeur", "kV")]),
+        C("teneur_eau", "Teneur en eau", [F("valeur", "Valeur", "ppm")]),
+        C("acidite", "Acidité (indice de neutralisation)", [F("valeur", "Valeur", "mgKOH/g")]),
+        C("tension_interfaciale", "Tension interfaciale", [F("valeur", "Valeur", "mN/m")]),
+        C("facteur_dissipation", "Facteur de dissipation (tan δ)", [F("valeur", "Valeur", "%")]),
+        C("analyse_gaz_dissous", "Analyse des gaz dissous (DGA)", [F("conclusion", "Conclusion", null, LISTE_CONCLUSION_DGA)]),
+      ]},
+    ],
+  },
+  "Jeu de barre / Gaine à barre": {
+    identification: [
+      { key: "repere", label: "Repère / Nom de l'équipement" },
+      { key: "type", label: "Type", options: LISTE_TYPE_JDB }, { key: "marque", label: "Fabricant / Marque" },
+      { key: "tensionAssignee", label: "Tension assignée (kV)", numeric: true }, { key: "courantAssigne", label: "Courant assigné (A)", numeric: true },
+      { key: "nombrePhases", label: "Nombre de phases", options: ["3", "4"] }, { key: "longueur", label: "Longueur (m)", numeric: true },
+      { key: "anneeMiseEnService", label: "Année de mise en service", numeric: true },
+    ],
+    sections: [
+      { key: "mecaniques", title: "Contrôles mécaniques", items: [
+        C("fixations_supports", "Fixations et supports"),
+        C("joints_dilatation", "État des joints de dilatation"),
+        C("alignement_troncons", "Alignement des tronçons"),
+        C("capots_enveloppes", "État des capots / enveloppes de protection"),
+        C("proprete_corps_etrangers", "Propreté et absence de corps étrangers"),
+      ]},
+      { key: "electriques", title: "Contrôles électriques", items: [
+        C("serrage_connexions", "Contrôle du serrage des connexions", [F("couple", "Couple de serrage", "N.m")]),
+        C("resistance_jonctions", "Résistance de contact aux jonctions", [...L1L2L3("µΩ"), F("n", "N", "µΩ")]),
+        C("etat_isolants_entretoises", "État des isolants et entretoises"),
+        C("continuite_masses_jdb", "Continuité des masses et mise à la terre", [F("valeur", "Valeur", "mΩ")]),
+        C("thermographie", "Contrôle thermographique / points chauds", [F("temperature", "Température relevée", "°C")]),
+      ]},
+      { key: "mesure_isolement", title: "Mesure d'isolement", items: [
+        C("phase1_terre", "Phase 1 - Terre", [F("v", "Tension", null, TENSION_ISOLEMENT), F("valeur", "Valeur"), F("unite", "Unité", null, UNITE_ISOLEMENT)]),
+        C("phase2_terre", "Phase 2 - Terre", [F("v", "Tension", null, TENSION_ISOLEMENT), F("valeur", "Valeur"), F("unite", "Unité", null, UNITE_ISOLEMENT)]),
+        C("phase3_terre", "Phase 3 - Terre", [F("v", "Tension", null, TENSION_ISOLEMENT), F("valeur", "Valeur"), F("unite", "Unité", null, UNITE_ISOLEMENT)]),
+        C("phase_phase", "Phase - Phase", [F("v", "Tension", null, TENSION_ISOLEMENT), F("valeur", "Valeur"), F("unite", "Unité", null, UNITE_ISOLEMENT)]),
+        C("pi_jdb", "PI (10/1min)", [F("v", "Tension", null, TENSION_ISOLEMENT)]),
+        C("dar_jdb", "DAR (60/10sec)", [F("v", "Tension", null, TENSION_ISOLEMENT)]),
       ]},
     ],
   },
@@ -447,6 +532,11 @@ const ITEM_GENDER = {
   "Troisième seuil de courant de phase": ["m", false], "Troisième seuil de courant homopolaire": ["m", false], "Type": ["m", false],
   "Vérification du système de verrouillage à clé": ["f", false], "Vérification unité de contrôle": ["f", false],
   "État général des chambres de coupures": ["m", false], "État général des isolants": ["m", false], "État général externe et interne de la cellule": ["m", false],
+  "Fixations et supports": ["f", true], "État des joints de dilatation": ["m", false], "Alignement des tronçons": ["m", false],
+  "État des capots / enveloppes de protection": ["m", false], "Propreté et absence de corps étrangers": ["f", false],
+  "Contrôle du serrage des connexions": ["m", false], "Résistance de contact aux jonctions": ["f", false],
+  "État des isolants et entretoises": ["m", false], "Continuité des masses et mise à la terre": ["f", false],
+  "Contrôle thermographique / points chauds": ["m", false],
 };
 function itemAgreement(label) {
   const g = ITEM_GENDER[label];
@@ -512,6 +602,7 @@ function emptyEquipement(type) {
     remarques: "",
     photos: [],
     courbeFiles: [],
+    rapportLaboFiles: [],
   };
 }
 
@@ -520,6 +611,7 @@ function emptySite() {
   next.setFullYear(next.getFullYear() + 1);
   return {
     id: uid(),
+    nom: "",
     client: "",
     local: "",
     rapport: {
@@ -598,7 +690,7 @@ function prefillInterventionFromSite(site, eq, numeroRI) {
   return {
     ...base,
     client: site.client,
-    site: site.local,
+    site: site.nom || site.local,
     date: site.rapport.date || todayISO(),
     technicien: site.rapport.intervenant || "",
     heureDebut: site.rapport.heureArrivee || "",
@@ -1288,7 +1380,7 @@ function Overview({ sites, onOpen, onNew }) {
     let list = enriched;
     if (query.trim()) {
       const q = query.toLowerCase();
-      list = list.filter((s) => (s.client + " " + s.local + " " + s.rapport.intervenant).toLowerCase().includes(q));
+      list = list.filter((s) => (s.nom + " " + s.client + " " + s.local + " " + s.rapport.intervenant).toLowerCase().includes(q));
     }
     if (statusFilter !== "Tous") list = list.filter((s) => rankToLabel(s._rank) === statusFilter);
     if (sortKey === "prochaine") list = [...list].sort((a, b) => new Date(a._prochaine) - new Date(b._prochaine));
@@ -1353,8 +1445,8 @@ function Overview({ sites, onOpen, onNew }) {
                 onMouseEnter={(e) => (e.currentTarget.style.borderColor = "#9AA5B1")} onMouseLeave={(e) => (e.currentTarget.style.borderColor = "#D8DEE5")}
               >
                 <div className="site-row-main" style={{ flex: "1 1 220px", minWidth: 0 }}>
-                  <div style={{ fontSize: 13.5, fontWeight: 700, color: "#1A1F26", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.local || "Site sans nom"}</div>
-                  <div style={{ fontSize: 12, color: "#5B6B7D" }}>{s.client || "Client non renseigné"}</div>
+                  <div style={{ fontSize: 13.5, fontWeight: 700, color: "#1A1F26", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.nom || "Site sans nom"}</div>
+                  <div style={{ fontSize: 12, color: "#5B6B7D" }}>{[s.client, s.local].filter(Boolean).join(" · ") || "Client non renseigné"}</div>
                 </div>
                 <div className="site-row-meta hide-mobile" style={{ flex: "0 0 130px", fontSize: 12 }}>
                   <div style={{ color: "#8B96A3", fontSize: 10.5, textTransform: "uppercase", fontWeight: 600 }}>Intervenant</div>
@@ -1483,6 +1575,64 @@ function MiniSelect({ label, options, value, onChange }) {
     </MiniField>
   );
 }
+function MiniCombo({ label, options, value, onChange, listId }) {
+  return (
+    <MiniField label={label}>
+      <Combo value={value} onChange={onChange} options={options} listId={listId} style={{ width: 90, padding: "5px 7px", fontSize: 12 }} />
+    </MiniField>
+  );
+}
+
+// Analyse d'huile : liste des analyses possibles à cocher — seules celles cochées affichent
+// leur(s) champ(s) de résultat.
+function AnalyseHuilePanel({ eq, update, idPrefix }) {
+  const schema = SCHEMAS["Analyse d'huile"];
+  const items = schema.sections[0].items;
+  const values = eq.controles.resultats;
+  const setField = (key, fieldKey, v) =>
+    update({ ...eq, controles: { ...eq.controles, resultats: { ...values, [key]: { ...values[key], fields: { ...values[key].fields, [fieldKey]: v } } } } });
+  const toggleRealise = (key, checked) => setField(key, "realise", checked ? "OUI" : "");
+  const setEtat = (key, etat) => update({ ...eq, controles: { ...eq.controles, resultats: { ...values, [key]: { ...values[key], etat } } } });
+
+  return (
+    <Card style={{ marginBottom: 14 }}>
+      <SectionTitle>Résultats d'analyse</SectionTitle>
+      <div>
+        {items.map((item) => {
+          const v = values[item.key];
+          const checked = v.fields.realise === "OUI";
+          return (
+            <div key={item.key} style={{ padding: "10px 0", borderBottom: "1px solid #E2E6EB" }}>
+              <label style={{ display: "flex", alignItems: "center", gap: 9, cursor: "pointer" }}>
+                <input type="checkbox" checked={checked} onChange={(e) => toggleRealise(item.key, e.target.checked)} style={{ width: 16, height: 16, accentColor: BRAND.blue, cursor: "pointer" }} />
+                <span style={{ fontSize: 13, fontWeight: 600, color: "#1A1F26" }}>{item.label}</span>
+              </label>
+              {checked && (
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginTop: 10, marginLeft: 25 }}>
+                  {item.fields.map((f) => (
+                    <label key={f.key} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#5B6B7D" }}>
+                      {f.label}
+                      {f.options ? (
+                        <Combo value={v.fields[f.key]} onChange={(val) => setField(item.key, f.key, val)} options={f.options} listId={`${idPrefix}-${item.key}-${f.key}`} style={{ width: 130, padding: "5px 7px", fontSize: 12 }} />
+                      ) : f.unit ? (
+                        <NumberWithUnit value={v.fields[f.key]} unit={v.fields[f.key + "Unite"] || f.unit} onValueChange={(val) => setField(item.key, f.key, val)} onUnitChange={(u) => setField(item.key, f.key + "Unite", u)} />
+                      ) : (
+                        <input value={v.fields[f.key] ?? ""} onChange={(e) => setField(item.key, f.key, e.target.value)} style={{ ...inputStyle, width: 90, padding: "5px 7px", fontSize: 12 }} />
+                      )}
+                    </label>
+                  ))}
+                  <Select value={v.etat} onChange={(e) => setEtat(item.key, e.target.value)} style={{ width: 130, padding: "5px 7px", fontSize: 12 }}>
+                    {EQUIP_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+                  </Select>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </Card>
+  );
+}
 
 function ParametrageRelaisPanel({ eq, update, idPrefix }) {
   const seuils = eq.controles.parametrage_relais_seuils;
@@ -1558,7 +1708,7 @@ function DisjoncteurRelaisPanel({ eq, update, custom, onAddCustom, onChangeCusto
           </div>
         )}
         {renseignes.map((s) => {
-          const tol = calcToleranceEssai(s.fields.reglage, s.fields.temporisation_unite, s.label);
+          const tol = calcToleranceEssai(s.fields.temporisation, s.fields.temporisation_unite);
           return (
             <div key={s.id} style={{ padding: "10px 0", borderBottom: "1px solid #E2E6EB" }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
@@ -1635,7 +1785,7 @@ function BRKReglagePanel({ eq, update, custom, onAddCustom, onChangeCustom, onRe
             <MiniInputUnit label="Ineutre" value={sl.ineutre} unit={sl.ineutreUnite || "A"} onValueChange={(v) => setR("surcharge_longue", "ineutre", v)} onUnitChange={(u) => setR("surcharge_longue", "ineutreUnite", u)} />
             <MiniSelect label="tr" options={LISTE_TR_MODE} value={sl.tr_mode} onChange={(v) => setR("surcharge_longue", "tr_mode", v)} />
             <MiniInput label="tr" unit="s" value={sl.tr} onChange={(v) => setR("surcharge_longue", "tr", v)} />
-            <MiniSelect label="à (x Ir)" options={LISTE_TR_CLASSE} value={sl.tr_classe} onChange={(v) => setR("surcharge_longue", "tr_classe", v)} />
+            <MiniCombo label="à (x Ir)" options={LISTE_TR_CLASSE} value={sl.tr_classe} onChange={(v) => setR("surcharge_longue", "tr_classe", v)} listId="brk-tr-classe" />
             <MiniComputed label="Ir (calculé)" unit="A" value={Ir || null} />
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "8px 0", borderBottom: "1px solid #E2E6EB" }}>
@@ -1812,6 +1962,16 @@ function EquipementCard({ eq, update, remove, removable = true }) {
                   onRemoveCustom={(id) => removeCustomAction(sec.key, id)}
                   extra={<FileGallery files={eq.courbeFiles} onChange={(files) => update({ ...eq, courbeFiles: files })} idPrefix={`${eq.id}-courbe`} />}
                 />
+              );
+            }
+            if (eq.type === "Analyse d'huile" && sec.key === "resultats") {
+              return (
+                <React.Fragment key={sec.key}>
+                  <AnalyseHuilePanel eq={eq} update={update} idPrefix={`${eq.id}-${sec.key}`} />
+                  <Card style={{ marginBottom: 14 }}>
+                    <FileGallery files={eq.rapportLaboFiles} onChange={(files) => update({ ...eq, rapportLaboFiles: files })} idPrefix={`${eq.id}-labo`} />
+                  </Card>
+                </React.Fragment>
               );
             }
             return (
@@ -1997,7 +2157,7 @@ function PrintEquipement({ eq }) {
           {isRelaisSeuils && sec.key === "controles_relais" && (
             <>
               {eq.controles.parametrage_relais_seuils.filter((s) => s.label).map((s) => {
-                const tol = calcToleranceEssai(s.fields.reglage, s.fields.temporisation_unite, s.label);
+                const tol = calcToleranceEssai(s.fields.temporisation, s.fields.temporisation_unite);
                 const parts = [s.essai.fields.l1 && `L1 : ${s.essai.fields.l1}`, s.essai.fields.l2 && `L2 : ${s.essai.fields.l2}`, s.essai.fields.l3 && `L3 : ${s.essai.fields.l3}`, s.essai.fields.courant_injecte && `Courant injecté : ${s.essai.fields.courant_injecte} A`].filter(Boolean);
                 return (
                   <div key={s.id}>
@@ -2146,7 +2306,7 @@ function PrintReport({ site }) {
           <img src={LOGO_DARK} alt="HT Maintenance" style={{ width: 52, height: 52, objectFit: "cover", borderRadius: 8 }} />
           <div>
             <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: 1.2, color: BRAND.silver }}>Rapport de maintenance préventive HT</div>
-            <div style={{ fontSize: 20, fontWeight: 800 }}>{site.local || "Site"}</div>
+            <div style={{ fontSize: 20, fontWeight: 800 }}>{site.nom || "Site"}</div>
             <div style={{ fontSize: 13, color: BRAND.silver }}>{site.client}</div>
           </div>
         </div>
@@ -2347,7 +2507,8 @@ function SiteDetail({ site, update, onBack, onDelete, onPrint, onCreateIntervent
         <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 14, flex: "1 1 380px" }}>
             <Field label="Dénomination client"><TextInput value={site.client} onChange={(e) => update((d) => ({ ...d, client: e.target.value }))} placeholder="Client" /></Field>
-            <Field label="Nom du local"><TextInput value={site.local} onChange={(e) => update((d) => ({ ...d, local: e.target.value }))} placeholder="Site / local" /></Field>
+            <Field label="Nom du site"><TextInput value={site.nom} onChange={(e) => update((d) => ({ ...d, nom: e.target.value }))} placeholder="Nom du site" /></Field>
+            <Field label="Local"><TextInput value={site.local} onChange={(e) => update((d) => ({ ...d, local: e.target.value }))} placeholder="Local / emplacement" /></Field>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
             <StatusBadge label={rankToLabel(rank)} />
@@ -2619,7 +2780,7 @@ function InterventionPrefillPicker({ sites, onCancel, onConfirm }) {
           <IvField label="Site">
             <Select value={siteId} onChange={(e) => { setSiteId(e.target.value); setEquipId(""); }}>
               <option value="">— Choisir un site —</option>
-              {sites.map((s) => <option key={s.id} value={s.id}>{s.client} — {s.local}</option>)}
+              {sites.map((s) => <option key={s.id} value={s.id}>{s.nom || "Site sans nom"} — {s.client}</option>)}
             </Select>
           </IvField>
           {site && (
@@ -2725,7 +2886,7 @@ function buildCalendarEvents(sites, interventions) {
   const events = [];
   sites.forEach((s) => {
     if (s.rapport && s.rapport.date) {
-      events.push({ id: "site-" + s.id, dateISO: s.rapport.date, kind: "site", label: s.local || "Site sans nom", sub: s.client, statusLabel: rankToLabel(overallRank(s)), refId: s.id });
+      events.push({ id: "site-" + s.id, dateISO: s.rapport.date, kind: "site", label: s.nom || "Site sans nom", sub: s.client, statusLabel: rankToLabel(overallRank(s)), refId: s.id });
     }
   });
   interventions.forEach((iv) => {
@@ -3031,7 +3192,7 @@ function docxEquipementElements(eq) {
       elements.push(docxHeading(sec.title));
       const rows = [];
       (eq.controles.parametrage_relais_seuils || []).filter((s) => s.label).forEach((s) => {
-        const tol = calcToleranceEssai(s.fields.reglage, s.fields.temporisation_unite, s.label);
+        const tol = calcToleranceEssai(s.fields.temporisation, s.fields.temporisation_unite);
         const detail = [s.essai.fields.l1 && `L1 : ${s.essai.fields.l1}`, s.essai.fields.l2 && `L2 : ${s.essai.fields.l2}`, s.essai.fields.l3 && `L3 : ${s.essai.fields.l3}`,
           s.essai.fields.courant_injecte && `Courant injecté : ${s.essai.fields.courant_injecte} A`, tol && `Tolérance attendue : ${tol.min} – ${tol.max} ${tol.unite}`].filter(Boolean).join(" · ");
         rows.push(["Essai de déclenchement — " + s.label, detail, s.essai.action, s.essai.etat]);
@@ -3040,6 +3201,19 @@ function docxEquipementElements(eq) {
       rows.push(["Contrôle du circuit de mesures et commande", "", circuit.action, circuit.etat]);
       const t = docxControlTable(rows);
       if (t) elements.push(t);
+      elements.push(docxSpacer());
+      return;
+    }
+    if (eq.type === "Analyse d'huile" && sec.key === "resultats") {
+      elements.push(docxHeading(sec.title));
+      const rows = sec.items.filter((item) => eq.controles[sec.key][item.key].fields.realise === "OUI").map((item) => {
+        const value = eq.controles[sec.key][item.key];
+        const parts = printFieldParts(item, value);
+        return [item.label, parts.join(" · "), value.action, value.etat];
+      });
+      const t = docxControlTable(rows);
+      if (t) elements.push(t);
+      else elements.push(new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: "Aucune analyse renseignée", size: 18, color: "666666" })] }));
       elements.push(docxSpacer());
       return;
     }
@@ -3068,6 +3242,15 @@ function docxEquipementElements(eq) {
   }));
   if (eq.remarques) elements.push(new DOCX.Paragraph({ spacing: { after: 80 }, children: [new DOCX.TextRun({ text: "Remarques : ", bold: true, size: 18 }), new DOCX.TextRun({ text: eq.remarques, size: 18 })] }));
   (eq.photos || []).forEach((p) => { const img = docxImage(p.dataUrl, 200, 150); if (img) elements.push(new DOCX.Paragraph({ spacing: { after: 40 }, children: [img] })); });
+  const attachedFiles = [...(eq.courbeFiles || []), ...(eq.rapportLaboFiles || [])];
+  attachedFiles.forEach((f) => {
+    if (f.isPdf) {
+      elements.push(new DOCX.Paragraph({ spacing: { after: 40 }, children: [new DOCX.TextRun({ text: "Pièce jointe (PDF) : " + (f.name || "document.pdf"), size: 16, color: DOCX_BLUE, italics: true })] }));
+    } else {
+      const img = docxImage(f.dataUrl, 200, 150);
+      if (img) elements.push(new DOCX.Paragraph({ spacing: { after: 40 }, children: [img] }));
+    }
+  });
   return elements;
 }
 
@@ -3080,8 +3263,8 @@ async function generateSiteDocx(site) {
     width: { size: 8800, type: DOCX.WidthType.DXA }, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_DARK },
     children: [
       new DOCX.Paragraph({ spacing: { before: 160, after: 20 }, children: [...(logoImg ? [logoImg] : []), new DOCX.TextRun({ text: "   RAPPORT DE MAINTENANCE PRÉVENTIVE HT — " + rankLabel.toUpperCase(), color: DOCX_SILVER, size: 16 })] }),
-      new DOCX.Paragraph({ spacing: { after: 10 }, children: [new DOCX.TextRun({ text: site.local || "Site", bold: true, color: DOCX_WHITE, size: 30 })] }),
-      new DOCX.Paragraph({ spacing: { after: 160 }, children: [new DOCX.TextRun({ text: site.client || "", color: DOCX_SILVER, size: 20 })] }),
+      new DOCX.Paragraph({ spacing: { after: 10 }, children: [new DOCX.TextRun({ text: site.nom || "Site", bold: true, color: DOCX_WHITE, size: 30 })] }),
+      new DOCX.Paragraph({ spacing: { after: 160 }, children: [new DOCX.TextRun({ text: [site.client, site.local].filter(Boolean).join(" — "), color: DOCX_SILVER, size: 20 })] }),
     ],
   })] })] });
 
@@ -3270,7 +3453,7 @@ export default function App() {
       try {
         if (printSite) {
           const blob = await generateSiteDocx(printSite);
-          if (!cancelled) downloadBlob(blob, `Rapport_${(printSite.local || "site").replace(/[^a-z0-9]+/gi, "_")}.docx`);
+          if (!cancelled) downloadBlob(blob, `Rapport_${(printSite.nom || printSite.local || "site").replace(/[^a-z0-9]+/gi, "_")}.docx`);
         } else if (printIv) {
           const blob = await generateInterventionDocx(printIv);
           if (!cancelled) downloadBlob(blob, `RI_${(printIv.numeroRI || "intervention").replace(/[^a-z0-9]+/gi, "_")}.docx`);
