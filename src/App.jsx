@@ -3373,7 +3373,7 @@ function docxCoverPage(site) {
     new DOCX.Paragraph({ spacing: { before: 2200, after: 0 }, children: [] }),
     new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, children: logoImg ? [logoImg] : [] }),
     new DOCX.Paragraph({ spacing: { before: 500, after: 0 }, alignment: DOCX.AlignmentType.CENTER, children: [
-      new DOCX.TextRun({ text: "RAPPORT DE MAINTENANCE PRÉVENTIVE HT", bold: true, color: "8B96A3", size: 20 }),
+      new DOCX.TextRun({ text: "RAPPORT DE MAINTENANCE PRÉVENTIVE HT / BT / CONVERSION D'ÉNERGIE", bold: true, color: "8B96A3", size: 20 }),
     ]}),
     new DOCX.Paragraph({ spacing: { before: 500, after: 0 }, alignment: DOCX.AlignmentType.CENTER, children: [
       new DOCX.TextRun({ text: site.nom || "Site", bold: true, color: DOCX_DARK, size: 56 }),
@@ -3406,7 +3406,7 @@ async function generateSiteDocx(site) {
   const headerTable = new DOCX.Table({ width: { size: 8800, type: DOCX.WidthType.DXA }, columnWidths: [8800], rows: [new DOCX.TableRow({ children: [new DOCX.TableCell({
     width: { size: 8800, type: DOCX.WidthType.DXA }, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_DARK },
     children: [
-      new DOCX.Paragraph({ spacing: { before: 160, after: 20 }, children: [...(logoImg ? [logoImg] : []), new DOCX.TextRun({ text: "   RAPPORT DE MAINTENANCE PRÉVENTIVE HT — " + rankLabel.toUpperCase(), color: DOCX_SILVER, size: 16 })] }),
+      new DOCX.Paragraph({ spacing: { before: 160, after: 20 }, children: [...(logoImg ? [logoImg] : []), new DOCX.TextRun({ text: "   RAPPORT DE MAINTENANCE PRÉVENTIVE HT / BT / CONVERSION D'ÉNERGIE — " + rankLabel.toUpperCase(), color: DOCX_SILVER, size: 16 })] }),
       new DOCX.Paragraph({ spacing: { after: 10 }, children: [new DOCX.TextRun({ text: site.nom || "Site", bold: true, color: DOCX_WHITE, size: 30 })] }),
       new DOCX.Paragraph({ spacing: { after: 160 }, children: [new DOCX.TextRun({ text: [site.client, site.local].filter(Boolean).join(" — "), color: DOCX_SILVER, size: 20 })] }),
     ],
