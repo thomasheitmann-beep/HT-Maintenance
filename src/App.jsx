@@ -44,6 +44,10 @@ const F = (key, label, unit, options) => ({ key, label, unit, options });
 /* ---- Listes déroulantes reprises des validations de données Excel ---- */
 const LISTE_INTERVENANTS = ["Thomas HEITMANN"];
 const LISTE_ETAT_INSTALLATION = ["Conforme (R.A.S)", "Dégradé (actions à prévoir)", "Défaillant (actions urgentes)"];
+const LISTE_TYPE_POSTE = ["Intérieur", "Extérieur", "Aérien", "Souterrain", "Préfabriqué"];
+// Combine les régimes de neutre HTA (isolé/compensé/résistant) et les schémas de liaison à la
+// terre BT (TT/TN/IT) : l'un ou l'autre s'applique selon que le site est HTA, BT, ou les deux.
+const LISTE_REGIME_NEUTRE = ["Neutre isolé (HTA)", "Neutre compensé / résonnant (HTA)", "Neutre résistant (HTA)", "TT (BT)", "TN-S (BT)", "TN-C (BT)", "TN-C-S (BT)", "IT (BT)"];
 const REMARQUE_STANDARD_EQUIPEMENT = "Équipement contrôlé, en bon état de fonctionnement. Aucune anomalie relevée lors de cette intervention.";
 const REMARQUE_STANDARD_INSTALLATION = "Installation en bon état général. Aucune anomalie majeure relevée lors de cette intervention.";
 const LISTE_MARQUES = ["ABB", "AREVA", "ALSTOM", "ALSTHOM", "BBC", "CALOR EMAG", "CEM GARDY", "DELLE", "EATON", "EIB", "FELTEN et GUILLAUME", "MAGRINI GALILEO", "MERLIN GERIN", "ORMAZABAL", "POMMIER", "SCHNEIDER ELECTRIC", "SIEMENS"];
@@ -83,6 +87,15 @@ const UNITE_ISOLEMENT = ["GΩ", "MΩ", "Ω"];
 const L1L2L3 = (unit) => [F("l1", "L1", unit), F("l2", "L2", unit), F("l3", "L3", unit)];
 
 const numOf = (v) => { const n = parseFloat(v); return isNaN(n) ? null : n; };
+// Détermine si une valeur mesurée respecte une tolérance (min et/ou max) : "ok" (vert),
+// "bad" (rouge), ou null si pas assez de données pour se prononcer (reste neutre).
+function toleranceState(value, min, max) {
+  const v = numOf(value);
+  if (v === null || (min === null && max === null)) return null;
+  if (min !== null && v < min) return "bad";
+  if (max !== null && v > max) return "bad";
+  return "ok";
+}
 
 const FUSIBLE_FIELDS = [
   F("fabricant", "Fabricant", null, LISTE_FABRICANT_FUSIBLE),
@@ -134,11 +147,21 @@ const CONTROLES_DISJONCTEUR = [
   C("essai_dielectrique_pole", "Essai diélectrique après intervention sur le pôle"),
 ];
 // Seuils du relais de protection : liste dynamique (un seul affiché par défaut, ajout au besoin)
-// plutôt que les 6 lignes fixes de l'Excel — chaque seuil ajouté fait apparaître automatiquement
-// sa ligne d'essai correspondante dans "Contrôles du relais de protection".
+// basée sur les codes de protection ANSI (norme IEEE C37.2) — 50/51 disposent de 3 seuils
+// possibles (stades), comme sur un relais LSI réel ; les autres fonctions sont à seuil unique.
+// Chaque seuil ajouté fait apparaître automatiquement sa ligne d'essai correspondante dans
+// "Contrôles du relais de protection".
 const PARAM_SEUIL_TYPES = [
-  "Premier seuil de courant de phase", "Deuxième seuil de courant de phase", "Troisième seuil de courant de phase",
-  "Premier seuil de courant homopolaire", "Deuxième seuil de courant homopolaire", "Troisième seuil de courant homopolaire",
+  "50-1 — Max I phase instantané (seuil 1)", "50-2 — Max I phase instantané (seuil 2)", "50-3 — Max I phase instantané (seuil 3)",
+  "51-1 — Max I phase temporisé (seuil 1)", "51-2 — Max I phase temporisé (seuil 2)", "51-3 — Max I phase temporisé (seuil 3)",
+  "50N — Max I terre instantané", "51N — Max I terre temporisé",
+  "46 — Déséquilibre / composante inverse",
+  "67 — Max I phase directionnel", "67N — Max I terre directionnel",
+  "27 — Minimum de tension", "59 — Maximum de tension", "59N — Surtension résiduelle",
+  "32 — Directionnel de puissance",
+  "81O — Surfréquence", "81U — Sous-fréquence", "81R — Gradient de fréquence",
+  "87 — Différentielle", "87T — Différentielle transformateur", "87B — Différentielle jeu de barres",
+  "49 — Image thermique", "63 — Buchholz / pression", "25 — Contrôle de synchronisme", "79 — Réenclenchement automatique",
 ];
 function emptySeuilEntry(label) {
   return {
@@ -147,6 +170,37 @@ function emptySeuilEntry(label) {
     essai: { action: "", etat: "Conforme", fields: { l1: "", l2: "", l3: "", courant_injecte: "" } },
   };
 }
+// Extrait le code ANSI en tête d'un libellé de seuil (ex. "50-1 — Max I..." → "50", "81O — ..." → "81O").
+function ansiFamily(label) {
+  const m = (label || "").match(/^(\d+)([A-Za-z]*)(?:-\d+)?/);
+  return m ? m[1] + m[2] : null;
+}
+// Champs de réglage pertinents selon la fonction de protection sélectionnée. À défaut de
+// correspondance (libellé personnalisé), on retombe sur le jeu de champs 50/51 par défaut.
+const ANSI_REGLAGE_FIELDS = {
+  "50": [{ key: "courbe", label: "Courbe à temps", options: LISTE_COURBE_RELAIS }, { key: "type", label: "Type", options: LISTE_TYPE_RELAIS }, { key: "reglage", label: "Réglage", unit: "A" }],
+  "51": [{ key: "courbe", label: "Courbe à temps", options: LISTE_COURBE_RELAIS }, { key: "type", label: "Type", options: LISTE_TYPE_RELAIS }, { key: "reglage", label: "Réglage", unit: "A" }],
+  "50N": [{ key: "reglage", label: "Réglage", unit: "A" }],
+  "51N": [{ key: "courbe", label: "Courbe à temps", options: LISTE_COURBE_RELAIS }, { key: "reglage", label: "Réglage", unit: "A" }],
+  "46": [{ key: "reglage", label: "Réglage", unit: "%" }],
+  "67": [{ key: "reglage", label: "Réglage", unit: "A" }, { key: "angle", label: "Angle caractéristique", unit: "°" }],
+  "67N": [{ key: "reglage", label: "Réglage", unit: "A" }, { key: "angle", label: "Angle caractéristique", unit: "°" }],
+  "27": [{ key: "reglage", label: "Réglage", unit: "V" }],
+  "59": [{ key: "reglage", label: "Réglage", unit: "V" }],
+  "59N": [{ key: "reglage", label: "Réglage", unit: "V" }],
+  "32": [{ key: "reglage", label: "Réglage", unit: "kW" }],
+  "81O": [{ key: "reglage", label: "Réglage", unit: "Hz" }],
+  "81U": [{ key: "reglage", label: "Réglage", unit: "Hz" }],
+  "81R": [{ key: "reglage", label: "Réglage", unit: "Hz/s" }],
+  "87": [{ key: "reglage", label: "Réglage (pente)", unit: "%" }],
+  "87T": [{ key: "reglage", label: "Réglage (pente)", unit: "%" }],
+  "87B": [{ key: "reglage", label: "Réglage (pente)", unit: "%" }],
+  "49": [{ key: "seuil_alarme", label: "Seuil alarme", unit: "%" }, { key: "seuil_declenchement", label: "Seuil déclenchement", unit: "%" }, { key: "constante_temps", label: "Constante de temps", unit: "min" }],
+  "63": [],
+  "25": [{ key: "dv_max", label: "ΔV max", unit: "%" }, { key: "df_max", label: "Δf max", unit: "Hz" }, { key: "dphi_max", label: "Δφ max", unit: "°" }],
+  "79": [{ key: "nb_cycles", label: "Nombre de cycles" }, { key: "temps_mort1", label: "Temps mort 1", unit: "s" }, { key: "temps_mort2", label: "Temps mort 2", unit: "s" }],
+};
+const ANSI_REGLAGE_FIELDS_DEFAUT = ANSI_REGLAGE_FIELDS["50"];
 // Contrôle du relais de protection non lié à un seuil précis (toujours affiché)
 const CIRCUIT_MESURES_COMMANDE = C("circuit_mesures_commande", "Contrôle du circuit de mesures et commande");
 const TYPES_AVEC_RELAIS = ["Disjoncteur HTA", "Contacteur HTA", "Interrupteur HTA", "Interrupteur Fusible HTA"];
@@ -620,8 +674,9 @@ function emptySite() {
     client: "",
     local: "",
     rapport: {
-      date: todayISO(), intervenant: "", heureArrivee: "", heureFin: "",
+      date: todayISO(), dateFin: "", intervenant: "", intervenantsSupplementaires: [], heureArrivee: "", heureFin: "", journeesSupplementaires: [],
       marque: "", anneeMiseEnService: "", courantAssigne: "", tensionAssignee: "", nombreEquipements: "",
+      typeDePoste: "", regimeNeutre: "",
       environnementEtat: "Conforme (R.A.S)", environnementRemarque: "",
       fonctionnementEtat: "Conforme (R.A.S)", fonctionnementRemarque: "",
       prochaineMaintenance: next.toISOString().slice(0, 10),
@@ -663,7 +718,7 @@ function emptyIntervention(numeroRI) {
   return {
     id: uid(),
     numeroRI,
-    client: "", site: "", emailClient: "", date: todayISO(), technicien: "",
+    client: "", site: "", emailClient: "", date: todayISO(), dateFin: "", technicien: "", techniciensSupplementaires: [], journeesSupplementaires: [],
     heureDebut: "", heureFin: "",
     equipement: { type: "", constructeur: "", modele: "", numeroSerie: "", localisation: "", reference: "" },
     nature: { preventive: false, corrective: false, miseEnService: false, expertise: false },
@@ -794,15 +849,16 @@ function Combo({ value, onChange, options, listId, style, placeholder, numeric }
 
 // Valeur numérique + unité : si l'unité appartient à une famille (V/A/Ω/VA), un sélecteur
 // permet de changer d'échelle (mV/V/kV…) ; sinon l'unité reste affichée telle quelle.
-function NumberWithUnit({ value, unit, onValueChange, onUnitChange, width }) {
+function NumberWithUnit({ value, unit, onValueChange, onUnitChange, width, validState }) {
   const family = unitFamilyFor(unit);
+  const borderColor = validState === "ok" ? "#0F8A5F" : validState === "bad" ? "#C0392B" : "#D8DEE5";
   return (
     <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
       <input
         type="number" step="any"
         value={value ?? ""}
         onChange={(e) => onValueChange(e.target.value)}
-        style={{ ...inputStyle, width: width || 66, padding: "5px 7px", fontSize: 12 }}
+        style={{ ...inputStyle, width: width || 66, padding: "5px 7px", fontSize: 12, border: `1.5px solid ${borderColor}`, background: validState === "ok" ? "#F0FBF6" : validState === "bad" ? "#FDF1F0" : inputStyle.background }}
       />
       {family ? (
         <select value={unit || family[0]} onChange={(e) => onUnitChange(e.target.value)} style={{ ...inputStyle, width: 62, padding: "5px 4px", fontSize: 11.5 }}>
@@ -1285,6 +1341,18 @@ function ControlRow({ item, value, onChange, idPrefix }) {
   if (!value) return null; // donnée incompatible (ancien format) : on ignore plutôt que de planter
   const fields = value.fields || {};
   const setField = (k, v) => onChange({ ...value, fields: { ...fields, [k]: v } });
+  const hasToleranceField = (item.fields || []).some((f) => f.key === "tolerance");
+  const toleranceMax = hasToleranceField ? numOf(fields.tolerance) : null;
+  const tolMinField = (item.fields || []).find((f) => f.key === "tol_min" && f.compute);
+  const tolMaxField = (item.fields || []).find((f) => f.key === "tol_max" && f.compute);
+  const computedMin = tolMinField ? numOf(tolMinField.compute(fields)) : null;
+  const computedMax = tolMaxField ? numOf(tolMaxField.compute(fields)) : null;
+  const MESURE_KEYS = ["l1", "l2", "l3", "rd", "n"];
+  function fieldValidState(key) {
+    if (tolMinField && tolMinField.unitFrom === key) return toleranceState(fields[key], computedMin, computedMax);
+    if (MESURE_KEYS.includes(key) && hasToleranceField) return toleranceState(fields[key], null, toleranceMax);
+    return null;
+  }
   return (
     <div style={{ padding: "10px 0", borderBottom: "1px solid #E2E6EB" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
@@ -1295,7 +1363,7 @@ function ControlRow({ item, value, onChange, idPrefix }) {
               <label key={f.key} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#8B96A3" }}>
                 {f.label}
                 <span style={{ ...inputStyle, width: 66, padding: "5px 7px", fontSize: 12, background: "#EEF2F6", color: "#0A5DA8", fontWeight: 700, display: "inline-block", textAlign: "center" }}>
-                  {f.compute(fields) ?? "—"}
+                  {f.compute(fields) || "—"}
                 </span>
                 {(() => {
                   const u = f.unitFrom ? (fields[f.unitFrom + "Unite"] || f.unit) : f.unit;
@@ -1322,6 +1390,7 @@ function ControlRow({ item, value, onChange, idPrefix }) {
                     unit={fields[f.key + "Unite"] || f.unit}
                     onValueChange={(v) => setField(f.key, v)}
                     onUnitChange={(u) => setField(f.key + "Unite", u)}
+                    validState={fieldValidState(f.key)}
                   />
                 ) : (
                   <input
@@ -1518,6 +1587,32 @@ function RapportTab({ site, update }) {
   const r = site.rapport;
   const set = (k, v) => update((d) => ({ ...d, rapport: { ...d.rapport, [k]: v } }));
 
+  function addTechnicien() {
+    update((d) => ({ ...d, rapport: { ...d.rapport, intervenantsSupplementaires: [...(d.rapport.intervenantsSupplementaires || []), ""] } }));
+  }
+  function setTechnicien(index, v) {
+    update((d) => ({ ...d, rapport: { ...d.rapport, intervenantsSupplementaires: d.rapport.intervenantsSupplementaires.map((t, i) => (i === index ? v : t)) } }));
+  }
+  function removeTechnicien(index) {
+    update((d) => ({ ...d, rapport: { ...d.rapport, intervenantsSupplementaires: d.rapport.intervenantsSupplementaires.filter((_, i) => i !== index) } }));
+  }
+  function addJournee() {
+    update((d) => ({ ...d, rapport: { ...d.rapport, journeesSupplementaires: [...(d.rapport.journeesSupplementaires || []), { id: uid(), date: "", heureArrivee: "", heureFin: "" }] } }));
+  }
+  function setJournee(id, k, v) {
+    update((d) => ({ ...d, rapport: { ...d.rapport, journeesSupplementaires: d.rapport.journeesSupplementaires.map((j) => (j.id === id ? { ...j, [k]: v } : j)) } }));
+  }
+  function removeJournee(id) {
+    update((d) => ({ ...d, rapport: { ...d.rapport, journeesSupplementaires: d.rapport.journeesSupplementaires.filter((j) => j.id !== id) } }));
+  }
+
+  function appliquerPeriodicite(annees) {
+    const base = r.date ? parseIso(r.date) : new Date();
+    const d = new Date(base);
+    d.setFullYear(d.getFullYear() + Number(annees));
+    set("prochaineMaintenance", isoOf(d));
+  }
+
   function actualiserFonctionnement() {
     const rang = Math.max(0, worstRank(site.equipements.map((e) => e.etatFinal)));
     set("fonctionnementEtat", LISTE_ETAT_INSTALLATION[rang]);
@@ -1533,13 +1628,56 @@ function RapportTab({ site, update }) {
     <>
     <Card>
       <SectionTitle>Intervention</SectionTitle>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 14, marginBottom: 24 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+        <label style={{ fontSize: 11, fontWeight: 600, color: "#5B6B7D", letterSpacing: 0.5, textTransform: "uppercase" }}>Journée 1</label>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 14, marginBottom: 10 }}>
         <Field label="Date"><TextInput type="date" value={r.date} onChange={(e) => set("date", e.target.value)} /></Field>
-        <Field label="Intervenant">
-          <Combo value={r.intervenant} onChange={(v) => set("intervenant", v)} options={LISTE_INTERVENANTS} listId={`${site.id}-intervenant`} />
-        </Field>
         <Field label="Heure d'arrivée"><TextInput type="time" value={r.heureArrivee} onChange={(e) => set("heureArrivee", e.target.value)} /></Field>
         <Field label="Heure de fin"><TextInput type="time" value={r.heureFin} onChange={(e) => set("heureFin", e.target.value)} /></Field>
+      </div>
+
+      {(r.journeesSupplementaires || []).map((j, i) => (
+        <div key={j.id} style={{ marginBottom: 10 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+            <label style={{ fontSize: 11, fontWeight: 600, color: "#5B6B7D", letterSpacing: 0.5, textTransform: "uppercase" }}>Journée {i + 2}</label>
+            <button onClick={() => removeJournee(j.id)} style={{ background: "none", border: "none", color: "#EF4444", cursor: "pointer", padding: 4 }} title="Retirer cette journée">
+              <Trash2 size={15} />
+            </button>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 14 }}>
+            <Field label="Date"><TextInput type="date" value={j.date} onChange={(e) => setJournee(j.id, "date", e.target.value)} /></Field>
+            <Field label="Heure d'arrivée"><TextInput type="time" value={j.heureArrivee} onChange={(e) => setJournee(j.id, "heureArrivee", e.target.value)} /></Field>
+            <Field label="Heure de fin"><TextInput type="time" value={j.heureFin} onChange={(e) => setJournee(j.id, "heureFin", e.target.value)} /></Field>
+          </div>
+        </div>
+      ))}
+      <div style={{ marginBottom: 20 }}>
+        <button onClick={addJournee} style={btnGhost(BRAND.blue)} title="Pour une intervention sur plusieurs jours, avec des horaires propres à chaque journée">
+          <Plus size={13} /> Ajouter une journée
+        </button>
+      </div>
+
+      <div style={{ marginBottom: 24 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+          <label style={{ fontSize: 11, fontWeight: 600, color: "#5B6B7D", letterSpacing: 0.5, textTransform: "uppercase" }}>Intervenants</label>
+          <button onClick={addTechnicien} style={btnGhost(BRAND.blue)}><Plus size={13} /> Ajouter un technicien</button>
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <div style={{ maxWidth: 320 }}>
+            <Combo value={r.intervenant} onChange={(v) => set("intervenant", v)} options={LISTE_INTERVENANTS} listId={`${site.id}-intervenant`} placeholder="Intervenant principal" />
+          </div>
+          {(r.intervenantsSupplementaires || []).map((t, i) => (
+            <div key={i} style={{ display: "flex", gap: 8, alignItems: "center", maxWidth: 320 }}>
+              <div style={{ flex: 1 }}>
+                <Combo value={t} onChange={(v) => setTechnicien(i, v)} options={LISTE_INTERVENANTS} listId={`${site.id}-intervenant-${i}`} placeholder="Technicien supplémentaire" />
+              </div>
+              <button onClick={() => removeTechnicien(i)} style={{ background: "none", border: "none", color: "#EF4444", cursor: "pointer", padding: 4 }} title="Retirer">
+                <Trash2 size={15} />
+              </button>
+            </div>
+          ))}
+        </div>
       </div>
 
       <SectionTitle>Caractéristiques de l'installation</SectionTitle>
@@ -1548,14 +1686,23 @@ function RapportTab({ site, update }) {
           <Combo value={r.marque} onChange={(v) => set("marque", v)} options={LISTE_MARQUES} listId={`${site.id}-marque`} />
         </Field>
         <Field label="Année de mise en service"><TextInput value={r.anneeMiseEnService} onChange={(e) => set("anneeMiseEnService", e.target.value)} /></Field>
-        <Field label="Courant assigné (Ir, A)">
-          <Combo value={r.courantAssigne} onChange={(v) => set("courantAssigne", v)} options={LISTE_COURANT_ASSIGNE} listId={`${site.id}-courant`} numeric />
+        <Field label="Nombre d'équipements"><TextInput value={site.equipements.length} disabled style={{ opacity: 0.7 }} /></Field>
+        <Field label="Type de poste">
+          <Combo value={r.typeDePoste} onChange={(v) => set("typeDePoste", v)} options={LISTE_TYPE_POSTE} listId={`${site.id}-typeposte`} />
         </Field>
-        <Field label="Tension assignée (Ur, kV)">
-          <Combo value={r.tensionAssignee} onChange={(v) => set("tensionAssignee", v)} options={LISTE_TENSION_ASSIGNEE} listId={`${site.id}-tension`} numeric />
+        <Field label="Régime de neutre" span={2}>
+          <Combo value={r.regimeNeutre} onChange={(v) => set("regimeNeutre", v)} options={LISTE_REGIME_NEUTRE} listId={`${site.id}-regimeneutre`} placeholder="HTA et/ou BT selon le site" />
         </Field>
-        <Field label="Nombre d'équipements" span={2}><TextInput type="number" min="0" value={r.nombreEquipements} onChange={(e) => set("nombreEquipements", e.target.value)} /></Field>
-        <Field label="Prochaine maintenance recommandée avant" span={2}><TextInput type="date" value={r.prochaineMaintenance} onChange={(e) => set("prochaineMaintenance", e.target.value)} /></Field>
+        <Field label="Prochaine maintenance recommandée avant" span={2}>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <TextInput type="date" value={r.prochaineMaintenance} onChange={(e) => set("prochaineMaintenance", e.target.value)} style={{ flex: "1 1 160px" }} />
+            <span style={{ fontSize: 11, color: "#8B96A3", whiteSpace: "nowrap" }}>ou dans</span>
+            <select onChange={(e) => { if (e.target.value) { appliquerPeriodicite(e.target.value); e.target.value = ""; } }} defaultValue="" style={{ ...inputStyle, width: 130, padding: "9px 8px" }}>
+              <option value="" disabled>— choisir —</option>
+              {[1, 2, 3, 4, 5, 6, 10].map((n) => <option key={n} value={n}>{n} an{n > 1 ? "s" : ""}</option>)}
+            </select>
+          </div>
+        </Field>
       </div>
 
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
@@ -1629,10 +1776,11 @@ function MiniComputed({ label, unit, value }) {
     </MiniField>
   );
 }
-function MiniInput({ label, unit, value, onChange, width }) {
+function MiniInput({ label, unit, value, onChange, width, validState }) {
+  const borderColor = validState === "ok" ? "#0F8A5F" : validState === "bad" ? "#C0392B" : "#D8DEE5";
   return (
     <MiniField label={label} unit={unit}>
-      <input type="number" step="any" value={value ?? ""} onChange={(e) => onChange(e.target.value)} style={{ ...inputStyle, width: width || 70, padding: "5px 7px", fontSize: 12 }} />
+      <input type="number" step="any" value={value ?? ""} onChange={(e) => onChange(e.target.value)} style={{ ...inputStyle, width: width || 70, padding: "5px 7px", fontSize: 12, border: `1.5px solid ${borderColor}`, background: validState === "ok" ? "#F0FBF6" : validState === "bad" ? "#FDF1F0" : inputStyle.background }} />
     </MiniField>
   );
 }
@@ -1743,9 +1891,13 @@ function ParametrageRelaisPanel({ eq, update, idPrefix }) {
                 </div>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                   <MiniSelect label="État" options={LISTE_ETAT_SEUIL} value={s.fields.etat} onChange={(v) => setSeuilField(s.id, "etat", v)} />
-                  <MiniSelect label="Courbe à temps" options={LISTE_COURBE_RELAIS} value={s.fields.courbe} onChange={(v) => setSeuilField(s.id, "courbe", v)} />
-                  <MiniSelect label="Type" options={LISTE_TYPE_RELAIS} value={s.fields.type} onChange={(v) => setSeuilField(s.id, "type", v)} />
-                  <MiniInput label="Réglage" unit="A" value={s.fields.reglage} onChange={(v) => setSeuilField(s.id, "reglage", v)} />
+                  {(ANSI_REGLAGE_FIELDS[ansiFamily(s.label)] || ANSI_REGLAGE_FIELDS_DEFAUT).map((f) =>
+                    f.options ? (
+                      <MiniSelect key={f.key} label={f.label} options={f.options} value={s.fields[f.key]} onChange={(v) => setSeuilField(s.id, f.key, v)} />
+                    ) : (
+                      <MiniInput key={f.key} label={f.label} unit={f.unit} value={s.fields[f.key]} onChange={(v) => setSeuilField(s.id, f.key, v)} />
+                    )
+                  )}
                   <MiniInput label="Temporisation" value={s.fields.temporisation} onChange={(v) => setSeuilField(s.id, "temporisation", v)} />
                   <MiniSelect label="Unité" options={LISTE_TEMPO_UNITE} value={s.fields.temporisation_unite} onChange={(v) => setSeuilField(s.id, "temporisation_unite", v)} />
                 </div>
@@ -1784,9 +1936,9 @@ function DisjoncteurRelaisPanel({ eq, update, custom, onAddCustom, onChangeCusto
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
                 <span style={{ fontSize: 12.5, color: "#3E4A5C", flex: "1 1 240px" }}>Essai de déclenchement — {s.label}</span>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                  <MiniInput label="L1" value={s.essai.fields.l1} onChange={(v) => setEssaiField(s.id, "l1", v)} />
-                  <MiniInput label="L2" value={s.essai.fields.l2} onChange={(v) => setEssaiField(s.id, "l2", v)} />
-                  <MiniInput label="L3" value={s.essai.fields.l3} onChange={(v) => setEssaiField(s.id, "l3", v)} />
+                  <MiniInput label="L1" value={s.essai.fields.l1} onChange={(v) => setEssaiField(s.id, "l1", v)} validState={tol ? toleranceState(s.essai.fields.l1, tol.min, tol.max) : null} />
+                  <MiniInput label="L2" value={s.essai.fields.l2} onChange={(v) => setEssaiField(s.id, "l2", v)} validState={tol ? toleranceState(s.essai.fields.l2, tol.min, tol.max) : null} />
+                  <MiniInput label="L3" value={s.essai.fields.l3} onChange={(v) => setEssaiField(s.id, "l3", v)} validState={tol ? toleranceState(s.essai.fields.l3, tol.min, tol.max) : null} />
                   <MiniInput label="Courant injecté" unit="A" value={s.essai.fields.courant_injecte} onChange={(v) => setEssaiField(s.id, "courant_injecte", v)} />
                   {tol && <MiniComputed label="Tolérance attendue" unit={tol.unite} value={`${tol.min} – ${tol.max}`} />}
                   <input placeholder="Action" value={s.essai.action} onChange={(e) => setEssai(s.id, { action: e.target.value })} style={{ ...inputStyle, width: 150, padding: "5px 7px", fontSize: 12 }} />
@@ -2720,6 +2872,12 @@ function InterventionEditor({ iv, update, onBack, onDelete, onPrint }) {
   const addAction = () => update((d) => ({ ...d, travauxActions: [...(d.travauxActions || []), { id: uid(), action: "", detail: "" }] }));
   const setActionField = (id, k, v) => update((d) => ({ ...d, travauxActions: d.travauxActions.map((a) => (a.id === id ? { ...a, [k]: v } : a)) }));
   const removeAction = (id) => update((d) => ({ ...d, travauxActions: d.travauxActions.filter((a) => a.id !== id) }));
+  const addTechnicien = () => update((d) => ({ ...d, techniciensSupplementaires: [...(d.techniciensSupplementaires || []), ""] }));
+  const setTechnicien = (index, v) => update((d) => ({ ...d, techniciensSupplementaires: d.techniciensSupplementaires.map((t, i) => (i === index ? v : t)) }));
+  const removeTechnicien = (index) => update((d) => ({ ...d, techniciensSupplementaires: d.techniciensSupplementaires.filter((_, i) => i !== index) }));
+  const addJournee = () => update((d) => ({ ...d, journeesSupplementaires: [...(d.journeesSupplementaires || []), { id: uid(), date: "", heureDebut: "", heureFin: "" }] }));
+  const setJournee = (id, k, v) => update((d) => ({ ...d, journeesSupplementaires: d.journeesSupplementaires.map((j) => (j.id === id ? { ...j, [k]: v } : j)) }));
+  const removeJournee = (id) => update((d) => ({ ...d, journeesSupplementaires: d.journeesSupplementaires.filter((j) => j.id !== id) }));
   const duree = dureeIntervention(iv.heureDebut, iv.heureFin);
 
   function envoyerParMail() {
@@ -2756,13 +2914,58 @@ function InterventionEditor({ iv, update, onBack, onDelete, onPrint }) {
           <IvField label="Client"><TextInput value={iv.client} onChange={(e) => set("client", e.target.value)} /></IvField>
           <IvField label="Site"><TextInput value={iv.site} onChange={(e) => set("site", e.target.value)} /></IvField>
           <IvField label="Email client"><TextInput type="email" value={iv.emailClient} onChange={(e) => set("emailClient", e.target.value)} placeholder="pour l'envoi par mail" /></IvField>
-          <IvField label="Date"><TextInput type="date" value={iv.date} onChange={(e) => set("date", e.target.value)} /></IvField>
-          <IvField label="Technicien">
-            <Combo value={iv.technicien} onChange={(v) => set("technicien", v)} options={LISTE_INTERVENANTS} listId={`${iv.id}-tech`} />
-          </IvField>
-          <IvField label="Heure début"><TextInput type="time" value={iv.heureDebut} onChange={(e) => set("heureDebut", e.target.value)} /></IvField>
-          <IvField label="Heure fin"><TextInput type="time" value={iv.heureFin} onChange={(e) => set("heureFin", e.target.value)} /></IvField>
-          <IvField label="Durée"><TextInput value={duree} disabled style={{ opacity: 0.7 }} /></IvField>
+        </div>
+
+        <div style={{ marginTop: 16 }}>
+          <label style={{ fontSize: 11, fontWeight: 600, color: "#5B6B7D", letterSpacing: 0.5, textTransform: "uppercase" }}>Journée 1</label>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 14, marginTop: 8 }}>
+            <IvField label="Date"><TextInput type="date" value={iv.date} onChange={(e) => set("date", e.target.value)} /></IvField>
+            <IvField label="Heure début"><TextInput type="time" value={iv.heureDebut} onChange={(e) => set("heureDebut", e.target.value)} /></IvField>
+            <IvField label="Heure fin"><TextInput type="time" value={iv.heureFin} onChange={(e) => set("heureFin", e.target.value)} /></IvField>
+            <IvField label="Durée"><TextInput value={duree} disabled style={{ opacity: 0.7 }} /></IvField>
+          </div>
+        </div>
+
+        {(iv.journeesSupplementaires || []).map((j, i) => (
+          <div key={j.id} style={{ marginTop: 14 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+              <label style={{ fontSize: 11, fontWeight: 600, color: "#5B6B7D", letterSpacing: 0.5, textTransform: "uppercase" }}>Journée {i + 2}</label>
+              <button onClick={() => removeJournee(j.id)} style={{ background: "none", border: "none", color: "#EF4444", cursor: "pointer", padding: 4 }} title="Retirer cette journée">
+                <Trash2 size={15} />
+              </button>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 14 }}>
+              <IvField label="Date"><TextInput type="date" value={j.date} onChange={(e) => setJournee(j.id, "date", e.target.value)} /></IvField>
+              <IvField label="Heure début"><TextInput type="time" value={j.heureDebut} onChange={(e) => setJournee(j.id, "heureDebut", e.target.value)} /></IvField>
+              <IvField label="Heure fin"><TextInput type="time" value={j.heureFin} onChange={(e) => setJournee(j.id, "heureFin", e.target.value)} /></IvField>
+            </div>
+          </div>
+        ))}
+        <div style={{ marginTop: 14 }}>
+          <button onClick={addJournee} style={btnGhost(BRAND.blue)} title="Pour une intervention sur plusieurs jours, avec des horaires propres à chaque journée">
+            <Plus size={13} /> Ajouter une journée
+          </button>
+        </div>
+        <div style={{ marginTop: 16 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+            <label style={{ fontSize: 11, fontWeight: 600, color: "#5B6B7D", letterSpacing: 0.5, textTransform: "uppercase" }}>Intervenants</label>
+            <button onClick={addTechnicien} style={btnGhost(BRAND.blue)}><Plus size={13} /> Ajouter un technicien</button>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <div style={{ maxWidth: 320 }}>
+              <Combo value={iv.technicien} onChange={(v) => set("technicien", v)} options={LISTE_INTERVENANTS} listId={`${iv.id}-tech`} placeholder="Technicien principal" />
+            </div>
+            {(iv.techniciensSupplementaires || []).map((t, i) => (
+              <div key={i} style={{ display: "flex", gap: 8, alignItems: "center", maxWidth: 320 }}>
+                <div style={{ flex: 1 }}>
+                  <Combo value={t} onChange={(v) => setTechnicien(i, v)} options={LISTE_INTERVENANTS} listId={`${iv.id}-tech-${i}`} placeholder="Technicien supplémentaire" />
+                </div>
+                <button onClick={() => removeTechnicien(i)} style={{ background: "none", border: "none", color: "#EF4444", cursor: "pointer", padding: 4 }} title="Retirer">
+                  <Trash2 size={15} />
+                </button>
+              </div>
+            ))}
+          </div>
         </div>
       </Card>
 
@@ -3455,12 +3658,18 @@ async function generateSiteDocx(site) {
 
   const syntheseTable = docxSyntheseTable(site);
 
+  const tousIntervenants = [site.rapport.intervenant, ...(site.rapport.intervenantsSupplementaires || [])].filter(Boolean).join(", ");
+  const toutesJournees = [
+    { date: site.rapport.date, heureArrivee: site.rapport.heureArrivee, heureFin: site.rapport.heureFin },
+    ...(site.rapport.journeesSupplementaires || []),
+  ].filter((j) => j.date);
+  const journeesTexte = toutesJournees.map((j) => `${j.date}${j.heureArrivee || j.heureFin ? ` (${j.heureArrivee || "?"} – ${j.heureFin || "?"})` : ""}`).join(" · ");
   const rapportRows = [
-    ["Date", site.rapport.date], ["Intervenant", site.rapport.intervenant],
-    ["Heure d'arrivée", site.rapport.heureArrivee], ["Heure de fin", site.rapport.heureFin],
+    ["Date(s) d'intervention", journeesTexte || site.rapport.date],
+    ["Intervenant(s)", tousIntervenants],
     ["Marque", site.rapport.marque], ["Année de mise en service", site.rapport.anneeMiseEnService],
-    ["Courant assigné (Ir)", site.rapport.courantAssigne], ["Tension assignée (Ur)", site.rapport.tensionAssignee],
-    ["Nombre d'équipements", site.rapport.nombreEquipements], ["Prochaine maintenance recommandée avant", site.rapport.prochaineMaintenance],
+    ["Nombre d'équipements", String(site.equipements.length)], ["Prochaine maintenance recommandée avant", site.rapport.prochaineMaintenance],
+    ["Type de poste", site.rapport.typeDePoste], ["Régime de neutre", site.rapport.regimeNeutre],
     ["Environnement", [site.rapport.environnementEtat, site.rapport.environnementRemarque].filter(Boolean).join(" — ")],
     ["Fonctionnement de l'installation", [site.rapport.fonctionnementEtat, site.rapport.fonctionnementRemarque].filter(Boolean).join(" — ")],
   ];
@@ -3495,9 +3704,17 @@ async function generateInterventionDocx(iv) {
     ],
   })] })] });
 
+  const tousTechniciens = [iv.technicien, ...(iv.techniciensSupplementaires || [])].filter(Boolean).join(", ");
+  const ivToutesJournees = [
+    { date: iv.date, heureDebut: iv.heureDebut, heureFin: iv.heureFin },
+    ...(iv.journeesSupplementaires || []),
+  ].filter((j) => j.date);
+  const ivJourneesTexte = ivToutesJournees.map((j) => `${j.date}${j.heureDebut || j.heureFin ? ` (${j.heureDebut || "?"} – ${j.heureFin || "?"})` : ""}`).join(" · ");
   const infoRows = [
-    ["Client", iv.client], ["Site", iv.site], ["Date", iv.date], ["Technicien", iv.technicien],
-    ["Heure début", iv.heureDebut], ["Heure fin", iv.heureFin], ["Durée", duree],
+    ["Client", iv.client], ["Site", iv.site],
+    ["Date(s) d'intervention", ivJourneesTexte || iv.date],
+    ["Technicien(s)", tousTechniciens],
+    ["Durée totale (journée 1)", duree],
   ];
   const equipRows = [
     ["Type", iv.equipement.type], ["Constructeur", iv.equipement.constructeur], ["Modèle", iv.equipement.modele],
