@@ -8,14 +8,14 @@ import {
   Plus, Search, AlertTriangle, CheckCircle2, AlertOctagon,
   Trash2, ArrowLeft, Building2, Clock, ChevronRight, ChevronDown,
   MapPin, ShieldCheck, FileText, Settings2, Printer, ImagePlus,
-  Mail, PenLine, RotateCcw, ClipboardList, X, MinusCircle, Download, Upload,
+  Mail, PenLine, RotateCcw, ClipboardList, X, MinusCircle, Download, Upload, Copy, RefreshCw,
 } from "lucide-react";
 
 /* =========================================================================
    SCHÉMAS DE CONTRÔLE — repris fidèlement des feuilles Excel par type
    ========================================================================= */
 
-const EQUIPMENT_TYPES = [
+const EQUIPMENT_TYPES_HTABT = [
   "Sécurité",
   "Interrupteur HTA",
   "Comptage HTA",
@@ -27,7 +27,11 @@ const EQUIPMENT_TYPES = [
   "Transformateur",
   "Analyse d'huile",
   "Jeu de barre / Gaine à barre",
+  "Batterie de compensation",
 ];
+// Redresseur chargeur et inverseur de source statique à venir.
+const EQUIPMENT_TYPES_CONVERSION = ["Onduleur"];
+const EQUIPMENT_TYPES = [...EQUIPMENT_TYPES_HTABT, ...EQUIPMENT_TYPES_CONVERSION];
 
 // petit constructeur : un contrôle avec Action + État final (+ champs de mesure optionnels)
 const C = (key, label, fields, actionOptions) => ({ key, label, kind: "control", fields: fields || [], actionOptions });
@@ -77,6 +81,18 @@ const LISTE_TYPE_CELLULE = {
 const LISTE_MARQUE_BRK = ["MASTERPACT", "COMPACT", "IZM", "NZM", "MEGAMAX", "ISOMAX", "EMAX", "EMAX 2", "SPECTRONIC", "MPACT", "3WL", "3WN", "DMX", "DMX³", "DPX"];
 const LISTE_TYPE_TRANSFORMATEUR = ["TRANSFORMATEUR DE DISTRIBUTION", "TRANSFORMATEUR", "AUTO-TRANSFORMATEUR", "TRANSFORMATEUR A DOUBLE SECONDAIRE", "TRANSFORMATEUR SEC ENROBÉ"];
 const LISTE_TYPE_JDB = ["Jeu de barres", "Gaine à barres"];
+const LISTE_MARQUE_BATTERIE = ["ABB", "AEG", "Alpes Technologies", "Alstom", "Beluk", "Chauvin Arnoux", "Comar Condensatori", "EPCOS", "ESTA", "Fabrimex", "Frako", "Kautz", "Merlin Gerin", "Schneider Electric", "Sermes", "Socomec", "Varilec", "Vishay"];
+const LISTE_TYPE_COMPENSATION = ["Compensateur d'énergie réactive", "Power Factor Correction"];
+const LISTE_TYPE_REGULATEUR = ["Statique", "Électromécanique"];
+const LISTE_ACCESSIBILITE = ["Conforme", "Difficile", "Très difficile"];
+const LISTE_TYPE_UPS = ["UPS", "NO BREAK", "ASI", "ONDULEUR", "Alimentation statique sans interruption", "Alimentation statique ininterrompue", "Onduleur sécurité"];
+const LISTE_CONFIG_UPS = ["Unitaire", "Unitaire sans bypass", "Parallèle modulaire", "Parallèle centralisé"];
+const LISTE_TENSION_ENTREE_SORTIE = ["400 V / 400 V", "400 V / 230 V", "230 V / 230 V"];
+const LISTE_REGIME_SORTIE_UPS = ["3+N", "3", "1"];
+const LISTE_TECHNO_BATTERIE = ["PE", "PO", "GEL", "Cd-Ni"];
+const LISTE_NB_BRANCHES = ["1", "2", "3", "4", "5", "6"];
+const LISTE_MACHINE_ETAT = ["Propre", "À nettoyer", "Nettoyé"];
+const LISTE_ENVIRONNEMENT_UPS = ["Propre", "Dépoussiérée", "Nécessite une dépollution industrielle"];
 const LISTE_CONCLUSION_DGA = ["Normal", "Surveillance", "Alerte", "Critique"];
 const LISTE_MARQUE_TDY = ["ABB", "ALSTOM", "AREVA", "CAHORS", "CONTI TRANSFO", "EFACEC", "ELKIMA", "France TRANSFO", "GBE", "MATELEC", "MERLIN GERIN", "PAUWELS", "SCHNEIDER ELECTRIC", "SIEMENS", "SNT DURIEZ", "UNELEC"];
 const LISTE_COUPLAGE_TDY = ["Yzn11", "Dyn11", "Dzn10", "Dzn6", "Yyn6", "Yzn5", "Dyn5", "Yyn0", "Yz11", "Yd11", "Dy11", "Dz10", "Dz6", "Yy6", "Dd6", "Yz5", "Yd5", "Dy5", "Yy0", "Dd0"];
@@ -110,8 +126,9 @@ const FUSIBLE_FIELDS = [
 ];
 const TC_FIELDS = [F("type", "Type"), F("couplage", "Couplage"), F("puissance", "Puissance", "VA"), F("classe", "Classe")];
 
+const LISTE_TYPE_INT_SECT = ["Interrupteur", "Sectionneur", "Interrupteur-sectionneur"];
 const MECA_CELLULE = [
-  C("manoeuvre_int_sect", "Manœuvres de l'interrupteur-sectionneur"),
+  C("manoeuvre_int_sect", "Manœuvres de l'interrupteur-sectionneur", [F("type", "Type", null, LISTE_TYPE_INT_SECT)]),
   C("manoeuvre_sect_terre", "Manœuvres du sectionneur de terre"),
   C("densimetre_sf6", "Contrôle du densimètre SF6"),
   C("etat_general_cellule", "État général externe et interne de la cellule"),
@@ -122,6 +139,120 @@ const SECURITE_CELLULE = [
   C("fiche_manoeuvre", "Présence et exactitude de la fiche de manœuvre"),
 ];
 const ORGANES_FIELDS = [{ key: "reference", label: "Référence" }, { key: "tension", label: "Tension", options: LISTE_TENSION_ORGANES }, { key: "type", label: "Type", options: LISTE_TYPE_ORGANES }];
+const LISTE_TYPE_ORGANE_DYNAMIQUE = ["Bobine à manque", "Déclencheur voltmétrique", "Moteur", "Bobine de fermeture", "Bobine d'ouverture", "Bouton poussoir", "Contact auxiliaire"];
+const LISTE_TC_FONCTION = ["Protection", "Mesure", "Protection / Mesure"];
+const LISTE_TC_SECONDAIRE = ["1", "5"];
+const TC_FIELDS_DYNAMIC = [
+  F("fonction", "Fonction", null, LISTE_TC_FONCTION),
+  F("type", "Type"), F("couplage", "Couplage"), F("puissance", "Puissance", "VA"), F("classe", "Classe"),
+  F("rapportPrimaire", "Rapport primaire"), F("secondaire", "Secondaire", "A", LISTE_TC_SECONDAIRE),
+];
+// Types d'équipement qui utilisent désormais le contrôle TC dynamique / les organes internes dynamiques
+// (un seul élément affiché par défaut, bouton pour en ajouter — remplace la liste fixe précédente).
+const TYPES_AVEC_TC = ["Comptage HTA", "Contacteur HTA"];
+const TYPES_AVEC_ORGANES_DYNAMIQUE = ["Interrupteur HTA", "Interrupteur Fusible HTA", "Disjoncteur HTA", "Disjoncteur BT", "Interrupteur BT"];
+const TYPES_AVEC_GRADINS = ["Batterie de compensation"];
+// Onduleur : branches de batterie (dynamique, comme les gradins) et relevé détaillé des tensions
+// par élément, avec classification automatique (Normal / À surveiller / Critique) par rapport à
+// la moyenne mesurée — reprend le principe du fichier Excel (comparaison à la tension de floating).
+const TYPES_AVEC_BRANCHES_UPS = ["Onduleur"];
+// Pièces d'usure Onduleur : 4 catégories, chacune avec une durée de vie par défaut ajustable par
+// modèle (les batteries n'ont pas de durée par défaut — elle dépend de la capacité Ah saisie).
+const CATEGORIES_USURE_UPS = [
+  { key: "batteries", label: "Batteries", dureeDefaut: null },
+  { key: "condensateursAlternatifs", label: "Condensateurs alternatifs (AC)", dureeDefaut: 6 },
+  { key: "condensateursContinus", label: "Condensateurs continus (DC)", dureeDefaut: 5 },
+  { key: "ventilateurs", label: "Ventilateurs", dureeDefaut: 4 },
+];
+function emptyModeleUsure(dureeDefaut) {
+  return { id: uid(), description: "", marque: "", modele: "", quantite: "", anneeMiseEnService: "", dureeVie: dureeDefaut ?? "" };
+}
+function calcEcheancesUsureUPS(eq) {
+  const data = eq.controles.pieces_usure_ups || {};
+  const batterieInfo = eq.controles.batterie_id?.batterie_caracteristiques?.fields || {};
+  const lignes = [];
+  CATEGORIES_USURE_UPS.forEach((cat) => {
+    (data[cat.key] || []).forEach((m, i) => {
+      const annee = numOf(m.anneeMiseEnService), duree = numOf(m.dureeVie);
+      if (annee === null || duree === null) return;
+      const label = cat.key === "batteries" && i === 0 ? (batterieInfo.typeBloc || batterieInfo.marque || `Modèle ${i + 1}`) : (m.modele || m.description || `Modèle ${i + 1}`);
+      lignes.push({ type: `${cat.label} — ${label}`, annee: Math.round(annee) + Math.round(duree) });
+    });
+  });
+  return lignes;
+}
+const BRANCHE_FIELD_DEFS = [{ key: "recharge" }, { key: "residuel" }, { key: "decharge" }];
+const LISTE_NOM_BRANCHE = Array.from({ length: 6 }, (_, i) => `Branche ${i + 1}`);
+const ELEMENT_FIELD_DEFS = [{ key: "tension" }];
+// Un élément est signalé "défectueux" s'il sort de la bande [moyenne - toléranceBasse% ; moyenne + toléranceHaute%].
+function elementBatterieStatus(tension, moyenne, toleranceBasse, toleranceHaute) {
+  const v = numOf(tension), m = numOf(moyenne);
+  if (v === null || m === null || m === 0) return null;
+  const tb = numOf(toleranceBasse) ?? 3, th = numOf(toleranceHaute) ?? 3;
+  const min = m * (1 - tb / 100), max = m * (1 + th / 100);
+  return v < min || v > max ? "bad" : "ok";
+}
+const GRADIN_FIELD_DEFS = [
+  { key: "q" }, { key: "u" }, { key: "i1" }, { key: "i2" }, { key: "i3" },
+  { key: "selfMA" }, { key: "selfFrequence" },
+  { key: "contacteurRef" }, { key: "contacteurAnnee" },
+  { key: "fusiblesRef" }, { key: "fusiblesAnnee" },
+  { key: "condensateursRef" }, { key: "condensateursAnnee" },
+];
+// Courant théorique par phase d'un gradin, à partir de sa puissance réactive et de sa tension
+// (I = Q×1000 / (√3×U)) — sert à valider la cohérence des courants mesurés (±10%).
+// Génère des champs L1/L2/L3 + une valeur calculée (moyenne ou max selon la grandeur), fidèle
+// aux formules du fichier Excel Onduleur (ex. tension = moyenne des 3 phases, THdV = max des 3).
+function champsTriphase(unit, label, decimals, mode, withDesequilibre) {
+  const calc = (f) => {
+    const vals = [numOf(f.l1), numOf(f.l2), numOf(f.l3)].filter((v) => v !== null);
+    if (!vals.length) return "";
+    const r = mode === "max" ? Math.max(...vals) : vals.reduce((a, b) => a + b, 0) / vals.length;
+    return Math.round(r * Math.pow(10, decimals)) / Math.pow(10, decimals);
+  };
+  const fields = [
+    F("l1", "L1", unit), F("l2", "L2", unit), F("l3", "L3", unit),
+    { key: mode, label: `${label} (${mode === "max" ? "max calculé" : "moyenne calculée"})`, unit, compute: calc },
+  ];
+  if (withDesequilibre) {
+    fields.push({
+      key: "desequilibre", label: "Déséquilibre (calculé)", unit: "%",
+      compute: (f) => {
+        const vals = [numOf(f.l1), numOf(f.l2), numOf(f.l3)].filter((v) => v !== null);
+        if (vals.length < 2) return "";
+        const moy = vals.reduce((a, b) => a + b, 0) / vals.length;
+        if (!moy) return "";
+        return Math.round(((Math.max(...vals) - Math.min(...vals)) / moy) * 100 * 100) / 100;
+      },
+    });
+  }
+  return fields;
+}
+function gradinIntensiteTheorique(q, u) {
+  const qn = numOf(q), un = numOf(u);
+  if (qn === null || un === null || un === 0) return null;
+  return Math.round(((qn * 1000) / (Math.sqrt(3) * un)) * 100) / 100;
+}
+// Capacité (µF) calculée à partir du courant mesuré sur une phase : C = I / (U × 2π × f)
+function gradinCapacite(i, u, f) {
+  const ii = numOf(i), uu = numOf(u), ff = numOf(f);
+  if (ii === null || uu === null || !uu || !ff) return null;
+  return Math.round((ii / (uu * 2 * Math.PI * ff)) * 1e6 * 100) / 100;
+}
+// Puissance réactive (kVAR) déduite du courant mesuré sur une phase — inverse de gradinIntensiteTheorique,
+// utile pour comparer phase par phase et au total avec la valeur théorique déclarée du gradin (Q).
+function gradinQMesuree(i, u) {
+  const ii = numOf(i), uu = numOf(u);
+  if (ii === null || uu === null) return null;
+  return Math.round(((ii * Math.sqrt(3) * uu) / 1000) * 100) / 100;
+}
+const LISTE_NOM_GRADIN = Array.from({ length: 24 }, (_, i) => `Gradin ${i + 1}`);
+function emptyDynamicEntry(label, fieldDefs, withActionEtat) {
+  const fields = {};
+  (fieldDefs || []).forEach((f) => { fields[f.key] = ""; if (unitFamilyFor(f.unit)) fields[f.key + "Unite"] = f.unit; });
+  const base = withActionEtat ? { id: uid(), label: label || "", action: "", etat: "Conforme", fields } : { id: uid(), label: label || "", fields };
+  return { ...base, photos: [] };
+}
 const ORGANES_INTERNES = [
   I("bobine_manque", "Bobine à manque", ORGANES_FIELDS),
   I("declencheur_volt_1", "Déclencheur voltmétrique", ORGANES_FIELDS),
@@ -141,8 +272,8 @@ const CONTROLES_DISJONCTEUR = [
   C("etat_isolants_disj", "État général des isolants"),
   C("etat_chambres_coupure", "État général des chambres de coupures"),
   C("resistance_contact_chambres", "Résistances de contact des chambres de coupure", [...L1L2L3("µΩ"), F("tolerance", "Tolérance", "µΩ")]),
-  C("synchronisme_coupure", "Contrôle du synchronisme de coupure"),
-  C("temps_fermeture", "Mesure du temps de fermeture", [...L1L2L3("ms")]),
+  C("temps_ouverture", "Mesure du temps d'ouverture", [...L1L2L3("ms"), F("synchronisme", "Synchronisme (ensemble des phases)", "ms")]),
+  C("temps_fermeture", "Mesure du temps de fermeture", [...L1L2L3("ms"), F("synchronisme", "Synchronisme (ensemble des phases)", "ms")]),
   C("courbe_compensation_sf6", "Courbe de compensation pression SF6 / température", [F("reference", "Référence / commentaire")]),
   C("essai_dielectrique_pole", "Essai diélectrique après intervention sur le pôle"),
 ];
@@ -231,7 +362,7 @@ const SCHEMAS = {
         C("tetes_cables", "Contrôle des têtes de câbles"),
         C("contacts_position", "Contrôle des contacts de position"),
       ]},
-      { key: "organes", title: "Organes internes", items: ORGANES_INTERNES },
+      { key: "organes", title: "Organes internes", items: [] },
       { key: "securite", title: "Contrôles de sécurité", items: SECURITE_CELLULE },
       { key: "parametrage_relais", title: "Paramétrage du relais de protection", items: [] },
       { key: "controles_relais", title: "Contrôles du relais de protection", items: [CIRCUIT_MESURES_COMMANDE] },
@@ -275,7 +406,7 @@ const SCHEMAS = {
         C("contacts_position", "Contrôle des contacts de position"),
         ...FUSIBLES,
       ]},
-      { key: "organes", title: "Organes internes", items: ORGANES_INTERNES },
+      { key: "organes", title: "Organes internes", items: [] },
       { key: "securite", title: "Contrôles de sécurité", items: SECURITE_CELLULE },
       { key: "parametrage_relais", title: "Paramétrage du relais de protection", items: [] },
       { key: "controles_relais", title: "Contrôles du relais de protection", items: [CIRCUIT_MESURES_COMMANDE] },
@@ -299,10 +430,8 @@ const SCHEMAS = {
         C("etat_isolants", "État général des isolants"),
         C("connexions_puissance", "Contrôle des connexions de puissance"),
         C("contacts_position", "Contrôle des contacts de position"),
-        C("tc_protection", "Contrôle des TC de protection", TC_FIELDS),
-        C("tc_mesure", "Contrôle des TC de mesure", TC_FIELDS),
       ]},
-      { key: "organes", title: "Organes internes", items: ORGANES_INTERNES },
+      { key: "organes", title: "Organes internes", items: [] },
       { key: "securite", title: "Contrôles de sécurité", items: [
         C("continuite_masses", "Contrôle de la continuité des masses", [F("valeur", "Valeur", "mΩ")]),
         C("interverrouillage", "Contrôle de l'interverrouillage de sécurité"),
@@ -327,8 +456,6 @@ const SCHEMAS = {
         C("etat_isolants", "État général des isolants"),
         C("connexions_puissance", "Contrôle des connexions de puissance"),
         C("contacts_position", "Contrôle des contacts de position"),
-        C("tc_protection", "Contrôle des TC de protection", TC_FIELDS),
-        C("tc_mesure", "Contrôle des TC de mesure", TC_FIELDS),
         ...FUSIBLES,
       ]},
       { key: "securite", title: "Contrôles de sécurité", items: [
@@ -337,7 +464,7 @@ const SCHEMAS = {
         C("fiche_manoeuvre", "Présence et exactitude de la fiche de manœuvre"),
       ]},
       { key: "parametrage_relais", title: "Paramétrage du relais de protection", items: [] },
-      { key: "controles_disjoncteur", title: "Contrôles du disjoncteur", items: CONTROLES_DISJONCTEUR },
+      { key: "controles_disjoncteur", title: "Contrôles du contacteur", items: CONTROLES_DISJONCTEUR },
       { key: "controles_relais", title: "Contrôles du relais de protection", items: [CIRCUIT_MESURES_COMMANDE] },
     ],
   },
@@ -367,7 +494,7 @@ const SCHEMAS = {
         C("contacts_aux_signalisation", "Vérification des contacts auxiliaires de signalisation (OF/SD)"),
         C("bouton_test_rearmement", "Test du bouton test / réarmement"),
       ]},
-      { key: "organes", title: "Organes internes", items: ORGANES_INTERNES },
+      { key: "organes", title: "Organes internes", items: [] },
       { key: "reglage_disjoncteur", title: "Réglage du disjoncteur", items: [
         S("surcharge_longue", "Surcharge longue", [F("inominal", "I nominal", "A"), F("k1", "K1"), F("k2", "K2"), F("ineutre", "Ineutre", "A"), F("tr_mode", "tr", null, LISTE_TR_MODE), F("tr", "tr", "s"), F("tr_classe", "à (x Ir)", null, LISTE_TR_CLASSE)]),
         S("cc_temporise", "Court-circuit temporisé", [F("im_fonction_de", "Im fonction de", null, ["Ir", "In"]), F("k", "K"), F("tsd", "tsd", "ms"), F("i2t", "I²t")]),
@@ -409,7 +536,7 @@ const SCHEMAS = {
         C("contacts_aux_signalisation", "Vérification des contacts auxiliaires de signalisation (OF/SD)"),
         C("bouton_test_rearmement", "Test du bouton test / réarmement"),
       ]},
-      { key: "organes", title: "Organes internes", items: ORGANES_INTERNES },
+      { key: "organes", title: "Organes internes", items: [] },
     ],
   },
   "Transformateur": {
@@ -476,6 +603,198 @@ const SCHEMAS = {
         C("facteur_dissipation", "Facteur de dissipation (tan δ)", [F("valeur", "Valeur", "%")]),
         C("analyse_gaz_dissous", "Analyse des gaz dissous (DGA)", [F("conclusion", "Conclusion", null, LISTE_CONCLUSION_DGA)]),
       ]},
+    ],
+  },
+  "Batterie de compensation": {
+    identification: [
+      { key: "repere", label: "Repère / Nom de l'équipement" },
+      { key: "marque", label: "Marque", options: LISTE_MARQUE_BATTERIE }, { key: "typeCompensation", label: "Type de compensation", options: LISTE_TYPE_COMPENSATION },
+      { key: "qn", label: "Qn (kVAR)", numeric: true }, { key: "triphase", label: "Régime", options: ["Triphasé", "Monophasé"] },
+      { key: "nombreGradins", label: "Nombre total de gradins", numeric: true }, { key: "anneeMiseEnService", label: "Année de mise en service", numeric: true },
+    ],
+    sections: [
+      { key: "environnement", title: "Environnement et exploitation", items: [
+        C("espace_batterie", "Espace autour de la batterie", [F("acces", "Accessibilité", null, LISTE_ACCESSIBILITE)]),
+        C("temperature_locale", "Température locale", [F("temp", "Température externe", "°C")]),
+        I("position_reseau", "Position dans le réseau", [{ key: "valeur", label: "Description" }]),
+        I("fonctionnement_groupe", "Fonctionnement sur groupe électrogène", [{ key: "valeur", label: "Description" }]),
+        I("charges_reactives", "Principales charges réactives", [{ key: "valeur", label: "Description" }]),
+      ]},
+      { key: "mecaniques", title: "Contrôles mécaniques", items: [
+        C("serrage_connexions_batt", "Serrage des connexions"),
+        C("etat_cables_batt", "État des câbles"),
+        C("etat_contacts_batt", "État des contacts, contacteurs et interrupteurs"),
+        C("resistances_decharge", "Résistances de décharge", [F("valeur", "Valeur", "MΩ")]),
+        C("depoussierage", "Dépoussiérage de l'installation"),
+        C("test_ventilateur", "Test de fonctionnement du ventilateur (démarrage / arrêt aux seuils)"),
+        C("thermographie_batt", "Contrôle thermographique", [F("temperature", "Température relevée", "°C")]),
+      ]},
+      { key: "securite_automatismes", title: "Contrôles sécurité et automatismes", items: [
+        C("type_regulateur", "Type de régulateur", [F("type", "Type", null, LISTE_TYPE_REGULATEUR)]),
+        C("reglage_cosphi", "Réglage cos phi", [
+          F("cosphi", "Cos Phi"),
+          { key: "tangphi", label: "Tang Phi (calculé)", unit: null, compute: (f) => {
+            const c = numOf(f.cosphi);
+            if (c === null || c <= 0 || c > 1) return "";
+            return Math.round((Math.sqrt(1 - c * c) / c) * 1000) / 1000;
+          } },
+        ]),
+        C("correspondance_affichage", "Correspondance affichage et mesure réelle"),
+        C("enclenchement_auto", "Vérification d'enclenchement des gradins — Automatique"),
+        C("enclenchement_manuel", "Vérification d'enclenchement des gradins — Manuel"),
+        C("tempo_enclenchement", "Temporisation d'enclenchement entre chaque gradin", [F("valeur", "Valeur", "s")]),
+        C("tempo_reenclenchement", "Temporisation avant réenclenchement d'un gradin", [F("valeur", "Valeur", "s")]),
+        C("alarmes_signalisations_batt", "Alarmes et signalisations"),
+      ]},
+      { key: "mesures_amont", title: "Mesures réseau amont (batterie en service)", items: [
+        C("frequence_amont", "Fréquence", [F("hz", "Fréquence", "Hz")]),
+        C("tensions_amont", "Tensions", [F("u12", "U12", "V"), F("u23", "U23", "V"), F("u31", "U31", "V"), F("thdv1", "THdV L1", "%"), F("thdv2", "THdV L2", "%"), F("thdv3", "THdV L3", "%")]),
+        C("courants_amont", "Courants", [F("i1", "I1", "A"), F("i2", "I2", "A"), F("i3", "I3", "A"), F("thdi1", "ThdI L1", "%"), F("thdi2", "ThdI L2", "%"), F("thdi3", "ThdI L3", "%")]),
+        C("puissances_amont", "Puissances", [F("p", "P", "kW"), F("s", "S", "kVA"), F("q", "Q", "kVAR"), F("cosphi", "Cos Phi"), { key: "tangphi", label: "Tang Phi (calculé)", unit: null, compute: (f) => { const c = numOf(f.cosphi); if (c === null || c <= 0 || c > 1) return ""; return Math.round((Math.sqrt(1 - c * c) / c) * 1000) / 1000; } }]),
+      ]},
+      { key: "mesures_aval", title: "Mesures réseau aval (ou batterie hors service)", items: [
+        C("frequence_aval", "Fréquence", [F("hz", "Fréquence", "Hz")]),
+        C("tensions_aval", "Tensions", [F("u12", "U12", "V"), F("u23", "U23", "V"), F("u31", "U31", "V"), F("thdv1", "THdV L1", "%"), F("thdv2", "THdV L2", "%"), F("thdv3", "THdV L3", "%")]),
+        C("courants_aval", "Courants", [F("i1", "I1", "A"), F("i2", "I2", "A"), F("i3", "I3", "A"), F("thdi1", "ThdI L1", "%"), F("thdi2", "ThdI L2", "%"), F("thdi3", "ThdI L3", "%")]),
+        C("puissances_aval", "Puissances", [F("p", "P", "kW"), F("s", "S", "kVA"), F("q", "Q", "kVAR"), F("cosphi", "Cos Phi"), { key: "tangphi", label: "Tang Phi (calculé)", unit: null, compute: (f) => { const c = numOf(f.cosphi); if (c === null || c <= 0 || c > 1) return ""; return Math.round((Math.sqrt(1 - c * c) / c) * 1000) / 1000; } }]),
+      ]},
+      { key: "gradins", title: "Gradins", items: [] },
+      { key: "usure", title: "Pièces d'usure", items: [
+        I("ventilation_usure", "Ventilation", [{ key: "reference", label: "Référence" }, { key: "annee", label: "Année de mise en service" }]),
+      ]},
+    ],
+  },
+  "Onduleur": {
+    identification: [
+      { key: "repere", label: "Repère / Nom de l'équipement" },
+      { key: "marque", label: "Marque" }, { key: "typeUPS", label: "Type", options: LISTE_TYPE_UPS },
+      { key: "configuration", label: "Configuration", options: LISTE_CONFIG_UPS },
+      { key: "puissance", label: "Puissance", numeric: true }, { key: "puissanceUnite", label: "Unité", options: ["kVA", "VA"] },
+      { key: "tensionEntreeSortie", label: "Tension entrée / sortie", options: LISTE_TENSION_ENTREE_SORTIE },
+      { key: "regimeSortie", label: "Régime de sortie", options: LISTE_REGIME_SORTIE_UPS },
+      { key: "anneeMiseEnService", label: "Année de mise en service", numeric: true },
+    ],
+    sections: [
+      { key: "batterie_id", title: "Batterie", items: [
+        I("batterie_caracteristiques", "Caractéristiques de la batterie", [
+          { key: "marque", label: "Marque" }, { key: "technologie", label: "Technologie", options: LISTE_TECHNO_BATTERIE },
+          { key: "typeBloc", label: "Type de bloc" }, { key: "tensionNominale", label: "Tension du bloc batterie (V)" },
+          { key: "capacite", label: "Capacité par branche (Ah)" },
+          { key: "nombreBranches", label: "Nombre de branches", options: LISTE_NB_BRANCHES }, { key: "nombreBlocsParBranche", label: "Nombre de blocs par branche" },
+          { key: "anneeMiseEnService", label: "Année de mise en service" },
+        ]),
+      ]},
+      { key: "environnement_ups", title: "État de l'installation", items: [
+        C("local_ups", "Local", [F("acces", "Accessibilité", null, LISTE_ACCESSIBILITE)]),
+        C("temperature_ups", "Température", [F("acces", "Accessibilité", null, LISTE_ACCESSIBILITE)]),
+        C("machine_ups", "Machine", [F("etat", "État", null, LISTE_MACHINE_ETAT)]),
+        C("environnement_ups_item", "Environnement", [F("etat", "État", null, LISTE_ENVIRONNEMENT_UPS)]),
+      ]},
+      { key: "redresseur_chargeur", title: "État redresseur / chargeur", items: [
+        C("essai_alarme_redresseur", "Essai alarme / défaut"),
+        C("ventilation_redresseur", "Ventilation"),
+        C("alim_electroniques_redresseur", "Alimentations électroniques"),
+        C("logique_marche_redresseur", "Logique de marche"),
+        C("auto_alim_redresseur", "Auto-alim électroniques"),
+      ]},
+      { key: "etat_onduleur", title: "État de l'onduleur", items: [
+        C("essai_alarme_onduleur", "Essai alarme / défaut"),
+        C("ventilation_onduleur", "Ventilation"),
+        C("alim_electroniques_onduleur", "Alimentations électroniques"),
+        C("logique_marche_onduleur", "Logique de marche"),
+        C("auto_alim_onduleur", "Auto-alim électroniques"),
+        C("auto_alim_commutateur", "Auto-alim commutateur statique R2"),
+        C("commutation_r0_r2", "Commutation R0 vers R2 et R2 vers R0"),
+        C("controle_rs", "Contrôle RS"),
+      ]},
+      { key: "bypass_synoptique", title: "État du by-pass / synoptique", items: [
+        C("bypass_manuel_interne", "By-pass manuel interne"),
+        C("bypass_manuel_externe", "By-pass manuel externe"),
+        C("signalisations_leds", "Signalisations / LEDs"),
+        C("affichage_alarmes_defauts", "Affichage alarmes / défauts"),
+        C("commandes_synoptique", "Commandes"),
+        C("mesures_synoptique", "Mesures (synoptique)"),
+      ]},
+      { key: "report_alarme", title: "Type et état report alarme", items: [
+        C("relais_contacts_secs", "Relais contacts secs"),
+        C("reseau_ethernet_snmp", "Réseau Ethernet / SNMP"),
+        C("liaison_modbus_jbus", "Liaison série Modbus / J-Bus"),
+      ]},
+      { key: "mesures_reseau_normal", title: "Mesures — Réseau normal", items: [
+        C("tension_normal", "Tension composée", champsTriphase("V", "Tension", 0, "moyenne", true)),
+        C("thdv_normal", "Taux de distorsion tension", champsTriphase("%", "THdV", 1, "max")),
+        C("frequence_normal", "Fréquence", [F("hz", "Valeur", "Hz")]),
+        C("regime_neutre_normal", "Régime de neutre", [F("valeur", "Valeur")]),
+        C("courant_normal", "Courant", champsTriphase("A", "Courant", 1, "moyenne", true)),
+        C("thdi_normal", "Taux de distorsion courant", champsTriphase("%", "ThdI", 1, "moyenne")),
+        C("fp_normal", "Facteur de puissance", champsTriphase(null, "Cos φ", 2, "moyenne")),
+        C("puissance_normal", "Puissance apparente", [F("valeur", "Valeur", "kVA")]),
+      ]},
+      { key: "mesures_reseau_secours", title: "Mesures — Réseau secours", items: [
+        C("tension_simple_secours", "Tension simple", champsTriphase("V", "Tension", 0, "moyenne", true)),
+        C("tension_secours", "Tension composée", champsTriphase("V", "Tension", 0, "moyenne", true)),
+        C("thdv_secours", "Taux de distorsion tension", champsTriphase("%", "THdV", 1, "max")),
+        C("frequence_secours", "Fréquence", [F("hz", "Valeur", "Hz")]),
+        C("regime_neutre_secours", "Régime de neutre", [F("valeur", "Valeur")]),
+        C("courant_secours", "Courant", champsTriphase("A", "Courant", 1, "moyenne", true)),
+        C("thdi_secours", "Taux de distorsion courant", champsTriphase("%", "ThdI", 1, "moyenne")),
+        C("tension_terre_neutre_secours", "Tension terre / neutre", [F("v", "Valeur", "V")]),
+      ]},
+      { key: "mesures_utilisation", title: "Mesures — Utilisation (sortie)", items: [
+        C("tension_simple_utilisation", "Tension simple", champsTriphase("V", "Tension", 0, "moyenne", true)),
+        C("tension_utilisation", "Tension composée", champsTriphase("V", "Tension", 0, "moyenne", true)),
+        C("thdv_utilisation", "Taux de distorsion tension", champsTriphase("%", "THdV", 1, "max")),
+        C("courant_utilisation", "Courant", champsTriphase("A", "Courant", 1, "moyenne", true)),
+        C("puissance_fp_utilisation", "Puissance et facteur de puissance", [
+          F("p1", "P actif L1", "kW"), F("p2", "P actif L2", "kW"), F("p3", "P actif L3", "kW"),
+          F("s1", "S apparent L1", "kVA"), F("s2", "S apparent L2", "kVA"), F("s3", "S apparent L3", "kVA"),
+          { key: "cosphi1", label: "Cos φ L1 (calculé)", unit: null, compute: (f) => { const p = numOf(f.p1), s = numOf(f.s1); return (p === null || s === null || !s) ? "" : Math.round((p / s) * 100) / 100; } },
+          { key: "cosphi2", label: "Cos φ L2 (calculé)", unit: null, compute: (f) => { const p = numOf(f.p2), s = numOf(f.s2); return (p === null || s === null || !s) ? "" : Math.round((p / s) * 100) / 100; } },
+          { key: "cosphi3", label: "Cos φ L3 (calculé)", unit: null, compute: (f) => { const p = numOf(f.p3), s = numOf(f.s3); return (p === null || s === null || !s) ? "" : Math.round((p / s) * 100) / 100; } },
+          F("nature", "Nature", null, ["Inductif", "Capacitif", "Résistif"]),
+        ]),
+        C("dv_sortie_secours", "ΔV sortie / secours", [F("v", "Valeur", "V")]),
+        C("regime_neutre_utilisation", "Régime de neutre", [F("valeur", "Valeur")]),
+        C("tension_terre_neutre_utilisation", "Tension terre / neutre", [F("v", "Valeur", "V")]),
+        C("frequence_utilisation", "Fréquence", [F("hz", "Valeur", "Hz")]),
+        C("taux_charge_utilisation", "Taux de charge", champsTriphase("%", "Taux de charge", 1, "max")),
+      ]},
+      { key: "mesures_onduleur_item", title: "Mesures — Onduleur", items: [
+        C("tension_onduleur", "Tension composée", champsTriphase("V", "Tension", 0, "moyenne")),
+        C("frequence_onduleur", "Fréquence synchro / autonome", [F("synchro", "Synchro", "Hz"), F("autonome", "Autonome", "Hz")]),
+        C("courant_pont", "Courant pont (efficace + FC)", champsTriphase("A", "Courant pont", 1, "moyenne")),
+        C("courant_filtre", "Courant filtre", champsTriphase("A", "Courant filtre", 1, "moyenne")),
+      ]},
+      { key: "mesures_batterie_ups", title: "Mesures batterie", items: [
+        C("tension_floating", "Tension de floating", [F("v", "Valeur", "V")]),
+        C("tension_repos", "Tension de repos", [F("v", "Valeur", "V")]),
+        C("tension_charge", "Tension de charge", [F("v", "Valeur", "V")]),
+        C("tension_charge_forte", "Tension de charge forte", [F("v", "Valeur", "V")]),
+        C("tension_egalisation", "Tension d'égalisation", [F("v", "Valeur", "V")]),
+        C("pole_plus_terre", "Pôle \"+\" batterie / terre", [F("v", "Valeur", "V")]),
+        C("pole_moins_terre", "Pôle \"-\" batterie / terre", [F("v", "Valeur", "V")]),
+        C("tension_nominale_elt", "Tension nominale (par élément)", [F("v", "Valeur", "V")]),
+        C("seuil_fin_decharge", "Seuil de \"fin de décharge\"", [F("v", "Valeur", "V")]),
+      ]},
+      { key: "defauts_apparence", title: "Défauts d'apparence", items: [
+        C("bornes_sulfatees", "Bornes sulfatées"),
+        C("bornes_oxydees", "Bornes oxydées"),
+        C("traces_degazage", "Traces de dégazage"),
+      ]},
+      { key: "branches_batterie", title: "Branches batterie", items: [] },
+      { key: "essai_decharge", title: "Essai décharge / autonomie", items: [
+        C("decharge_puissance_constante", "Décharge à puissance constante", [
+          F("tension", "Tension de décharge", "V"), F("courant", "Courant", "A"),
+          { key: "puissance", label: "Puissance (calculée)", unit: "kW", compute: (f) => { const u = numOf(f.tension), i = numOf(f.courant); return (u === null || i === null) ? "" : Math.round(((u * i) / 1000) * 100) / 100; } },
+        ]),
+        C("temperature_decharge", "Température batterie lors de la décharge", [F("temp", "Valeur", "°C")]),
+        C("duree_decharge", "Durée de la décharge batterie", [F("duree", "Valeur", "min")]),
+      ]},
+      { key: "releve_tensions", title: "Relevé des tensions batterie", items: [] },
+      { key: "thermographie_ups", title: "Thermographie", items: [
+        C("controle_thermo_ups", "Contrôle thermographique"),
+      ]},
+      { key: "pieces_usure_ups", title: "Pièces d'usure", items: [] },
     ],
   },
   "Jeu de barre / Gaine à barre": {
@@ -652,15 +971,32 @@ function emptyEquipement(type) {
   if (type === "Sécurité") {
     Object.keys(controles.materiel_securite).forEach((k) => { controles.materiel_securite[k].fields.present = "OUI"; });
   }
+  if (TYPES_AVEC_TC.includes(type)) controles.tc_dynamique = [emptyDynamicEntry(LISTE_TC_FONCTION[0], TC_FIELDS_DYNAMIC, true)];
+  if (TYPES_AVEC_ORGANES_DYNAMIQUE.includes(type)) controles.organes_dynamique = [emptyDynamicEntry("", ORGANES_FIELDS, false)];
+  if (TYPES_AVEC_GRADINS.includes(type)) controles.gradins_dynamique = [emptyDynamicEntry(LISTE_NOM_GRADIN[0], GRADIN_FIELD_DEFS, true)];
+  if (TYPES_AVEC_BRANCHES_UPS.includes(type)) {
+    controles.branches_dynamique = [emptyDynamicEntry(LISTE_NOM_BRANCHE[0], BRANCHE_FIELD_DEFS, true)];
+    controles.elements_dynamique = [emptyDynamicEntry("Élément 1", ELEMENT_FIELD_DEFS, false)];
+    controles.releve_config = { mode: "Floating", saisieParGroupe: false, tailleGroupe: 2, toleranceBasse: 3, toleranceHaute: 3 };
+    controles.photos_utilisation = { l1: [], l2: [], l3: [] };
+    controles.pieces_usure_ups = {
+      batteries: [emptyModeleUsure(null)],
+      condensateursAlternatifs: [emptyModeleUsure(6)],
+      condensateursContinus: [emptyModeleUsure(5)],
+      ventilateurs: [emptyModeleUsure(4)],
+    };
+  }
   return {
     id: uid(),
     type,
+    localId: "",
     identification,
     controles,
     etatFinal: "Conforme",
     remarques: "",
     photos: [],
     courbeFiles: [],
+    courbeDechargeFiles: [],
     rapportLaboFiles: [],
   };
 }
@@ -673,10 +1009,10 @@ function emptySite() {
     nom: "",
     client: "",
     local: "",
+    locaux: [emptyLocal("Local principal")],
     rapport: {
       date: todayISO(), dateFin: "", intervenant: "", intervenantsSupplementaires: [], heureArrivee: "", heureFin: "", journeesSupplementaires: [],
-      marque: "", anneeMiseEnService: "", courantAssigne: "", tensionAssignee: "", nombreEquipements: "",
-      typeDePoste: "", regimeNeutre: "",
+      nombreEquipements: "",
       environnementEtat: "Conforme (R.A.S)", environnementRemarque: "",
       fonctionnementEtat: "Conforme (R.A.S)", fonctionnementRemarque: "",
       prochaineMaintenance: next.toISOString().slice(0, 10),
@@ -685,6 +1021,9 @@ function emptySite() {
     },
     equipements: [],
   };
+}
+function emptyLocal(nom) {
+  return { id: uid(), nom: nom || "", typeDePoste: "", regimeNeutre: "", marque: "", anneeMiseEnService: "" };
 }
 
 function worstRank(labels) { return labels.reduce((worst, l) => Math.max(worst, RANK_OF[l] ?? 0), 0); }
@@ -757,7 +1096,7 @@ function prefillInterventionFromSite(site, eq, numeroRI) {
     heureFin: site.rapport.heureFin || "",
     equipement: {
       type: eq ? eq.type : "",
-      constructeur: idf.marque || site.rapport.marque || "",
+      constructeur: idf.marque || (site.locaux || []).find((l) => l.id === (eq && eq.localId))?.marque || "",
       modele: idf.typeCellule || idf.typeTransformateur || idf.typeDisjoncteur || "",
       numeroSerie: idf.numeroSerie || idf.numeroSerieDisjoncteur || idf.numeroSerieContacteur || idf.numeroSerieRelais || "",
       localisation: site.local,
@@ -771,6 +1110,26 @@ function prefillInterventionFromSite(site, eq, numeroRI) {
   };
 }
 
+// Repère les champs importants manquants avant de générer un rapport Word — simple avertissement,
+// non bloquant : l'utilisateur choisit de continuer ou de compléter d'abord.
+function siteExportWarnings(site) {
+  const w = [];
+  if (!site.nom) w.push("Le nom du site n'est pas renseigné");
+  if (!site.client) w.push("La dénomination client n'est pas renseignée");
+  if (!site.rapport.date) w.push("La date d'intervention n'est pas renseignée");
+  if (!site.rapport.intervenant) w.push("L'intervenant principal n'est pas renseigné");
+  if (site.equipements.length === 0) w.push("Aucun équipement n'a été ajouté sur ce site");
+  return w;
+}
+function ivExportWarnings(iv) {
+  const w = [];
+  if (!iv.client) w.push("Le client n'est pas renseigné");
+  if (!iv.site) w.push("Le site n'est pas renseigné");
+  if (!iv.date) w.push("La date d'intervention n'est pas renseignée");
+  if (!iv.technicien) w.push("Le technicien principal n'est pas renseigné");
+  if (!iv.validation.signatureClient && !iv.validation.signatureHT) w.push("Aucune signature (client ou technicien) n'a été enregistrée");
+  return w;
+}
 function overallRank(site) {
   return worstRank([site.rapport.environnementEtat, site.rapport.fonctionnementEtat, ...site.equipements.map((e) => e.etatFinal)]);
 }
@@ -1606,6 +1965,16 @@ function RapportTab({ site, update }) {
     update((d) => ({ ...d, rapport: { ...d.rapport, journeesSupplementaires: d.rapport.journeesSupplementaires.filter((j) => j.id !== id) } }));
   }
 
+  function addLocal() {
+    update((d) => ({ ...d, locaux: [...(d.locaux || []), emptyLocal("")] }));
+  }
+  function setLocalField(id, k, v) {
+    update((d) => ({ ...d, locaux: d.locaux.map((l) => (l.id === id ? { ...l, [k]: v } : l)) }));
+  }
+  function removeLocal(id) {
+    update((d) => ({ ...d, locaux: d.locaux.filter((l) => l.id !== id) }));
+  }
+
   function appliquerPeriodicite(annees) {
     const base = r.date ? parseIso(r.date) : new Date();
     const d = new Date(base);
@@ -1682,18 +2051,8 @@ function RapportTab({ site, update }) {
 
       <SectionTitle>Caractéristiques de l'installation</SectionTitle>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 14, marginBottom: 24 }}>
-        <Field label="Marque">
-          <Combo value={r.marque} onChange={(v) => set("marque", v)} options={LISTE_MARQUES} listId={`${site.id}-marque`} />
-        </Field>
-        <Field label="Année de mise en service"><TextInput value={r.anneeMiseEnService} onChange={(e) => set("anneeMiseEnService", e.target.value)} /></Field>
         <Field label="Nombre d'équipements"><TextInput value={site.equipements.length} disabled style={{ opacity: 0.7 }} /></Field>
-        <Field label="Type de poste">
-          <Combo value={r.typeDePoste} onChange={(v) => set("typeDePoste", v)} options={LISTE_TYPE_POSTE} listId={`${site.id}-typeposte`} />
-        </Field>
-        <Field label="Régime de neutre" span={2}>
-          <Combo value={r.regimeNeutre} onChange={(v) => set("regimeNeutre", v)} options={LISTE_REGIME_NEUTRE} listId={`${site.id}-regimeneutre`} placeholder="HTA et/ou BT selon le site" />
-        </Field>
-        <Field label="Prochaine maintenance recommandée avant" span={2}>
+        <Field label="Prochaine maintenance recommandée avant" span={3}>
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
             <TextInput type="date" value={r.prochaineMaintenance} onChange={(e) => set("prochaineMaintenance", e.target.value)} style={{ flex: "1 1 160px" }} />
             <span style={{ fontSize: 11, color: "#8B96A3", whiteSpace: "nowrap" }}>ou dans</span>
@@ -1703,6 +2062,39 @@ function RapportTab({ site, update }) {
             </select>
           </div>
         </Field>
+      </div>
+
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+        <SectionTitle>Locaux</SectionTitle>
+        <button onClick={addLocal} style={btnGhost(BRAND.blue)}><Plus size={13} /> Ajouter un local</button>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 24 }}>
+        {(site.locaux || []).map((l, i) => (
+          <Card key={l.id} style={{ background: "#F7F8FA" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10, flexWrap: "wrap", gap: 8 }}>
+              <div style={{ flex: "1 1 200px" }}>
+                <TextInput value={l.nom} onChange={(e) => setLocalField(l.id, "nom", e.target.value)} placeholder="Nom du local (ex. Local HTA)" />
+              </div>
+              {site.locaux.length > 1 && (
+                <button onClick={() => removeLocal(l.id)} style={{ background: "none", border: "none", color: "#EF4444", cursor: "pointer", padding: 4 }} title="Retirer ce local">
+                  <Trash2 size={15} />
+                </button>
+              )}
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 14 }}>
+              <Field label="Marque">
+                <Combo value={l.marque} onChange={(v) => setLocalField(l.id, "marque", v)} options={LISTE_MARQUES} listId={`${l.id}-marque`} />
+              </Field>
+              <Field label="Année de mise en service"><TextInput value={l.anneeMiseEnService} onChange={(e) => setLocalField(l.id, "anneeMiseEnService", e.target.value)} /></Field>
+              <Field label="Type de poste">
+                <Combo value={l.typeDePoste} onChange={(v) => setLocalField(l.id, "typeDePoste", v)} options={LISTE_TYPE_POSTE} listId={`${l.id}-typeposte`} />
+              </Field>
+              <Field label="Régime de neutre">
+                <Combo value={l.regimeNeutre} onChange={(v) => setLocalField(l.id, "regimeNeutre", v)} options={LISTE_REGIME_NEUTRE} listId={`${l.id}-regimeneutre`} placeholder="HTA et/ou BT" />
+              </Field>
+            </div>
+          </Card>
+        ))}
       </div>
 
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
@@ -1777,10 +2169,11 @@ function MiniComputed({ label, unit, value }) {
   );
 }
 function MiniInput({ label, unit, value, onChange, width, validState }) {
-  const borderColor = validState === "ok" ? "#0F8A5F" : validState === "bad" ? "#C0392B" : "#D8DEE5";
+  const borderColor = validState === "ok" ? "#0F8A5F" : validState === "warn" ? "#B5730A" : validState === "bad" ? "#C0392B" : "#D8DEE5";
+  const bg = validState === "ok" ? "#F0FBF6" : validState === "warn" ? "#FDF6EC" : validState === "bad" ? "#FDF1F0" : inputStyle.background;
   return (
     <MiniField label={label} unit={unit}>
-      <input type="number" step="any" value={value ?? ""} onChange={(e) => onChange(e.target.value)} style={{ ...inputStyle, width: width || 70, padding: "5px 7px", fontSize: 12, border: `1.5px solid ${borderColor}`, background: validState === "ok" ? "#F0FBF6" : validState === "bad" ? "#FDF1F0" : inputStyle.background }} />
+      <input type="number" step="any" value={value ?? ""} onChange={(e) => onChange(e.target.value)} style={{ ...inputStyle, width: width || 70, padding: "5px 7px", fontSize: 12, border: `1.5px solid ${borderColor}`, background: bg }} />
     </MiniField>
   );
 }
@@ -1847,6 +2240,495 @@ function AnalyseHuilePanel({ eq, update, idPrefix }) {
             </div>
           );
         })}
+      </div>
+    </Card>
+  );
+}
+
+// Panneau générique : une liste d'éléments avec un intitulé au choix (liste + saisie libre),
+// des champs propres, et un bouton pour en ajouter d'autres. Réutilisé pour les contrôles TC
+// et les organes internes, afin d'alléger l'affichage (un seul élément par défaut).
+// Gradins de la batterie de compensation : panneau dédié (plus riche que la liste générique) —
+// courant théorique calculé à partir de Q et U, validation des courants mesurés par tolérance,
+// intégration de la self (mA / fréquence), et suivi interne des pièces d'usure (contacteur,
+// fusibles, condensateurs) avec année de mise en service — non repris tel quel dans le rapport
+// client, qui n'affiche que le type de pièce et l'année de remplacement prévue.
+function GradinsPanel({ eq, update, idPrefix }) {
+  const entries = eq.controles.gradins_dynamique || [];
+  const setEntries = (next) => update({ ...eq, controles: { ...eq.controles, gradins_dynamique: next } });
+  const setEntry = (id, patch) => setEntries(entries.map((e) => (e.id === id ? { ...e, ...patch } : e)));
+  const setField = (id, k, v) => { const e = entries.find((x) => x.id === id); setEntry(id, { fields: { ...e.fields, [k]: v } }); };
+  const addEntry = () => {
+    const used = entries.map((e) => e.label);
+    const remaining = LISTE_NOM_GRADIN.filter((t) => !used.includes(t));
+    setEntries([...entries, emptyDynamicEntry(remaining[0] || "", GRADIN_FIELD_DEFS, true)]);
+  };
+  const duplicateEntry = (e) => {
+    const copy = JSON.parse(JSON.stringify(e));
+    copy.id = uid();
+    const used = entries.map((x) => x.label);
+    const remaining = LISTE_NOM_GRADIN.filter((t) => !used.includes(t));
+    copy.label = remaining[0] || "";
+    setEntries([...entries, copy]);
+  };
+  const removeEntry = (id) => setEntries(entries.filter((e) => e.id !== id));
+
+  return (
+    <Card style={{ marginBottom: 14 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+        <SectionTitle>Gradins</SectionTitle>
+        <button onClick={addEntry} style={btnGhost(BRAND.blue)}><Plus size={13} /> Ajouter un gradin</button>
+      </div>
+      {entries.length === 0 ? (
+        <div style={{ textAlign: "center", padding: 18, color: "#8B96A3", fontSize: 12.5, border: "1px dashed #D8DEE5", borderRadius: 10 }}>Aucun gradin</div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          {entries.map((e) => {
+            const used = entries.filter((x) => x.id !== e.id).map((x) => x.label);
+            const options = LISTE_NOM_GRADIN.filter((t) => !used.includes(t));
+            const iTheo = gradinIntensiteTheorique(e.fields.q, e.fields.u);
+            const tolMin = iTheo !== null ? Math.round(iTheo * 0.9 * 100) / 100 : null;
+            const tolMax = iTheo !== null ? Math.round(iTheo * 1.1 * 100) / 100 : null;
+            const iStatus = (v) => (iTheo === null ? null : toleranceState(v, tolMin, tolMax));
+            const freqReseau = numOf(eq.controles.mesures_amont?.frequence_amont?.fields?.hz) || 50;
+            const c1 = gradinCapacite(e.fields.i1, e.fields.u, freqReseau);
+            const c2 = gradinCapacite(e.fields.i2, e.fields.u, freqReseau);
+            const c3 = gradinCapacite(e.fields.i3, e.fields.u, freqReseau);
+            const q1 = gradinQMesuree(e.fields.i1, e.fields.u);
+            const q2 = gradinQMesuree(e.fields.i2, e.fields.u);
+            const q3 = gradinQMesuree(e.fields.i3, e.fields.u);
+            const qMesures = [q1, q2, q3].filter((v) => v !== null);
+            const qTotalMesure = qMesures.length ? Math.round((qMesures.reduce((a, b) => a + b, 0) / qMesures.length) * 100) / 100 : null;
+            const qStatus = qTotalMesure === null ? null : toleranceState(e.fields.q, Math.round(qTotalMesure * 0.9 * 100) / 100, Math.round(qTotalMesure * 1.1 * 100) / 100);
+            return (
+              <div key={e.id} style={{ padding: "12px 0", borderBottom: "1px solid #E2E6EB" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+                  <div style={{ flex: "1 1 160px" }}>
+                    <Combo value={e.label} onChange={(v) => setEntry(e.id, { label: v })} options={options} listId={`${idPrefix}-${e.id}`} placeholder="Nom du gradin" />
+                  </div>
+                  <button onClick={() => duplicateEntry(e)} style={{ background: "none", border: "none", color: "#0A5DA8", cursor: "pointer", padding: 4 }} title="Dupliquer ce gradin">
+                    <Copy size={15} />
+                  </button>
+                  {entries.length > 1 && (
+                    <button onClick={() => removeEntry(e.id)} style={{ background: "none", border: "none", color: "#EF4444", cursor: "pointer", padding: 4 }} title="Retirer">
+                      <Trash2 size={15} />
+                    </button>
+                  )}
+                </div>
+
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(105px, 1fr))", gap: 10, marginBottom: 8 }}>
+                  {[
+                    { phase: "L1", i: "i1", iVal: e.fields.i1, c: c1, q: q1 },
+                    { phase: "L2", i: "i2", iVal: e.fields.i2, c: c2, q: q2 },
+                    { phase: "L3", i: "i3", iVal: e.fields.i3, c: c3, q: q3 },
+                  ].map((ph) => (
+                    <div key={ph.phase} style={{ border: "1px solid #E2E6EB", borderRadius: 8, padding: 8 }}>
+                      <div style={{ fontSize: 10.5, fontWeight: 700, color: "#8B96A3", marginBottom: 6 }}>{ph.phase}</div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                        <MiniInput label="I" unit="A" value={ph.iVal} onChange={(v) => setField(e.id, ph.i, v)} validState={iStatus(ph.iVal)} />
+                        <MiniComputed label="C" unit="µF" value={ph.c} />
+                        <MiniComputed label="Q" unit="kVAR" value={ph.q} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 8 }}>
+                  <MiniInput label="Q" unit="kVAR" value={e.fields.q} onChange={(v) => setField(e.id, "q", v)} validState={qStatus} />
+                  <MiniInput label="U" unit="V" value={e.fields.u} onChange={(v) => setField(e.id, "u", v)} />
+                  <MiniComputed label="I théorique" unit="A" value={iTheo} />
+                  <MiniComputed label="Q total mesuré" unit="kVAR" value={qTotalMesure} />
+                </div>
+
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 8 }}>
+                  <MiniInput label="Self" unit="mA" value={e.fields.selfMA} onChange={(v) => setField(e.id, "selfMA", v)} />
+                  <MiniInput label="Self" unit="Hz" value={e.fields.selfFrequence} onChange={(v) => setField(e.id, "selfFrequence", v)} />
+                </div>
+
+                <div style={{ fontSize: 10.5, fontWeight: 700, color: "#8B96A3", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>
+                  Pièces d'usure (usage interne — non affiché au client)
+                </div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 8 }}>
+                  <MiniInput label="Contacteur — Réf." value={e.fields.contacteurRef} onChange={(v) => setField(e.id, "contacteurRef", v)} width={110} />
+                  <MiniInput label="Contacteur — MES" value={e.fields.contacteurAnnee} onChange={(v) => setField(e.id, "contacteurAnnee", v)} width={70} />
+                  <MiniInput label="Fusibles — Réf." value={e.fields.fusiblesRef} onChange={(v) => setField(e.id, "fusiblesRef", v)} width={110} />
+                  <MiniInput label="Fusibles — MES" value={e.fields.fusiblesAnnee} onChange={(v) => setField(e.id, "fusiblesAnnee", v)} width={70} />
+                  <MiniInput label="Condensateurs — Réf." value={e.fields.condensateursRef} onChange={(v) => setField(e.id, "condensateursRef", v)} width={110} />
+                  <MiniInput label="Condensateurs — MES" value={e.fields.condensateursAnnee} onChange={(v) => setField(e.id, "condensateursAnnee", v)} width={70} />
+                </div>
+
+                <div style={{ marginBottom: 8 }}>
+                  <FileGallery files={e.photos || []} onChange={(files) => setEntry(e.id, { photos: files })} idPrefix={`${idPrefix}-${e.id}-photo`} />
+                </div>
+
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                  <input placeholder="Action" value={e.action} onChange={(ev) => setEntry(e.id, { action: ev.target.value })} style={{ ...inputStyle, width: 150, padding: "5px 7px", fontSize: 12 }} />
+                  <Select value={e.etat} onChange={(ev) => setEntry(e.id, { etat: ev.target.value })} style={{ width: 120, padding: "5px 7px", fontSize: 12 }}>
+                    {EQUIP_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+                  </Select>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+// Relevé des tensions batterie (Onduleur) : un élément par ligne, avec classification automatique
+// par rapport à la moyenne mesurée (Normal / À surveiller au-delà de ±3%, Critique au-delà de ±10%)
+// — reprend le principe du contrôle "déf./crit." du fichier Excel d'origine.
+// Génère les emplacements de relevé à partir du nombre de branches et de blocs par branche
+// déclarés dans la fiche "Batterie" — cohérent avec ce qui est renseigné dans le rapport.
+function regenererElementsBatterie(eq) {
+  const c = eq.controles.batterie_id?.batterie_caracteristiques?.fields || {};
+  const nbBranches = Math.max(1, Math.round(numOf(c.nombreBranches) || 1));
+  const nbBlocs = Math.max(1, Math.round(numOf(c.nombreBlocsParBranche) || 1));
+  const cfg = eq.controles.releve_config || {};
+  const taille = cfg.saisieParGroupe ? Math.max(1, Math.round(numOf(cfg.tailleGroupe) || 1)) : 1;
+  const nbParBranche = Math.ceil(nbBlocs / taille);
+  const entries = [];
+  for (let b = 1; b <= nbBranches; b++) {
+    for (let g = 1; g <= nbParBranche; g++) {
+      const label = taille > 1
+        ? `Branche ${b} — Groupe ${g} (élts ${(g - 1) * taille + 1}-${Math.min(g * taille, nbBlocs)})`
+        : `Branche ${b} — Élément ${g}`;
+      entries.push(emptyDynamicEntry(label, ELEMENT_FIELD_DEFS, false));
+    }
+  }
+  return entries;
+}
+function ElementsBatteriePanel({ eq, update, idPrefix }) {
+  const entries = eq.controles.elements_dynamique || [];
+  const cfg = eq.controles.releve_config || { mode: "Floating", saisieParGroupe: false, tailleGroupe: 2, toleranceBasse: 3, toleranceHaute: 3 };
+  const setEntries = (next) => update({ ...eq, controles: { ...eq.controles, elements_dynamique: next } });
+  const setCfg = (patch) => update({ ...eq, controles: { ...eq.controles, releve_config: { ...cfg, ...patch } } });
+  const setEntry = (id, patch) => setEntries(entries.map((e) => (e.id === id ? { ...e, ...patch } : e)));
+  const setField = (id, k, v) => { const e = entries.find((x) => x.id === id); setEntry(id, { fields: { ...e.fields, [k]: v } }); };
+  const addEntry = () => setEntries([...entries, emptyDynamicEntry(`Élément ${entries.length + 1}`, ELEMENT_FIELD_DEFS, false)]);
+  const removeEntry = (id) => setEntries(entries.filter((e) => e.id !== id));
+  const regenerer = () => setEntries(regenererElementsBatterie(eq));
+
+  const c = eq.controles.batterie_id?.batterie_caracteristiques?.fields || {};
+  const nbBranches = numOf(c.nombreBranches), nbBlocs = numOf(c.nombreBlocsParBranche);
+  const nbAttendu = nbBranches && nbBlocs ? nbBranches * Math.ceil(nbBlocs / (cfg.saisieParGroupe ? Math.max(1, numOf(cfg.tailleGroupe) || 1) : 1)) : null;
+
+  const valeurs = entries.map((e) => numOf(e.fields.tension)).filter((v) => v !== null);
+  const moyenne = valeurs.length ? Math.round((valeurs.reduce((a, b) => a + b, 0) / valeurs.length) * 1000) / 1000 : null;
+  const nbDefectueux = entries.filter((e) => elementBatterieStatus(e.fields.tension, moyenne, cfg.toleranceBasse, cfg.toleranceHaute) === "bad").length;
+
+  return (
+    <Card style={{ marginBottom: 14 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10, flexWrap: "wrap", gap: 8 }}>
+        <SectionTitle>Relevé des tensions batterie</SectionTitle>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={regenerer} style={btnGhost(BRAND.blue)} title="Régénère les emplacements selon le nombre de branches / blocs déclaré"><RefreshCw size={13} /> Régénérer</button>
+          <button onClick={addEntry} style={btnGhost(BRAND.blue)}><Plus size={13} /> Ajouter</button>
+        </div>
+      </div>
+
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 10 }}>
+        <MiniSelect label="Mode" options={["Floating", "Décharge", "Repos"]} value={cfg.mode} onChange={(v) => setCfg({ mode: v })} />
+        <MiniSelect label="Saisie" options={["Par élément", "Par groupe"]} value={cfg.saisieParGroupe ? "Par groupe" : "Par élément"} onChange={(v) => setCfg({ saisieParGroupe: v === "Par groupe" })} />
+        {cfg.saisieParGroupe && <MiniInput label="Éléments / groupe" value={cfg.tailleGroupe} onChange={(v) => setCfg({ tailleGroupe: v })} width={70} />}
+        <MiniInput label="Tolérance basse" unit="%" value={cfg.toleranceBasse} onChange={(v) => setCfg({ toleranceBasse: v })} width={62} />
+        <MiniInput label="Tolérance haute" unit="%" value={cfg.toleranceHaute} onChange={(v) => setCfg({ toleranceHaute: v })} width={62} />
+      </div>
+
+      <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "center", marginBottom: 12, fontSize: 12.5 }}>
+        <span style={{ color: "#5B6B7D" }}>Moyenne : <b style={{ color: "#1A1F26" }}>{moyenne ?? "—"} V</b></span>
+        {nbAttendu !== null && (
+          <span style={{ color: entries.length === nbAttendu ? "#0F8A5F" : "#B5730A" }}>
+            {entries.length} / {nbAttendu} emplacement(s) attendu(s) ({nbBranches} branche(s) × {nbBlocs} bloc(s))
+          </span>
+        )}
+        {nbDefectueux > 0 && <span style={{ color: "#C0392B", fontWeight: 700 }}>{nbDefectueux} élément(s) défectueux</span>}
+      </div>
+
+      {entries.length === 0 ? (
+        <div style={{ textAlign: "center", padding: 18, color: "#8B96A3", fontSize: 12.5, border: "1px dashed #D8DEE5", borderRadius: 10 }}>Aucun élément — utilisez "Régénérer" pour créer les emplacements</div>
+      ) : (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 8 }}>
+          {entries.map((e) => (
+            <div key={e.id} style={{ border: "1px solid #E2E6EB", borderRadius: 8, padding: 8 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                <input value={e.label} onChange={(ev) => setEntry(e.id, { label: ev.target.value })} style={{ ...inputStyle, border: "none", padding: 0, fontSize: 11, fontWeight: 700, color: "#5B6B7D", width: "82%" }} />
+                <button onClick={() => removeEntry(e.id)} style={{ background: "none", border: "none", color: "#EF4444", cursor: "pointer", padding: 2 }} title="Retirer">
+                  <Trash2 size={13} />
+                </button>
+              </div>
+              <MiniInput label="U" unit="V" value={e.fields.tension} onChange={(v) => setField(e.id, "tension", v)} validState={elementBatterieStatus(e.fields.tension, moyenne, cfg.toleranceBasse, cfg.toleranceHaute)} width={62} />
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function DynamicListPanel({ title, entries, onChange, typeOptions, fieldDefs, withActionEtat, idPrefix }) {
+  const setEntry = (id, patch) => onChange(entries.map((e) => (e.id === id ? { ...e, ...patch } : e)));
+  const setField = (id, k, v) => { const e = entries.find((x) => x.id === id); setEntry(id, { fields: { ...e.fields, [k]: v } }); };
+  const addEntry = () => {
+    const used = entries.map((e) => e.label);
+    const remaining = typeOptions.filter((t) => !used.includes(t));
+    onChange([...entries, emptyDynamicEntry(remaining[0] || "", fieldDefs, withActionEtat)]);
+  };
+  const removeEntry = (id) => onChange(entries.filter((e) => e.id !== id));
+
+  return (
+    <Card style={{ marginBottom: 14 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+        <SectionTitle>{title}</SectionTitle>
+        <button onClick={addEntry} style={btnGhost(BRAND.blue)}><Plus size={13} /> Ajouter</button>
+      </div>
+      {entries.length === 0 ? (
+        <div style={{ textAlign: "center", padding: 18, color: "#8B96A3", fontSize: 12.5, border: "1px dashed #D8DEE5", borderRadius: 10 }}>Aucun élément</div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          {entries.map((e) => {
+            const used = entries.filter((x) => x.id !== e.id).map((x) => x.label);
+            const options = typeOptions.filter((t) => !used.includes(t));
+            return (
+              <div key={e.id} style={{ padding: "10px 0", borderBottom: "1px solid #E2E6EB" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+                  <div style={{ flex: "1 1 200px" }}>
+                    <Combo value={e.label} onChange={(v) => setEntry(e.id, { label: v })} options={options} listId={`${idPrefix}-${e.id}`} placeholder="Type (ou saisie libre)" />
+                  </div>
+                  {entries.length > 1 && (
+                    <button onClick={() => removeEntry(e.id)} style={{ background: "none", border: "none", color: "#EF4444", cursor: "pointer", padding: 4 }} title="Retirer">
+                      <Trash2 size={15} />
+                    </button>
+                  )}
+                </div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                  {fieldDefs.map((f) =>
+                    f.options ? (
+                      <MiniCombo key={f.key} label={f.label} options={f.options} value={e.fields[f.key]} onChange={(v) => setField(e.id, f.key, v)} listId={`${idPrefix}-${e.id}-${f.key}`} />
+                    ) : (
+                      <MiniInput key={f.key} label={f.label} unit={f.unit} value={e.fields[f.key]} onChange={(v) => setField(e.id, f.key, v)} />
+                    )
+                  )}
+                  {withActionEtat && (
+                    <>
+                      <input placeholder="Action" value={e.action} onChange={(ev) => setEntry(e.id, { action: ev.target.value })} style={{ ...inputStyle, width: 150, padding: "5px 7px", fontSize: 12 }} />
+                      <Select value={e.etat} onChange={(ev) => setEntry(e.id, { etat: ev.target.value })} style={{ width: 120, padding: "5px 7px", fontSize: 12 }}>
+                        {EQUIP_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+                      </Select>
+                    </>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+// Synthèse des échéances de remplacement des pièces d'usure — calculée à partir des années de
+// mise en service saisies sur chaque gradin et sur la ventilation. C'est cette synthèse (type de
+// pièce + année de remplacement) qui apparaît côté client, pas les références ni les années brutes.
+// Puissance apparente : S = U × I × √3 / 1000 (kVA), à partir des moyennes calculées d'une section de mesures réseau.
+// Autonomie théorique (min) = énergie disponible (Ah × nb branches en parallèle × V) ÷ puissance de décharge, × 60.
+function calcAutonomieTheorique(eq) {
+  const c = eq.controles.batterie_id?.batterie_caracteristiques?.fields || {};
+  const capaciteBranche = numOf(c.capacite);
+  const nbBranches = numOf(c.nombreBranches);
+  const tensionElt = numOf(c.tensionNominale);
+  const nbBlocs = numOf(c.nombreBlocsParBranche);
+  const puissance = numOf(eq.controles.essai_decharge?.decharge_puissance_constante?.fields?.puissance);
+  if (capaciteBranche === null || nbBranches === null || tensionElt === null || nbBlocs === null || !puissance) return null;
+  const capaciteTotale = capaciteBranche * nbBranches;
+  const tensionTotale = tensionElt * nbBlocs;
+  const energieWh = capaciteTotale * tensionTotale;
+  return Math.round((energieWh / (puissance * 1000)) * 60 * 10) / 10;
+}
+function calcPuissanceApparente(eq, sectionKey) {
+  const u = numOf(eq.controles[sectionKey]?.[`tension_${sectionKey === "mesures_reseau_normal" ? "normal" : "secours"}`]?.fields?.moyenne);
+  const i = numOf(eq.controles[sectionKey]?.[`courant_${sectionKey === "mesures_reseau_normal" ? "normal" : "secours"}`]?.fields?.moyenne);
+  if (u === null || i === null) return null;
+  return Math.round(((u * i * Math.sqrt(3)) / 1000) * 100) / 100;
+}
+function calcPuissanceApparenteNormale(eq) { return calcPuissanceApparente(eq, "mesures_reseau_normal"); }
+// Tensions batterie théoriques (nominale / égalisation / seuil de fin de décharge), calculées à
+// partir de la technologie, de la tension nominale par élément et du nombre de blocs par branche
+// — reprend les coefficients du fichier Excel (1,2 V/élt et seuil 1,1 V/élt pour le Cd-Ni ; 2 V/élt
+// et seuil 1,7 V/élt pour les autres technologies ; égalisation = seuil × 1,05).
+// "Tension nominale" saisie = tension du BLOC batterie (ex. 12 V). Un bloc de 12 V contient 6
+// cellules de 2 V (norme plomb-acide) ; pour le Cd-Ni, cellule de référence 1,2 V. Le nombre de
+// cellules par bloc se déduit donc de la tension du bloc, puis se multiplie par le nombre de blocs
+// par branche pour obtenir le nombre total d'éléments (cellules) sur lequel portent les calculs.
+function calcTensionsBatterieTheoriques(eq) {
+  const c = eq.controles.batterie_id?.batterie_caracteristiques?.fields || {};
+  const technologie = c.technologie;
+  const tensionBloc = numOf(c.tensionNominale);
+  const nbBlocs = numOf(c.nombreBlocsParBranche);
+  if (tensionBloc === null || nbBlocs === null) return null;
+  const estCdNi = technologie === "Cd-Ni";
+  const tensionCellule = estCdNi ? 1.2 : 2;
+  const finDechargeCoef = estCdNi ? 1.1 : 1.7;
+  const egalisationCoef = Math.round(finDechargeCoef * 1.05 * 1000) / 1000;
+  const nbCellulesParBloc = Math.round((tensionBloc / tensionCellule) * 100) / 100;
+  const nbElementsTotal = Math.round(nbCellulesParBloc * nbBlocs * 100) / 100;
+  return {
+    nbCellulesParBloc,
+    nbElementsTotal,
+    nominale: Math.round(nbElementsTotal * tensionCellule * 100) / 100,
+    egalisation: Math.round(nbElementsTotal * egalisationCoef * 100) / 100,
+    finDecharge: Math.round(nbElementsTotal * finDechargeCoef * 100) / 100,
+  };
+}
+function calcPiecesUsure(eq) {
+  const lignes = [];
+  const anneeRemplacement = (annee, delai) => { const a = numOf(annee); return a === null ? null : Math.round(a) + delai; };
+  (eq.controles.gradins_dynamique || []).filter((g) => g.label).forEach((g) => {
+    if (g.fields.contacteurAnnee) lignes.push({ type: `Contacteur — ${g.label}`, annee: anneeRemplacement(g.fields.contacteurAnnee, 10) });
+    if (g.fields.fusiblesAnnee) lignes.push({ type: `Fusibles — ${g.label}`, annee: anneeRemplacement(g.fields.fusiblesAnnee, 10) });
+    if (g.fields.condensateursAnnee) lignes.push({ type: `Condensateurs — ${g.label}`, annee: anneeRemplacement(g.fields.condensateursAnnee, 10) });
+  });
+  const ventilationAnnee = eq.controles.usure?.ventilation_usure?.fields?.annee;
+  if (ventilationAnnee) lignes.push({ type: "Ventilation", annee: anneeRemplacement(ventilationAnnee, 4) });
+  return lignes;
+}
+function AutonomieCalculee({ eq }) {
+  const a = calcAutonomieTheorique(eq);
+  if (a === null) return null;
+  return (
+    <Card style={{ marginBottom: 14 }}>
+      <div style={{ fontSize: 12.5, color: "#5B6B7D" }}>
+        Autonomie avec la charge mesurée (calculée à partir de la puissance de décharge et des caractéristiques batterie) : <b style={{ color: "#1A1F26" }}>{a} min</b>
+      </div>
+    </Card>
+  );
+}
+function PuissanceApparenteCalculee({ eq, sectionKey }) {
+  const s = calcPuissanceApparente(eq, sectionKey);
+  if (s === null) return null;
+  return (
+    <Card style={{ marginBottom: 14 }}>
+      <div style={{ fontSize: 12.5, color: "#5B6B7D" }}>
+        Puissance apparente calculée (S = U × I × √3) : <b style={{ color: "#1A1F26" }}>{s} kVA</b>
+      </div>
+    </Card>
+  );
+}
+function TensionsBatterieTheoriques({ eq }) {
+  const t = calcTensionsBatterieTheoriques(eq);
+  if (!t) return null;
+  return (
+    <Card style={{ marginBottom: 14 }}>
+      <SectionTitle>Valeurs théoriques calculées</SectionTitle>
+      <div style={{ fontSize: 11.5, color: "#8B96A3", marginBottom: 8 }}>
+        {t.nbCellulesParBloc} cellule(s) / bloc × blocs par branche = {t.nbElementsTotal} élément(s) au total
+      </div>
+      <div style={{ display: "flex", gap: 16, flexWrap: "wrap", fontSize: 12.5 }}>
+        <span style={{ color: "#5B6B7D" }}>Tension nominale : <b style={{ color: "#1A1F26" }}>{t.nominale} V</b></span>
+        <span style={{ color: "#5B6B7D" }}>Tension d'égalisation : <b style={{ color: "#1A1F26" }}>{t.egalisation} V</b></span>
+        <span style={{ color: "#5B6B7D" }}>Seuil de fin de décharge (critique) : <b style={{ color: "#1A1F26" }}>{t.finDecharge} V</b></span>
+      </div>
+    </Card>
+  );
+}
+// Pièces d'usure Onduleur : saisie par catégorie (description/marque/modèle/quantité/année de mise
+// en service/durée de vie), avec bouton pour ajouter un modèle différent par catégorie. Usage
+// interne uniquement — seule la synthèse des échéances (calcEcheancesUsureUPS) va dans le rapport.
+function PiecesUsureUPSPanel({ eq, update }) {
+  const data = eq.controles.pieces_usure_ups || {};
+  const setCategorie = (catKey, modeles) => update({ ...eq, controles: { ...eq.controles, pieces_usure_ups: { ...data, [catKey]: modeles } } });
+  const batterieInfo = eq.controles.batterie_id?.batterie_caracteristiques?.fields || {};
+  const quantiteBatteries = (() => {
+    const nb = numOf(batterieInfo.nombreBranches), nblocs = numOf(batterieInfo.nombreBlocsParBranche);
+    return nb !== null && nblocs !== null ? nb * nblocs : "";
+  })();
+
+  return (
+    <>
+      {CATEGORIES_USURE_UPS.map((cat) => {
+        const modeles = data[cat.key] || [];
+        const setModele = (id, patch) => setCategorie(cat.key, modeles.map((m) => (m.id === id ? { ...m, ...patch } : m)));
+        const addModele = () => setCategorie(cat.key, [...modeles, emptyModeleUsure(cat.dureeDefaut)]);
+        const removeModele = (id) => setCategorie(cat.key, modeles.filter((m) => m.id !== id));
+        return (
+          <Card key={cat.key} style={{ marginBottom: 14 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+              <SectionTitle>{cat.label}</SectionTitle>
+              <button onClick={addModele} style={btnGhost(BRAND.blue)}><Plus size={13} /> Ajouter un modèle</button>
+            </div>
+            {cat.key === "batteries" && (
+              <div style={{ fontSize: 11.5, color: "#8B96A3", marginBottom: 8 }}>Le premier modèle reprend automatiquement marque, type de bloc et quantité depuis la fiche "Batterie" ci-dessus.</div>
+            )}
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {modeles.map((m, idx) => {
+                const isAutoBatterie = cat.key === "batteries" && idx === 0;
+                return (
+                  <div key={m.id} style={{ padding: "10px 0", borderBottom: "1px solid #E2E6EB" }}>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                      {isAutoBatterie ? (
+                        <>
+                          <MiniField label="Marque"><div style={{ ...inputStyle, width: 100, padding: "5px 7px", fontSize: 12, background: "#F4F6F8", color: "#5B6B7D" }}>{batterieInfo.marque || "—"}</div></MiniField>
+                          <MiniField label="Modèle (type de bloc)"><div style={{ ...inputStyle, width: 120, padding: "5px 7px", fontSize: 12, background: "#F4F6F8", color: "#5B6B7D" }}>{batterieInfo.typeBloc || "—"}</div></MiniField>
+                          <MiniField label="Quantité"><div style={{ ...inputStyle, width: 60, padding: "5px 7px", fontSize: 12, background: "#F4F6F8", color: "#5B6B7D" }}>{quantiteBatteries || "—"}</div></MiniField>
+                        </>
+                      ) : (
+                        <>
+                          <MiniInput label="Description" value={m.description} onChange={(v) => setModele(m.id, { description: v })} width={130} />
+                          <MiniInput label="Marque" value={m.marque} onChange={(v) => setModele(m.id, { marque: v })} width={100} />
+                          <MiniInput label="Modèle" value={m.modele} onChange={(v) => setModele(m.id, { modele: v })} width={100} />
+                          <MiniInput label="Quantité" value={m.quantite} onChange={(v) => setModele(m.id, { quantite: v })} width={60} />
+                        </>
+                      )}
+                      <MiniInput label="Année MES" value={m.anneeMiseEnService} onChange={(v) => setModele(m.id, { anneeMiseEnService: v })} width={70} />
+                      <MiniInput label="Durée de vie" unit="ans" value={m.dureeVie} onChange={(v) => setModele(m.id, { dureeVie: v })} width={62} />
+                      {modeles.length > 1 && (
+                        <button onClick={() => removeModele(m.id)} style={{ background: "none", border: "none", color: "#EF4444", cursor: "pointer", padding: 4 }} title="Retirer">
+                          <Trash2 size={15} />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </Card>
+        );
+      })}
+      <PiecesUsureSyntheseUPS eq={eq} />
+    </>
+  );
+}
+function PiecesUsureSyntheseUPS({ eq }) {
+  const lignes = calcEcheancesUsureUPS(eq);
+  if (lignes.length === 0) return null;
+  return (
+    <Card style={{ marginBottom: 14 }}>
+      <SectionTitle>Échéances de remplacement prévues</SectionTitle>
+      <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+        {lignes.map((l, i) => (
+          <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid #E2E6EB", fontSize: 12.5 }}>
+            <span style={{ color: "#3E4A5C" }}>{l.type}</span>
+            <span style={{ fontWeight: 700, color: "#1A1F26" }}>{l.annee}</span>
+          </div>
+        ))}
+      </div>
+    </Card>
+  );
+}
+function PiecesUsureSynthese({ eq }) {
+  const lignes = calcPiecesUsure(eq);
+  if (lignes.length === 0) return null;
+  return (
+    <Card style={{ marginBottom: 14 }}>
+      <SectionTitle>Échéances de remplacement prévues</SectionTitle>
+      <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+        {lignes.map((l, i) => (
+          <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid #E2E6EB", fontSize: 12.5 }}>
+            <span style={{ color: "#3E4A5C" }}>{l.type}</span>
+            <span style={{ fontWeight: 700, color: "#1A1F26" }}>{l.annee ?? "—"}</span>
+          </div>
+        ))}
       </div>
     </Card>
   );
@@ -2104,7 +2986,7 @@ function collectAnomalies(eq) {
   return lines;
 }
 
-function EquipementCard({ eq, update, remove, removable = true }) {
+function EquipementCard({ eq, update, remove, removable = true, onDuplicate, locaux = [] }) {
   const [open, setOpen] = useState(true);
   const schema = SCHEMAS[eq.type];
   const setIdentification = (k, v) => update({ ...eq, identification: { ...eq.identification, [k]: v } });
@@ -2134,6 +3016,11 @@ function EquipementCard({ eq, update, remove, removable = true }) {
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }} onClick={(e) => e.stopPropagation()}>
           <StatusBadge label={eq.etatFinal} size="sm" gender={equipGender(eq.type)} />
+          {onDuplicate && (
+            <button onClick={onDuplicate} style={{ background: "none", border: "none", color: "#0A5DA8", cursor: "pointer", padding: 4 }} title="Dupliquer cet équipement">
+              <Copy size={15} />
+            </button>
+          )}
           {removable && (
             <button onClick={remove} style={{ background: "none", border: "none", color: "#EF4444", cursor: "pointer", padding: 4 }} title="Supprimer cet équipement">
               <Trash2 size={15} />
@@ -2144,6 +3031,15 @@ function EquipementCard({ eq, update, remove, removable = true }) {
 
       {open && (
         <div style={{ marginTop: 16 }}>
+          {locaux.length > 1 && (
+            <div style={{ marginBottom: 16, maxWidth: 260 }}>
+              <Field label="Local">
+                <Select value={eq.localId} onChange={(e) => update({ ...eq, localId: e.target.value })}>
+                  {locaux.map((l) => <option key={l.id} value={l.id}>{l.nom || "Local sans nom"}</option>)}
+                </Select>
+              </Field>
+            </div>
+          )}
           {schema.identification.length > 0 && (
             <div style={{ marginBottom: 16 }}>
               <SectionTitle>Identification</SectionTitle>
@@ -2204,6 +3100,13 @@ function EquipementCard({ eq, update, remove, removable = true }) {
               return null; // rendu conjointement par BRKReglagePanel ci-dessus
             }
             if (eq.type === "Disjoncteur BT" && sec.key === "courbe_declenchement") {
+              const tDisj = eq.controles.tests_disjoncteur;
+              const testEntriesLive = [
+                ["Surcharge longue", tDisj.test_surcharge_longue.etat],
+                ["Court-circuit temporisé", tDisj.test_cc_temporise.etat],
+                ["Instantané", tDisj.test_instantane.etat],
+              ];
+              const nonConformesLive = testEntriesLive.filter(([, etat]) => (RANK_OF[etat] ?? 0) > 0);
               return (
                 <SectionBlock
                   key={sec.key}
@@ -2216,7 +3119,20 @@ function EquipementCard({ eq, update, remove, removable = true }) {
                   onAddCustom={() => addCustomAction(sec.key)}
                   onChangeCustom={(id, patch) => changeCustomAction(sec.key, id, patch)}
                   onRemoveCustom={(id) => removeCustomAction(sec.key, id)}
-                  extra={<FileGallery files={eq.courbeFiles} onChange={(files) => update({ ...eq, courbeFiles: files })} idPrefix={`${eq.id}-courbe`} />}
+                  extra={
+                    <>
+                      <FileGallery files={eq.courbeFiles} onChange={(files) => update({ ...eq, courbeFiles: files })} idPrefix={`${eq.id}-courbe`} />
+                      <div style={{
+                        marginTop: 12, padding: "10px 14px", borderRadius: 8, fontSize: 12.5, fontWeight: 600,
+                        background: nonConformesLive.length === 0 ? "rgba(15,138,95,0.1)" : "rgba(192,57,43,0.1)",
+                        color: nonConformesLive.length === 0 ? "#0F8A5F" : "#C0392B",
+                      }}>
+                        {nonConformesLive.length === 0
+                          ? "Tous les essais de déclenchement sont conformes."
+                          : "Essai(s) non conforme(s) : " + nonConformesLive.map(([label, etat]) => `${label} (${etat})`).join(", ")}
+                      </div>
+                    </>
+                  }
                 />
               );
             }
@@ -2227,6 +3143,178 @@ function EquipementCard({ eq, update, remove, removable = true }) {
                   <Card style={{ marginBottom: 14 }}>
                     <FileGallery files={eq.rapportLaboFiles} onChange={(files) => update({ ...eq, rapportLaboFiles: files })} idPrefix={`${eq.id}-labo`} />
                   </Card>
+                </React.Fragment>
+              );
+            }
+            if ((sec.key === "mesures_reseau_normal" || sec.key === "mesures_reseau_secours") && TYPES_AVEC_BRANCHES_UPS.includes(eq.type)) {
+              return (
+                <React.Fragment key={sec.key}>
+                  <SectionBlock
+                    title={sec.title}
+                    items={sec.items}
+                    values={eq.controles[sec.key]}
+                    onChangeItem={(itemKey, v) => setControleItem(sec.key, itemKey, v)}
+                    idPrefix={`${eq.id}-${sec.key}`}
+                    custom={eq.controles[sec.key + "__custom"] || []}
+                    onAddCustom={() => addCustomAction(sec.key)}
+                    onChangeCustom={(id, patch) => changeCustomAction(sec.key, id, patch)}
+                    onRemoveCustom={(id) => removeCustomAction(sec.key, id)}
+                  />
+                  <PuissanceApparenteCalculee eq={eq} sectionKey={sec.key} />
+                </React.Fragment>
+              );
+            }
+            if (sec.key === "mesures_utilisation" && TYPES_AVEC_BRANCHES_UPS.includes(eq.type)) {
+              return (
+                <React.Fragment key={sec.key}>
+                  <SectionBlock
+                    title={sec.title}
+                    items={sec.items}
+                    values={eq.controles[sec.key]}
+                    onChangeItem={(itemKey, v) => setControleItem(sec.key, itemKey, v)}
+                    idPrefix={`${eq.id}-${sec.key}`}
+                    custom={eq.controles[sec.key + "__custom"] || []}
+                    onAddCustom={() => addCustomAction(sec.key)}
+                    onChangeCustom={(id, patch) => changeCustomAction(sec.key, id, patch)}
+                    onRemoveCustom={(id) => removeCustomAction(sec.key, id)}
+                  />
+                  <Card style={{ marginBottom: 14 }}>
+                    <SectionTitle>Photo par phase (tension + courant)</SectionTitle>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10 }}>
+                      {["l1", "l2", "l3"].map((ph) => (
+                        <div key={ph}>
+                          <div style={{ fontSize: 10.5, fontWeight: 700, color: "#8B96A3", marginBottom: 4 }}>{ph.toUpperCase()}</div>
+                          <FileGallery
+                            files={(eq.controles.photos_utilisation || {})[ph] || []}
+                            onChange={(files) => update({ ...eq, controles: { ...eq.controles, photos_utilisation: { ...(eq.controles.photos_utilisation || {}), [ph]: files } } })}
+                            idPrefix={`${eq.id}-photos-${ph}`}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </Card>
+                </React.Fragment>
+              );
+            }
+            if (sec.key === "mesures_batterie_ups" && TYPES_AVEC_BRANCHES_UPS.includes(eq.type)) {
+              return (
+                <React.Fragment key={sec.key}>
+                  <SectionBlock
+                    title={sec.title}
+                    items={sec.items}
+                    values={eq.controles[sec.key]}
+                    onChangeItem={(itemKey, v) => setControleItem(sec.key, itemKey, v)}
+                    idPrefix={`${eq.id}-${sec.key}`}
+                    custom={eq.controles[sec.key + "__custom"] || []}
+                    onAddCustom={() => addCustomAction(sec.key)}
+                    onChangeCustom={(id, patch) => changeCustomAction(sec.key, id, patch)}
+                    onRemoveCustom={(id) => removeCustomAction(sec.key, id)}
+                  />
+                  <TensionsBatterieTheoriques eq={eq} />
+                </React.Fragment>
+              );
+            }
+            if (sec.key === "essai_decharge" && TYPES_AVEC_BRANCHES_UPS.includes(eq.type)) {
+              return (
+                <React.Fragment key={sec.key}>
+                  <SectionBlock
+                    title={sec.title}
+                    items={sec.items}
+                    values={eq.controles[sec.key]}
+                    onChangeItem={(itemKey, v) => setControleItem(sec.key, itemKey, v)}
+                    idPrefix={`${eq.id}-${sec.key}`}
+                    custom={eq.controles[sec.key + "__custom"] || []}
+                    onAddCustom={() => addCustomAction(sec.key)}
+                    onChangeCustom={(id, patch) => changeCustomAction(sec.key, id, patch)}
+                    onRemoveCustom={(id) => removeCustomAction(sec.key, id)}
+                  />
+                  <TensionsBatterieTheoriques eq={eq} />
+                  <AutonomieCalculee eq={eq} />
+                  <Card style={{ marginBottom: 14 }}>
+                    <SectionTitle>Courbe de décharge batterie</SectionTitle>
+                    <FileGallery files={eq.courbeDechargeFiles} onChange={(files) => update({ ...eq, courbeDechargeFiles: files })} idPrefix={`${eq.id}-courbe-decharge`} />
+                  </Card>
+                </React.Fragment>
+              );
+            }
+            if (sec.key === "pieces_usure_ups" && TYPES_AVEC_BRANCHES_UPS.includes(eq.type)) {
+              return <PiecesUsureUPSPanel key={sec.key} eq={eq} update={update} />;
+            }
+            if (sec.key === "usure" && TYPES_AVEC_GRADINS.includes(eq.type)) {
+              return (
+                <React.Fragment key={sec.key}>
+                  <SectionBlock
+                    title={sec.title}
+                    items={sec.items}
+                    values={eq.controles[sec.key]}
+                    onChangeItem={(itemKey, v) => setControleItem(sec.key, itemKey, v)}
+                    idPrefix={`${eq.id}-${sec.key}`}
+                    custom={eq.controles[sec.key + "__custom"] || []}
+                    onAddCustom={() => addCustomAction(sec.key)}
+                    onChangeCustom={(id, patch) => changeCustomAction(sec.key, id, patch)}
+                    onRemoveCustom={(id) => removeCustomAction(sec.key, id)}
+                  />
+                  <PiecesUsureSynthese eq={eq} />
+                </React.Fragment>
+              );
+            }
+            if (sec.key === "gradins" && TYPES_AVEC_GRADINS.includes(eq.type)) {
+              return <GradinsPanel key={sec.key} eq={eq} update={update} idPrefix={`${eq.id}-gradins`} />;
+            }
+            if (sec.key === "branches_batterie" && TYPES_AVEC_BRANCHES_UPS.includes(eq.type)) {
+              return (
+                <DynamicListPanel
+                  key={sec.key}
+                  title="Branches batterie"
+                  entries={eq.controles.branches_dynamique || []}
+                  onChange={(entries) => update({ ...eq, controles: { ...eq.controles, branches_dynamique: entries } })}
+                  typeOptions={LISTE_NOM_BRANCHE}
+                  fieldDefs={[{ key: "recharge", label: "Courant de recharge", unit: "A" }, { key: "residuel", label: "Courant résiduel", unit: "A" }, { key: "decharge", label: "Courant de décharge", unit: "A" }]}
+                  withActionEtat={true}
+                  idPrefix={`${eq.id}-branches`}
+                />
+              );
+            }
+            if (sec.key === "releve_tensions" && TYPES_AVEC_BRANCHES_UPS.includes(eq.type)) {
+              return <ElementsBatteriePanel key={sec.key} eq={eq} update={update} idPrefix={`${eq.id}-elements`} />;
+            }
+            if (sec.key === "organes" && TYPES_AVEC_ORGANES_DYNAMIQUE.includes(eq.type)) {
+              return (
+                <DynamicListPanel
+                  key={sec.key}
+                  title="Organes internes"
+                  entries={eq.controles.organes_dynamique || []}
+                  onChange={(entries) => update({ ...eq, controles: { ...eq.controles, organes_dynamique: entries } })}
+                  typeOptions={LISTE_TYPE_ORGANE_DYNAMIQUE}
+                  fieldDefs={ORGANES_FIELDS}
+                  withActionEtat={false}
+                  idPrefix={`${eq.id}-organes`}
+                />
+              );
+            }
+            if (sec.key === "electriques" && TYPES_AVEC_TC.includes(eq.type)) {
+              return (
+                <React.Fragment key={sec.key}>
+                  <SectionBlock
+                    title={sec.title}
+                    items={sec.items}
+                    values={eq.controles[sec.key]}
+                    onChangeItem={(itemKey, v) => setControleItem(sec.key, itemKey, v)}
+                    idPrefix={`${eq.id}-${sec.key}`}
+                    custom={eq.controles[sec.key + "__custom"] || []}
+                    onAddCustom={() => addCustomAction(sec.key)}
+                    onChangeCustom={(id, patch) => changeCustomAction(sec.key, id, patch)}
+                    onRemoveCustom={(id) => removeCustomAction(sec.key, id)}
+                  />
+                  <DynamicListPanel
+                    title="Contrôle des TC"
+                    entries={eq.controles.tc_dynamique || []}
+                    onChange={(entries) => update({ ...eq, controles: { ...eq.controles, tc_dynamique: entries } })}
+                    typeOptions={LISTE_TC_FONCTION}
+                    fieldDefs={TC_FIELDS_DYNAMIC}
+                    withActionEtat={true}
+                    idPrefix={`${eq.id}-tc`}
+                  />
                 </React.Fragment>
               );
             }
@@ -2294,7 +3382,16 @@ function EquipementTypeTab({ type, site, update }) {
   const items = site.equipements.filter((e) => e.type === type);
   const updateItem = (id, next) => update((d) => ({ ...d, equipements: d.equipements.map((e) => (e.id === id ? next : e)) }));
   const removeItem = (id) => update((d) => ({ ...d, equipements: d.equipements.filter((e) => e.id !== id) }));
-  const addItem = () => update((d) => ({ ...d, equipements: [...d.equipements, emptyEquipement(type)] }));
+  const addItem = () => {
+    const eq = emptyEquipement(type);
+    if (site.locaux && site.locaux.length) eq.localId = site.locaux[0].id;
+    update((d) => ({ ...d, equipements: [...d.equipements, eq] }));
+  };
+  const duplicateItem = (eq) => {
+    const copy = JSON.parse(JSON.stringify(eq));
+    copy.id = uid();
+    update((d) => ({ ...d, equipements: [...d.equipements, copy] }));
+  };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
@@ -2306,7 +3403,7 @@ function EquipementTypeTab({ type, site, update }) {
           Aucun équipement de type « {type} » enregistré pour ce site.
         </div>
       ) : (
-        items.map((eq) => <EquipementCard key={eq.id} eq={eq} update={(next) => updateItem(eq.id, next)} remove={() => removeItem(eq.id)} />)
+        items.map((eq) => <EquipementCard key={eq.id} eq={eq} update={(next) => updateItem(eq.id, next)} remove={() => removeItem(eq.id)} onDuplicate={() => duplicateItem(eq)} locaux={site.locaux} />)
       )}
     </div>
   );
@@ -2495,6 +3592,23 @@ function PrintEquipement({ eq }) {
           <div style={{ fontSize: 10.5, fontWeight: 700, color: "#555", marginBottom: 6 }}>Courbe de déclenchement — pièces jointes</div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
             {eq.courbeFiles.map((f) =>
+              f.isPdf ? (
+                <div key={f.id} style={{ fontSize: 10, color: "#0A5DA8", border: "1px solid #ccc", padding: "6px 10px", borderRadius: 4 }}>{f.name || "document.pdf"} (PDF joint)</div>
+              ) : (
+                <div key={f.id} style={{ width: 140 }}>
+                  <img src={f.dataUrl} alt="" style={{ width: 140, height: 105, objectFit: "cover", border: "1px solid #ccc" }} />
+                  {f.caption && <div style={{ fontSize: 9, color: "#555", marginTop: 2 }}>{f.caption}</div>}
+                </div>
+              )
+            )}
+          </div>
+        </div>
+      )}
+      {eq.type === "Onduleur" && eq.courbeDechargeFiles && eq.courbeDechargeFiles.length > 0 && (
+        <div style={{ marginTop: 10 }}>
+          <div style={{ fontSize: 10.5, fontWeight: 700, color: "#555", marginBottom: 6 }}>Courbe de décharge batterie — pièces jointes</div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            {eq.courbeDechargeFiles.map((f) =>
               f.isPdf ? (
                 <div key={f.id} style={{ fontSize: 10, color: "#0A5DA8", border: "1px solid #ccc", padding: "6px 10px", borderRadius: 4 }}>{f.name || "document.pdf"} (PDF joint)</div>
               ) : (
@@ -2759,18 +3873,23 @@ function PrintIntervention({ iv }) {
 function SiteDetail({ site, update, onBack, onDelete, onPrint, onCreateIntervention }) {
   const presentTypes = useMemo(() => EQUIPMENT_TYPES.filter((t) => site.equipements.some((e) => e.type === t)), [site.equipements]);
   const [activeTab, setActiveTab] = useState("rapport");
-  const [addMenuOpen, setAddMenuOpen] = useState(false);
+  const [addMenuOpenHTA, setAddMenuOpenHTA] = useState(false);
+  const [addMenuOpenConv, setAddMenuOpenConv] = useState(false);
 
   useEffect(() => {
     if (activeTab !== "rapport" && !presentTypes.includes(activeTab)) setActiveTab("rapport");
   }, [presentTypes, activeTab]);
 
-  const remainingTypes = EQUIPMENT_TYPES.filter((t) => !presentTypes.includes(t));
+  const remainingHTA = EQUIPMENT_TYPES_HTABT.filter((t) => !presentTypes.includes(t));
+  const remainingConv = EQUIPMENT_TYPES_CONVERSION.filter((t) => !presentTypes.includes(t));
 
   function addEquipmentType(type) {
-    update((d) => ({ ...d, equipements: [...d.equipements, emptyEquipement(type)] }));
+    const eq = emptyEquipement(type);
+    if (site.locaux && site.locaux.length) eq.localId = site.locaux[0].id;
+    update((d) => ({ ...d, equipements: [...d.equipements, eq] }));
     setActiveTab(type);
-    setAddMenuOpen(false);
+    setAddMenuOpenHTA(false);
+    setAddMenuOpenConv(false);
   }
 
   const rank = overallRank(site);
@@ -2825,15 +3944,31 @@ function SiteDetail({ site, update, onBack, onDelete, onPrint, onCreateIntervent
           })}
         </div>
 
-        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 10 }}>
+        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 10, gap: 10, flexWrap: "wrap" }}>
           <div style={{ position: "relative" }}>
-            <button onClick={() => setAddMenuOpen((o) => !o)} disabled={remainingTypes.length === 0}
-              style={{ ...btnGhost("#FFC107"), opacity: remainingTypes.length === 0 ? 0.4 : 1, cursor: remainingTypes.length === 0 ? "not-allowed" : "pointer" }}>
-              <Plus size={13} /> Type d'équipement
+            <button onClick={() => { setAddMenuOpenHTA((o) => !o); setAddMenuOpenConv(false); }} disabled={remainingHTA.length === 0}
+              style={{ ...btnGhost("#FFC107"), opacity: remainingHTA.length === 0 ? 0.4 : 1, cursor: remainingHTA.length === 0 ? "not-allowed" : "pointer" }}>
+              <Plus size={13} /> Équipements HTA/BT
             </button>
-            {addMenuOpen && remainingTypes.length > 0 && (
+            {addMenuOpenHTA && remainingHTA.length > 0 && (
               <div style={{ position: "absolute", right: 0, top: "110%", background: "#F7F8FA", border: "1px solid #D8DEE5", borderRadius: 10, overflow: "hidden", zIndex: 50, minWidth: 200, boxShadow: "0 12px 30px rgba(0,0,0,0.4)" }}>
-                {remainingTypes.map((t) => (
+                {remainingHTA.map((t) => (
+                  <div key={t} onClick={() => addEquipmentType(t)} style={{ padding: "9px 14px", fontSize: 12.5, color: "#3E4A5C", cursor: "pointer" }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = "#E2E6EB")} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
+                    {t}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <div style={{ position: "relative" }}>
+            <button onClick={() => { setAddMenuOpenConv((o) => !o); setAddMenuOpenHTA(false); }} disabled={remainingConv.length === 0}
+              style={{ ...btnGhost(BRAND.blue), opacity: remainingConv.length === 0 ? 0.4 : 1, cursor: remainingConv.length === 0 ? "not-allowed" : "pointer" }}>
+              <Plus size={13} /> Conversion d'énergie
+            </button>
+            {addMenuOpenConv && remainingConv.length > 0 && (
+              <div style={{ position: "absolute", right: 0, top: "110%", background: "#F7F8FA", border: "1px solid #D8DEE5", borderRadius: 10, overflow: "hidden", zIndex: 50, minWidth: 200, boxShadow: "0 12px 30px rgba(0,0,0,0.4)" }}>
+                {remainingConv.map((t) => (
                   <div key={t} onClick={() => addEquipmentType(t)} style={{ padding: "9px 14px", fontSize: 12.5, color: "#3E4A5C", cursor: "pointer" }}
                     onMouseEnter={(e) => (e.currentTarget.style.background = "#E2E6EB")} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
                     {t}
@@ -2973,7 +4108,7 @@ function InterventionEditor({ iv, update, onBack, onDelete, onPrint }) {
         <SectionTitle>Équipement</SectionTitle>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 14 }}>
           <IvField label="Type">
-            <Combo value={iv.equipement.type} onChange={(v) => setEquip("type", v)} options={[...EQUIPMENT_TYPES, "Sécurité"]} listId={`${iv.id}-type`} />
+            <Combo value={iv.equipement.type} onChange={(v) => setEquip("type", v)} options={EQUIPMENT_TYPES} listId={`${iv.id}-type`} />
           </IvField>
           <IvField label="Constructeur">
             <Combo value={iv.equipement.constructeur} onChange={(v) => setEquip("constructeur", v)} options={LISTE_MARQUES} listId={`${iv.id}-construct`} />
@@ -3471,6 +4606,25 @@ function docxControlTable(rows) {
   if (rows.length === 0) return null;
   return new DOCX.Table({ width: { size: 8800, type: DOCX.WidthType.DXA }, columnWidths: [7000, 1800], rows: rows.map((r) => docxControlRow(...r)) });
 }
+// Tableau de mesures par phase : une ligne par grandeur (I, C, Q…), une colonne par phase — bien
+// plus lisible qu'un bloc de texte pour les mesures complètes (gradins, réseau amont/aval…).
+function docxPhaseCell(text, header, shaded) {
+  const t = text === null || text === undefined || text === "" ? "—" : String(text);
+  return new DOCX.TableCell({
+    width: { size: 1600, type: DOCX.WidthType.DXA }, shading: shaded ? { type: DOCX.ShadingType.CLEAR, fill: DOCX_LIGHT } : undefined,
+    children: [new DOCX.Paragraph({ alignment: header ? DOCX.AlignmentType.CENTER : DOCX.AlignmentType.LEFT, children: [new DOCX.TextRun({ text: t, size: 17, bold: header, color: header ? "555555" : DOCX_DARK })] })],
+  });
+}
+function docxPhaseTable(rows, headers) {
+  // rows: [ [label, v1, v2, v3], ... ] ; headers: ex. ["L1","L2","L3"] ou ["U12","U23","U31"]
+  const h = headers || ["L1", "L2", "L3"];
+  const header = new DOCX.TableRow({ children: [docxPhaseCell("", false, true), docxPhaseCell(h[0], true, true), docxPhaseCell(h[1], true, true), docxPhaseCell(h[2], true, true)] });
+  const body = rows.map((r) => new DOCX.TableRow({ children: [
+    new DOCX.TableCell({ width: { size: 2000, type: DOCX.WidthType.DXA }, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_LIGHT }, children: [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: r[0], size: 17, bold: true, color: "555555" })] })] }),
+    docxPhaseCell(r[1]), docxPhaseCell(r[2]), docxPhaseCell(r[3]),
+  ]}));
+  return new DOCX.Table({ width: { size: 6800, type: DOCX.WidthType.DXA }, columnWidths: [2000, 1600, 1600, 1600], rows: [header, ...body] });
+}
 // Table de synthèse : le nom de chaque équipement est un lien cliquable vers sa page dans le document.
 function docxSyntheseRow(label, etat, bookmarkId) {
   const linkRun = new DOCX.TextRun({ text: label, size: 18, color: DOCX_BLUE, underline: {} });
@@ -3516,9 +4670,12 @@ function docxImage(dataUrl, w, h) {
   try { return new DOCX.ImageRun({ data: bytes, type, transformation: { width: w || 160, height: h || 120 } }); } catch (e) { return null; }
 }
 
-function docxEquipementElements(eq) {
+function docxEquipementElements(eq, locaux) {
   const schema = SCHEMAS[eq.type];
-  const elements = [new DOCX.Paragraph({ children: [new DOCX.PageBreak()] }), docxEquipHeader(eq.type, docxBookmarkId(eq)), docxSpacer(80)];
+  const localNom = (locaux || []).find((l) => l.id === eq.localId);
+  const elements = [new DOCX.Paragraph({ children: [new DOCX.PageBreak()] }), docxEquipHeader(eq.type, docxBookmarkId(eq)), docxSpacer(40)];
+  if (localNom) elements.push(new DOCX.Paragraph({ spacing: { after: 60 }, children: [new DOCX.TextRun({ text: "Local : " + (localNom.nom || "Local sans nom"), size: 16, color: "666666", italics: true })] }));
+  else elements.push(docxSpacer(40));
   if (schema.identification.length) {
     const t = docxFieldTable(schema.identification.map((f) => [f.label, eq.identification[f.key]]));
     if (t) { elements.push(t); elements.push(docxSpacer()); }
@@ -3569,6 +4726,203 @@ function docxEquipementElements(eq) {
       elements.push(docxSpacer());
       return;
     }
+    if (sec.key === "branches_batterie" && TYPES_AVEC_BRANCHES_UPS.includes(eq.type)) {
+      elements.push(docxHeading(sec.title));
+      const rows = (eq.controles.branches_dynamique || []).filter((b) => b.label).map((b) => {
+        const parts = [b.fields.recharge && `Courant de recharge : ${b.fields.recharge} A`, b.fields.residuel && `Courant résiduel : ${b.fields.residuel} A`, b.fields.decharge && `Courant de décharge : ${b.fields.decharge} A`].filter(Boolean).join(" · ");
+        return [b.label, parts, b.action, b.etat];
+      });
+      const t2 = docxControlTable(rows);
+      if (t2) elements.push(t2);
+      elements.push(docxSpacer());
+      return;
+    }
+    if (sec.key === "releve_tensions" && TYPES_AVEC_BRANCHES_UPS.includes(eq.type)) {
+      elements.push(docxHeading(sec.title));
+      const cfg = eq.controles.releve_config || { mode: "Floating", toleranceBasse: 3, toleranceHaute: 3 };
+      const entries = eq.controles.elements_dynamique || [];
+      const valeurs = entries.map((e) => numOf(e.fields.tension)).filter((v) => v !== null);
+      const moyenne = valeurs.length ? Math.round((valeurs.reduce((a, b) => a + b, 0) / valeurs.length) * 1000) / 1000 : null;
+      elements.push(new DOCX.Paragraph({ spacing: { after: 60 }, children: [new DOCX.TextRun({ text: `Mode : ${cfg.mode}  ·  Tolérance : -${cfg.toleranceBasse}% / +${cfg.toleranceHaute}%${moyenne !== null ? `  ·  Moyenne : ${moyenne} V` : ""}`, size: 16, color: "666666", italics: true })] }));
+      const rows3 = entries.filter((e) => e.fields.tension).map((e) => {
+        const st = elementBatterieStatus(e.fields.tension, moyenne, cfg.toleranceBasse, cfg.toleranceHaute);
+        const etat = st === "bad" ? "Défaillant" : "Conforme";
+        return [e.label, `${e.fields.tension} V`, "", etat];
+      });
+      const t3 = docxControlTable(rows3);
+      if (t3) elements.push(t3);
+      elements.push(docxSpacer());
+      return;
+    }
+    if (sec.key === "gradins" && TYPES_AVEC_GRADINS.includes(eq.type)) {
+      elements.push(docxHeading(sec.title));
+      const freqReseau = numOf(eq.controles.mesures_amont?.frequence_amont?.fields?.hz) || 50;
+      (eq.controles.gradins_dynamique || []).filter((g) => g.label).forEach((g) => {
+        const iTheo = gradinIntensiteTheorique(g.fields.q, g.fields.u);
+        const c1 = gradinCapacite(g.fields.i1, g.fields.u, freqReseau);
+        const c2 = gradinCapacite(g.fields.i2, g.fields.u, freqReseau);
+        const c3 = gradinCapacite(g.fields.i3, g.fields.u, freqReseau);
+        const q1 = gradinQMesuree(g.fields.i1, g.fields.u);
+        const q2 = gradinQMesuree(g.fields.i2, g.fields.u);
+        const q3 = gradinQMesuree(g.fields.i3, g.fields.u);
+        const qMesures = [q1, q2, q3].filter((v) => v !== null);
+        const qTotalMesure = qMesures.length ? Math.round((qMesures.reduce((a, b) => a + b, 0) / qMesures.length) * 100) / 100 : null;
+
+        elements.push(new DOCX.Paragraph({
+          spacing: { before: 100, after: 6 },
+          children: [
+            new DOCX.TextRun({ text: g.label.toUpperCase(), bold: true, size: 19, color: DOCX_DARK }),
+            g.etat ? new DOCX.TextRun({ text: "   " + g.etat.toUpperCase(), bold: true, size: 15, color: docxEtatColor(g.etat) }) : new DOCX.TextRun(""),
+          ],
+        }));
+        const summary = [
+          g.fields.q && `Q déclaré : ${g.fields.q} kVAR`, qTotalMesure !== null && `Q mesuré : ${qTotalMesure} kVAR`,
+          g.fields.u && `U : ${g.fields.u} V`, iTheo !== null && `I théorique : ${iTheo} A`,
+        ].filter(Boolean).join("   ·   ");
+        if (summary) elements.push(new DOCX.Paragraph({ spacing: { after: 6 }, children: [new DOCX.TextRun({ text: summary, size: 16, color: "666666" })] }));
+
+        elements.push(docxPhaseTable([
+          ["I (A)", g.fields.i1, g.fields.i2, g.fields.i3],
+          ["C (µF)", c1, c2, c3],
+          ["Q (kVAR)", q1, q2, q3],
+        ]));
+
+        const extra = [g.fields.selfMA && `Self : ${g.fields.selfMA} mA`, g.fields.selfFrequence && `Self : ${g.fields.selfFrequence} Hz`, g.action && `Action : ${g.action}`].filter(Boolean).join("   ·   ");
+        if (extra) elements.push(new DOCX.Paragraph({ spacing: { before: 6, after: 4 }, children: [new DOCX.TextRun({ text: extra, size: 15, color: "666666" })] }));
+        elements.push(docxSpacer(60));
+
+        (g.photos || []).forEach((p) => {
+          const img = docxImage(p.dataUrl, 160, 120);
+          if (img) elements.push(new DOCX.Paragraph({ spacing: { after: 20 }, children: [img] }));
+        });
+      });
+      elements.push(docxSpacer());
+      return;
+    }
+    if ((sec.key === "mesures_amont" || sec.key === "mesures_aval") && TYPES_AVEC_GRADINS.includes(eq.type)) {
+      elements.push(docxHeading(sec.title));
+      sec.items.forEach((item) => {
+        const value = eq.controles[sec.key][item.key];
+        const fields = value.fields || {};
+        if (item.key.startsWith("tensions_")) {
+          elements.push(new DOCX.Paragraph({ spacing: { before: 60, after: 4 }, children: [new DOCX.TextRun({ text: item.label, bold: true, size: 17, color: DOCX_DARK })] }));
+          elements.push(docxPhaseTable([["U (V)", fields.u12, fields.u23, fields.u31], ["THdV (%)", fields.thdv1, fields.thdv2, fields.thdv3]], ["U12", "U23", "U31"]));
+          elements.push(docxSpacer(60));
+        } else if (item.key.startsWith("courants_")) {
+          elements.push(new DOCX.Paragraph({ spacing: { before: 60, after: 4 }, children: [new DOCX.TextRun({ text: item.label, bold: true, size: 17, color: DOCX_DARK })] }));
+          elements.push(docxPhaseTable([["I (A)", fields.i1, fields.i2, fields.i3], ["ThdI (%)", fields.thdi1, fields.thdi2, fields.thdi3]]));
+          elements.push(docxSpacer(60));
+        } else {
+          const parts = printFieldParts(item, value);
+          if (parts.length) elements.push(new DOCX.Paragraph({ spacing: { after: 6 }, children: [new DOCX.TextRun({ text: item.label + " — " + parts.map((p) => p.split(" : ")[1]).join("   ·   "), size: 17 })] }));
+        }
+      });
+      elements.push(docxSpacer());
+      return;
+    }
+    if ((sec.key === "mesures_reseau_normal" || sec.key === "mesures_reseau_secours") && TYPES_AVEC_BRANCHES_UPS.includes(eq.type)) {
+      elements.push(docxHeading(sec.title));
+      const rows4 = sec.items.map((item) => {
+        const value = eq.controles[sec.key][item.key];
+        const parts = printFieldParts(item, value);
+        return [item.label, parts.join(" · "), value.action, value.etat];
+      });
+      const t4 = docxControlTable(rows4);
+      if (t4) elements.push(t4);
+      const s = calcPuissanceApparente(eq, sec.key);
+      if (s !== null) elements.push(new DOCX.Paragraph({ spacing: { before: 60, after: 60 }, children: [new DOCX.TextRun({ text: `Puissance apparente calculée (S = U × I × √3) : ${s} kVA`, bold: true, size: 17, color: DOCX_DARK })] }));
+      else elements.push(docxSpacer());
+      return;
+    }
+    if (sec.key === "mesures_utilisation" && TYPES_AVEC_BRANCHES_UPS.includes(eq.type)) {
+      elements.push(docxHeading(sec.title));
+      const rowsU = sec.items.map((item) => {
+        const value = eq.controles[sec.key][item.key];
+        const parts = printFieldParts(item, value);
+        return [item.label, parts.join(" · "), value.action, value.etat];
+      });
+      const tU = docxControlTable(rowsU);
+      if (tU) elements.push(tU);
+      elements.push(docxSpacer(60));
+      const addPhotos = (label, files) => {
+        if (!(files || []).length) return;
+        elements.push(new DOCX.Paragraph({ spacing: { before: 40, after: 20 }, children: [new DOCX.TextRun({ text: label, bold: true, size: 16, color: "666666" })] }));
+        files.forEach((p) => {
+          const img = docxImage(p.dataUrl, 160, 120);
+          if (img) elements.push(new DOCX.Paragraph({ spacing: { after: 20 }, children: [img] }));
+        });
+      };
+      const photosU = eq.controles.photos_utilisation || {};
+      addPhotos("Photo — L1 (tension + courant)", photosU.l1);
+      addPhotos("Photo — L2 (tension + courant)", photosU.l2);
+      addPhotos("Photo — L3 (tension + courant)", photosU.l3);
+      elements.push(docxSpacer());
+      return;
+    }
+    if (sec.key === "mesures_batterie_ups" && TYPES_AVEC_BRANCHES_UPS.includes(eq.type)) {
+      elements.push(docxHeading(sec.title));
+      const rows5 = sec.items.map((item) => {
+        const value = eq.controles[sec.key][item.key];
+        const parts = printFieldParts(item, value);
+        return [item.label, parts.join(" · "), value.action, value.etat];
+      });
+      const t5 = docxControlTable(rows5);
+      if (t5) elements.push(t5);
+      const th = calcTensionsBatterieTheoriques(eq);
+      if (th) {
+        elements.push(new DOCX.Paragraph({ spacing: { before: 60, after: 60 }, children: [new DOCX.TextRun({ text: `Valeurs théoriques calculées — Nominale : ${th.nominale} V · Égalisation : ${th.egalisation} V · Seuil fin de décharge : ${th.finDecharge} V`, bold: true, size: 17, color: DOCX_DARK })] }));
+      } else elements.push(docxSpacer());
+      return;
+    }
+    if (sec.key === "essai_decharge" && TYPES_AVEC_BRANCHES_UPS.includes(eq.type)) {
+      elements.push(docxHeading(sec.title));
+      const rows6 = sec.items.map((item) => {
+        const value = eq.controles[sec.key][item.key];
+        const parts = printFieldParts(item, value);
+        return [item.label, parts.join(" · "), value.action, value.etat];
+      });
+      const t6 = docxControlTable(rows6);
+      if (t6) elements.push(t6);
+      const th6 = calcTensionsBatterieTheoriques(eq);
+      if (th6) elements.push(new DOCX.Paragraph({ spacing: { before: 60, after: 20 }, children: [new DOCX.TextRun({ text: `Tension nominale : ${th6.nominale} V · Seuil de fin de décharge (critique) : ${th6.finDecharge} V`, bold: true, size: 17, color: DOCX_DARK })] }));
+      const a = calcAutonomieTheorique(eq);
+      if (a !== null) elements.push(new DOCX.Paragraph({ spacing: { before: 20, after: 60 }, children: [new DOCX.TextRun({ text: `Autonomie avec la charge mesurée (calculée) : ${a} min`, bold: true, size: 17, color: DOCX_DARK })] }));
+      else elements.push(docxSpacer());
+      return;
+    }
+    if (sec.key === "pieces_usure_ups" && TYPES_AVEC_BRANCHES_UPS.includes(eq.type)) {
+      // Non repris tel quel : seule la synthèse (type de pièce + année de remplacement) est
+      // destinée au client — description/marque/modèle/quantité/mise en service restent internes.
+      elements.push(docxHeading("Échéances de remplacement prévues"));
+      const lignes = calcEcheancesUsureUPS(eq);
+      const t7 = docxFieldTable(lignes.map((l) => [l.type, String(l.annee)]));
+      if (t7) elements.push(t7);
+      else elements.push(new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: "Aucune donnée renseignée", size: 18, color: "666666" })] }));
+      elements.push(docxSpacer());
+      return;
+    }
+    if (sec.key === "usure" && TYPES_AVEC_GRADINS.includes(eq.type)) {
+      // Non repris tel quel : seule la synthèse (type de pièce + année de remplacement) est
+      // destinée au client — les références et années de mise en service restent internes.
+      elements.push(docxHeading("Échéances de remplacement prévues"));
+      const lignes = calcPiecesUsure(eq);
+      const t = docxFieldTable(lignes.map((l) => [l.type, l.annee !== null ? String(l.annee) : "—"]));
+      if (t) elements.push(t);
+      else elements.push(new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: "Aucune donnée renseignée", size: 18, color: "666666" })] }));
+      elements.push(docxSpacer());
+      return;
+    }
+    if (sec.key === "organes" && TYPES_AVEC_ORGANES_DYNAMIQUE.includes(eq.type)) {
+      elements.push(docxHeading(sec.title));
+      const rows = (eq.controles.organes_dynamique || []).filter((o) => o.label).map((o) => {
+        const parts = ORGANES_FIELDS.map((f) => o.fields[f.key] && `${f.label} : ${o.fields[f.key]}`).filter(Boolean).join(" · ");
+        return [o.label, parts, "", ""];
+      });
+      const t = docxControlTable(rows);
+      if (t) elements.push(t);
+      elements.push(docxSpacer());
+      return;
+    }
     elements.push(docxHeading(sec.title));
     const rows = sec.items.map((item) => {
       const value = eq.controles[sec.key][item.key];
@@ -3577,6 +4931,12 @@ function docxEquipementElements(eq) {
     });
     const custom = eq.controles[sec.key + "__custom"] || [];
     custom.forEach((c) => rows.push([c.label || "(action ajoutée)", "", c.action, c.etat]));
+    if (sec.key === "electriques" && TYPES_AVEC_TC.includes(eq.type)) {
+      (eq.controles.tc_dynamique || []).filter((tc) => tc.label).forEach((tc) => {
+        const parts = TC_FIELDS_DYNAMIC.map((f) => tc.fields[f.key] && `${f.label} : ${tc.fields[f.key]}${f.unit ? " " + f.unit : ""}`).filter(Boolean).join(" · ");
+        rows.push(["Contrôle TC — " + tc.label, parts, tc.action, tc.etat]);
+      });
+    }
     const t = docxControlTable(rows);
     if (t) elements.push(t);
     elements.push(docxSpacer());
@@ -3594,8 +4954,47 @@ function docxEquipementElements(eq) {
   }));
   if (eq.remarques) elements.push(new DOCX.Paragraph({ spacing: { after: 80 }, children: [new DOCX.TextRun({ text: "Remarques : ", bold: true, size: 18 }), new DOCX.TextRun({ text: eq.remarques, size: 18 })] }));
   (eq.photos || []).forEach((p) => { const img = docxImage(p.dataUrl, 200, 150); if (img) elements.push(new DOCX.Paragraph({ spacing: { after: 40 }, children: [img] })); });
-  const attachedFiles = [...(eq.courbeFiles || []), ...(eq.rapportLaboFiles || [])];
-  attachedFiles.forEach((f) => {
+
+  // Courbe de déclenchement (Disjoncteur BT) : image en grand format (≈ moitié de page), suivie
+  // d'une phrase indiquant si les essais du disjoncteur sont conformes ou non.
+  if (eq.type === "Disjoncteur BT" && (eq.courbeFiles || []).length) {
+    eq.courbeFiles.forEach((f) => {
+      if (f.isPdf) {
+        elements.push(new DOCX.Paragraph({ spacing: { after: 40 }, children: [new DOCX.TextRun({ text: "Pièce jointe (PDF) : " + (f.name || "document.pdf"), size: 16, color: DOCX_BLUE, italics: true })] }));
+      } else {
+        const img = docxImage(f.dataUrl, 520, 400);
+        if (img) elements.push(new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, spacing: { after: 40 }, children: [img] }));
+      }
+    });
+    const tests = eq.controles.tests_disjoncteur;
+    const testEntries = [
+      ["Surcharge longue", tests.test_surcharge_longue.etat],
+      ["Court-circuit temporisé", tests.test_cc_temporise.etat],
+      ["Instantané", tests.test_instantane.etat],
+    ];
+    const nonConformes = testEntries.filter(([, etat]) => (RANK_OF[etat] ?? 0) > 0);
+    const phrase = nonConformes.length === 0
+      ? "Tous les essais de déclenchement sont conformes."
+      : "Essai(s) non conforme(s) : " + nonConformes.map(([label, etat]) => `${label} (${etat})`).join(", ") + ".";
+    elements.push(new DOCX.Paragraph({ spacing: { after: 80 }, children: [new DOCX.TextRun({ text: phrase, bold: true, size: 18, color: nonConformes.length === 0 ? DOCX_GREEN : DOCX_RED })] }));
+  }
+
+  // Courbe de décharge batterie (Onduleur) : même principe que la courbe de déclenchement — image
+  // en grand format (≈ moitié de page).
+  if (eq.type === "Onduleur" && (eq.courbeDechargeFiles || []).length) {
+    elements.push(new DOCX.Paragraph({ spacing: { before: 60, after: 40 }, children: [new DOCX.TextRun({ text: "Courbe de décharge batterie", bold: true, size: 19, color: DOCX_DARK })] }));
+    eq.courbeDechargeFiles.forEach((f) => {
+      if (f.isPdf) {
+        elements.push(new DOCX.Paragraph({ spacing: { after: 40 }, children: [new DOCX.TextRun({ text: "Pièce jointe (PDF) : " + (f.name || "document.pdf"), size: 16, color: DOCX_BLUE, italics: true })] }));
+      } else {
+        const img = docxImage(f.dataUrl, 520, 400);
+        if (img) elements.push(new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, spacing: { after: 40 }, children: [img] }));
+      }
+    });
+  }
+
+  // Rapport de laboratoire (Analyse d'huile) : taille standard.
+  (eq.rapportLaboFiles || []).forEach((f) => {
     if (f.isPdf) {
       elements.push(new DOCX.Paragraph({ spacing: { after: 40 }, children: [new DOCX.TextRun({ text: "Pièce jointe (PDF) : " + (f.name || "document.pdf"), size: 16, color: DOCX_BLUE, italics: true })] }));
     } else {
@@ -3667,12 +5066,15 @@ async function generateSiteDocx(site) {
   const rapportRows = [
     ["Date(s) d'intervention", journeesTexte || site.rapport.date],
     ["Intervenant(s)", tousIntervenants],
-    ["Marque", site.rapport.marque], ["Année de mise en service", site.rapport.anneeMiseEnService],
     ["Nombre d'équipements", String(site.equipements.length)], ["Prochaine maintenance recommandée avant", site.rapport.prochaineMaintenance],
-    ["Type de poste", site.rapport.typeDePoste], ["Régime de neutre", site.rapport.regimeNeutre],
     ["Environnement", [site.rapport.environnementEtat, site.rapport.environnementRemarque].filter(Boolean).join(" — ")],
     ["Fonctionnement de l'installation", [site.rapport.fonctionnementEtat, site.rapport.fonctionnementRemarque].filter(Boolean).join(" — ")],
   ];
+  const locauxRows = (site.locaux || []).map((l) => [
+    l.nom || "Local sans nom",
+    [l.typeDePoste && `Type de poste : ${l.typeDePoste}`, l.regimeNeutre && `Régime de neutre : ${l.regimeNeutre}`, l.marque && `Marque : ${l.marque}`, l.anneeMiseEnService && `Mise en service : ${l.anneeMiseEnService}`].filter(Boolean).join(" · "),
+  ]);
+  const locauxTable = locauxRows.length ? docxFieldTable(locauxRows) : null;
 
   const children = [...docxCoverPage(site), headerTable, docxSpacer(160)];
   if (syntheseTable) { children.push(docxHeading("Synthèse des équipements")); children.push(syntheseTable); children.push(docxSpacer()); }
@@ -3682,7 +5084,9 @@ async function generateSiteDocx(site) {
   if (site.rapport.syntheseRemarques) children.push(new DOCX.Paragraph({ spacing: { before: 80, after: 80 }, children: [new DOCX.TextRun({ text: "Synthèse des remarques et préconisations : ", bold: true, size: 18 }), new DOCX.TextRun({ text: site.rapport.syntheseRemarques, size: 18 })] }));
   else children.push(docxSpacer());
 
-  site.equipements.forEach((eq) => { children.push(...docxEquipementElements(eq)); });
+  if (locauxTable) { children.push(docxHeading("Locaux")); children.push(locauxTable); children.push(docxSpacer()); }
+
+  site.equipements.forEach((eq) => { children.push(...docxEquipementElements(eq, site.locaux)); });
 
   children.push(docxSpacer(200));
   children.push(new DOCX.Paragraph({ border: { top: { color: DOCX_SILVER, space: 4, style: DOCX.BorderStyle.SINGLE, size: 4 } }, spacing: { before: 100 }, children: [new DOCX.TextRun({ text: "HT Maintenance — Maintenance électrique HTA / BT", size: 14, color: "888888", italics: true })] }));
@@ -3789,6 +5193,7 @@ export default function App() {
   const [selectedId, setSelectedId] = useState(null);
   const [saveError, setSaveError] = useState(false);
   const [printSite, setPrintSite] = useState(null);
+  const [exportConfirm, setExportConfirm] = useState(null);
   const saveTimer = useRef(null);
 
   const [view, setView] = useState("sites"); // "sites" | "interventions" | "calendrier"
@@ -3866,6 +5271,17 @@ export default function App() {
     })();
     return () => { cancelled = true; };
   }, [printSite, printIv]);
+
+  function requestPrintSite(site) {
+    const warnings = siteExportWarnings(site);
+    if (warnings.length) setExportConfirm({ kind: "site", data: site, warnings });
+    else setPrintSite(site);
+  }
+  function requestPrintIv(iv) {
+    const warnings = ivExportWarnings(iv);
+    if (warnings.length) setExportConfirm({ kind: "iv", data: iv, warnings });
+    else setPrintIv(iv);
+  }
 
   function updateSite(id, updater) { setSites((prev) => prev.map((s) => (s.id === id ? updater(s) : s))); }
   function addSite() {
@@ -4032,9 +5448,9 @@ export default function App() {
           )}
 
           {selected ? (
-            <SiteDetail site={selected} update={(updater) => updateSite(selected.id, updater)} onBack={() => setSelectedId(null)} onDelete={deleteSite} onPrint={setPrintSite} onCreateIntervention={createIntervention} />
+            <SiteDetail site={selected} update={(updater) => updateSite(selected.id, updater)} onBack={() => setSelectedId(null)} onDelete={deleteSite} onPrint={requestPrintSite} onCreateIntervention={createIntervention} />
           ) : selectedIv ? (
-            <InterventionEditor iv={selectedIv} update={(updater) => updateIntervention(selectedIv.id, updater)} onBack={() => setSelectedIvId(null)} onDelete={deleteIntervention} onPrint={setPrintIv} />
+            <InterventionEditor iv={selectedIv} update={(updater) => updateIntervention(selectedIv.id, updater)} onBack={() => setSelectedIvId(null)} onDelete={deleteIntervention} onPrint={requestPrintIv} />
           ) : view === "sites" ? (
             !loaded ? <div style={{ textAlign: "center", padding: 60, color: "#8B96A3", fontSize: 13 }}>Chargement…</div> : <Overview sites={sites} onOpen={setSelectedId} onNew={addSite} />
           ) : view === "interventions" ? (
@@ -4046,6 +5462,33 @@ export default function App() {
           )}
         </div>
       </div>
+
+      {exportConfirm && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(4,9,16,0.72)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200, padding: 16 }} onClick={() => setExportConfirm(null)}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: "#FFFFFF", border: "1px solid #D8DEE5", borderRadius: 14, padding: 22, maxWidth: 420, width: "100%", boxShadow: "0 20px 50px rgba(0,0,0,0.3)" }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "#1A1F26", marginBottom: 4 }}>Quelques champs semblent incomplets</div>
+            <div style={{ fontSize: 12, color: "#8B96A3", marginBottom: 14 }}>Le rapport Word peut quand même être généré — voici ce qui manque :</div>
+            <ul style={{ margin: 0, paddingLeft: 20, marginBottom: 18 }}>
+              {exportConfirm.warnings.map((w, i) => (
+                <li key={i} style={{ fontSize: 12.5, color: "#3E4A5C", marginBottom: 4 }}>{w}</li>
+              ))}
+            </ul>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+              <button onClick={() => setExportConfirm(null)} style={btnGhost()}>Annuler, je complète</button>
+              <button
+                onClick={() => {
+                  if (exportConfirm.kind === "site") setPrintSite(exportConfirm.data);
+                  else setPrintIv(exportConfirm.data);
+                  setExportConfirm(null);
+                }}
+                style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "#FFC107", border: "none", color: "#1A1F26", borderRadius: 8, padding: "9px 16px", fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}
+              >
+                Générer quand même
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
