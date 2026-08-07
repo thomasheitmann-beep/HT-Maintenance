@@ -30,7 +30,7 @@ const EQUIPMENT_TYPES_HTABT = [
   "Batterie de compensation",
 ];
 // Redresseur chargeur et inverseur de source statique à venir.
-const EQUIPMENT_TYPES_CONVERSION = ["Onduleur"];
+const EQUIPMENT_TYPES_CONVERSION = ["Onduleur 3/3"];
 const EQUIPMENT_TYPES = [...EQUIPMENT_TYPES_HTABT, ...EQUIPMENT_TYPES_CONVERSION];
 
 // petit constructeur : un contrôle avec Action + État final (+ champs de mesure optionnels)
@@ -93,6 +93,10 @@ const LISTE_TECHNO_BATTERIE = ["PE", "PO", "GEL", "Cd-Ni"];
 const LISTE_NB_BRANCHES = ["1", "2", "3", "4", "5", "6"];
 const LISTE_MACHINE_ETAT = ["Propre", "À nettoyer", "Nettoyé"];
 const LISTE_ENVIRONNEMENT_UPS = ["Propre", "Dépoussiérée", "Nécessite une dépollution industrielle"];
+const LISTE_TRANSFORMATEUR_AMONT = ["Sans transformateur amont", "Avec transformateur amont", "Avec transformateur amont réseau 1", "Avec transformateur amont réseau 2", "Avec transformateurs amont réseau 1 et réseau 2"];
+const LISTE_AUTO_TRANSFORMATEUR_AMONT = ["Sans auto-transformateur amont", "Avec auto-transformateur amont", "Avec auto-transformateur amont réseau 1", "Avec auto-transformateur amont réseau 2", "Avec auto-transformateurs amont réseau 1 et réseau 2"];
+const LISTE_ALIMENTATION_RESEAUX = ["1 réseau d'alimentation", "1 réseau d'alimentation (réseaux normal et secours pontés au bornier)", "2 réseaux d'alimentation indépendants (normal et secours séparés)"];
+const LISTE_TRANSFORMATEUR_SORTIE = ["Sans transformateur de sortie", "Avec transformateur de sortie"];
 const LISTE_CONCLUSION_DGA = ["Normal", "Surveillance", "Alerte", "Critique"];
 const LISTE_MARQUE_TDY = ["ABB", "ALSTOM", "AREVA", "CAHORS", "CONTI TRANSFO", "EFACEC", "ELKIMA", "France TRANSFO", "GBE", "MATELEC", "MERLIN GERIN", "PAUWELS", "SCHNEIDER ELECTRIC", "SIEMENS", "SNT DURIEZ", "UNELEC"];
 const LISTE_COUPLAGE_TDY = ["Yzn11", "Dyn11", "Dzn10", "Dzn6", "Yyn6", "Yzn5", "Dyn5", "Yyn0", "Yz11", "Yd11", "Dy11", "Dz10", "Dz6", "Yy6", "Dd6", "Yz5", "Yd5", "Dy5", "Yy0", "Dd0"];
@@ -155,7 +159,7 @@ const TYPES_AVEC_GRADINS = ["Batterie de compensation"];
 // Onduleur : branches de batterie (dynamique, comme les gradins) et relevé détaillé des tensions
 // par élément, avec classification automatique (Normal / À surveiller / Critique) par rapport à
 // la moyenne mesurée — reprend le principe du fichier Excel (comparaison à la tension de floating).
-const TYPES_AVEC_BRANCHES_UPS = ["Onduleur"];
+const TYPES_AVEC_BRANCHES_UPS = ["Onduleur 3/3"];
 // Pièces d'usure Onduleur : 4 catégories, chacune avec une durée de vie par défaut ajustable par
 // modèle (les batteries n'ont pas de durée par défaut — elle dépend de la capacité Ah saisie).
 const CATEGORIES_USURE_UPS = [
@@ -664,14 +668,18 @@ const SCHEMAS = {
       ]},
     ],
   },
-  "Onduleur": {
+  "Onduleur 3/3": {
     identification: [
       { key: "repere", label: "Repère / Nom de l'équipement" },
       { key: "marque", label: "Marque" }, { key: "typeUPS", label: "Type", options: LISTE_TYPE_UPS },
       { key: "configuration", label: "Configuration", options: LISTE_CONFIG_UPS },
-      { key: "puissance", label: "Puissance", numeric: true }, { key: "puissanceUnite", label: "Unité", options: ["kVA", "VA"] },
+      { key: "puissanceKVA", label: "Puissance (kVA)", numeric: true }, { key: "puissanceKW", label: "Puissance (kW)", numeric: true },
       { key: "tensionEntreeSortie", label: "Tension entrée / sortie", options: LISTE_TENSION_ENTREE_SORTIE },
       { key: "regimeSortie", label: "Régime de sortie", options: LISTE_REGIME_SORTIE_UPS },
+      { key: "transformateurAmont", label: "Transformateur amont", options: LISTE_TRANSFORMATEUR_AMONT },
+      { key: "autoTransformateurAmont", label: "Auto-transformateur amont", options: LISTE_AUTO_TRANSFORMATEUR_AMONT },
+      { key: "alimentationReseaux", label: "Réseaux normal / secours", options: LISTE_ALIMENTATION_RESEAUX },
+      { key: "transformateurSortie", label: "Transformateur de sortie", options: LISTE_TRANSFORMATEUR_SORTIE },
       { key: "anneeMiseEnService", label: "Année de mise en service", numeric: true },
     ],
     sections: [
@@ -679,14 +687,14 @@ const SCHEMAS = {
         I("batterie_caracteristiques", "Caractéristiques de la batterie", [
           { key: "marque", label: "Marque" }, { key: "technologie", label: "Technologie", options: LISTE_TECHNO_BATTERIE },
           { key: "typeBloc", label: "Type de bloc" }, { key: "tensionNominale", label: "Tension du bloc batterie (V)" },
-          { key: "capacite", label: "Capacité par branche (Ah)" },
+          { key: "capacite", label: "Capacité par batterie (Ah)" },
           { key: "nombreBranches", label: "Nombre de branches", options: LISTE_NB_BRANCHES }, { key: "nombreBlocsParBranche", label: "Nombre de blocs par branche" },
           { key: "anneeMiseEnService", label: "Année de mise en service" },
         ]),
       ]},
       { key: "environnement_ups", title: "État de l'installation", items: [
         C("local_ups", "Local", [F("acces", "Accessibilité", null, LISTE_ACCESSIBILITE)]),
-        C("temperature_ups", "Température", [F("acces", "Accessibilité", null, LISTE_ACCESSIBILITE)]),
+        C("temperature_ups", "Température", [F("valeur", "Valeur", "°C")]),
         C("machine_ups", "Machine", [F("etat", "État", null, LISTE_MACHINE_ETAT)]),
         C("environnement_ups_item", "Environnement", [F("etat", "État", null, LISTE_ENVIRONNEMENT_UPS)]),
       ]},
@@ -721,21 +729,22 @@ const SCHEMAS = {
         C("liaison_modbus_jbus", "Liaison série Modbus / J-Bus"),
       ]},
       { key: "mesures_reseau_normal", title: "Mesures — Réseau normal", items: [
+        C("tension_simple_normal", "Tension simple", champsTriphase("V", "Tension", 0, "moyenne", true)),
         C("tension_normal", "Tension composée", champsTriphase("V", "Tension", 0, "moyenne", true)),
         C("thdv_normal", "Taux de distorsion tension", champsTriphase("%", "THdV", 1, "max")),
         C("frequence_normal", "Fréquence", [F("hz", "Valeur", "Hz")]),
-        C("regime_neutre_normal", "Régime de neutre", [F("valeur", "Valeur")]),
+        C("regime_neutre_normal", "Régime de neutre", [F("valeur", "Valeur", null, LISTE_REGIME_NEUTRE)]),
         C("courant_normal", "Courant", champsTriphase("A", "Courant", 1, "moyenne", true)),
         C("thdi_normal", "Taux de distorsion courant", champsTriphase("%", "ThdI", 1, "moyenne")),
         C("fp_normal", "Facteur de puissance", champsTriphase(null, "Cos φ", 2, "moyenne")),
-        C("puissance_normal", "Puissance apparente", [F("valeur", "Valeur", "kVA")]),
+        C("puissance_normal", "Puissance apparente", champsTriphase("kVA", "Puissance apparente", 1, "moyenne")),
       ]},
       { key: "mesures_reseau_secours", title: "Mesures — Réseau secours", items: [
         C("tension_simple_secours", "Tension simple", champsTriphase("V", "Tension", 0, "moyenne", true)),
         C("tension_secours", "Tension composée", champsTriphase("V", "Tension", 0, "moyenne", true)),
         C("thdv_secours", "Taux de distorsion tension", champsTriphase("%", "THdV", 1, "max")),
         C("frequence_secours", "Fréquence", [F("hz", "Valeur", "Hz")]),
-        C("regime_neutre_secours", "Régime de neutre", [F("valeur", "Valeur")]),
+        C("regime_neutre_secours", "Régime de neutre", [F("valeur", "Valeur", null, LISTE_REGIME_NEUTRE)]),
         C("courant_secours", "Courant", champsTriphase("A", "Courant", 1, "moyenne", true)),
         C("thdi_secours", "Taux de distorsion courant", champsTriphase("%", "ThdI", 1, "moyenne")),
         C("tension_terre_neutre_secours", "Tension terre / neutre", [F("v", "Valeur", "V")]),
@@ -751,10 +760,12 @@ const SCHEMAS = {
           { key: "cosphi1", label: "Cos φ L1 (calculé)", unit: null, compute: (f) => { const p = numOf(f.p1), s = numOf(f.s1); return (p === null || s === null || !s) ? "" : Math.round((p / s) * 100) / 100; } },
           { key: "cosphi2", label: "Cos φ L2 (calculé)", unit: null, compute: (f) => { const p = numOf(f.p2), s = numOf(f.s2); return (p === null || s === null || !s) ? "" : Math.round((p / s) * 100) / 100; } },
           { key: "cosphi3", label: "Cos φ L3 (calculé)", unit: null, compute: (f) => { const p = numOf(f.p3), s = numOf(f.s3); return (p === null || s === null || !s) ? "" : Math.round((p / s) * 100) / 100; } },
-          F("nature", "Nature", null, ["Inductif", "Capacitif", "Résistif"]),
+          F("nature1", "Nature L1", null, ["Inductif", "Capacitif", "Résistif"]),
+          F("nature2", "Nature L2", null, ["Inductif", "Capacitif", "Résistif"]),
+          F("nature3", "Nature L3", null, ["Inductif", "Capacitif", "Résistif"]),
         ]),
-        C("dv_sortie_secours", "ΔV sortie / secours", [F("v", "Valeur", "V")]),
-        C("regime_neutre_utilisation", "Régime de neutre", [F("valeur", "Valeur")]),
+        C("dv_sortie_secours", "ΔV sortie / secours", champsTriphase("V", "ΔV", 1, "moyenne")),
+        C("regime_neutre_utilisation", "Régime de neutre", [F("valeur", "Valeur", null, LISTE_REGIME_NEUTRE)]),
         C("tension_terre_neutre_utilisation", "Tension terre / neutre", [F("v", "Valeur", "V")]),
         C("frequence_utilisation", "Fréquence", [F("hz", "Valeur", "Hz")]),
         C("taux_charge_utilisation", "Taux de charge", champsTriphase("%", "Taux de charge", 1, "max")),
@@ -1186,23 +1197,52 @@ function unitFamilyFor(u) {
   return null;
 }
 
-// Champ "liste déroulante + saisie libre" : suggestions via <datalist>, mais toute valeur tapée est acceptée.
+// Champ "liste déroulante + saisie libre" : liste personnalisée (pas de <datalist> natif, mal
+// géré sur iOS où les suggestions restent invisibles/coupées au-dessus du clavier).
 function Combo({ value, onChange, options, listId, style, placeholder, numeric }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    function onDocPointer(e) {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onDocPointer);
+    document.addEventListener("touchstart", onDocPointer);
+    return () => {
+      document.removeEventListener("mousedown", onDocPointer);
+      document.removeEventListener("touchstart", onDocPointer);
+    };
+  }, []);
+  const filtered = value ? options.filter((o) => String(o).toLowerCase().includes(String(value).toLowerCase())) : options;
   return (
-    <>
+    <div ref={ref} style={{ position: "relative", width: (style && style.width) || "100%" }}>
       <input
         type={numeric ? "number" : "text"}
         step={numeric ? "any" : undefined}
-        list={listId}
         value={value ?? ""}
         onChange={(e) => onChange(e.target.value)}
+        onFocus={() => setOpen(true)}
         placeholder={placeholder}
-        style={{ ...inputStyle, ...(style || {}) }}
+        style={{ ...inputStyle, ...(style || {}), width: "100%" }}
       />
-      <datalist id={listId}>
-        {options.map((o) => <option key={o} value={o} />)}
-      </datalist>
-    </>
+      {open && filtered.length > 0 && (
+        <div style={{
+          position: "absolute", top: "calc(100% + 3px)", left: 0, right: 0, zIndex: 300,
+          background: "#FFFFFF", border: "1px solid #D8DEE5", borderRadius: 8,
+          boxShadow: "0 12px 28px rgba(0,0,0,0.18)", maxHeight: 230, overflowY: "auto",
+        }}>
+          {filtered.map((o, i) => (
+            <div
+              key={o + i}
+              onMouseDown={(e) => { e.preventDefault(); onChange(o); setOpen(false); }}
+              style={{ padding: "10px 12px", fontSize: 13, color: "#1A1F26", cursor: "pointer", borderBottom: i < filtered.length - 1 ? "1px solid #F0F2F5" : "none" }}
+            >
+              {o}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -2449,16 +2489,17 @@ function ElementsBatteriePanel({ eq, update, idPrefix }) {
       {entries.length === 0 ? (
         <div style={{ textAlign: "center", padding: 18, color: "#8B96A3", fontSize: 12.5, border: "1px dashed #D8DEE5", borderRadius: 10 }}>Aucun élément — utilisez "Régénérer" pour créer les emplacements</div>
       ) : (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 8 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(64px, 1fr))", gap: 6 }}>
           {entries.map((e) => (
-            <div key={e.id} style={{ border: "1px solid #E2E6EB", borderRadius: 8, padding: 8 }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-                <input value={e.label} onChange={(ev) => setEntry(e.id, { label: ev.target.value })} style={{ ...inputStyle, border: "none", padding: 0, fontSize: 11, fontWeight: 700, color: "#5B6B7D", width: "82%" }} />
-                <button onClick={() => removeEntry(e.id)} style={{ background: "none", border: "none", color: "#EF4444", cursor: "pointer", padding: 2 }} title="Retirer">
-                  <Trash2 size={13} />
-                </button>
-              </div>
-              <MiniInput label="U" unit="V" value={e.fields.tension} onChange={(v) => setField(e.id, "tension", v)} validState={elementBatterieStatus(e.fields.tension, moyenne, cfg.toleranceBasse, cfg.toleranceHaute)} width={62} />
+            <div key={e.id} style={{ border: "1px solid #E2E6EB", borderRadius: 6, padding: "4px 5px", textAlign: "center" }} title={e.label}>
+              <div style={{ fontSize: 9, fontWeight: 700, color: "#8B96A3", marginBottom: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{e.label}</div>
+              <input
+                type="number" step="any" value={e.fields.tension ?? ""} onChange={(ev) => setField(e.id, "tension", ev.target.value)}
+                style={{
+                  ...inputStyle, width: "100%", padding: "3px 2px", fontSize: 11.5, textAlign: "center",
+                  border: `1.5px solid ${elementBatterieStatus(e.fields.tension, moyenne, cfg.toleranceBasse, cfg.toleranceHaute) === "bad" ? "#C0392B" : elementBatterieStatus(e.fields.tension, moyenne, cfg.toleranceBasse, cfg.toleranceHaute) === "ok" ? "#0F8A5F" : "#D8DEE5"}`,
+                }}
+              />
             </div>
           ))}
         </div>
@@ -2535,13 +2576,13 @@ function DynamicListPanel({ title, entries, onChange, typeOptions, fieldDefs, wi
 // Autonomie théorique (min) = énergie disponible (Ah × nb branches en parallèle × V) ÷ puissance de décharge, × 60.
 function calcAutonomieTheorique(eq) {
   const c = eq.controles.batterie_id?.batterie_caracteristiques?.fields || {};
-  const capaciteBranche = numOf(c.capacite);
+  const capaciteBatterie = numOf(c.capacite);
   const nbBranches = numOf(c.nombreBranches);
   const tensionElt = numOf(c.tensionNominale);
   const nbBlocs = numOf(c.nombreBlocsParBranche);
   const puissance = numOf(eq.controles.essai_decharge?.decharge_puissance_constante?.fields?.puissance);
-  if (capaciteBranche === null || nbBranches === null || tensionElt === null || nbBlocs === null || !puissance) return null;
-  const capaciteTotale = capaciteBranche * nbBranches;
+  if (capaciteBatterie === null || nbBranches === null || tensionElt === null || nbBlocs === null || !puissance) return null;
+  const capaciteTotale = capaciteBatterie * nbBranches;
   const tensionTotale = tensionElt * nbBlocs;
   const energieWh = capaciteTotale * tensionTotale;
   return Math.round((energieWh / (puissance * 1000)) * 60 * 10) / 10;
@@ -3604,7 +3645,7 @@ function PrintEquipement({ eq }) {
           </div>
         </div>
       )}
-      {eq.type === "Onduleur" && eq.courbeDechargeFiles && eq.courbeDechargeFiles.length > 0 && (
+      {eq.type === "Onduleur 3/3" && eq.courbeDechargeFiles && eq.courbeDechargeFiles.length > 0 && (
         <div style={{ marginTop: 10 }}>
           <div style={{ fontSize: 10.5, fontWeight: 700, color: "#555", marginBottom: 6 }}>Courbe de décharge batterie — pièces jointes</div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
@@ -4981,7 +5022,7 @@ function docxEquipementElements(eq, locaux) {
 
   // Courbe de décharge batterie (Onduleur) : même principe que la courbe de déclenchement — image
   // en grand format (≈ moitié de page).
-  if (eq.type === "Onduleur" && (eq.courbeDechargeFiles || []).length) {
+  if (eq.type === "Onduleur 3/3" && (eq.courbeDechargeFiles || []).length) {
     elements.push(new DOCX.Paragraph({ spacing: { before: 60, after: 40 }, children: [new DOCX.TextRun({ text: "Courbe de décharge batterie", bold: true, size: 19, color: DOCX_DARK })] }));
     eq.courbeDechargeFiles.forEach((f) => {
       if (f.isPdf) {
@@ -5207,7 +5248,12 @@ export default function App() {
     (async () => {
       try {
         const res = await window.storage.get(STORAGE_KEY, false);
-        if (res && res.value) setSites(JSON.parse(res.value));
+        if (res && res.value) {
+          const parsed = JSON.parse(res.value);
+          // Migration : l'équipement "Onduleur" a été renommé "Onduleur 3/3".
+          parsed.forEach((s) => (s.equipements || []).forEach((e) => { if (e.type === "Onduleur") e.type = "Onduleur 3/3"; }));
+          setSites(parsed);
+        }
       } catch (e) {
         // pas de données existantes
       }
