@@ -250,13 +250,12 @@ const FUSIBLE_FIELDS = [
 ];
 const TC_FIELDS = [F("type", "Type"), F("couplage", "Couplage"), F("puissance", "Puissance", "VA"), F("classe", "Classe")];
 
-const LISTE_TYPE_INT_SECT = ["Interrupteur", "Sectionneur", "Interrupteur-sectionneur"];
+const LISTE_TYPE_INT_SECT = ["Interrupteur", "Sectionneur", "Interrupteur-sectionneur", "Sectionneur de terre"];
 const MECA_CELLULE = [
-  C("manoeuvre_int_sect", "Manœuvres de l'interrupteur-sectionneur", [F("type", "Type", null, LISTE_TYPE_INT_SECT)]),
-  C("manoeuvre_sect_terre", "Manœuvres du sectionneur de terre"),
   C("densimetre_sf6", "Contrôle du densimètre SF6"),
   C("etat_general_cellule", "État général externe et interne de la cellule"),
 ];
+const TYPES_AVEC_MANOEUVRE_DYNAMIQUE = ["Interrupteur HTA", "Interrupteur Fusible HTA", "Comptage HTA", "Disjoncteur HTA", "Contacteur HTA"];
 const SECURITE_CELLULE = [
   C("continuite_masses", "Contrôle de la continuité des masses"),
   C("interverrouillage", "Contrôle de l'interverrouillage de sécurité"),
@@ -1493,6 +1492,7 @@ function emptyEquipement(type) {
     Object.keys(controles.materiel_securite).forEach((k) => { controles.materiel_securite[k].fields.present = "OUI"; });
   }
   if (TYPES_AVEC_TC.includes(type)) controles.tc_dynamique = [emptyDynamicEntry(LISTE_TC_FONCTION[0], TC_FIELDS_DYNAMIC, true)];
+  if (TYPES_AVEC_MANOEUVRE_DYNAMIQUE.includes(type)) controles.manoeuvre_dynamique = [emptyDynamicEntry(LISTE_TYPE_INT_SECT[0], [], true)];
   if (TYPES_AVEC_ORGANES_DYNAMIQUE.includes(type)) controles.organes_dynamique = [emptyDynamicEntry("", ORGANES_FIELDS, false)];
   if (TYPES_AVEC_GRADINS.includes(type)) controles.gradins_dynamique = [emptyDynamicEntry(LISTE_NOM_GRADIN[0], GRADIN_FIELD_DEFS, true)];
   if (TYPES_AVEC_BRANCHES_UPS.includes(type)) {
@@ -4143,6 +4143,32 @@ function EquipementCard({ eq, update, remove, removable = true, onDuplicate, loc
             if (sec.key === "releve_tensions" && TYPES_AVEC_BRANCHES_UPS.includes(eq.type)) {
               return <ElementsBatteriePanel key={sec.key} eq={eq} update={update} idPrefix={`${eq.id}-elements`} />;
             }
+            if (sec.key === "mecaniques" && TYPES_AVEC_MANOEUVRE_DYNAMIQUE.includes(eq.type)) {
+              return (
+                <React.Fragment key={sec.key}>
+                  <DynamicListPanel
+                    title="Manœuvre"
+                    entries={eq.controles.manoeuvre_dynamique || []}
+                    onChange={(entries) => update({ ...eq, controles: { ...eq.controles, manoeuvre_dynamique: entries } })}
+                    typeOptions={LISTE_TYPE_INT_SECT}
+                    fieldDefs={[]}
+                    withActionEtat={true}
+                    idPrefix={`${eq.id}-manoeuvre`}
+                  />
+                  <SectionBlock
+                    title={sec.title}
+                    items={sec.items}
+                    values={eq.controles[sec.key]}
+                    onChangeItem={(itemKey, v) => setControleItem(sec.key, itemKey, v)}
+                    idPrefix={`${eq.id}-${sec.key}`}
+                    custom={eq.controles[sec.key + "__custom"] || []}
+                    onAddCustom={() => addCustomAction(sec.key)}
+                    onChangeCustom={(id, patch) => changeCustomAction(sec.key, id, patch)}
+                    onRemoveCustom={(id) => removeCustomAction(sec.key, id)}
+                  />
+                </React.Fragment>
+              );
+            }
             if (sec.key === "organes" && TYPES_AVEC_ORGANES_DYNAMIQUE.includes(eq.type)) {
               return (
                 <DynamicListPanel
@@ -4180,6 +4206,18 @@ function EquipementCard({ eq, update, remove, removable = true, onDuplicate, loc
                     withActionEtat={true}
                     idPrefix={`${eq.id}-tc`}
                   />
+                  <div style={{ display: "flex", justifyContent: "flex-end", marginTop: -6, marginBottom: 14 }}>
+                    <button
+                      onClick={() => {
+                        const entry = emptyDynamicEntry("Homopolaire (terre)", TC_FIELDS_DYNAMIC, true);
+                        entry.fields.fonction = "Homopolaire (terre)";
+                        update({ ...eq, controles: { ...eq.controles, tc_dynamique: [...(eq.controles.tc_dynamique || []), entry] } });
+                      }}
+                      style={btnGhost(BRAND.blue)}
+                    >
+                      <Plus size={13} /> Ajouter un TC homopolaire
+                    </button>
+                  </div>
                 </React.Fragment>
               );
             }
@@ -5886,6 +5924,25 @@ function docxEquipementElements(eq, locaux) {
       const t = docxFieldTable(lignes.map((l) => [l.type, l.annee !== null ? String(l.annee) : "—"]));
       if (t) elements.push(t);
       else elements.push(new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: "Aucune donnée renseignée", size: 18, color: "666666" })] }));
+      elements.push(docxSpacer());
+      return;
+    }
+    if (sec.key === "mecaniques" && TYPES_AVEC_MANOEUVRE_DYNAMIQUE.includes(eq.type)) {
+      elements.push(docxHeading("Manœuvre"));
+      const rowsM = (eq.controles.manoeuvre_dynamique || []).filter((m) => m.label).map((m) => [m.label, "", m.action, m.etat]);
+      const tM = docxControlTable(rowsM);
+      if (tM) elements.push(tM);
+      elements.push(docxSpacer(60));
+      elements.push(docxHeading(sec.title));
+      const rowsMeca = sec.items.map((item) => {
+        const value = eq.controles[sec.key][item.key] || { action: "", etat: "", fields: {} };
+        const parts = printFieldParts(item, value);
+        return [item.label, parts.join(" · "), value.action, value.etat];
+      });
+      const custom = eq.controles[sec.key + "__custom"] || [];
+      custom.forEach((c) => rowsMeca.push([c.label || "(action ajoutée)", "", c.action, c.etat]));
+      const tMeca = docxControlTable(rowsMeca);
+      if (tMeca) elements.push(tMeca);
       elements.push(docxSpacer());
       return;
     }
