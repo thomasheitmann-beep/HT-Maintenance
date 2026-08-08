@@ -28,9 +28,10 @@ const EQUIPMENT_TYPES_HTABT = [
   "Analyse d'huile",
   "Jeu de barre / Gaine à barre",
   "Batterie de compensation",
+  "Bilan de puissance",
 ];
 // Redresseur chargeur et inverseur de source statique à venir.
-const EQUIPMENT_TYPES_CONVERSION = ["Onduleur 3/3"];
+const EQUIPMENT_TYPES_CONVERSION = ["Onduleur", "Redresseur chargeur", "Inverseur de source"];
 const EQUIPMENT_TYPES = [...EQUIPMENT_TYPES_HTABT, ...EQUIPMENT_TYPES_CONVERSION];
 
 // petit constructeur : un contrôle avec Action + État final (+ champs de mesure optionnels)
@@ -70,6 +71,31 @@ const LISTE_ETAT_SEUIL = ["", "Actif"];
 const LISTE_TR_MODE = ["Ajustable", "Fixe"];
 const LISTE_TR_CLASSE = ["1.5", "6"];
 const LISTE_RELAIS_MARQUE = ["SEPAM", "MICOM"];
+// Le relais de protection peut être d'une marque différente de celle de la cellule (ex. cellule
+// Schneider avec relais ABB) — sa marque et sa gamme sont donc indépendantes de celles de l'équipement.
+// HTA : relais de protection numériques autonomes.
+const LISTE_MARQUE_RELAIS_HTA = ["Schneider Electric", "Merlin Gerin", "ABB", "Siemens", "GE / Alstom", "Schweitzer Engineering Laboratories (SEL)", "Socomec", "Chauvin Arnoux"];
+const MARQUE_GAMME_RELAIS_HTA = {
+  "Schneider Electric": ["SEPAM S20", "SEPAM S40", "SEPAM S80", "SEPAM T20", "SEPAM M20"],
+  "Merlin Gerin": ["SEPAM S20", "SEPAM S40", "SEPAM S80"],
+  "ABB": ["REF615", "REJ601", "REM620", "Relion 615"],
+  "Siemens": ["SIPROTEC 5", "SIPROTEC 4", "7SJ"],
+  "GE / Alstom": ["MiCOM P12x", "MiCOM P14x", "MiCOM P54x"],
+  "Schweitzer Engineering Laboratories (SEL)": ["SEL-751", "SEL-387", "SEL-700G"],
+  "Socomec": ["Diris A40", "Diris A60"],
+  "Chauvin Arnoux": ["Centrale CVM-NRJ"],
+};
+// BT : unités de déclenchement intégrées aux disjoncteurs (produits différents du relais HTA).
+const LISTE_MARQUE_RELAIS_BT = ["Schneider Electric", "Merlin Gerin", "ABB", "Siemens", "Eaton", "Legrand", "General Electric"];
+const MARQUE_GAMME_RELAIS_BT = {
+  "Schneider Electric": ["Micrologic 2.0", "Micrologic 5.0", "Micrologic 6.0", "Micrologic 7.0"],
+  "Merlin Gerin": ["Micrologic 2.0", "Micrologic 5.0", "Micrologic 6.0"],
+  "ABB": ["Ekip Touch", "Ekip Dip", "Ekip LCD", "Ekip Hi-Touch"],
+  "Siemens": ["ETU25B", "ETU45B", "ETU76B"],
+  "Eaton": ["Digitrip 3000", "IZM trip unit"],
+  "Legrand": ["Micrologic (DMX³)"],
+  "General Electric": ["Entelliguard TU"],
+};
 const LISTE_REF_DISJONCTEUR = ["SF1", "ORTHOFLUOR"];
 const LISTE_TYPE_CELLULE = {
   "Interrupteur HTA": ["INTERRUPTEUR - IM", "INTERRUPTEUR - IS", "INTERRUPTEUR - N1G", "INTERRUPTEUR - SDC"],
@@ -81,7 +107,7 @@ const LISTE_TYPE_CELLULE = {
 const LISTE_MARQUE_BRK = ["MASTERPACT", "COMPACT", "IZM", "NZM", "MEGAMAX", "ISOMAX", "EMAX", "EMAX 2", "SPECTRONIC", "MPACT", "3WL", "3WN", "DMX", "DMX³", "DPX"];
 const LISTE_TYPE_TRANSFORMATEUR = ["TRANSFORMATEUR DE DISTRIBUTION", "TRANSFORMATEUR", "AUTO-TRANSFORMATEUR", "TRANSFORMATEUR A DOUBLE SECONDAIRE", "TRANSFORMATEUR SEC ENROBÉ"];
 const LISTE_TYPE_JDB = ["Jeu de barres", "Gaine à barres"];
-const LISTE_MARQUE_BATTERIE = ["ABB", "AEG", "Alpes Technologies", "Alstom", "Beluk", "Chauvin Arnoux", "Comar Condensatori", "EPCOS", "ESTA", "Fabrimex", "Frako", "Kautz", "Merlin Gerin", "Schneider Electric", "Sermes", "Socomec", "Varilec", "Vishay"];
+const LISTE_MARQUE_BATTERIE = ["ABB", "AEG", "Alpes Technologies", "Alstom", "Beluk", "Chauvin Arnoux", "Comar Condensatori", "EPCOS", "ESTA", "Fabrimex", "Frako", "Kautz", "Merlin Gerin", "Schneider Electric", "Sermes", "Socomec", "Varilec", "Vishay", "Legrand", "Circutor", "Enerlux", "ICAR", "Ducati Energia", "Zezal"];
 const LISTE_TYPE_COMPENSATION = ["Compensateur d'énergie réactive", "Power Factor Correction"];
 const LISTE_TYPE_REGULATEUR = ["Statique", "Électromécanique"];
 const LISTE_ACCESSIBILITE = ["Conforme", "Difficile", "Très difficile"];
@@ -97,8 +123,102 @@ const LISTE_TRANSFORMATEUR_AMONT = ["Sans transformateur amont", "Avec transform
 const LISTE_AUTO_TRANSFORMATEUR_AMONT = ["Sans auto-transformateur amont", "Avec auto-transformateur amont", "Avec auto-transformateur amont réseau 1", "Avec auto-transformateur amont réseau 2", "Avec auto-transformateurs amont réseau 1 et réseau 2"];
 const LISTE_ALIMENTATION_RESEAUX = ["1 réseau d'alimentation", "1 réseau d'alimentation (réseaux normal et secours pontés au bornier)", "2 réseaux d'alimentation indépendants (normal et secours séparés)"];
 const LISTE_TRANSFORMATEUR_SORTIE = ["Sans transformateur de sortie", "Avec transformateur de sortie"];
+const LISTE_RATTACHEMENT_BILAN = ["Transformateur", "Disjoncteur BT", "TGBT"];
+const LISTE_TYPE_SOURCE_INV = ["ASI (Alimentation Statique sans Interruption)", "Onduleur", "Groupe électrogène", "Groupe tournant", "Turbine à gaz", "TGBT", "Transformateur", "Fournisseur ERDF ou autre", "Aucune"];
+const LISTE_REGIME_NEUTRE_BT = ["TNS", "TT", "TNC", "IT"];
+const LISTE_ETAT_ARRIVEE_DEPART = ["Conforme", "Non conforme", "À l'arrêt", "En marche"];
+const LISTE_FONCTIONNEMENT_INV = ["Utilisation sur Source 1 et Source 1 prioritaire", "Utilisation sur Source 2 et Source 2 prioritaire", "Utilisation sur Source 1 et Source 2 prioritaire", "Utilisation sur Source 2 et Source 1 prioritaire", "Utilisation non alimentée", "Utilisation sur By-pass manuel 1", "Utilisation sur By-pass manuel 2"];
+const LISTE_RESULTAT_TRANSFERT_MANUEL = ["Conforme", "Bypass", "Hors tolérance", "Hors tension"];
+const LISTE_RESULTAT_TRANSFERT_AUTO = ["Réalisé et conforme", "Non conforme", "Non réalisé"];
 const LISTE_CONCLUSION_DGA = ["Normal", "Surveillance", "Alerte", "Critique"];
-const LISTE_MARQUE_TDY = ["ABB", "ALSTOM", "AREVA", "CAHORS", "CONTI TRANSFO", "EFACEC", "ELKIMA", "France TRANSFO", "GBE", "MATELEC", "MERLIN GERIN", "PAUWELS", "SCHNEIDER ELECTRIC", "SIEMENS", "SNT DURIEZ", "UNELEC"];
+const LISTE_MARQUE_TDY = ["ABB", "ALSTOM", "AREVA", "CAHORS", "CONTI TRANSFO", "EFACEC", "ELKIMA", "France TRANSFO", "GBE", "MATELEC", "MERLIN GERIN", "PAUWELS", "SCHNEIDER ELECTRIC", "SIEMENS", "SNT DURIEZ", "UNELEC", "GENERAL ELECTRIC", "SGB-SMIT", "TRIHAL", "COTRADIS", "NIDEC", "TRAFOLYX", "IMEFY", "ORMAZABAL"];
+// Marques courantes par catégorie d'équipement — liste + saisie libre (une valeur absente reste saisissable).
+const LISTE_MARQUE_CELLULE_HTA = ["Schneider Electric", "Merlin Gerin", "ABB", "Siemens", "Alstom Grid", "Areva", "GE Grid Solutions", "Nexans", "CG Power", "Ormazabal", "Eaton", "Ensto", "Normelec", "SM6", "Fuji Electric"];
+const LISTE_MARQUE_APPAREILLAGE_BT = ["Schneider Electric", "Merlin Gerin", "ABB", "Siemens", "Legrand", "Eaton", "General Electric", "Hager", "Socomec", "Moeller", "Terasaki", "Chint"];
+const LISTE_MARQUE_ELEMENT_BATTERIE = ["EnerSys", "Yuasa", "Hoppecke", "Saft", "FIAMM", "CEAC", "Exide", "Alcad", "Oldham", "Sonnenschein", "Powersafe", "HAZE", "Panasonic", "C&D Technologies", "Fulmen"];
+const LISTE_MARQUE_ONDULEUR = ["Schneider Electric", "APC", "MGE UPS", "Eaton", "Riello UPS", "Socomec", "Vertiv", "Emerson", "Liebert", "Legrand", "ABB", "General Electric", "Delta", "Chloride", "Borri", "Piller", "Newave"];
+const LISTE_MARQUE_REDRESSEUR = ["Benning", "AEG Power Solutions", "EnerSys", "Delta", "Chloride", "Socomec", "Schneider Electric", "France Chargeurs", "Newave", "Total Energie", "Riello UPS"];
+const LISTE_MARQUE_INVERSEUR = ["Socomec", "Eaton", "ABB", "Schneider Electric", "GE Digital Energy", "Chloride", "Kohler", "ASCO Power", "Legrand", "Merlin Gerin"];
+const LISTE_MARQUE_JDB = ["Schneider Electric", "Canalis", "Zucchini", "Legrand", "LEGA", "Rittal", "Nexans", "GAM"];
+
+// Correspondance marque → gamme/modèle : le champ Type/Modèle propose la gamme du constructeur
+// choisi (ex. Schneider → SM6/Masterpact, ABB → UniSec/Emax) au lieu d'une liste unique pour tous.
+function optionsParChamp(champKey, mapping, defaut) {
+  return (identification) => {
+    const val = identification && identification[champKey];
+    return (val && mapping[val]) || defaut;
+  };
+}
+function optionsParMarque(mapping, defaut) {
+  return optionsParChamp("marque", mapping, defaut);
+}
+const MARQUE_GAMME_HTA = {
+  "ABB": ["UniSec", "UniGear ZS1", "SafeRing", "SafePlus"],
+  "Siemens": ["8DJH", "NXPLUS C", "SIMOSEC"],
+  "Ormazabal": ["cgmCosmos", "CGC", "cgmCosmos-P"],
+  "GE Grid Solutions": ["Gemini", "FBX"],
+  "Alstom Grid": ["FBX", "Gemini"],
+  "Areva": ["FBX", "Gemini"],
+  "Eaton": ["xiria", "SVS"],
+  "CG Power": ["RMU-CG"],
+};
+function typeCelluleOptions(equipType) {
+  return (identification) => {
+    const marque = identification && identification.marque;
+    if (!marque || marque === "Schneider Electric" || marque === "Merlin Gerin") return LISTE_TYPE_CELLULE[equipType];
+    return MARQUE_GAMME_HTA[marque] || LISTE_TYPE_CELLULE[equipType];
+  };
+}
+const MARQUE_TYPE_DISJONCTEUR_BT = {
+  "Schneider Electric": ["MASTERPACT", "COMPACT"],
+  "Merlin Gerin": ["MASTERPACT", "COMPACT"],
+  "ABB": ["ISOMAX", "EMAX", "EMAX 2", "TMAX"],
+  "Siemens": ["3WL", "3WN", "3VA"],
+  "Eaton": ["NZM", "IZM"],
+  "Moeller": ["NZM", "IZM"],
+  "Legrand": ["DMX", "DMX³", "DPX"],
+  "General Electric": ["SPECTRONIC", "MPACT", "MEGAMAX"],
+};
+const LISTE_TYPE_DISJONCTEUR_BT_OPTIONS = optionsParMarque(MARQUE_TYPE_DISJONCTEUR_BT, LISTE_MARQUE_BRK);
+const LISTE_REFERENCE_RELAIS_HTA_OPTIONS = optionsParChamp("marqueRelais", MARQUE_GAMME_RELAIS_HTA, LISTE_RELAIS_MARQUE);
+const LISTE_REFERENCE_RELAIS_BT_OPTIONS = optionsParChamp("marqueRelais", MARQUE_GAMME_RELAIS_BT, null);
+const MARQUE_MODELE_ONDULEUR = {
+  "Schneider Electric": ["Galaxy VX", "Galaxy VS", "Galaxy PW", "Symmetra PX", "Comet"],
+  "APC": ["Symmetra PX", "Smart-UPS"],
+  "MGE UPS": ["Galaxy", "Comet", "Pulsar"],
+  "Eaton": ["93PM", "9395", "9E", "9PX"],
+  "Riello UPS": ["Multi Power", "Master HP", "Sentinel Power"],
+  "Socomec": ["Modulys GP", "Masterys", "Delphys MP"],
+  "Vertiv": ["Liebert APM", "Liebert NX"],
+  "Emerson": ["Liebert APM", "Liebert NX"],
+  "Liebert": ["Liebert APM", "Liebert NX"],
+  "ABB": ["PowerValue", "Conceptpower DPA"],
+  "Delta": ["Ultron", "Amplon"],
+  "Chloride": ["Trinergy", "70-Net"],
+  "Legrand": ["Keor", "Daker"],
+  "General Electric": ["LanPro", "SitePro"],
+};
+const LISTE_MODELE_ONDULEUR_OPTIONS = optionsParMarque(MARQUE_MODELE_ONDULEUR, null);
+const MARQUE_MODELE_REDRESSEUR = {
+  "Benning": ["MC 3", "MPS RCT"],
+  "AEG Power Solutions": ["Protect D."],
+  "Socomec": ["Sicon Redresseur"],
+  "Schneider Electric": ["Galaxy DC"],
+  "Chloride": ["70-Net DC"],
+  "Delta": ["Ultron DC"],
+  "EnerSys": ["Alber BCS"],
+};
+const LISTE_MODELE_REDRESSEUR_OPTIONS = optionsParMarque(MARQUE_MODELE_REDRESSEUR, null);
+const MARQUE_MATERIEL_INVERSEUR = {
+  "Socomec": ["ATyS 6", "ATyS 8", "ATyS M", "ATyS P", "STS COMPACT"],
+  "Eaton": ["ATC-300", "SC Series"],
+  "ABB": ["OTM ATS", "DPX-ATS"],
+  "Schneider Electric": ["TransferPacT"],
+  "ASCO Power": ["ASCO 4000", "ASCO 7000"],
+  "Kohler": ["KSS ATS"],
+  "GE Digital Energy": ["Sure Source"],
+};
+const LISTE_MATERIEL_INVERSEUR_OPTIONS = optionsParMarque(MARQUE_MATERIEL_INVERSEUR, null);
 const LISTE_COUPLAGE_TDY = ["Yzn11", "Dyn11", "Dzn10", "Dzn6", "Yyn6", "Yzn5", "Dyn5", "Yyn0", "Yz11", "Yd11", "Dy11", "Dz10", "Dz6", "Yy6", "Dd6", "Yz5", "Yd5", "Dy5", "Yy0", "Dd0"];
 const OUI_NON_LIST = ["OUI", "NON"];
 const TENSION_ISOLEMENT = ["200", "500", "1000", "5000", "10000", "15000"];
@@ -144,30 +264,68 @@ const SECURITE_CELLULE = [
 ];
 const ORGANES_FIELDS = [{ key: "reference", label: "Référence" }, { key: "tension", label: "Tension", options: LISTE_TENSION_ORGANES }, { key: "type", label: "Type", options: LISTE_TYPE_ORGANES }];
 const LISTE_TYPE_ORGANE_DYNAMIQUE = ["Bobine à manque", "Déclencheur voltmétrique", "Moteur", "Bobine de fermeture", "Bobine d'ouverture", "Bouton poussoir", "Contact auxiliaire"];
-const LISTE_TC_FONCTION = ["Protection", "Mesure", "Protection / Mesure"];
+const LISTE_TC_FONCTION = ["Protection", "Mesure", "Protection / Mesure", "Homopolaire (terre)"];
 const LISTE_TC_SECONDAIRE = ["1", "5"];
-const TC_FIELDS_DYNAMIC = [
-  F("fonction", "Fonction", null, LISTE_TC_FONCTION),
-  F("type", "Type"), F("couplage", "Couplage"), F("puissance", "Puissance", "VA"), F("classe", "Classe"),
-  F("rapportPrimaire", "Rapport primaire"), F("secondaire", "Secondaire", "A", LISTE_TC_SECONDAIRE),
-];
+// Caractéristiques standards des TC/TP/tores — liste + saisie libre, pour préremplir rapidement
+// les valeurs courantes du marché.
+const LISTE_RAPPORT_PRIMAIRE_TC = ["10", "15", "20", "30", "40", "50", "60", "75", "100", "150", "200", "300", "400", "500", "600", "750", "800", "1000", "1200", "1500", "2000"];
+const LISTE_RAPPORT_PRIMAIRE_TORE = ["20", "30", "40", "50", "60", "75", "100", "150", "200"];
+const LISTE_TYPE_TC = ["Bobiné", "Tore", "Barre", "Enroulé"];
+const LISTE_COUPLAGE_TC = ["Étoile", "Triangle ouvert", "Résiduel"];
+const LISTE_PUISSANCE_TC = ["2.5", "5", "7.5", "10", "15", "20", "30"];
+// Classe de précision : gamme protection (5P/10P) et gamme mesure (0.1 à 3) réunies — la liste
+// pertinente dépend de la fonction du TC, gérée directement dans TC_FIELDS_DYNAMIC.
+const LISTE_CLASSE_TC_PROTECTION = ["5P10", "5P15", "5P20", "5P30", "10P10", "10P20", "PR"];
+const LISTE_CLASSE_TC_MESURE = ["0.1", "0.2", "0.2S", "0.5", "0.5S", "1", "3"];
+const LISTE_CLASSE_TC_TOUTES = [...LISTE_CLASSE_TC_PROTECTION, ...LISTE_CLASSE_TC_MESURE];
+// TP (transformateurs de potentiel/tension) : rapports courants HTA.
+const LISTE_RAPPORT_TP = ["5500/100", "10000/100", "15000/100", "20000/100", "20000/100/√3", "33000/100/√3"];
+const LISTE_CLASSE_TP = ["0.2", "0.5", "1", "3P"];
+// Un TC "Protection / Mesure" peut avoir deux enroulements secondaires distincts (deux noyaux),
+// donc deux couples rapport/classe différents — champs affichés uniquement dans ce cas.
+function TC_FIELDS_DYNAMIC(fieldsCourants) {
+  const fonction = fieldsCourants && fieldsCourants.fonction;
+  const estTore = fonction === "Homopolaire (terre)";
+  const estDouble = fonction === "Protection / Mesure";
+  const classeOptions = fonction === "Protection" ? LISTE_CLASSE_TC_PROTECTION : fonction === "Mesure" ? LISTE_CLASSE_TC_MESURE : LISTE_CLASSE_TC_TOUTES;
+  const base = [
+    F("fonction", "Fonction", null, LISTE_TC_FONCTION),
+    F("type", "Type", null, LISTE_TYPE_TC), F("couplage", "Couplage", null, LISTE_COUPLAGE_TC), F("puissance", "Puissance", "VA", LISTE_PUISSANCE_TC),
+    F("classe", estDouble ? "Classe (protection)" : "Classe", null, classeOptions),
+    F("rapportPrimaire", "Rapport primaire", null, estTore ? LISTE_RAPPORT_PRIMAIRE_TORE : LISTE_RAPPORT_PRIMAIRE_TC), F("secondaire", "Secondaire", "A", LISTE_TC_SECONDAIRE),
+  ];
+  if (estDouble) {
+    base.push(
+      F("classe2", "Classe (mesure)", null, LISTE_CLASSE_TC_MESURE),
+      F("rapportPrimaire2", "Rapport primaire (mesure)", null, LISTE_RAPPORT_PRIMAIRE_TC), F("secondaire2", "Secondaire (mesure)", "A", LISTE_TC_SECONDAIRE),
+    );
+  }
+  return base;
+}
 // Types d'équipement qui utilisent désormais le contrôle TC dynamique / les organes internes dynamiques
 // (un seul élément affiché par défaut, bouton pour en ajouter — remplace la liste fixe précédente).
-const TYPES_AVEC_TC = ["Comptage HTA", "Contacteur HTA"];
+const TYPES_AVEC_TC = ["Comptage HTA", "Contacteur HTA", "Disjoncteur HTA", "Interrupteur HTA", "Interrupteur Fusible HTA"];
 const TYPES_AVEC_ORGANES_DYNAMIQUE = ["Interrupteur HTA", "Interrupteur Fusible HTA", "Disjoncteur HTA", "Disjoncteur BT", "Interrupteur BT"];
 const TYPES_AVEC_GRADINS = ["Batterie de compensation"];
 // Onduleur : branches de batterie (dynamique, comme les gradins) et relevé détaillé des tensions
 // par élément, avec classification automatique (Normal / À surveiller / Critique) par rapport à
 // la moyenne mesurée — reprend le principe du fichier Excel (comparaison à la tension de floating).
-const TYPES_AVEC_BRANCHES_UPS = ["Onduleur 3/3"];
-// Pièces d'usure Onduleur : 4 catégories, chacune avec une durée de vie par défaut ajustable par
-// modèle (les batteries n'ont pas de durée par défaut — elle dépend de la capacité Ah saisie).
+const TYPES_AVEC_BRANCHES_UPS = ["Onduleur", "Redresseur chargeur"];
+// Types qui partagent le bloc "Mesures — Utilisation" (mesures triphasées + photos par phase +
+// taux de charge calculé) : l'Onduleur, et le Bilan de puissance qui réutilise la même structure.
+const TYPES_AVEC_MESURES_UTILISATION = ["Onduleur", "Bilan de puissance", "Inverseur de source"];
+// Pièces d'usure : 4 catégories pour l'Onduleur, 3 pour le Redresseur chargeur (pas de
+// condensateurs alternatifs — pas d'onduleur/étage AC de sortie sur cet équipement).
 const CATEGORIES_USURE_UPS = [
   { key: "batteries", label: "Batteries", dureeDefaut: null },
   { key: "condensateursAlternatifs", label: "Condensateurs alternatifs (AC)", dureeDefaut: 6 },
   { key: "condensateursContinus", label: "Condensateurs continus (DC)", dureeDefaut: 5 },
   { key: "ventilateurs", label: "Ventilateurs", dureeDefaut: 4 },
 ];
+const CATEGORIES_USURE_REDRESSEUR = CATEGORIES_USURE_UPS.filter((c) => c.key !== "condensateursAlternatifs");
+function getCategoriesUsure(type) {
+  return type === "Redresseur chargeur" ? CATEGORIES_USURE_REDRESSEUR : CATEGORIES_USURE_UPS;
+}
 function emptyModeleUsure(dureeDefaut) {
   return { id: uid(), description: "", marque: "", modele: "", quantite: "", anneeMiseEnService: "", dureeVie: dureeDefaut ?? "" };
 }
@@ -175,7 +333,7 @@ function calcEcheancesUsureUPS(eq) {
   const data = eq.controles.pieces_usure_ups || {};
   const batterieInfo = eq.controles.batterie_id?.batterie_caracteristiques?.fields || {};
   const lignes = [];
-  CATEGORIES_USURE_UPS.forEach((cat) => {
+  getCategoriesUsure(eq.type).forEach((cat) => {
     (data[cat.key] || []).forEach((m, i) => {
       const annee = numOf(m.anneeMiseEnService), duree = numOf(m.dureeVie);
       if (annee === null || duree === null) return;
@@ -185,7 +343,7 @@ function calcEcheancesUsureUPS(eq) {
   });
   return lignes;
 }
-const BRANCHE_FIELD_DEFS = [{ key: "recharge" }, { key: "residuel" }, { key: "decharge" }];
+const BRANCHE_FIELD_DEFS = [{ key: "recharge" }, { key: "residuel" }];
 const LISTE_NOM_BRANCHE = Array.from({ length: 6 }, (_, i) => `Branche ${i + 1}`);
 const ELEMENT_FIELD_DEFS = [{ key: "tension" }];
 // Un élément est signalé "défectueux" s'il sort de la bande [moyenne - toléranceBasse% ; moyenne + toléranceHaute%].
@@ -253,7 +411,8 @@ function gradinQMesuree(i, u) {
 const LISTE_NOM_GRADIN = Array.from({ length: 24 }, (_, i) => `Gradin ${i + 1}`);
 function emptyDynamicEntry(label, fieldDefs, withActionEtat) {
   const fields = {};
-  (fieldDefs || []).forEach((f) => { fields[f.key] = ""; if (unitFamilyFor(f.unit)) fields[f.key + "Unite"] = f.unit; });
+  const defs = typeof fieldDefs === "function" ? fieldDefs({}) : (fieldDefs || []);
+  defs.forEach((f) => { fields[f.key] = ""; if (unitFamilyFor(f.unit)) fields[f.key + "Unite"] = f.unit; });
   const base = withActionEtat ? { id: uid(), label: label || "", action: "", etat: "Conforme", fields } : { id: uid(), label: label || "", fields };
   return { ...base, photos: [] };
 }
@@ -302,9 +461,10 @@ function emptySeuilEntry(label) {
   return {
     id: uid(), label: label || "",
     fields: { etat: "", courbe: "", type: "", reglage: "", temporisation: "", temporisation_unite: "ms" },
-    essai: { action: "", etat: "Conforme", fields: { l1: "", l2: "", l3: "", courant_injecte: "" } },
+    essai: { action: "", etat: "Conforme", fields: { l1: "", l2: "", l3: "", courant_injecte: "", typeValise: "1U1I (monophasé)" } },
   };
 }
+const LISTE_TYPE_VALISE = ["1U1I (monophasé)", "3U3I (triphasé)"];
 // Extrait le code ANSI en tête d'un libellé de seuil (ex. "50-1 — Max I..." → "50", "81O — ..." → "81O").
 function ansiFamily(label) {
   const m = (label || "").match(/^(\d+)([A-Za-z]*)(?:-\d+)?/);
@@ -312,11 +472,14 @@ function ansiFamily(label) {
 }
 // Champs de réglage pertinents selon la fonction de protection sélectionnée. À défaut de
 // correspondance (libellé personnalisé), on retombe sur le jeu de champs 50/51 par défaut.
+// Détection terre (50N/51N) : soit via un TC homopolaire dédié, soit calculée par le relais à
+// partir de la somme vectorielle des 3 courants de phase (pas de TC dédié dans ce cas).
+const LISTE_MODE_DETECTION_TERRE = ["TC homopolaire dédié", "Somme des 3I (calculée)"];
 const ANSI_REGLAGE_FIELDS = {
   "50": [{ key: "courbe", label: "Courbe à temps", options: LISTE_COURBE_RELAIS }, { key: "type", label: "Type", options: LISTE_TYPE_RELAIS }, { key: "reglage", label: "Réglage", unit: "A" }],
   "51": [{ key: "courbe", label: "Courbe à temps", options: LISTE_COURBE_RELAIS }, { key: "type", label: "Type", options: LISTE_TYPE_RELAIS }, { key: "reglage", label: "Réglage", unit: "A" }],
-  "50N": [{ key: "reglage", label: "Réglage", unit: "A" }],
-  "51N": [{ key: "courbe", label: "Courbe à temps", options: LISTE_COURBE_RELAIS }, { key: "reglage", label: "Réglage", unit: "A" }],
+  "50N": [{ key: "reglage", label: "Réglage", unit: "A" }, { key: "modeDetection", label: "Mode de détection", options: LISTE_MODE_DETECTION_TERRE }],
+  "51N": [{ key: "courbe", label: "Courbe à temps", options: LISTE_COURBE_RELAIS }, { key: "reglage", label: "Réglage", unit: "A" }, { key: "modeDetection", label: "Mode de détection", options: LISTE_MODE_DETECTION_TERRE }],
   "46": [{ key: "reglage", label: "Réglage", unit: "%" }],
   "67": [{ key: "reglage", label: "Réglage", unit: "A" }, { key: "angle", label: "Angle caractéristique", unit: "°" }],
   "67N": [{ key: "reglage", label: "Réglage", unit: "A" }, { key: "angle", label: "Angle caractéristique", unit: "°" }],
@@ -336,6 +499,66 @@ const ANSI_REGLAGE_FIELDS = {
   "79": [{ key: "nb_cycles", label: "Nombre de cycles" }, { key: "temps_mort1", label: "Temps mort 1", unit: "s" }, { key: "temps_mort2", label: "Temps mort 2", unit: "s" }],
 };
 const ANSI_REGLAGE_FIELDS_DEFAUT = ANSI_REGLAGE_FIELDS["50"];
+// Aide au technicien (jamais imprimée dans le rapport) : valeur de courant à injecter au
+// secondaire pour simuler le seuil de réglage primaire, à partir du rapport TC de protection
+// (ex. réglage 400 A, TC 300/5 → injection = 400 × 5/300 ≈ 6,67 A).
+// Aide au technicien (jamais imprimée dans le rapport) : valeur à injecter au secondaire pour
+// simuler le seuil de réglage primaire, selon la grandeur du code ANSI :
+//  - courant (A)   : via le rapport TC de protection (ex. 400 A, TC 300/5 → injection ≈ 6,67 A)
+//  - tension (V)   : via le rapport TP de protection (ex. 5750 V, TP 20000/100 → injection ≈ 28,75 V)
+//  - fréquence/angle (Hz, Hz/s, °) : mesure directe, pas de transformation — injection = réglage
+//  - autres grandeurs (%, kW, min…) : pas d'équivalent secondaire simple, aucune aide affichée.
+function ratioTransformation(rapport) {
+  const m = String(rapport || "").match(/^\s*([\d.,]+)\s*\/\s*([\d.,]+)\s*$/);
+  if (!m) return null;
+  const primaire = parseFloat(m[1].replace(",", ".")), secondaire = parseFloat(m[2].replace(",", "."));
+  return primaire && secondaire ? secondaire / primaire : null;
+}
+function calcInjectionAide(reglagePrimaire, unite, eq, ansiCode, modeDetection) {
+  const reglage = numOf(reglagePrimaire);
+  if (reglage === null || !unite) return null;
+  if (unite === "A") {
+    // Le rapport TC peut déjà être suivi ailleurs sur l'équipement (contrôle TC dynamique) — pour
+    // une protection de terre (50N/51N), on utilise le TC homopolaire dédié si ce mode est choisi,
+    // sinon (somme des 3I, calculée par le relais) on utilise le TC de phase, comme pour 50/51.
+    const estTerre = ansiCode === "50N" || ansiCode === "51N";
+    const viaHomopolaire = estTerre && modeDetection !== "Somme des 3I (calculée)";
+    const tcList = eq.controles.tc_dynamique || [];
+    const tcExistant =
+      (viaHomopolaire && tcList.find((tc) => tc.fields.rapportPrimaire && tc.fields.secondaire && tc.label === "Homopolaire (terre)")) ||
+      (!viaHomopolaire && tcList.find((tc) => tc.fields.rapportPrimaire && tc.fields.secondaire && tc.label !== "Homopolaire (terre)")) ||
+      tcList.find((tc) => tc.fields.rapportPrimaire && tc.fields.secondaire);
+    const rapport = tcExistant ? `${tcExistant.fields.rapportPrimaire}/${tcExistant.fields.secondaire}` : eq.identification.rapportTCProtection;
+    const ratio = ratioTransformation(rapport);
+    return ratio === null ? null : Math.round(reglage * ratio * 1000) / 1000;
+  }
+  if (unite === "V") {
+    const ratio = ratioTransformation(eq.identification.rapportTPProtection);
+    return ratio === null ? null : Math.round(reglage * ratio * 1000) / 1000;
+  }
+  if (unite === "Hz" || unite === "Hz/s" || unite === "°") {
+    return reglage; // mesure directe, pas de transformation
+  }
+  if (unite === "kW") {
+    // Protection directionnelle de puissance (32) : la puissance secondaire à injecter dépend à
+    // la fois du rapport TC (courant) et du rapport TP (tension). Plutôt qu'une puissance abstraite,
+    // on détaille ce que le technicien doit réellement injecter : une tension (référence 100 V,
+    // secondaire standard du TP), le courant qui en découle, et le déphasage U/I (0° = puissance
+    // active pure, cos φ = 1 — convention par défaut pour l'essai).
+    const tcList = eq.controles.tc_dynamique || [];
+    const tcExistant = tcList.find((tc) => tc.fields.rapportPrimaire && tc.fields.secondaire && tc.label !== "Homopolaire (terre)") || tcList.find((tc) => tc.fields.rapportPrimaire && tc.fields.secondaire);
+    const rapportTC = tcExistant ? `${tcExistant.fields.rapportPrimaire}/${tcExistant.fields.secondaire}` : eq.identification.rapportTCProtection;
+    const ratioTC = ratioTransformation(rapportTC);
+    const ratioTP = ratioTransformation(eq.identification.rapportTPProtection);
+    if (ratioTC === null || ratioTP === null) return null;
+    const pSecondaireW = reglage * 1000 * ratioTC * ratioTP;
+    const uInjectee = 100;
+    const dephasage = 0;
+    const iInjectee = Math.round((pSecondaireW / uInjectee) * 1000) / 1000;
+    return { type: "puissance", u: uInjectee, i: iInjectee, dephasage };
+  }
+  return null;
+}
 // Contrôle du relais de protection non lié à un seuil précis (toujours affiché)
 const CIRCUIT_MESURES_COMMANDE = C("circuit_mesures_commande", "Contrôle du circuit de mesures et commande");
 const TYPES_AVEC_RELAIS = ["Disjoncteur HTA", "Contacteur HTA", "Interrupteur HTA", "Interrupteur Fusible HTA"];
@@ -350,9 +573,332 @@ function calcToleranceEssai(reglage, unite) {
 }
 
 
+// Fabrique de schéma Onduleur : chaque section de mesures réseau peut être triphasée (par défaut)
+// ou monophasée (un seul point de mesure, réutilise la clé "l1"/"p1"/"s1"/"cosphi1" pour rester
+// compatible avec les calculs déjà en place — taux de charge, tableaux consolidés, etc.).
+function champsMono(unit, label) {
+  return [F("l1", label || "Valeur", unit)];
+}
+function puissanceFpItem(mono) {
+  if (mono) {
+    return [
+      F("p1", "P actif", "kW"), F("s1", "S apparent", "kVA"),
+      { key: "cosphi1", label: "Cos φ (calculé)", unit: null, compute: (f) => { const p = numOf(f.p1), s = numOf(f.s1); return (p === null || s === null || !s) ? "" : Math.round((p / s) * 100) / 100; } },
+      F("nature1", "Nature", null, ["Inductif", "Capacitif", "Résistif"]),
+    ];
+  }
+  return [
+    F("p1", "P actif L1", "kW"), F("p2", "P actif L2", "kW"), F("p3", "P actif L3", "kW"),
+    F("s1", "S apparent L1", "kVA"), F("s2", "S apparent L2", "kVA"), F("s3", "S apparent L3", "kVA"),
+    { key: "cosphi1", label: "Cos φ L1 (calculé)", unit: null, compute: (f) => { const p = numOf(f.p1), s = numOf(f.s1); return (p === null || s === null || !s) ? "" : Math.round((p / s) * 100) / 100; } },
+    { key: "cosphi2", label: "Cos φ L2 (calculé)", unit: null, compute: (f) => { const p = numOf(f.p2), s = numOf(f.s2); return (p === null || s === null || !s) ? "" : Math.round((p / s) * 100) / 100; } },
+    { key: "cosphi3", label: "Cos φ L3 (calculé)", unit: null, compute: (f) => { const p = numOf(f.p3), s = numOf(f.s3); return (p === null || s === null || !s) ? "" : Math.round((p / s) * 100) / 100; } },
+    F("nature1", "Nature L1", null, ["Inductif", "Capacitif", "Résistif"]),
+    F("nature2", "Nature L2", null, ["Inductif", "Capacitif", "Résistif"]),
+    F("nature3", "Nature L3", null, ["Inductif", "Capacitif", "Résistif"]),
+  ];
+}
+function tensionCourantItem(mono, unit, label) {
+  if (mono) return champsMono(unit, label);
+  const decimals = unit === "V" ? 0 : 1;
+  return champsTriphase(unit, label, decimals, "moyenne", true);
+}
+function buildOnduleurSchema({ normalMono = false, secoursMono = false, utilisationMono = false, onduleurMono = false } = {}) {
+  return {
+    identification: [
+      { key: "repere", label: "Repère / Nom de l'équipement" },
+      { key: "marque", label: "Marque", options: LISTE_MARQUE_ONDULEUR }, { key: "modele", label: "Modèle", options: LISTE_MODELE_ONDULEUR_OPTIONS }, { key: "typeUPS", label: "Type", options: LISTE_TYPE_UPS },
+      { key: "configuration", label: "Configuration", options: LISTE_CONFIG_UPS },
+      { key: "puissanceKVA", label: "Puissance (kVA)", numeric: true }, { key: "puissanceKW", label: "Puissance (kW)", numeric: true },
+      { key: "tensionEntreeSortie", label: "Tension entrée / sortie", options: LISTE_TENSION_ENTREE_SORTIE },
+      { key: "regimeSortie", label: "Régime de sortie", options: LISTE_REGIME_SORTIE_UPS },
+      { key: "transformateurAmont", label: "Transformateur amont", options: LISTE_TRANSFORMATEUR_AMONT },
+      { key: "autoTransformateurAmont", label: "Auto-transformateur amont", options: LISTE_AUTO_TRANSFORMATEUR_AMONT },
+      { key: "alimentationReseaux", label: "Réseaux normal / secours", options: LISTE_ALIMENTATION_RESEAUX },
+      { key: "transformateurSortie", label: "Transformateur de sortie", options: LISTE_TRANSFORMATEUR_SORTIE },
+      { key: "anneeMiseEnService", label: "Année de mise en service", numeric: true },
+    ],
+    sections: [
+      { key: "batterie_id", title: "Batterie", items: [
+        I("batterie_caracteristiques", "Caractéristiques de la batterie", [
+          { key: "marque", label: "Marque", options: LISTE_MARQUE_ELEMENT_BATTERIE }, { key: "technologie", label: "Technologie", options: LISTE_TECHNO_BATTERIE },
+          { key: "typeBloc", label: "Type de bloc" }, { key: "tensionNominale", label: "Tension du bloc batterie (V)" },
+          { key: "capacite", label: "Capacité par batterie (Ah)" },
+          { key: "nombreBranches", label: "Nombre de branches", options: LISTE_NB_BRANCHES }, { key: "nombreBlocsParBranche", label: "Nombre de blocs par branche" },
+          { key: "anneeMiseEnService", label: "Année de mise en service" },
+        ]),
+      ]},
+      { key: "environnement_ups", title: "État de l'installation", items: [
+        C("local_ups", "Local", [F("acces", "Accessibilité", null, LISTE_ACCESSIBILITE)]),
+        C("temperature_ups", "Température", [F("valeur", "Valeur", "°C")]),
+        C("machine_ups", "Machine", [F("etat", "État", null, LISTE_ENVIRONNEMENT_UPS)]),
+        C("environnement_ups_item", "Environnement", [F("etat", "État", null, LISTE_MACHINE_ETAT)]),
+      ]},
+      { key: "redresseur_chargeur", title: "État redresseur / chargeur", items: [
+        C("essai_alarme_redresseur", "Essai alarme / défaut"),
+        C("ventilation_redresseur", "Ventilation"),
+        C("alim_electroniques_redresseur", "Alimentations électroniques"),
+        C("logique_marche_redresseur", "Logique de marche"),
+        C("auto_alim_redresseur", "Auto-alim électroniques"),
+        C("controle_isolement", "Contrôle du contrôleur d'isolement"),
+      ]},
+      { key: "etat_onduleur", title: "État de l'onduleur", items: [
+        C("essai_alarme_onduleur", "Essai alarme / défaut"),
+        C("ventilation_onduleur", "Ventilation"),
+        C("alim_electroniques_onduleur", "Alimentations électroniques"),
+        C("logique_marche_onduleur", "Logique de marche"),
+        C("auto_alim_onduleur", "Auto-alim électroniques"),
+        C("auto_alim_commutateur", "Auto-alim commutateur statique R2"),
+        C("commutation_r0_r2", "Commutation R0 vers R2 et R2 vers R0"),
+        C("controle_rs", "Contrôle RS"),
+      ]},
+      { key: "bypass_synoptique", title: "État du by-pass / synoptique", items: [
+        C("bypass_manuel_interne", "By-pass manuel interne"),
+        C("bypass_manuel_externe", "By-pass manuel externe"),
+        C("signalisations_leds", "Signalisations / LEDs"),
+        C("affichage_alarmes_defauts", "Affichage alarmes / défauts"),
+        C("commandes_synoptique", "Commandes"),
+        C("mesures_synoptique", "Mesures (synoptique)"),
+      ]},
+      { key: "report_alarme", title: "Type et état report alarme", items: [
+        C("relais_contacts_secs", "Relais contacts secs"),
+        C("reseau_ethernet_snmp", "Réseau Ethernet / SNMP"),
+        C("liaison_modbus_jbus", "Liaison série Modbus / J-Bus"),
+      ]},
+      { key: "mesures_reseau_normal", title: "Mesures — Réseau normal", items: [
+        C("tension_simple_normal", "Tension simple", tensionCourantItem(normalMono, "V", "Tension")),
+        ...(normalMono ? [] : [C("tension_normal", "Tension composée", tensionCourantItem(false, "V", "Tension"))]),
+        C("thdv_normal", "Taux de distorsion tension", normalMono ? champsMono("%", "THdV") : champsTriphase("%", "THdV", 1, "max")),
+        C("frequence_normal", "Fréquence", [F("hz", "Valeur", "Hz")]),
+        C("regime_neutre_normal", "Régime de neutre", [F("valeur", "Valeur", null, LISTE_REGIME_NEUTRE)]),
+        C("courant_normal", "Courant", tensionCourantItem(normalMono, "A", "Courant")),
+        ...(normalMono ? [] : [C("courant_neutre_normal", "Courant dans le neutre", [F("in", "IN", "A")])]),
+        C("thdi_normal", "Taux de distorsion courant", normalMono ? champsMono("%", "ThdI") : champsTriphase("%", "ThdI", 1, "moyenne")),
+        C("puissance_fp_normal", "Puissance et facteur de puissance", puissanceFpItem(normalMono)),
+      ]},
+      { key: "mesures_reseau_secours", title: "Mesures — Réseau secours", items: [
+        C("tension_simple_secours", "Tension simple", tensionCourantItem(secoursMono, "V", "Tension")),
+        ...(secoursMono ? [] : [C("tension_secours", "Tension composée", tensionCourantItem(false, "V", "Tension"))]),
+        C("thdv_secours", "Taux de distorsion tension", secoursMono ? champsMono("%", "THdV") : champsTriphase("%", "THdV", 1, "max")),
+        C("frequence_secours", "Fréquence", [F("hz", "Valeur", "Hz")]),
+        C("regime_neutre_secours", "Régime de neutre", [F("valeur", "Valeur", null, LISTE_REGIME_NEUTRE)]),
+        C("courant_secours", "Courant", tensionCourantItem(secoursMono, "A", "Courant")),
+        ...(secoursMono ? [] : [C("courant_neutre_secours", "Courant dans le neutre", [F("in", "IN", "A")])]),
+        C("thdi_secours", "Taux de distorsion courant", secoursMono ? champsMono("%", "ThdI") : champsTriphase("%", "ThdI", 1, "moyenne")),
+        C("tension_terre_neutre_secours", "Tension terre / neutre", [F("v", "Valeur", "V")]),
+      ]},
+      { key: "mesures_utilisation", title: "Mesures — Utilisation (sortie)", items: [
+        C("tension_simple_utilisation", "Tension simple", tensionCourantItem(utilisationMono, "V", "Tension")),
+        ...(utilisationMono ? [] : [C("tension_utilisation", "Tension composée", tensionCourantItem(false, "V", "Tension"))]),
+        C("thdv_utilisation", "Taux de distorsion tension", utilisationMono ? champsMono("%", "THdV") : champsTriphase("%", "THdV", 1, "max")),
+        C("courant_utilisation", "Courant", tensionCourantItem(utilisationMono, "A", "Courant")),
+        ...(utilisationMono ? [] : [C("courant_neutre_utilisation", "Courant dans le neutre", [F("in", "IN", "A")])]),
+        C("puissance_fp_utilisation", "Puissance et facteur de puissance", puissanceFpItem(utilisationMono)),
+        C("dv_sortie_secours", "ΔV sortie / secours", utilisationMono ? champsMono("V", "ΔV") : champsTriphase("V", "ΔV", 1, "moyenne")),
+        C("regime_neutre_utilisation", "Régime de neutre", [F("valeur", "Valeur", null, LISTE_REGIME_NEUTRE)]),
+        C("tension_terre_neutre_utilisation", "Tension terre / neutre", [F("v", "Valeur", "V")]),
+        C("frequence_utilisation", "Fréquence", [F("hz", "Valeur", "Hz")]),
+      ]},
+      { key: "mesures_onduleur_item", title: "Mesures — Onduleur", items: [
+        C("tension_onduleur", "Tension simple", onduleurMono ? champsMono("V", "Tension") : champsTriphase("V", "Tension", 0, "moyenne")),
+        C("frequence_onduleur", "Fréquence synchro / autonome", [F("synchro", "Synchro", "Hz"), F("autonome", "Autonome", "Hz")]),
+        C("courant_filtre", "Courant filtre", onduleurMono ? champsMono("A", "Courant filtre") : champsTriphase("A", "Courant filtre", 1, "moyenne")),
+      ]},
+      { key: "mesures_batterie_ups", title: "Mesures batterie", items: [
+        C("tension_floating", "Tension de floating", [F("v", "Valeur", "V")]),
+        C("tension_repos", "Tension de repos", [F("v", "Valeur", "V")]),
+        C("tension_charge", "Tension de charge", [F("v", "Valeur", "V")]),
+        C("tension_charge_forte", "Tension de charge forte", [F("v", "Valeur", "V")]),
+        C("tension_egalisation", "Tension d'égalisation", [F("v", "Valeur", "V")]),
+        C("pole_plus_terre", "Pôle \"+\" batterie / terre", [F("v", "Valeur", "V")]),
+        C("pole_moins_terre", "Pôle \"-\" batterie / terre", [F("v", "Valeur", "V")]),
+      ]},
+      { key: "defauts_apparence", title: "Défauts d'apparence", items: [
+        C("bornes_sulfatees", "Bornes sulfatées"),
+        C("bornes_oxydees", "Bornes oxydées"),
+        C("traces_degazage", "Traces de dégazage"),
+      ]},
+      { key: "branches_batterie", title: "Branches batterie", items: [] },
+      { key: "essai_decharge", title: "Essai décharge / autonomie", items: [
+        C("decharge_puissance_constante", "Décharge à puissance constante", [F("tension", "Tension de décharge", "V")]),
+        C("temperature_decharge", "Température batterie lors de la décharge", [F("temp", "Valeur", "°C")]),
+        C("duree_decharge", "Durée de la décharge batterie", [F("duree", "Valeur", "min")]),
+      ]},
+      { key: "releve_tensions", title: "Relevé des tensions batterie", items: [] },
+      { key: "thermographie_ups", title: "Thermographie", items: [
+        C("controle_thermo_ups", "Contrôle thermographique"),
+      ]},
+      { key: "pieces_usure_ups", title: "Pièces d'usure", items: [] },
+    ],
+  };
+}
+// Redresseur chargeur : même base que l'Onduleur (batterie, état, alarme, décharge, pièces
+// d'usure) mais sans onduleur/by-pass — uniquement le réseau d'entrée (mono/tri) et le continu de
+// sortie. Pas de condensateurs alternatifs dans les pièces d'usure (pas d'étage AC de sortie).
+function buildRedresseurSchema({ reseauMono = false } = {}) {
+  return {
+    identification: [
+      { key: "repere", label: "Repère / Nom de l'équipement" },
+      { key: "marque", label: "Marque", options: LISTE_MARQUE_REDRESSEUR }, { key: "modele", label: "Modèle", options: LISTE_MODELE_REDRESSEUR_OPTIONS },
+      { key: "puissanceKVA", label: "Puissance (kVA)", numeric: true }, { key: "puissanceKW", label: "Puissance (kW)", numeric: true },
+      { key: "tensionEntree", label: "Tension d'entrée (V)" }, { key: "tensionSortieContinue", label: "Tension de sortie continue (V)" },
+      { key: "anneeMiseEnService", label: "Année de mise en service", numeric: true },
+    ],
+    sections: [
+      { key: "batterie_id", title: "Batterie", items: [
+        I("batterie_caracteristiques", "Caractéristiques de la batterie", [
+          { key: "marque", label: "Marque", options: LISTE_MARQUE_ELEMENT_BATTERIE }, { key: "technologie", label: "Technologie", options: LISTE_TECHNO_BATTERIE },
+          { key: "typeBloc", label: "Type de bloc" }, { key: "tensionNominale", label: "Tension du bloc batterie (V)" },
+          { key: "capacite", label: "Capacité par batterie (Ah)" },
+          { key: "nombreBranches", label: "Nombre de branches", options: LISTE_NB_BRANCHES }, { key: "nombreBlocsParBranche", label: "Nombre de blocs par branche" },
+          { key: "anneeMiseEnService", label: "Année de mise en service" },
+        ]),
+      ]},
+      { key: "environnement_ups", title: "État de l'installation", items: [
+        C("local_ups", "Local", [F("acces", "Accessibilité", null, LISTE_ACCESSIBILITE)]),
+        C("temperature_ups", "Température", [F("valeur", "Valeur", "°C")]),
+        C("machine_ups", "Machine", [F("etat", "État", null, LISTE_ENVIRONNEMENT_UPS)]),
+        C("environnement_ups_item", "Environnement", [F("etat", "État", null, LISTE_MACHINE_ETAT)]),
+      ]},
+      { key: "redresseur_chargeur", title: "État redresseur / chargeur", items: [
+        C("essai_alarme_redresseur", "Essai alarme / défaut"),
+        C("ventilation_redresseur", "Ventilation"),
+        C("alim_electroniques_redresseur", "Alimentations électroniques"),
+        C("logique_marche_redresseur", "Logique de marche"),
+        C("auto_alim_redresseur", "Auto-alim électroniques"),
+        C("controle_isolement", "Contrôle du contrôleur d'isolement"),
+      ]},
+      { key: "report_alarme", title: "Type et état report alarme", items: [
+        C("relais_contacts_secs", "Relais contacts secs"),
+        C("reseau_ethernet_snmp", "Réseau Ethernet / SNMP"),
+        C("liaison_modbus_jbus", "Liaison série Modbus / J-Bus"),
+      ]},
+      { key: "mesures_reseau_normal", title: "Mesures réseau", items: [
+        C("tension_simple_normal", "Tension simple", tensionCourantItem(reseauMono, "V", "Tension")),
+        ...(reseauMono ? [] : [C("tension_normal", "Tension composée", tensionCourantItem(false, "V", "Tension"))]),
+        C("thdv_normal", "Taux de distorsion tension", reseauMono ? champsMono("%", "THdV") : champsTriphase("%", "THdV", 1, "max")),
+        C("frequence_normal", "Fréquence", [F("hz", "Valeur", "Hz")]),
+        C("regime_neutre_normal", "Régime de neutre", [F("valeur", "Valeur", null, LISTE_REGIME_NEUTRE)]),
+        C("courant_normal", "Courant", tensionCourantItem(reseauMono, "A", "Courant")),
+        ...(reseauMono ? [] : [C("courant_neutre_normal", "Courant dans le neutre", [F("in", "IN", "A")])]),
+        C("thdi_normal", "Taux de distorsion courant", reseauMono ? champsMono("%", "ThdI") : champsTriphase("%", "ThdI", 1, "moyenne")),
+        C("puissance_fp_normal", "Puissance et facteur de puissance", puissanceFpItem(reseauMono)),
+      ]},
+      { key: "mesures_continu", title: "Mesures — Continu (sortie)", items: [
+        C("tension_continue", "Tension continue", [F("v", "Valeur", "V")]),
+        C("courant_charge", "Courant de charge", [F("a", "Valeur", "A")]),
+        C("ondulation_residuelle", "Taux d'ondulation résiduelle", [F("pct", "Valeur", "%")]),
+      ]},
+      { key: "mesures_batterie_ups", title: "Mesures batterie", items: [
+        C("tension_floating", "Tension de floating", [F("v", "Valeur", "V")]),
+        C("tension_repos", "Tension de repos", [F("v", "Valeur", "V")]),
+        C("tension_charge", "Tension de charge", [F("v", "Valeur", "V")]),
+        C("tension_charge_forte", "Tension de charge forte", [F("v", "Valeur", "V")]),
+        C("tension_egalisation", "Tension d'égalisation", [F("v", "Valeur", "V")]),
+        C("pole_plus_terre", "Pôle \"+\" batterie / terre", [F("v", "Valeur", "V")]),
+        C("pole_moins_terre", "Pôle \"-\" batterie / terre", [F("v", "Valeur", "V")]),
+      ]},
+      { key: "defauts_apparence", title: "Défauts d'apparence", items: [
+        C("bornes_sulfatees", "Bornes sulfatées"),
+        C("bornes_oxydees", "Bornes oxydées"),
+        C("traces_degazage", "Traces de dégazage"),
+      ]},
+      { key: "branches_batterie", title: "Branches batterie", items: [] },
+      { key: "essai_decharge", title: "Essai décharge / autonomie", items: [
+        C("decharge_puissance_constante", "Décharge à puissance constante", [F("tension", "Tension de décharge", "V")]),
+        C("temperature_decharge", "Température batterie lors de la décharge", [F("temp", "Valeur", "°C")]),
+        C("duree_decharge", "Durée de la décharge batterie", [F("duree", "Valeur", "min")]),
+      ]},
+      { key: "releve_tensions", title: "Relevé des tensions batterie", items: [] },
+      { key: "thermographie_ups", title: "Thermographie", items: [
+        C("controle_thermo_ups", "Contrôle thermographique"),
+      ]},
+      { key: "pieces_usure_ups", title: "Pièces d'usure", items: [] },
+    ],
+  };
+}
+// Inverseur de source (commutateur statique / manuel entre 2 sources) : pas de batterie sur cet
+// équipement — Source 1, Source 2, Utilisation, chacune avec son régime mono/tri indépendant.
+function buildInverseurSchema({ source1Mono = false, source2Mono = false, utilisationMono = false } = {}) {
+  return {
+    identification: [
+      { key: "repere", label: "Repère / Nom de l'équipement" },
+      { key: "marque", label: "Marque", options: LISTE_MARQUE_INVERSEUR }, { key: "materiel", label: "Matériel", options: LISTE_MATERIEL_INVERSEUR_OPTIONS },
+      { key: "puissanceKVA", label: "Puissance (kVA)", numeric: true }, { key: "calibreDisjoncteur", label: "Calibre (A)", numeric: true },
+      { key: "anneeMiseEnService", label: "Année de mise en service", numeric: true },
+    ],
+    sections: [
+      { key: "environnement_ups", title: "État de l'installation", items: [
+        C("local_ups", "Local", [F("acces", "Accessibilité", null, LISTE_ACCESSIBILITE)]),
+        C("temperature_ups", "Température", [F("valeur", "Valeur", "°C")]),
+        C("machine_ups", "Machine", [F("etat", "État", null, LISTE_ENVIRONNEMENT_UPS)]),
+        C("environnement_ups_item", "Environnement", [F("etat", "État", null, LISTE_MACHINE_ETAT)]),
+      ]},
+      { key: "sources", title: "Sources", items: [
+        I("source1_carac", "Source 1 — Caractéristiques", [{ key: "type", label: "Type de source", options: LISTE_TYPE_SOURCE_INV }, { key: "reference", label: "Référence" }]),
+        C("source1_regime_neutre", "Source 1 — Régime de neutre", [F("valeur", "Valeur", null, LISTE_REGIME_NEUTRE_BT)]),
+        I("source2_carac", "Source 2 — Caractéristiques", [{ key: "type", label: "Type de source", options: LISTE_TYPE_SOURCE_INV }, { key: "reference", label: "Référence" }]),
+        C("source2_regime_neutre", "Source 2 — Régime de neutre", [F("valeur", "Valeur", null, LISTE_REGIME_NEUTRE_BT)]),
+        C("coupure_neutre", "Coupure du neutre"),
+      ]},
+      { key: "fonctionnement", title: "Fonctionnement", items: [
+        C("fonctionnement_arrivee", "Fonctionnement à l'arrivée", [F("etat", "État", null, LISTE_ETAT_ARRIVEE_DEPART), F("fonctionnement", "Fonctionnement", null, LISTE_FONCTIONNEMENT_INV)]),
+        C("fonctionnement_depart", "Fonctionnement au départ", [F("etat", "État", null, LISTE_ETAT_ARRIVEE_DEPART), F("fonctionnement", "Fonctionnement", null, LISTE_FONCTIONNEMENT_INV)]),
+        C("transfert_manuel_s1s2", "Transfert manuel S1 → S2", [F("resultat", "Résultat", null, LISTE_RESULTAT_TRANSFERT_MANUEL)]),
+        C("transfert_manuel_s2s1", "Transfert manuel S2 → S1", [F("resultat", "Résultat", null, LISTE_RESULTAT_TRANSFERT_MANUEL)]),
+        C("transfert_auto_s1s2", "Transfert automatique S1 → S2", [F("resultat", "Résultat", null, LISTE_RESULTAT_TRANSFERT_AUTO)]),
+        C("transfert_auto_s2s1", "Transfert automatique S2 → S1", [F("resultat", "Résultat", null, LISTE_RESULTAT_TRANSFERT_AUTO)]),
+      ]},
+      { key: "etat_commutateur", title: "État du commutateur", items: [
+        C("essai_alarme_commutateur", "Essai alarme / défaut"),
+        C("ventilation_commutateur", "Ventilation"),
+        C("alim_electroniques_commutateur", "Alimentations électroniques"),
+        C("logique_marche_commutateur", "Logique de marche"),
+        C("auto_alim_commutateur_inv", "Auto-alim électroniques"),
+      ]},
+      { key: "etat_synoptique_inv", title: "État synoptique", items: [
+        C("signalisations_leds_inv", "Signalisations / LEDs"),
+        C("affichage_alarmes_defauts_inv", "Affichage alarmes / défauts"),
+        C("commandes_inv", "Commandes"),
+        C("mesures_synoptique_inv", "Mesures"),
+      ]},
+      { key: "report_alarme", title: "État report alarme", items: [
+        C("relais_contacts_secs", "Relais contacts secs"),
+        C("communication_jbus", "Communication J-Bus"),
+      ]},
+      { key: "mesures_source1", title: "Mesures — Source 1 en charge", items: [
+        C("tension_simple_s1", "Tension simple", tensionCourantItem(source1Mono, "V", "Tension")),
+        ...(source1Mono ? [] : [C("tension_composee_s1", "Tension composée", tensionCourantItem(false, "V", "Tension"))]),
+        C("thdv_s1", "Taux de distorsion tension", source1Mono ? champsMono("%", "THdV") : champsTriphase("%", "THdV", 1, "max")),
+        C("frequence_s1", "Fréquence", [F("hz", "Valeur", "Hz")]),
+        C("dv_s1_s2", "ΔV Source 1 / Source 2", tensionCourantItem(source1Mono, "V", "ΔV")),
+        C("tension_cs_s1", "Tension CS", tensionCourantItem(source1Mono, "V", "Tension CS")),
+      ]},
+      { key: "mesures_source2", title: "Mesures — Source 2 en charge", items: [
+        C("tension_simple_s2", "Tension simple", tensionCourantItem(source2Mono, "V", "Tension")),
+        ...(source2Mono ? [] : [C("tension_composee_s2", "Tension composée", tensionCourantItem(false, "V", "Tension"))]),
+        C("thdv_s2", "Taux de distorsion tension", source2Mono ? champsMono("%", "THdV") : champsTriphase("%", "THdV", 1, "max")),
+        C("frequence_s2", "Fréquence", [F("hz", "Valeur", "Hz")]),
+        C("dv_s2_s1", "ΔV Source 2 / Source 1", tensionCourantItem(source2Mono, "V", "ΔV")),
+        C("tension_cs_s2", "Tension CS", tensionCourantItem(source2Mono, "V", "Tension CS")),
+      ]},
+      { key: "mesures_utilisation", title: "Mesures — Utilisation", items: [
+        C("tension_simple_utilisation", "Tension simple", tensionCourantItem(utilisationMono, "V", "Tension")),
+        ...(utilisationMono ? [] : [C("tension_utilisation", "Tension composée", tensionCourantItem(false, "V", "Tension"))]),
+        C("thdv_utilisation", "Taux de distorsion tension", utilisationMono ? champsMono("%", "THdV") : champsTriphase("%", "THdV", 1, "max")),
+        C("courant_utilisation", "Courant efficace", tensionCourantItem(utilisationMono, "A", "Courant")),
+        C("thdi_utilisation", "Taux de distorsion courant", utilisationMono ? champsMono("%", "ThdI") : champsTriphase("%", "ThdI", 1, "moyenne")),
+        C("puissance_fp_utilisation", "Puissance et facteur de puissance", puissanceFpItem(utilisationMono)),
+      ]},
+      { key: "thermographie_ups", title: "Thermographie", items: [
+        C("controle_thermo_ups", "Contrôle thermographique"),
+      ]},
+    ],
+  };
+}
 const SCHEMAS = {
   "Interrupteur HTA": {
-    identification: [{ key: "repere", label: "Repère / Nom de l'équipement" }, { key: "typeCellule", label: "Type de cellule", options: LISTE_TYPE_CELLULE["Interrupteur HTA"] }, { key: "numeroSerie", label: "Numéro de série" }],
+    identification: [{ key: "repere", label: "Repère / Nom de l'équipement" }, { key: "marque", label: "Marque", options: LISTE_MARQUE_CELLULE_HTA }, { key: "modele", label: "Modèle", options: typeCelluleOptions("Interrupteur HTA") }, { key: "typeCellule", label: "Type de cellule", options: typeCelluleOptions("Interrupteur HTA") }, { key: "numeroSerie", label: "Numéro de série" }, { key: "rapportTCProtection", label: "Rapport TC de protection (ex. 300/5)" }, { key: "rapportTPProtection", label: "Rapport TP de protection (ex. 20000/100)" }],
     sections: [
       { key: "mecaniques", title: "Contrôles mécaniques", items: [
         ...MECA_CELLULE,
@@ -377,7 +923,7 @@ const SCHEMAS = {
     ],
   },
   "Comptage HTA": {
-    identification: [{ key: "repere", label: "Repère / Nom de l'équipement" }, { key: "typeCellule", label: "Type de cellule", options: LISTE_TYPE_CELLULE["Comptage HTA"] }, { key: "numeroSerie", label: "Numéro de série" }],
+    identification: [{ key: "repere", label: "Repère / Nom de l'équipement" }, { key: "marque", label: "Marque", options: LISTE_MARQUE_CELLULE_HTA }, { key: "modele", label: "Modèle", options: typeCelluleOptions("Comptage HTA") }, { key: "typeCellule", label: "Type de cellule", options: typeCelluleOptions("Comptage HTA") }, { key: "numeroSerie", label: "Numéro de série" }],
     sections: [
       { key: "mecaniques", title: "Contrôles mécaniques", items: MECA_CELLULE },
       { key: "electriques", title: "Contrôles électriques", items: [
@@ -385,7 +931,7 @@ const SCHEMAS = {
         C("connexions_puissance", "Contrôle des connexions de puissance"),
         C("tetes_cables", "Contrôle des têtes de câbles"),
         C("contacts_position", "Contrôle des contacts de position"),
-        C("tp", "Contrôle des transformateurs de potentiel (TP)", TC_FIELDS),
+        C("tp", "Contrôle des transformateurs de potentiel (TP)", [...TC_FIELDS, F("rapport", "Rapport", null, LISTE_RAPPORT_TP)]),
         ...FUSIBLES,
         C("rapport_tc_comptage", "Contrôle du rapport de transformation des TC de comptage", [...L1L2L3()]),
         C("scelles_plombs", "Vérification des scellés / plombs réglementaires"),
@@ -395,7 +941,7 @@ const SCHEMAS = {
     ],
   },
   "Interrupteur Fusible HTA": {
-    identification: [{ key: "repere", label: "Repère / Nom de l'équipement" }, { key: "typeCellule", label: "Type de cellule", options: LISTE_TYPE_CELLULE["Interrupteur Fusible HTA"] }, { key: "numeroSerie", label: "Numéro de série" }],
+    identification: [{ key: "repere", label: "Repère / Nom de l'équipement" }, { key: "marque", label: "Marque", options: LISTE_MARQUE_CELLULE_HTA }, { key: "modele", label: "Modèle", options: typeCelluleOptions("Interrupteur Fusible HTA") }, { key: "typeCellule", label: "Type de cellule", options: typeCelluleOptions("Interrupteur Fusible HTA") }, { key: "numeroSerie", label: "Numéro de série" }, { key: "rapportTCProtection", label: "Rapport TC de protection (ex. 300/5)" }, { key: "rapportTPProtection", label: "Rapport TP de protection (ex. 20000/100)" }],
     sections: [
       { key: "mecaniques", title: "Contrôles mécaniques", items: [
         ...MECA_CELLULE,
@@ -423,9 +969,13 @@ const SCHEMAS = {
   "Disjoncteur HTA": {
     identification: [
       { key: "repere", label: "Repère / Nom de l'équipement" }, 
-      { key: "typeCellule", label: "Type de cellule", options: LISTE_TYPE_CELLULE["Disjoncteur HTA"] }, { key: "numeroSerie", label: "Numéro de série" },
+      { key: "marque", label: "Marque", options: LISTE_MARQUE_CELLULE_HTA },
+      { key: "modele", label: "Modèle", options: typeCelluleOptions("Disjoncteur HTA") },
+      { key: "typeCellule", label: "Type de cellule", options: typeCelluleOptions("Disjoncteur HTA") }, { key: "numeroSerie", label: "Numéro de série" },
       { key: "referenceDisjoncteur", label: "Référence du disjoncteur", options: LISTE_REF_DISJONCTEUR }, { key: "numeroSerieDisjoncteur", label: "Numéro de série (disjoncteur)" },
-      { key: "referenceRelais", label: "Référence du relais", options: LISTE_RELAIS_MARQUE }, { key: "numeroSerieRelais", label: "Numéro de série (relais)" },
+      { key: "marqueRelais", label: "Marque du relais de protection", options: LISTE_MARQUE_RELAIS_HTA }, { key: "referenceRelais", label: "Référence du relais", options: LISTE_REFERENCE_RELAIS_HTA_OPTIONS }, { key: "numeroSerieRelais", label: "Numéro de série (relais)" },
+      { key: "rapportTCProtection", label: "Rapport TC de protection (ex. 300/5)" },
+      { key: "rapportTPProtection", label: "Rapport TP de protection (ex. 20000/100)" },
     ],
     sections: [
       { key: "mecaniques", title: "Contrôles mécaniques", items: MECA_CELLULE },
@@ -449,9 +999,13 @@ const SCHEMAS = {
   "Contacteur HTA": {
     identification: [
       { key: "repere", label: "Repère / Nom de l'équipement" }, 
-      { key: "typeCellule", label: "Type de cellule", options: LISTE_TYPE_CELLULE["Contacteur HTA"] }, { key: "numeroSerie", label: "Numéro de série" },
+      { key: "marque", label: "Marque", options: LISTE_MARQUE_CELLULE_HTA },
+      { key: "modele", label: "Modèle", options: typeCelluleOptions("Contacteur HTA") },
+      { key: "typeCellule", label: "Type de cellule", options: typeCelluleOptions("Contacteur HTA") }, { key: "numeroSerie", label: "Numéro de série" },
       { key: "referenceContacteur", label: "Référence du contacteur", options: LISTE_REF_DISJONCTEUR }, { key: "numeroSerieContacteur", label: "Numéro de série (contacteur)" },
-      { key: "referenceRelais", label: "Référence du relais", options: LISTE_RELAIS_MARQUE }, { key: "numeroSerieRelais", label: "Numéro de série (relais)" },
+      { key: "marqueRelais", label: "Marque du relais de protection", options: LISTE_MARQUE_RELAIS_HTA }, { key: "referenceRelais", label: "Référence du relais", options: LISTE_REFERENCE_RELAIS_HTA_OPTIONS }, { key: "numeroSerieRelais", label: "Numéro de série (relais)" },
+      { key: "rapportTCProtection", label: "Rapport TC de protection (ex. 300/5)" },
+      { key: "rapportTPProtection", label: "Rapport TP de protection (ex. 20000/100)" },
     ],
     sections: [
       { key: "mecaniques", title: "Contrôles mécaniques", items: MECA_CELLULE },
@@ -475,9 +1029,11 @@ const SCHEMAS = {
   "Disjoncteur BT": {
     identification: [
       { key: "repere", label: "Repère / Nom de l'équipement" }, 
+      { key: "marque", label: "Marque", options: LISTE_MARQUE_APPAREILLAGE_BT },
+      { key: "modele", label: "Modèle", options: LISTE_TYPE_DISJONCTEUR_BT_OPTIONS },
       { key: "nomTGBT", label: "Nom du TGBT" }, { key: "utilisation", label: "Utilisation" },
-      { key: "typeDisjoncteur", label: "Type disjoncteur", options: LISTE_MARQUE_BRK }, { key: "numeroSerieDisjoncteur", label: "Numéro de série" },
-      { key: "referenceRelais", label: "Référence du relais", options: LISTE_RELAIS_MARQUE }, { key: "numeroSerieRelais", label: "Numéro de série (relais)" },
+      { key: "typeDisjoncteur", label: "Type disjoncteur", options: LISTE_TYPE_DISJONCTEUR_BT_OPTIONS }, { key: "numeroSerieDisjoncteur", label: "Numéro de série" },
+      { key: "marqueRelais", label: "Marque de l'unité de déclenchement", options: LISTE_MARQUE_RELAIS_BT }, { key: "referenceRelais", label: "Référence de l'unité de déclenchement", options: LISTE_REFERENCE_RELAIS_BT_OPTIONS }, { key: "numeroSerieRelais", label: "Numéro de série (relais)" },
       { key: "intensiteNominale", label: "Intensité nominale (A)", numeric: true }, { key: "debrochable", label: "Débrochable", options: OUI_NON_LIST },
     ],
     sections: [
@@ -518,8 +1074,10 @@ const SCHEMAS = {
   "Interrupteur BT": {
     identification: [
       { key: "repere", label: "Repère / Nom de l'équipement" },
+      { key: "marque", label: "Marque", options: LISTE_MARQUE_APPAREILLAGE_BT },
+      { key: "modele", label: "Modèle", options: LISTE_TYPE_DISJONCTEUR_BT_OPTIONS },
       { key: "nomTGBT", label: "Nom du TGBT" }, { key: "utilisation", label: "Utilisation" },
-      { key: "typeDisjoncteur", label: "Type", options: LISTE_MARQUE_BRK }, { key: "numeroSerieDisjoncteur", label: "Numéro de série" },
+      { key: "typeDisjoncteur", label: "Type", options: LISTE_TYPE_DISJONCTEUR_BT_OPTIONS }, { key: "numeroSerieDisjoncteur", label: "Numéro de série" },
       { key: "intensiteNominale", label: "Intensité nominale (A)", numeric: true }, { key: "debrochable", label: "Débrochable", options: OUI_NON_LIST },
     ],
     sections: [
@@ -668,92 +1226,26 @@ const SCHEMAS = {
       ]},
     ],
   },
-  "Onduleur 3/3": {
+  "Onduleur": buildOnduleurSchema({}),
+  "Redresseur chargeur": buildRedresseurSchema({}),
+  "Inverseur de source": buildInverseurSchema({}),
+  "Bilan de puissance": {
     identification: [
-      { key: "repere", label: "Repère / Nom de l'équipement" },
-      { key: "marque", label: "Marque" }, { key: "typeUPS", label: "Type", options: LISTE_TYPE_UPS },
-      { key: "configuration", label: "Configuration", options: LISTE_CONFIG_UPS },
-      { key: "puissanceKVA", label: "Puissance (kVA)", numeric: true }, { key: "puissanceKW", label: "Puissance (kW)", numeric: true },
-      { key: "tensionEntreeSortie", label: "Tension entrée / sortie", options: LISTE_TENSION_ENTREE_SORTIE },
-      { key: "regimeSortie", label: "Régime de sortie", options: LISTE_REGIME_SORTIE_UPS },
-      { key: "transformateurAmont", label: "Transformateur amont", options: LISTE_TRANSFORMATEUR_AMONT },
-      { key: "autoTransformateurAmont", label: "Auto-transformateur amont", options: LISTE_AUTO_TRANSFORMATEUR_AMONT },
-      { key: "alimentationReseaux", label: "Réseaux normal / secours", options: LISTE_ALIMENTATION_RESEAUX },
-      { key: "transformateurSortie", label: "Transformateur de sortie", options: LISTE_TRANSFORMATEUR_SORTIE },
+      { key: "repere", label: "Repère / Point de mesure" },
+      { key: "rattachement", label: "Rattaché à", options: LISTE_RATTACHEMENT_BILAN },
+      { key: "referenceRattachement", label: "Référence du transformateur / disjoncteur / TGBT" },
+      { key: "puissanceKVA", label: "Puissance nominale installée (kVA)", numeric: true },
+      { key: "calibreDisjoncteur", label: "Calibre du disjoncteur (A)", numeric: true },
+      { key: "tensionNominale", label: "Tension nominale (V)" },
       { key: "anneeMiseEnService", label: "Année de mise en service", numeric: true },
     ],
     sections: [
-      { key: "batterie_id", title: "Batterie", items: [
-        I("batterie_caracteristiques", "Caractéristiques de la batterie", [
-          { key: "marque", label: "Marque" }, { key: "technologie", label: "Technologie", options: LISTE_TECHNO_BATTERIE },
-          { key: "typeBloc", label: "Type de bloc" }, { key: "tensionNominale", label: "Tension du bloc batterie (V)" },
-          { key: "capacite", label: "Capacité par batterie (Ah)" },
-          { key: "nombreBranches", label: "Nombre de branches", options: LISTE_NB_BRANCHES }, { key: "nombreBlocsParBranche", label: "Nombre de blocs par branche" },
-          { key: "anneeMiseEnService", label: "Année de mise en service" },
-        ]),
-      ]},
-      { key: "environnement_ups", title: "État de l'installation", items: [
-        C("local_ups", "Local", [F("acces", "Accessibilité", null, LISTE_ACCESSIBILITE)]),
-        C("temperature_ups", "Température", [F("valeur", "Valeur", "°C")]),
-        C("machine_ups", "Machine", [F("etat", "État", null, LISTE_MACHINE_ETAT)]),
-        C("environnement_ups_item", "Environnement", [F("etat", "État", null, LISTE_ENVIRONNEMENT_UPS)]),
-      ]},
-      { key: "redresseur_chargeur", title: "État redresseur / chargeur", items: [
-        C("essai_alarme_redresseur", "Essai alarme / défaut"),
-        C("ventilation_redresseur", "Ventilation"),
-        C("alim_electroniques_redresseur", "Alimentations électroniques"),
-        C("logique_marche_redresseur", "Logique de marche"),
-        C("auto_alim_redresseur", "Auto-alim électroniques"),
-      ]},
-      { key: "etat_onduleur", title: "État de l'onduleur", items: [
-        C("essai_alarme_onduleur", "Essai alarme / défaut"),
-        C("ventilation_onduleur", "Ventilation"),
-        C("alim_electroniques_onduleur", "Alimentations électroniques"),
-        C("logique_marche_onduleur", "Logique de marche"),
-        C("auto_alim_onduleur", "Auto-alim électroniques"),
-        C("auto_alim_commutateur", "Auto-alim commutateur statique R2"),
-        C("commutation_r0_r2", "Commutation R0 vers R2 et R2 vers R0"),
-        C("controle_rs", "Contrôle RS"),
-      ]},
-      { key: "bypass_synoptique", title: "État du by-pass / synoptique", items: [
-        C("bypass_manuel_interne", "By-pass manuel interne"),
-        C("bypass_manuel_externe", "By-pass manuel externe"),
-        C("signalisations_leds", "Signalisations / LEDs"),
-        C("affichage_alarmes_defauts", "Affichage alarmes / défauts"),
-        C("commandes_synoptique", "Commandes"),
-        C("mesures_synoptique", "Mesures (synoptique)"),
-      ]},
-      { key: "report_alarme", title: "Type et état report alarme", items: [
-        C("relais_contacts_secs", "Relais contacts secs"),
-        C("reseau_ethernet_snmp", "Réseau Ethernet / SNMP"),
-        C("liaison_modbus_jbus", "Liaison série Modbus / J-Bus"),
-      ]},
-      { key: "mesures_reseau_normal", title: "Mesures — Réseau normal", items: [
-        C("tension_simple_normal", "Tension simple", champsTriphase("V", "Tension", 0, "moyenne", true)),
-        C("tension_normal", "Tension composée", champsTriphase("V", "Tension", 0, "moyenne", true)),
-        C("thdv_normal", "Taux de distorsion tension", champsTriphase("%", "THdV", 1, "max")),
-        C("frequence_normal", "Fréquence", [F("hz", "Valeur", "Hz")]),
-        C("regime_neutre_normal", "Régime de neutre", [F("valeur", "Valeur", null, LISTE_REGIME_NEUTRE)]),
-        C("courant_normal", "Courant", champsTriphase("A", "Courant", 1, "moyenne", true)),
-        C("thdi_normal", "Taux de distorsion courant", champsTriphase("%", "ThdI", 1, "moyenne")),
-        C("fp_normal", "Facteur de puissance", champsTriphase(null, "Cos φ", 2, "moyenne")),
-        C("puissance_normal", "Puissance apparente", champsTriphase("kVA", "Puissance apparente", 1, "moyenne")),
-      ]},
-      { key: "mesures_reseau_secours", title: "Mesures — Réseau secours", items: [
-        C("tension_simple_secours", "Tension simple", champsTriphase("V", "Tension", 0, "moyenne", true)),
-        C("tension_secours", "Tension composée", champsTriphase("V", "Tension", 0, "moyenne", true)),
-        C("thdv_secours", "Taux de distorsion tension", champsTriphase("%", "THdV", 1, "max")),
-        C("frequence_secours", "Fréquence", [F("hz", "Valeur", "Hz")]),
-        C("regime_neutre_secours", "Régime de neutre", [F("valeur", "Valeur", null, LISTE_REGIME_NEUTRE)]),
-        C("courant_secours", "Courant", champsTriphase("A", "Courant", 1, "moyenne", true)),
-        C("thdi_secours", "Taux de distorsion courant", champsTriphase("%", "ThdI", 1, "moyenne")),
-        C("tension_terre_neutre_secours", "Tension terre / neutre", [F("v", "Valeur", "V")]),
-      ]},
-      { key: "mesures_utilisation", title: "Mesures — Utilisation (sortie)", items: [
+      { key: "mesures_utilisation", title: "Mesures", items: [
         C("tension_simple_utilisation", "Tension simple", champsTriphase("V", "Tension", 0, "moyenne", true)),
         C("tension_utilisation", "Tension composée", champsTriphase("V", "Tension", 0, "moyenne", true)),
         C("thdv_utilisation", "Taux de distorsion tension", champsTriphase("%", "THdV", 1, "max")),
         C("courant_utilisation", "Courant", champsTriphase("A", "Courant", 1, "moyenne", true)),
+        C("courant_neutre_utilisation", "Courant dans le neutre", [F("in", "IN", "A")]),
         C("puissance_fp_utilisation", "Puissance et facteur de puissance", [
           F("p1", "P actif L1", "kW"), F("p2", "P actif L2", "kW"), F("p3", "P actif L3", "kW"),
           F("s1", "S apparent L1", "kVA"), F("s2", "S apparent L2", "kVA"), F("s3", "S apparent L3", "kVA"),
@@ -764,54 +1256,16 @@ const SCHEMAS = {
           F("nature2", "Nature L2", null, ["Inductif", "Capacitif", "Résistif"]),
           F("nature3", "Nature L3", null, ["Inductif", "Capacitif", "Résistif"]),
         ]),
-        C("dv_sortie_secours", "ΔV sortie / secours", champsTriphase("V", "ΔV", 1, "moyenne")),
         C("regime_neutre_utilisation", "Régime de neutre", [F("valeur", "Valeur", null, LISTE_REGIME_NEUTRE)]),
         C("tension_terre_neutre_utilisation", "Tension terre / neutre", [F("v", "Valeur", "V")]),
         C("frequence_utilisation", "Fréquence", [F("hz", "Valeur", "Hz")]),
-        C("taux_charge_utilisation", "Taux de charge", champsTriphase("%", "Taux de charge", 1, "max")),
       ]},
-      { key: "mesures_onduleur_item", title: "Mesures — Onduleur", items: [
-        C("tension_onduleur", "Tension composée", champsTriphase("V", "Tension", 0, "moyenne")),
-        C("frequence_onduleur", "Fréquence synchro / autonome", [F("synchro", "Synchro", "Hz"), F("autonome", "Autonome", "Hz")]),
-        C("courant_pont", "Courant pont (efficace + FC)", champsTriphase("A", "Courant pont", 1, "moyenne")),
-        C("courant_filtre", "Courant filtre", champsTriphase("A", "Courant filtre", 1, "moyenne")),
-      ]},
-      { key: "mesures_batterie_ups", title: "Mesures batterie", items: [
-        C("tension_floating", "Tension de floating", [F("v", "Valeur", "V")]),
-        C("tension_repos", "Tension de repos", [F("v", "Valeur", "V")]),
-        C("tension_charge", "Tension de charge", [F("v", "Valeur", "V")]),
-        C("tension_charge_forte", "Tension de charge forte", [F("v", "Valeur", "V")]),
-        C("tension_egalisation", "Tension d'égalisation", [F("v", "Valeur", "V")]),
-        C("pole_plus_terre", "Pôle \"+\" batterie / terre", [F("v", "Valeur", "V")]),
-        C("pole_moins_terre", "Pôle \"-\" batterie / terre", [F("v", "Valeur", "V")]),
-        C("tension_nominale_elt", "Tension nominale (par élément)", [F("v", "Valeur", "V")]),
-        C("seuil_fin_decharge", "Seuil de \"fin de décharge\"", [F("v", "Valeur", "V")]),
-      ]},
-      { key: "defauts_apparence", title: "Défauts d'apparence", items: [
-        C("bornes_sulfatees", "Bornes sulfatées"),
-        C("bornes_oxydees", "Bornes oxydées"),
-        C("traces_degazage", "Traces de dégazage"),
-      ]},
-      { key: "branches_batterie", title: "Branches batterie", items: [] },
-      { key: "essai_decharge", title: "Essai décharge / autonomie", items: [
-        C("decharge_puissance_constante", "Décharge à puissance constante", [
-          F("tension", "Tension de décharge", "V"), F("courant", "Courant", "A"),
-          { key: "puissance", label: "Puissance (calculée)", unit: "kW", compute: (f) => { const u = numOf(f.tension), i = numOf(f.courant); return (u === null || i === null) ? "" : Math.round(((u * i) / 1000) * 100) / 100; } },
-        ]),
-        C("temperature_decharge", "Température batterie lors de la décharge", [F("temp", "Valeur", "°C")]),
-        C("duree_decharge", "Durée de la décharge batterie", [F("duree", "Valeur", "min")]),
-      ]},
-      { key: "releve_tensions", title: "Relevé des tensions batterie", items: [] },
-      { key: "thermographie_ups", title: "Thermographie", items: [
-        C("controle_thermo_ups", "Contrôle thermographique"),
-      ]},
-      { key: "pieces_usure_ups", title: "Pièces d'usure", items: [] },
     ],
   },
   "Jeu de barre / Gaine à barre": {
     identification: [
       { key: "repere", label: "Repère / Nom de l'équipement" },
-      { key: "type", label: "Type", options: LISTE_TYPE_JDB }, { key: "marque", label: "Fabricant / Marque" },
+      { key: "type", label: "Type", options: LISTE_TYPE_JDB }, { key: "marque", label: "Fabricant / Marque", options: LISTE_MARQUE_JDB },
       { key: "tensionAssignee", label: "Tension assignée (kV)", numeric: true }, { key: "courantAssigne", label: "Courant assigné (A)", numeric: true },
       { key: "nombrePhases", label: "Nombre de phases", options: ["3", "4"] }, { key: "longueur", label: "Longueur (m)", numeric: true },
       { key: "anneeMiseEnService", label: "Année de mise en service", numeric: true },
@@ -869,6 +1323,39 @@ const SCHEMAS = {
     ],
   },
 };
+
+// Schéma dynamique de l'Onduleur : le régime (triphasé/monophasé) de chaque réseau est choisi
+// par l'utilisateur et stocké dans eq.controles.regimes_reseaux — le schéma (et donc les champs
+// affichés) se recalcule en fonction de ce choix, section par section.
+function getOnduleurRegimes(eq) {
+  const r = (eq.controles && eq.controles.regimes_reseaux) || {};
+  return {
+    normalMono: r.normal === "Monophasé",
+    secoursMono: r.secours === "Monophasé",
+    utilisationMono: r.utilisation === "Monophasé",
+    onduleurMono: r.onduleur === "Monophasé",
+  };
+}
+function getSchema(eq) {
+  if (eq.type === "Onduleur") {
+    const schema = buildOnduleurSchema(getOnduleurRegimes(eq));
+    // Un onduleur sécurité n'a ni réseau secours, ni by-pass / commutation R2 (RS) — masqués.
+    if (eq.identification?.typeUPS === "Onduleur sécurité") {
+      const ITEMS_R2_A_MASQUER = ["auto_alim_commutateur", "commutation_r0_r2", "controle_rs"];
+      const sections = schema.sections
+        .filter((s) => s.key !== "mesures_reseau_secours" && s.key !== "bypass_synoptique")
+        .map((s) => (s.key === "etat_onduleur" ? { ...s, items: s.items.filter((it) => !ITEMS_R2_A_MASQUER.includes(it.key)) } : s));
+      return { ...schema, sections };
+    }
+    return schema;
+  }
+  if (eq.type === "Redresseur chargeur") return buildRedresseurSchema({ reseauMono: getOnduleurRegimes(eq).normalMono });
+  if (eq.type === "Inverseur de source") {
+    const r = (eq.controles && eq.controles.regimes_reseaux) || {};
+    return buildInverseurSchema({ source1Mono: r.source1 === "Monophasé", source2Mono: r.source2 === "Monophasé", utilisationMono: r.utilisation === "Monophasé" });
+  }
+  return SCHEMAS[eq.type];
+}
 
 /* =========================================================================
    Helpers état / rang de conformité
@@ -955,6 +1442,29 @@ function daysUntil(dateStr) {
   return Math.round((d - now) / 86400000);
 }
 
+// Répare un équipement dont les données ont été créées avant l'ajout de nouveaux contrôles au
+// schéma (mises à jour successives de l'app) : comble les clés manquantes sans toucher aux
+// valeurs déjà saisies — évite les plantages (export Word, etc.) et rend les nouveaux champs utilisables.
+function repairEquipementControles(eq) {
+  const schema = getSchema(eq);
+  if (!schema) return eq;
+  const controles = { ...eq.controles };
+  schema.sections.forEach((sec) => {
+    controles[sec.key] = { ...(controles[sec.key] || {}) };
+    sec.items.forEach((item) => {
+      if (!controles[sec.key][item.key]) {
+        const fieldsDefault = {};
+        (item.fields || []).forEach((f) => {
+          fieldsDefault[f.key] = "";
+          if (unitFamilyFor(f.unit)) fieldsDefault[f.key + "Unite"] = f.unit;
+        });
+        controles[sec.key][item.key] = item.kind === "control" ? { action: "", etat: "Conforme", fields: fieldsDefault } : { fields: fieldsDefault };
+      }
+    });
+    if (!controles[sec.key + "__custom"]) controles[sec.key + "__custom"] = [];
+  });
+  return { ...eq, controles };
+}
 function createControlesDefaults(schema) {
   const controles = {};
   schema.sections.forEach((sec) => {
@@ -989,14 +1499,13 @@ function emptyEquipement(type) {
     controles.branches_dynamique = [emptyDynamicEntry(LISTE_NOM_BRANCHE[0], BRANCHE_FIELD_DEFS, true)];
     controles.elements_dynamique = [emptyDynamicEntry("Élément 1", ELEMENT_FIELD_DEFS, false)];
     controles.releve_config = { mode: "Floating", saisieParGroupe: false, tailleGroupe: 2, toleranceBasse: 3, toleranceHaute: 3 };
-    controles.photos_utilisation = { l1: [], l2: [], l3: [] };
-    controles.pieces_usure_ups = {
-      batteries: [emptyModeleUsure(null)],
-      condensateursAlternatifs: [emptyModeleUsure(6)],
-      condensateursContinus: [emptyModeleUsure(5)],
-      ventilateurs: [emptyModeleUsure(4)],
-    };
+    controles.pieces_usure_ups = {};
+    getCategoriesUsure(type).forEach((cat) => { controles.pieces_usure_ups[cat.key] = [emptyModeleUsure(cat.dureeDefaut)]; });
   }
+  if (type === "Onduleur" || type === "Redresseur chargeur") controles.regimes_reseaux = { normal: "Triphasé", secours: "Triphasé", utilisation: "Triphasé", onduleur: "Triphasé" };
+  if (type === "Inverseur de source") controles.regimes_reseaux = { source1: "Triphasé", source2: "Triphasé", utilisation: "Triphasé" };
+  if (TYPES_AVEC_MESURES_UTILISATION.includes(type)) controles.photos_utilisation = { l1: [], l2: [], l3: [] };
+  if (type === "Redresseur chargeur") controles.photos_reseau_entree = { l1: [], l2: [], l3: [] };
   return {
     id: uid(),
     type,
@@ -2544,7 +3053,7 @@ function DynamicListPanel({ title, entries, onChange, typeOptions, fieldDefs, wi
                   )}
                 </div>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                  {fieldDefs.map((f) =>
+                  {(typeof fieldDefs === "function" ? fieldDefs(e.fields) : fieldDefs).map((f) =>
                     f.options ? (
                       <MiniCombo key={f.key} label={f.label} options={f.options} value={e.fields[f.key]} onChange={(v) => setField(e.id, f.key, v)} listId={`${idPrefix}-${e.id}-${f.key}`} />
                     ) : (
@@ -2574,18 +3083,78 @@ function DynamicListPanel({ title, entries, onChange, typeOptions, fieldDefs, wi
 // pièce + année de remplacement) qui apparaît côté client, pas les références ni les années brutes.
 // Puissance apparente : S = U × I × √3 / 1000 (kVA), à partir des moyennes calculées d'une section de mesures réseau.
 // Autonomie théorique (min) = énergie disponible (Ah × nb branches en parallèle × V) ÷ puissance de décharge, × 60.
+// Courant de décharge total = somme du courant de décharge saisi pour chaque branche déclarée.
+function calcCourantDechargeTotal(eq) {
+  const nb = Math.max(1, Math.round(numOf(eq.controles.batterie_id?.batterie_caracteristiques?.fields?.nombreBranches) || 1));
+  const courants = eq.controles.essai_decharge?.courants_branches || {};
+  let total = 0, any = false;
+  for (let i = 1; i <= nb; i++) {
+    const v = numOf(courants[`b${i}`]);
+    if (v !== null) { total += v; any = true; }
+  }
+  return any ? Math.round(total * 100) / 100 : null;
+}
+// Puissance de décharge = tension de décharge × courant de décharge total.
+function calcPuissanceDecharge(eq) {
+  const u = numOf(eq.controles.essai_decharge?.decharge_puissance_constante?.fields?.tension);
+  const iTotal = calcCourantDechargeTotal(eq);
+  if (u === null || iTotal === null) return null;
+  return Math.round(((u * iTotal) / 1000) * 100) / 100;
+}
+// Courant de sortie redresseur (A) = puissance de décharge batterie (W) ÷ tension de floating (V)
+// — formule reprise telle quelle du fichier Excel d'origine.
+function calcCourantSortieRedresseur(eq) {
+  const puissanceDechargeKW = calcPuissanceDecharge(eq);
+  const uFloating = numOf(eq.controles.mesures_batterie_ups?.tension_floating?.fields?.v);
+  if (puissanceDechargeKW === null || !uFloating) return null;
+  return Math.round(((puissanceDechargeKW * 1000) / uFloating) * 100) / 100;
+}
 function calcAutonomieTheorique(eq) {
   const c = eq.controles.batterie_id?.batterie_caracteristiques?.fields || {};
   const capaciteBatterie = numOf(c.capacite);
   const nbBranches = numOf(c.nombreBranches);
   const tensionElt = numOf(c.tensionNominale);
   const nbBlocs = numOf(c.nombreBlocsParBranche);
-  const puissance = numOf(eq.controles.essai_decharge?.decharge_puissance_constante?.fields?.puissance);
+  const puissance = calcPuissanceDecharge(eq);
   if (capaciteBatterie === null || nbBranches === null || tensionElt === null || nbBlocs === null || !puissance) return null;
   const capaciteTotale = capaciteBatterie * nbBranches;
   const tensionTotale = tensionElt * nbBlocs;
   const energieWh = capaciteTotale * tensionTotale;
   return Math.round((energieWh / (puissance * 1000)) * 60 * 10) / 10;
+}
+// Taux de charge (%) par phase = S mesuré (utilisation) / (puissance nominale onduleur / 3) × 100.
+// Taux de charge (%) par phase — basé sur le calibre du disjoncteur associé (I mesuré / calibre)
+// si renseigné, sinon sur la puissance nominale de l'onduleur / du transformateur (S mesuré / (P/3)).
+// Capacité des condensateurs de filtre (µF), déduite du courant de filtre mesuré et de la tension
+// de sortie onduleur : C = I / (U × 2π × f). Une valeur par phase en triphasé, une seule en monophasé.
+function calcCapaciteFiltre(eq) {
+  const c = eq.controles.mesures_onduleur_item || {};
+  const u = numOf(c.tension_onduleur?.fields?.l1);
+  const freq = numOf(c.frequence_onduleur?.fields?.synchro) || 50;
+  if (!u) return null;
+  const cf = c.courant_filtre?.fields || {};
+  const calc = (i) => { const v = numOf(i); return v === null ? null : Math.round((v / (u * 2 * Math.PI * freq)) * 1e6 * 100) / 100; };
+  const c1 = calc(cf.l1), c2 = calc(cf.l2), c3 = calc(cf.l3);
+  if (c1 === null && c2 === null && c3 === null) return null;
+  return { c1, c2, c3 };
+}
+function calcTauxCharge(eq) {
+  const calibre = numOf(eq.identification?.calibreDisjoncteur);
+  if (calibre) {
+    const ic = eq.controles.mesures_utilisation?.courant_utilisation?.fields || {};
+    const calc = (i) => { const v = numOf(i); return v === null ? null : Math.round((v / calibre) * 100 * 10) / 10; };
+    const t1 = calc(ic.l1), t2 = calc(ic.l2), t3 = calc(ic.l3);
+    if (t1 === null && t2 === null && t3 === null) return null;
+    return { t1, t2, t3 };
+  }
+  const puissanceNominale = numOf(eq.identification?.puissanceKVA);
+  if (!puissanceNominale) return null;
+  const f = eq.controles.mesures_utilisation?.puissance_fp_utilisation?.fields || {};
+  const parPhase = puissanceNominale / 3;
+  const calc = (s) => { const v = numOf(s); return v === null ? null : Math.round((v / parPhase) * 100 * 10) / 10; };
+  const t1 = calc(f.s1), t2 = calc(f.s2), t3 = calc(f.s3);
+  if (t1 === null && t2 === null && t3 === null) return null;
+  return { t1, t2, t3 };
 }
 function calcPuissanceApparente(eq, sectionKey) {
   const u = numOf(eq.controles[sectionKey]?.[`tension_${sectionKey === "mesures_reseau_normal" ? "normal" : "secours"}`]?.fields?.moyenne);
@@ -2611,16 +3180,21 @@ function calcTensionsBatterieTheoriques(eq) {
   const estCdNi = technologie === "Cd-Ni";
   const tensionCellule = estCdNi ? 1.2 : 2;
   const finDechargeCoef = estCdNi ? 1.1 : 1.7;
-  const egalisationCoef = Math.round(finDechargeCoef * 1.05 * 1000) / 1000;
   const nbCellulesParBloc = Math.round((tensionBloc / tensionCellule) * 100) / 100;
   const nbElementsTotal = Math.round(nbCellulesParBloc * nbBlocs * 100) / 100;
   return {
     nbCellulesParBloc,
     nbElementsTotal,
     nominale: Math.round(nbElementsTotal * tensionCellule * 100) / 100,
-    egalisation: Math.round(nbElementsTotal * egalisationCoef * 100) / 100,
     finDecharge: Math.round(nbElementsTotal * finDechargeCoef * 100) / 100,
   };
+}
+// Tension par cellule (floating) = tension de floating mesurée ÷ nombre d'éléments (cellules) total.
+function calcTensionParCellule(eq) {
+  const t = calcTensionsBatterieTheoriques(eq);
+  const vFloating = numOf(eq.controles.mesures_batterie_ups?.tension_floating?.fields?.v);
+  if (!t || vFloating === null || !t.nbElementsTotal) return null;
+  return Math.round((vFloating / t.nbElementsTotal) * 1000) / 1000;
 }
 function calcPiecesUsure(eq) {
   const lignes = [];
@@ -2645,6 +3219,59 @@ function AutonomieCalculee({ eq }) {
     </Card>
   );
 }
+// Sélecteur de régime (Monophasé/Triphasé) pour une section de mesures de l'Onduleur — change le
+// schéma affiché dynamiquement (getSchema) sans perdre les valeurs déjà saisies.
+function RegimeReseauSelector({ eq, update, reseau }) {
+  if (eq.type !== "Onduleur" && eq.type !== "Redresseur chargeur" && eq.type !== "Inverseur de source") return null;
+  const regimes = eq.controles.regimes_reseaux || {};
+  const value = regimes[reseau] || "Triphasé";
+  const setRegime = (v) => update({ ...eq, controles: { ...eq.controles, regimes_reseaux: { ...regimes, [reseau]: v } } });
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+      <span style={{ fontSize: 11.5, fontWeight: 700, color: "#5B6B7D" }}>Régime :</span>
+      <Select value={value} onChange={(e) => setRegime(e.target.value)} style={{ width: 140, padding: "5px 7px", fontSize: 12 }}>
+        <option value="Triphasé">Triphasé</option>
+        <option value="Monophasé">Monophasé</option>
+      </Select>
+    </div>
+  );
+}
+function CourantSortieRedresseurCalcule({ eq }) {
+  const i = calcCourantSortieRedresseur(eq);
+  if (i === null) return null;
+  return (
+    <Card style={{ marginBottom: 14 }}>
+      <div style={{ fontSize: 12.5, color: "#5B6B7D" }}>
+        Courant de sortie redresseur (calculé — P décharge batterie ÷ U floating) : <b style={{ color: "#1A1F26" }}>{i} A</b>
+      </div>
+    </Card>
+  );
+}
+function CapaciteFiltreCalculee({ eq }) {
+  const c = calcCapaciteFiltre(eq);
+  if (!c) return null;
+  const parts = [c.c1 !== null && `L1 : ${c.c1} µF`, c.c2 !== null && `L2 : ${c.c2} µF`, c.c3 !== null && `L3 : ${c.c3} µF`].filter(Boolean);
+  return (
+    <Card style={{ marginBottom: 14 }}>
+      <div style={{ fontSize: 12.5, color: "#5B6B7D" }}>
+        Capacité des condensateurs de filtre (calculée) : <b style={{ color: "#1A1F26" }}>{parts.join("  ·  ")}</b>
+      </div>
+    </Card>
+  );
+}
+function TauxChargeCalcule({ eq }) {
+  const t = calcTauxCharge(eq);
+  if (!t) return null;
+  const base = numOf(eq.identification?.calibreDisjoncteur) ? "I mesuré ÷ calibre du disjoncteur" : "S mesuré ÷ puissance nominale";
+  return (
+    <Card style={{ marginBottom: 14 }}>
+      <div style={{ fontSize: 12.5, color: "#5B6B7D" }}>
+        Taux de charge calculé ({base}) :{" "}
+        <b style={{ color: "#1A1F26" }}>L1 : {t.t1 ?? "—"}%  ·  L2 : {t.t2 ?? "—"}%  ·  L3 : {t.t3 ?? "—"}%</b>
+      </div>
+    </Card>
+  );
+}
 function PuissanceApparenteCalculee({ eq, sectionKey }) {
   const s = calcPuissanceApparente(eq, sectionKey);
   if (s === null) return null;
@@ -2659,6 +3286,7 @@ function PuissanceApparenteCalculee({ eq, sectionKey }) {
 function TensionsBatterieTheoriques({ eq }) {
   const t = calcTensionsBatterieTheoriques(eq);
   if (!t) return null;
+  const vCellule = calcTensionParCellule(eq);
   return (
     <Card style={{ marginBottom: 14 }}>
       <SectionTitle>Valeurs théoriques calculées</SectionTitle>
@@ -2667,8 +3295,8 @@ function TensionsBatterieTheoriques({ eq }) {
       </div>
       <div style={{ display: "flex", gap: 16, flexWrap: "wrap", fontSize: 12.5 }}>
         <span style={{ color: "#5B6B7D" }}>Tension nominale : <b style={{ color: "#1A1F26" }}>{t.nominale} V</b></span>
-        <span style={{ color: "#5B6B7D" }}>Tension d'égalisation : <b style={{ color: "#1A1F26" }}>{t.egalisation} V</b></span>
         <span style={{ color: "#5B6B7D" }}>Seuil de fin de décharge (critique) : <b style={{ color: "#1A1F26" }}>{t.finDecharge} V</b></span>
+        {vCellule !== null && <span style={{ color: "#5B6B7D" }}>Tension par cellule (floating) : <b style={{ color: "#1A1F26" }}>{vCellule} V</b></span>}
       </div>
     </Card>
   );
@@ -2687,7 +3315,7 @@ function PiecesUsureUPSPanel({ eq, update }) {
 
   return (
     <>
-      {CATEGORIES_USURE_UPS.map((cat) => {
+      {getCategoriesUsure(eq.type).map((cat) => {
         const modeles = data[cat.key] || [];
         const setModele = (id, patch) => setCategorie(cat.key, modeles.map((m) => (m.id === id ? { ...m, ...patch } : m)));
         const addModele = () => setCategorie(cat.key, [...modeles, emptyModeleUsure(cat.dureeDefaut)]);
@@ -2775,6 +3403,27 @@ function PiecesUsureSynthese({ eq }) {
   );
 }
 
+function CourantDechargeBranches({ eq, update }) {
+  const nb = Math.max(1, Math.round(numOf(eq.controles.batterie_id?.batterie_caracteristiques?.fields?.nombreBranches) || 1));
+  const courants = eq.controles.essai_decharge?.courants_branches || {};
+  const setBranche = (key, v) => update({ ...eq, controles: { ...eq.controles, essai_decharge: { ...eq.controles.essai_decharge, courants_branches: { ...courants, [key]: v } } } });
+  const total = calcCourantDechargeTotal(eq);
+  const puissance = calcPuissanceDecharge(eq);
+  return (
+    <Card style={{ marginBottom: 14 }}>
+      <SectionTitle>Courant de décharge par branche</SectionTitle>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 10 }}>
+        {Array.from({ length: nb }, (_, i) => (
+          <MiniInput key={i} label={`Branche ${i + 1}`} unit="A" value={courants[`b${i + 1}`]} onChange={(v) => setBranche(`b${i + 1}`, v)} width={70} />
+        ))}
+      </div>
+      <div style={{ fontSize: 12.5, color: "#5B6B7D" }}>
+        Total : <b style={{ color: "#1A1F26" }}>{total ?? "—"} A</b>
+        {"  ·  "}Puissance de décharge (calculée) : <b style={{ color: "#1A1F26" }}>{puissance ?? "—"} kW</b>
+      </div>
+    </Card>
+  );
+}
 function ParametrageRelaisPanel({ eq, update, idPrefix }) {
   const seuils = eq.controles.parametrage_relais_seuils;
   const setSeuils = (next) => update({ ...eq, controles: { ...eq.controles, parametrage_relais_seuils: next } });
@@ -2862,7 +3511,54 @@ function DisjoncteurRelaisPanel({ eq, update, custom, onAddCustom, onChangeCusto
                   <MiniInput label="L1" value={s.essai.fields.l1} onChange={(v) => setEssaiField(s.id, "l1", v)} validState={tol ? toleranceState(s.essai.fields.l1, tol.min, tol.max) : null} />
                   <MiniInput label="L2" value={s.essai.fields.l2} onChange={(v) => setEssaiField(s.id, "l2", v)} validState={tol ? toleranceState(s.essai.fields.l2, tol.min, tol.max) : null} />
                   <MiniInput label="L3" value={s.essai.fields.l3} onChange={(v) => setEssaiField(s.id, "l3", v)} validState={tol ? toleranceState(s.essai.fields.l3, tol.min, tol.max) : null} />
-                  <MiniInput label="Courant injecté" unit="A" value={s.essai.fields.courant_injecte} onChange={(v) => setEssaiField(s.id, "courant_injecte", v)} />
+                  {(() => {
+                    const champsReglageU = ANSI_REGLAGE_FIELDS[ansiFamily(s.label)] || ANSI_REGLAGE_FIELDS_DEFAUT;
+                    const uInjecte = (champsReglageU.find((f) => f.key === "reglage") || {}).unit || "A";
+                    return <MiniInput label="Valeur injectée" unit={uInjecte} value={s.essai.fields.courant_injecte} onChange={(v) => setEssaiField(s.id, "courant_injecte", v)} />;
+                  })()}
+                  <MiniSelect label="Valise d'injection" options={LISTE_TYPE_VALISE} value={s.essai.fields.typeValise || "1U1I (monophasé)"} onChange={(v) => setEssaiField(s.id, "typeValise", v)} />
+                  {(() => {
+                    const champsReglage = ANSI_REGLAGE_FIELDS[ansiFamily(s.label)] || ANSI_REGLAGE_FIELDS_DEFAUT;
+                    const champReglage = champsReglage.find((f) => f.key === "reglage");
+                    const unite = champReglage ? champReglage.unit : null;
+                    const aide = calcInjectionAide(s.fields.reglage, unite, eq, ansiFamily(s.label), s.fields.modeDetection);
+                    if (aide === null) return null;
+                    const en3U3I = s.essai.fields.typeValise === "3U3I (triphasé)";
+                    const pill = { fontSize: 11, color: "#0A5DA8", background: "rgba(10,93,168,0.08)", padding: "4px 8px", borderRadius: 6 };
+                    if (typeof aide === "object" && aide.type === "puissance") {
+                      if (en3U3I) {
+                        return (
+                          <span style={{ display: "flex", gap: 6, flexWrap: "wrap" }} title="Aide au technicien — non imprimée dans le rapport">
+                            <span style={pill}>L1 : U {aide.u} V / I {aide.i} A @ 0°</span>
+                            <span style={pill}>L2 : U {aide.u} V / I {aide.i} A @ -120°</span>
+                            <span style={pill}>L3 : U {aide.u} V / I {aide.i} A @ -240°</span>
+                          </span>
+                        );
+                      }
+                      return (
+                        <span style={{ display: "flex", gap: 6, flexWrap: "wrap" }} title="Aide au technicien — non imprimée dans le rapport">
+                          <span style={pill}>U inj. : {aide.u} V</span>
+                          <span style={pill}>I inj. : {aide.i} A</span>
+                          <span style={pill}>Déphasage : {aide.dephasage}°</span>
+                        </span>
+                      );
+                    }
+                    const directe = unite === "Hz" || unite === "Hz/s" || unite === "°";
+                    if (en3U3I && (unite === "A" || unite === "V")) {
+                      return (
+                        <span style={{ display: "flex", gap: 6, flexWrap: "wrap" }} title="Aide au technicien — non imprimée dans le rapport">
+                          <span style={pill}>L1 : ≈ {aide} {unite} @ 0°</span>
+                          <span style={pill}>L2 : ≈ {aide} {unite} @ -120°</span>
+                          <span style={pill}>L3 : ≈ {aide} {unite} @ -240°</span>
+                        </span>
+                      );
+                    }
+                    return (
+                      <span style={{ fontSize: 11, color: "#0A5DA8", background: "rgba(10,93,168,0.08)", padding: "4px 8px", borderRadius: 6 }} title="Aide au technicien — non imprimée dans le rapport">
+                        Aide injection : ≈ {aide} {unite}{directe ? " (mesure directe)" : ""}
+                      </span>
+                    );
+                  })()}
                   {tol && <MiniComputed label="Tolérance attendue" unit={tol.unite} value={`${tol.min} – ${tol.max}`} />}
                   <input placeholder="Action" value={s.essai.action} onChange={(e) => setEssai(s.id, { action: e.target.value })} style={{ ...inputStyle, width: 150, padding: "5px 7px", fontSize: 12 }} />
                   <Select value={s.essai.etat} onChange={(e) => setEssai(s.id, { etat: e.target.value })} style={{ width: 120, padding: "5px 7px", fontSize: 12 }}>
@@ -2996,7 +3692,7 @@ function BRKReglagePanel({ eq, update, custom, onAddCustom, onChangeCustom, onRe
 // Parcourt tous les contrôles d'un équipement (y compris seuils dynamiques, essais liés,
 // et analyses d'huile cochées) et relève ceux dont l'état n'est pas "Conforme".
 function collectAnomalies(eq) {
-  const schema = SCHEMAS[eq.type];
+  const schema = getSchema(eq);
   const isRelais = TYPES_AVEC_RELAIS.includes(eq.type);
   const lines = [];
   schema.sections.forEach((sec) => {
@@ -3027,9 +3723,9 @@ function collectAnomalies(eq) {
   return lines;
 }
 
-function EquipementCard({ eq, update, remove, removable = true, onDuplicate, locaux = [] }) {
+function EquipementCard({ eq, update, remove, removable = true, onDuplicate, locaux = [], allEquipements = [] }) {
   const [open, setOpen] = useState(true);
-  const schema = SCHEMAS[eq.type];
+  const schema = getSchema(eq);
   const setIdentification = (k, v) => update({ ...eq, identification: { ...eq.identification, [k]: v } });
   const setControleItem = (sectionKey, itemKey, v) =>
     update({ ...eq, controles: { ...eq.controles, [sectionKey]: { ...eq.controles[sectionKey], [itemKey]: v } } });
@@ -3085,13 +3781,15 @@ function EquipementCard({ eq, update, remove, removable = true, onDuplicate, loc
             <div style={{ marginBottom: 16 }}>
               <SectionTitle>Identification</SectionTitle>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 14 }}>
-                {schema.identification.map((f) => (
+                {schema.identification.map((f) => {
+                  const opts = typeof f.options === "function" ? f.options(eq.identification) : f.options;
+                  return (
                   <Field key={f.key} label={f.label}>
-                    {f.options ? (
+                    {opts ? (
                       <Combo
                         value={eq.identification[f.key]}
                         onChange={(v) => setIdentification(f.key, v)}
-                        options={f.options}
+                        options={opts}
                         listId={`${eq.id}-ident-${f.key}`}
                       />
                     ) : f.numeric ? (
@@ -3100,10 +3798,64 @@ function EquipementCard({ eq, update, remove, removable = true, onDuplicate, loc
                       <TextInput value={eq.identification[f.key] || ""} onChange={(e) => setIdentification(f.key, e.target.value)} />
                     )}
                   </Field>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}
+
+          {eq.type === "Bilan de puissance" && (eq.identification.rattachement === "Transformateur" || eq.identification.rattachement === "Disjoncteur BT") && (() => {
+            const typeCible = eq.identification.rattachement;
+            const candidats = allEquipements.filter((e) => e.type === typeCible && e.id !== eq.id);
+            const lie = candidats.find((e) => e.id === eq.identification.rattachementEquipementId);
+            const reprendreDonnees = () => {
+              if (!lie) return;
+              if (typeCible === "Transformateur") {
+                update({
+                  ...eq,
+                  identification: {
+                    ...eq.identification,
+                    referenceRattachement: lie.identification.repere || "",
+                    puissanceKVA: lie.identification.puissance || eq.identification.puissanceKVA,
+                    calibreDisjoncteur: "",
+                    tensionNominale: lie.identification.tensionSecondaire || eq.identification.tensionNominale,
+                    anneeMiseEnService: lie.identification.anneeMiseEnService || eq.identification.anneeMiseEnService,
+                  },
+                });
+              } else {
+                update({
+                  ...eq,
+                  identification: {
+                    ...eq.identification,
+                    referenceRattachement: lie.identification.repere || "",
+                    calibreDisjoncteur: lie.identification.intensiteNominale || eq.identification.calibreDisjoncteur,
+                  },
+                });
+              }
+            };
+            return (
+              <div style={{ marginBottom: 16, padding: 12, background: "#F4F6F8", borderRadius: 10, border: "1px solid #E2E6EB" }}>
+                <div style={{ fontSize: 11.5, fontWeight: 700, color: "#5B6B7D", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.4 }}>Rattacher à un équipement déjà créé</div>
+                {candidats.length === 0 ? (
+                  <div style={{ fontSize: 12.5, color: "#8B96A3" }}>Aucun équipement {typeCible} créé sur ce site pour l'instant.</div>
+                ) : (
+                  <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                    <div style={{ minWidth: 220 }}>
+                      <Select value={eq.identification.rattachementEquipementId || ""} onChange={(e) => setIdentification("rattachementEquipementId", e.target.value)}>
+                        <option value="">— Choisir un {typeCible.toLowerCase()} —</option>
+                        {candidats.map((t) => <option key={t.id} value={t.id}>{t.identification.repere || `${typeCible} sans repère`}</option>)}
+                      </Select>
+                    </div>
+                    {lie && (
+                      <button onClick={reprendreDonnees} style={btnGhost(BRAND.blue)}>
+                        <RefreshCw size={13} /> Reprendre les données{typeCible === "Disjoncteur BT" ? " (calibre)" : ""}
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {schema.sections.map((sec) => {
             if (sec.key === "parametrage_relais" && TYPES_AVEC_RELAIS.includes(eq.type)) {
@@ -3190,6 +3942,7 @@ function EquipementCard({ eq, update, remove, removable = true, onDuplicate, loc
             if ((sec.key === "mesures_reseau_normal" || sec.key === "mesures_reseau_secours") && TYPES_AVEC_BRANCHES_UPS.includes(eq.type)) {
               return (
                 <React.Fragment key={sec.key}>
+                  <RegimeReseauSelector eq={eq} update={update} reseau={sec.key === "mesures_reseau_normal" ? "normal" : "secours"} />
                   <SectionBlock
                     title={sec.title}
                     items={sec.items}
@@ -3202,12 +3955,30 @@ function EquipementCard({ eq, update, remove, removable = true, onDuplicate, loc
                     onRemoveCustom={(id) => removeCustomAction(sec.key, id)}
                   />
                   <PuissanceApparenteCalculee eq={eq} sectionKey={sec.key} />
+                  {eq.type === "Redresseur chargeur" && sec.key === "mesures_reseau_normal" && (
+                    <Card style={{ marginBottom: 14 }}>
+                      <SectionTitle>Photo par phase — réseau d'entrée (tension + courant)</SectionTitle>
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10 }}>
+                        {["l1", "l2", "l3"].map((ph) => (
+                          <div key={ph}>
+                            <div style={{ fontSize: 10.5, fontWeight: 700, color: "#8B96A3", marginBottom: 4 }}>{ph.toUpperCase()}</div>
+                            <FileGallery
+                              files={(eq.controles.photos_reseau_entree || {})[ph] || []}
+                              onChange={(files) => update({ ...eq, controles: { ...eq.controles, photos_reseau_entree: { ...(eq.controles.photos_reseau_entree || {}), [ph]: files } } })}
+                              idPrefix={`${eq.id}-photos-entree-${ph}`}
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    </Card>
+                  )}
                 </React.Fragment>
               );
             }
-            if (sec.key === "mesures_utilisation" && TYPES_AVEC_BRANCHES_UPS.includes(eq.type)) {
+            if ((sec.key === "mesures_source1" || sec.key === "mesures_source2") && eq.type === "Inverseur de source") {
               return (
                 <React.Fragment key={sec.key}>
+                  <RegimeReseauSelector eq={eq} update={update} reseau={sec.key === "mesures_source1" ? "source1" : "source2"} />
                   <SectionBlock
                     title={sec.title}
                     items={sec.items}
@@ -3219,6 +3990,25 @@ function EquipementCard({ eq, update, remove, removable = true, onDuplicate, loc
                     onChangeCustom={(id, patch) => changeCustomAction(sec.key, id, patch)}
                     onRemoveCustom={(id) => removeCustomAction(sec.key, id)}
                   />
+                </React.Fragment>
+              );
+            }
+            if (sec.key === "mesures_utilisation" && TYPES_AVEC_MESURES_UTILISATION.includes(eq.type)) {
+              return (
+                <React.Fragment key={sec.key}>
+                  <RegimeReseauSelector eq={eq} update={update} reseau="utilisation" />
+                  <SectionBlock
+                    title={sec.title}
+                    items={sec.items}
+                    values={eq.controles[sec.key]}
+                    onChangeItem={(itemKey, v) => setControleItem(sec.key, itemKey, v)}
+                    idPrefix={`${eq.id}-${sec.key}`}
+                    custom={eq.controles[sec.key + "__custom"] || []}
+                    onAddCustom={() => addCustomAction(sec.key)}
+                    onChangeCustom={(id, patch) => changeCustomAction(sec.key, id, patch)}
+                    onRemoveCustom={(id) => removeCustomAction(sec.key, id)}
+                  />
+                  <TauxChargeCalcule eq={eq} />
                   <Card style={{ marginBottom: 14 }}>
                     <SectionTitle>Photo par phase (tension + courant)</SectionTitle>
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10 }}>
@@ -3237,6 +4027,25 @@ function EquipementCard({ eq, update, remove, removable = true, onDuplicate, loc
                 </React.Fragment>
               );
             }
+            if (sec.key === "mesures_onduleur_item" && TYPES_AVEC_BRANCHES_UPS.includes(eq.type)) {
+              return (
+                <React.Fragment key={sec.key}>
+                  <RegimeReseauSelector eq={eq} update={update} reseau="onduleur" />
+                  <SectionBlock
+                    title={sec.title}
+                    items={sec.items}
+                    values={eq.controles[sec.key]}
+                    onChangeItem={(itemKey, v) => setControleItem(sec.key, itemKey, v)}
+                    idPrefix={`${eq.id}-${sec.key}`}
+                    custom={eq.controles[sec.key + "__custom"] || []}
+                    onAddCustom={() => addCustomAction(sec.key)}
+                    onChangeCustom={(id, patch) => changeCustomAction(sec.key, id, patch)}
+                    onRemoveCustom={(id) => removeCustomAction(sec.key, id)}
+                  />
+                  <CapaciteFiltreCalculee eq={eq} />
+                </React.Fragment>
+              );
+            }
             if (sec.key === "mesures_batterie_ups" && TYPES_AVEC_BRANCHES_UPS.includes(eq.type)) {
               return (
                 <React.Fragment key={sec.key}>
@@ -3252,6 +4061,7 @@ function EquipementCard({ eq, update, remove, removable = true, onDuplicate, loc
                     onRemoveCustom={(id) => removeCustomAction(sec.key, id)}
                   />
                   <TensionsBatterieTheoriques eq={eq} />
+                  <CourantSortieRedresseurCalcule eq={eq} />
                 </React.Fragment>
               );
             }
@@ -3269,7 +4079,7 @@ function EquipementCard({ eq, update, remove, removable = true, onDuplicate, loc
                     onChangeCustom={(id, patch) => changeCustomAction(sec.key, id, patch)}
                     onRemoveCustom={(id) => removeCustomAction(sec.key, id)}
                   />
-                  <TensionsBatterieTheoriques eq={eq} />
+                  <CourantDechargeBranches eq={eq} update={update} />
                   <AutonomieCalculee eq={eq} />
                   <Card style={{ marginBottom: 14 }}>
                     <SectionTitle>Courbe de décharge batterie</SectionTitle>
@@ -3303,17 +4113,31 @@ function EquipementCard({ eq, update, remove, removable = true, onDuplicate, loc
               return <GradinsPanel key={sec.key} eq={eq} update={update} idPrefix={`${eq.id}-gradins`} />;
             }
             if (sec.key === "branches_batterie" && TYPES_AVEC_BRANCHES_UPS.includes(eq.type)) {
+              const nbBranchesDeclare = numOf(eq.controles.batterie_id?.batterie_caracteristiques?.fields?.nombreBranches);
+              const regenererBranches = () => {
+                const n = Math.max(1, Math.round(nbBranchesDeclare || 1));
+                const next = Array.from({ length: n }, (_, i) => emptyDynamicEntry(LISTE_NOM_BRANCHE[i] || `Branche ${i + 1}`, BRANCHE_FIELD_DEFS, true));
+                update({ ...eq, controles: { ...eq.controles, branches_dynamique: next } });
+              };
               return (
-                <DynamicListPanel
-                  key={sec.key}
-                  title="Branches batterie"
-                  entries={eq.controles.branches_dynamique || []}
-                  onChange={(entries) => update({ ...eq, controles: { ...eq.controles, branches_dynamique: entries } })}
-                  typeOptions={LISTE_NOM_BRANCHE}
-                  fieldDefs={[{ key: "recharge", label: "Courant de recharge", unit: "A" }, { key: "residuel", label: "Courant résiduel", unit: "A" }, { key: "decharge", label: "Courant de décharge", unit: "A" }]}
-                  withActionEtat={true}
-                  idPrefix={`${eq.id}-branches`}
-                />
+                <React.Fragment key={sec.key}>
+                  {nbBranchesDeclare !== null && (
+                    <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: -6 }}>
+                      <button onClick={regenererBranches} style={btnGhost(BRAND.blue)} title="Génère automatiquement le nombre de branches déclaré dans la fiche Batterie">
+                        <RefreshCw size={13} /> Régénérer selon l'installation ({nbBranchesDeclare} branche{nbBranchesDeclare > 1 ? "s" : ""})
+                      </button>
+                    </div>
+                  )}
+                  <DynamicListPanel
+                    title="Branches batterie"
+                    entries={eq.controles.branches_dynamique || []}
+                    onChange={(entries) => update({ ...eq, controles: { ...eq.controles, branches_dynamique: entries } })}
+                    typeOptions={LISTE_NOM_BRANCHE}
+                    fieldDefs={[{ key: "recharge", label: "Courant de recharge", unit: "A" }, { key: "residuel", label: "Courant résiduel", unit: "A" }]}
+                    withActionEtat={true}
+                    idPrefix={`${eq.id}-branches`}
+                  />
+                </React.Fragment>
               );
             }
             if (sec.key === "releve_tensions" && TYPES_AVEC_BRANCHES_UPS.includes(eq.type)) {
@@ -3444,7 +4268,7 @@ function EquipementTypeTab({ type, site, update }) {
           Aucun équipement de type « {type} » enregistré pour ce site.
         </div>
       ) : (
-        items.map((eq) => <EquipementCard key={eq.id} eq={eq} update={(next) => updateItem(eq.id, next)} remove={() => removeItem(eq.id)} onDuplicate={() => duplicateItem(eq)} locaux={site.locaux} />)
+        items.map((eq) => <EquipementCard key={eq.id} eq={eq} update={(next) => updateItem(eq.id, next)} remove={() => removeItem(eq.id)} onDuplicate={() => duplicateItem(eq)} locaux={site.locaux} allEquipements={site.equipements} />)
       )}
     </div>
   );
@@ -3542,7 +4366,7 @@ function computeBRKValues(eq) {
 }
 
 function PrintEquipement({ eq }) {
-  const schema = SCHEMAS[eq.type];
+  const schema = getSchema(eq);
   const isRelaisSeuils = TYPES_AVEC_RELAIS.includes(eq.type);
   const brk = eq.type === "Disjoncteur BT" ? computeBRKValues(eq) : null;
   return (
@@ -3565,7 +4389,7 @@ function PrintEquipement({ eq }) {
                   <div>{s.label || "(seuil sans nom)"}</div>
                   <div style={{ color: "#666", fontSize: 10 }}>
                     {[s.fields.etat && `État : ${s.fields.etat}`, s.fields.courbe && `Courbe : ${s.fields.courbe}`, s.fields.type && `Type : ${s.fields.type}`,
-                      s.fields.reglage && `Réglage : ${s.fields.reglage} A`, s.fields.temporisation && `Temporisation : ${s.fields.temporisation} ${s.fields.temporisation_unite || ""}`]
+                      s.fields.reglage && `Réglage : ${s.fields.reglage} ${((ANSI_REGLAGE_FIELDS[ansiFamily(s.label)] || ANSI_REGLAGE_FIELDS_DEFAUT).find((f) => f.key === "reglage") || {}).unit || "A"}`, s.fields.temporisation && `Temporisation : ${s.fields.temporisation} ${s.fields.temporisation_unite || ""}`]
                       .filter(Boolean).join(" · ")}
                   </div>
                 </div>
@@ -3576,7 +4400,7 @@ function PrintEquipement({ eq }) {
             <>
               {eq.controles.parametrage_relais_seuils.filter((s) => s.label).map((s) => {
                 const tol = calcToleranceEssai(s.fields.temporisation, s.fields.temporisation_unite);
-                const parts = [s.essai.fields.l1 && `L1 : ${s.essai.fields.l1}`, s.essai.fields.l2 && `L2 : ${s.essai.fields.l2}`, s.essai.fields.l3 && `L3 : ${s.essai.fields.l3}`, s.essai.fields.courant_injecte && `Courant injecté : ${s.essai.fields.courant_injecte} A`].filter(Boolean);
+                const parts = [s.essai.fields.l1 && `L1 : ${s.essai.fields.l1}`, s.essai.fields.l2 && `L2 : ${s.essai.fields.l2}`, s.essai.fields.l3 && `L3 : ${s.essai.fields.l3}`, s.essai.fields.courant_injecte && `Valeur injectée : ${s.essai.fields.courant_injecte} ${((ANSI_REGLAGE_FIELDS[ansiFamily(s.label)] || ANSI_REGLAGE_FIELDS_DEFAUT).find((f) => f.key === "reglage") || {}).unit || "A"}`].filter(Boolean);
                 return (
                   <div key={s.id}>
                     <PrintControlLine item={{ label: "Essai de déclenchement — " + s.label, fields: [] }} value={{ action: s.essai.action, etat: s.essai.etat, fields: {} }} extraParts={parts} />
@@ -3588,7 +4412,7 @@ function PrintEquipement({ eq }) {
             </>
           )}
           {!(isRelaisSeuils && (sec.key === "parametrage_relais" || sec.key === "controles_relais")) && sec.items.map((item) => {
-            const value = eq.controles[sec.key][item.key];
+            const value = eq.controles[sec.key][item.key] || { action: "", etat: "", fields: {} };
             return (
               <div key={item.key}>
                 <PrintControlLine item={item} value={value} />
@@ -3645,7 +4469,7 @@ function PrintEquipement({ eq }) {
           </div>
         </div>
       )}
-      {eq.type === "Onduleur 3/3" && eq.courbeDechargeFiles && eq.courbeDechargeFiles.length > 0 && (
+      {TYPES_AVEC_BRANCHES_UPS.includes(eq.type) && eq.courbeDechargeFiles && eq.courbeDechargeFiles.length > 0 && (
         <div style={{ marginTop: 10 }}>
           <div style={{ fontSize: 10.5, fontWeight: 700, color: "#555", marginBottom: 6 }}>Courbe de décharge batterie — pièces jointes</div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
@@ -3704,7 +4528,7 @@ function PrintSynthese({ site }) {
         </thead>
         <tbody>
           {items.map((eq, i) => {
-            const schema = SCHEMAS[eq.type];
+            const schema = getSchema(eq);
             const idLabel = schema.identification.filter((f) => f.key !== "repere").map((f) => eq.identification[f.key]).filter(Boolean).join(" · ");
             const repere = eq.identification.repere;
             return (
@@ -4605,6 +5429,10 @@ async function ensureDocx() {
 }
 
 const DOCX_BLUE = "0A5DA8", DOCX_DARK = "1A1F26", DOCX_SILVER = "C0C6CE", DOCX_AMBER = "FFC107";
+// Largeur standard de tous les tableaux du rapport (homogénéité visuelle) + marges internes
+// des cellules (un peu plus aérées que le rendu compact précédent).
+const TABLE_WIDTH = 9600;
+const CELL_MARGINS = { top: 90, bottom: 90, left: 110, right: 110 };
 const DOCX_GREEN = "0F8A5F", DOCX_ORANGE = "B5730A", DOCX_RED = "C0392B", DOCX_WHITE = "FFFFFF", DOCX_LIGHT = "F4F6F8";
 
 function docxEtatColor(label) {
@@ -4623,36 +5451,99 @@ function docxHeading(text) {
 }
 function docxFieldRow(label, value) {
   return new DOCX.TableRow({ children: [
-    new DOCX.TableCell({ width: { size: 3200, type: DOCX.WidthType.DXA }, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_LIGHT }, children: [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: label, size: 18, color: "555555" })] })] }),
-    new DOCX.TableCell({ width: { size: 5600, type: DOCX.WidthType.DXA }, children: [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: value || "—", size: 18, bold: true, color: DOCX_DARK })] })] }),
+    new DOCX.TableCell({ width: { size: 3400, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_LIGHT }, children: [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: label, size: 18, color: "555555" })] })] }),
+    new DOCX.TableCell({ width: { size: 6200, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, children: [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: value || "—", size: 18, bold: true, color: DOCX_DARK })] })] }),
   ]});
 }
 function docxFieldTable(rows) {
   const filtered = rows.filter((r) => r[1]);
   if (filtered.length === 0) return null;
-  return new DOCX.Table({ width: { size: 8800, type: DOCX.WidthType.DXA }, columnWidths: [3200, 5600], rows: filtered.map(([l, v]) => docxFieldRow(l, v)) });
+  return new DOCX.Table({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: [3400, 6200], rows: filtered.map(([l, v]) => docxFieldRow(l, v)) });
 }
 function docxControlRow(label, detail, action, etat) {
   const children = [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: label, size: 18, color: DOCX_DARK })] })];
   if (detail) children.push(new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: detail, size: 16, color: "666666", italics: true })] }));
   if (action) children.push(new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: "Action : " + action, size: 16, color: "666666" })] }));
   return new DOCX.TableRow({ children: [
-    new DOCX.TableCell({ width: { size: 7000, type: DOCX.WidthType.DXA }, children }),
+    new DOCX.TableCell({ width: { size: 7600, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, children }),
     etat
-      ? new DOCX.TableCell({ width: { size: 1800, type: DOCX.WidthType.DXA }, shading: { type: DOCX.ShadingType.CLEAR, fill: docxEtatColor(etat) }, verticalAlign: DOCX.VerticalAlign.CENTER, children: [new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, children: [new DOCX.TextRun({ text: (etat || "").toUpperCase(), bold: true, color: DOCX_WHITE, size: 16 })] })] })
-      : new DOCX.TableCell({ width: { size: 1800, type: DOCX.WidthType.DXA }, children: [new DOCX.Paragraph("")] }),
+      ? new DOCX.TableCell({ width: { size: 2000, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, shading: { type: DOCX.ShadingType.CLEAR, fill: docxEtatColor(etat) }, verticalAlign: DOCX.VerticalAlign.CENTER, children: [new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, children: [new DOCX.TextRun({ text: (etat || "").toUpperCase(), bold: true, color: DOCX_WHITE, size: 16 })] })] })
+      : new DOCX.TableCell({ width: { size: 2000, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, children: [new DOCX.Paragraph("")] }),
   ]});
 }
 function docxControlTable(rows) {
   if (rows.length === 0) return null;
-  return new DOCX.Table({ width: { size: 8800, type: DOCX.WidthType.DXA }, columnWidths: [7000, 1800], rows: rows.map((r) => docxControlRow(...r)) });
+  return new DOCX.Table({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: [7600, 2000], rows: rows.map((r) => docxControlRow(...r)) });
 }
 // Tableau de mesures par phase : une ligne par grandeur (I, C, Q…), une colonne par phase — bien
 // plus lisible qu'un bloc de texte pour les mesures complètes (gradins, réseau amont/aval…).
+// Rendu "intelligent" d'un contrôle de mesure : si le contrôle a des champs L1/L2/L3 (ou P/S par
+// phase), on l'affiche en tableau colonnes-par-phase, avec la valeur calculée (moyenne/max/déséquilibre/
+// Cos φ) juste en dessous — beaucoup plus lisible qu'une ligne de texte compacte.
+// Un seul tableau pour toute la section de mesures : une ligne par grandeur, colonnes L1/L2/L3 +
+// valeur calculée — évite la répétition titre/tableau d'un mini-tableau par grandeur.
+// Cellule de valeur mesurée (fond blanc, sans remplissage) — la colonne "Grandeur" reste seule à
+// être grisée, pour bien distinguer description et valeurs saisies.
+function docxValCell(text) {
+  const t = text === null || text === undefined || text === "" ? "—" : String(text);
+  return new DOCX.TableCell({
+    width: { size: 1600, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS,
+    children: [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: t, size: 17, color: DOCX_DARK })] })],
+  });
+}
+// Constructeur générique : lignes [Grandeur, val1, val2, val3, Moyenne] → un seul tableau,
+// réutilisé par toutes les sections de mesures par phase (Onduleur, Batterie de compensation…).
+function docxBuildMesuresTable(rows, headers) {
+  if (!rows.length) return null;
+  const h = headers || ["L1", "L2", "L3"];
+  const headCell = (text, width) => new DOCX.TableCell({
+    width: { size: width, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_LIGHT },
+    children: [new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, children: [new DOCX.TextRun({ text, size: 17, bold: true, color: "555555" })] })],
+  });
+  const header = new DOCX.TableRow({ children: [headCell("Grandeur", 2800), headCell(h[0], 1600), headCell(h[1], 1600), headCell(h[2], 1600), headCell("Moyenne des valeurs", 2000)] });
+  const body = rows.map((r) => new DOCX.TableRow({ children: [
+    new DOCX.TableCell({ width: { size: 2800, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_LIGHT }, children: [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: r[0], size: 17, bold: true, color: "555555" })] })] }),
+    docxValCell(r[1]), docxValCell(r[2]), docxValCell(r[3]),
+    new DOCX.TableCell({ width: { size: 2000, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, children: [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: (r[4] === "" || r[4] === null || r[4] === undefined) ? "—" : String(r[4]), size: 16, color: "0A5DA8", bold: true })] })] }),
+  ]}));
+  return new DOCX.Table({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: [2800, 1600, 1600, 1600, 2000], rows: [header, ...body] });
+}
+function moyenneOf(...vals) {
+  const nums = vals.map(numOf).filter((v) => v !== null);
+  if (!nums.length) return "";
+  return Math.round((nums.reduce((a, b) => a + b, 0) / nums.length) * 100) / 100;
+}
+function docxTableauMesures(items, controlesSection) {
+  const rows = [];
+  items.forEach((item) => {
+    const value = controlesSection[item.key] || { fields: {} };
+    const f = value.fields || {};
+    if (f.p1 !== undefined || f.s1 !== undefined) {
+      const cosField = (k) => { const fd = (item.fields || []).find((x) => x.key === k && x.compute); return fd ? fd.compute(f) : ""; };
+      rows.push(["P actif (kW)", f.p1, f.p2, f.p3, moyenneOf(f.p1, f.p2, f.p3)]);
+      rows.push(["S apparent (kVA)", f.s1, f.s2, f.s3, moyenneOf(f.s1, f.s2, f.s3)]);
+      rows.push(["Cos φ (calculé)", cosField("cosphi1"), cosField("cosphi2"), cosField("cosphi3"), moyenneOf(cosField("cosphi1"), cosField("cosphi2"), cosField("cosphi3"))]);
+      return;
+    }
+    if (f.l1 !== undefined && f.l2 !== undefined && f.l3 !== undefined) {
+      let calc = "";
+      (item.fields || []).forEach((ff) => {
+        if (!ff.compute) return;
+        const v = ff.compute(f);
+        if (v !== "" && v !== null && v !== undefined) calc += (calc ? "  ·  " : "") + `${v}${ff.unit ? " " + ff.unit : ""}`;
+      });
+      rows.push([item.label, f.l1, f.l2, f.l3, calc]);
+      return;
+    }
+    const parts = printFieldParts(item, value);
+    if (parts.length) rows.push([item.label, "", "", "", parts.map((p) => p.includes(" : ") ? p.split(" : ").slice(1).join(" : ") : p).join("  ·  ")]);
+  });
+  return docxBuildMesuresTable(rows);
+}
 function docxPhaseCell(text, header, shaded) {
   const t = text === null || text === undefined || text === "" ? "—" : String(text);
   return new DOCX.TableCell({
-    width: { size: 1600, type: DOCX.WidthType.DXA }, shading: shaded ? { type: DOCX.ShadingType.CLEAR, fill: DOCX_LIGHT } : undefined,
+    width: { size: 2000, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, shading: shaded ? { type: DOCX.ShadingType.CLEAR, fill: DOCX_LIGHT } : undefined,
     children: [new DOCX.Paragraph({ alignment: header ? DOCX.AlignmentType.CENTER : DOCX.AlignmentType.LEFT, children: [new DOCX.TextRun({ text: t, size: 17, bold: header, color: header ? "555555" : DOCX_DARK })] })],
   });
 }
@@ -4661,26 +5552,26 @@ function docxPhaseTable(rows, headers) {
   const h = headers || ["L1", "L2", "L3"];
   const header = new DOCX.TableRow({ children: [docxPhaseCell("", false, true), docxPhaseCell(h[0], true, true), docxPhaseCell(h[1], true, true), docxPhaseCell(h[2], true, true)] });
   const body = rows.map((r) => new DOCX.TableRow({ children: [
-    new DOCX.TableCell({ width: { size: 2000, type: DOCX.WidthType.DXA }, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_LIGHT }, children: [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: r[0], size: 17, bold: true, color: "555555" })] })] }),
+    new DOCX.TableCell({ width: { size: 3600, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_LIGHT }, children: [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: r[0], size: 17, bold: true, color: "555555" })] })] }),
     docxPhaseCell(r[1]), docxPhaseCell(r[2]), docxPhaseCell(r[3]),
   ]}));
-  return new DOCX.Table({ width: { size: 6800, type: DOCX.WidthType.DXA }, columnWidths: [2000, 1600, 1600, 1600], rows: [header, ...body] });
+  return new DOCX.Table({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: [3600, 2000, 2000, 2000], rows: [header, ...body] });
 }
 // Table de synthèse : le nom de chaque équipement est un lien cliquable vers sa page dans le document.
 function docxSyntheseRow(label, etat, bookmarkId) {
   const linkRun = new DOCX.TextRun({ text: label, size: 18, color: DOCX_BLUE, underline: {} });
   return new DOCX.TableRow({ children: [
-    new DOCX.TableCell({ width: { size: 7000, type: DOCX.WidthType.DXA }, children: [new DOCX.Paragraph({ children: [
+    new DOCX.TableCell({ width: { size: 7600, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, children: [new DOCX.Paragraph({ children: [
       bookmarkId ? new DOCX.InternalHyperlink({ anchor: bookmarkId, children: [linkRun] }) : new DOCX.TextRun({ text: label, size: 18, color: DOCX_DARK }),
     ] })] }),
     etat
-      ? new DOCX.TableCell({ width: { size: 1800, type: DOCX.WidthType.DXA }, shading: { type: DOCX.ShadingType.CLEAR, fill: docxEtatColor(etat) }, verticalAlign: DOCX.VerticalAlign.CENTER, children: [new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, children: [new DOCX.TextRun({ text: (etat || "").toUpperCase(), bold: true, color: DOCX_WHITE, size: 16 })] })] })
-      : new DOCX.TableCell({ width: { size: 1800, type: DOCX.WidthType.DXA }, children: [new DOCX.Paragraph("")] }),
+      ? new DOCX.TableCell({ width: { size: 2000, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, shading: { type: DOCX.ShadingType.CLEAR, fill: docxEtatColor(etat) }, verticalAlign: DOCX.VerticalAlign.CENTER, children: [new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, children: [new DOCX.TextRun({ text: (etat || "").toUpperCase(), bold: true, color: DOCX_WHITE, size: 16 })] })] })
+      : new DOCX.TableCell({ width: { size: 2000, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, children: [new DOCX.Paragraph("")] }),
   ]});
 }
 function docxSyntheseTable(site) {
   if (site.equipements.length === 0) return null;
-  return new DOCX.Table({ width: { size: 8800, type: DOCX.WidthType.DXA }, columnWidths: [7000, 1800], rows: site.equipements.map((eq) =>
+  return new DOCX.Table({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: [7600, 2000], rows: site.equipements.map((eq) =>
     docxSyntheseRow(eq.type + (eq.identification.repere ? " — " + eq.identification.repere : ""), eq.etatFinal, docxBookmarkId(eq))
   )});
 }
@@ -4712,7 +5603,11 @@ function docxImage(dataUrl, w, h) {
 }
 
 function docxEquipementElements(eq, locaux) {
-  const schema = SCHEMAS[eq.type];
+  const schema = getSchema(eq);
+  if (!schema) {
+    return [new DOCX.Paragraph({ children: [new DOCX.PageBreak()] }), docxEquipHeader(eq.type || "Équipement", docxBookmarkId(eq)), docxSpacer(40),
+      new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: "Type d'équipement non reconnu — données non affichées.", italics: true, color: "C0392B", size: 18 })] }), docxSpacer()];
+  }
   const localNom = (locaux || []).find((l) => l.id === eq.localId);
   const elements = [new DOCX.Paragraph({ children: [new DOCX.PageBreak()] }), docxEquipHeader(eq.type, docxBookmarkId(eq)), docxSpacer(40)];
   if (localNom) elements.push(new DOCX.Paragraph({ spacing: { after: 60 }, children: [new DOCX.TextRun({ text: "Local : " + (localNom.nom || "Local sans nom"), size: 16, color: "666666", italics: true })] }));
@@ -4730,8 +5625,9 @@ function docxEquipementElements(eq, locaux) {
         elements.push(new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: "Aucun seuil paramétré", size: 18, color: "666666" })] }));
       } else {
         seuils.forEach((s) => {
+          const uReglage = ((ANSI_REGLAGE_FIELDS[ansiFamily(s.label)] || ANSI_REGLAGE_FIELDS_DEFAUT).find((f) => f.key === "reglage") || {}).unit || "A";
           const detail = [s.fields.etat && `État : ${s.fields.etat}`, s.fields.courbe && `Courbe : ${s.fields.courbe}`, s.fields.type && `Type : ${s.fields.type}`,
-            s.fields.reglage && `Réglage : ${s.fields.reglage} A`, s.fields.temporisation && `Temporisation : ${s.fields.temporisation} ${s.fields.temporisation_unite || ""}`].filter(Boolean).join(" · ");
+            s.fields.reglage && `Réglage : ${s.fields.reglage} ${uReglage}`, s.fields.temporisation && `Temporisation : ${s.fields.temporisation} ${s.fields.temporisation_unite || ""}`].filter(Boolean).join(" · ");
           elements.push(new DOCX.Paragraph({ spacing: { after: 60 }, children: [new DOCX.TextRun({ text: (s.label || "(seuil sans nom)") + (detail ? " — " + detail : ""), size: 18 })] }));
         });
       }
@@ -4743,8 +5639,9 @@ function docxEquipementElements(eq, locaux) {
       const rows = [];
       (eq.controles.parametrage_relais_seuils || []).filter((s) => s.label).forEach((s) => {
         const tol = calcToleranceEssai(s.fields.temporisation, s.fields.temporisation_unite);
+        const uInjecte = ((ANSI_REGLAGE_FIELDS[ansiFamily(s.label)] || ANSI_REGLAGE_FIELDS_DEFAUT).find((f) => f.key === "reglage") || {}).unit || "A";
         const detail = [s.essai.fields.l1 && `L1 : ${s.essai.fields.l1}`, s.essai.fields.l2 && `L2 : ${s.essai.fields.l2}`, s.essai.fields.l3 && `L3 : ${s.essai.fields.l3}`,
-          s.essai.fields.courant_injecte && `Courant injecté : ${s.essai.fields.courant_injecte} A`, tol && `Tolérance attendue : ${tol.min} – ${tol.max} ${tol.unite}`].filter(Boolean).join(" · ");
+          s.essai.fields.courant_injecte && `Valeur injectée : ${s.essai.fields.courant_injecte} ${uInjecte}`, tol && `Tolérance attendue : ${tol.min} – ${tol.max} ${tol.unite}`].filter(Boolean).join(" · ");
         rows.push(["Essai de déclenchement — " + s.label, detail, s.essai.action, s.essai.etat]);
       });
       const circuit = eq.controles.controles_relais.circuit_mesures_commande;
@@ -4757,7 +5654,7 @@ function docxEquipementElements(eq, locaux) {
     if (eq.type === "Analyse d'huile" && sec.key === "resultats") {
       elements.push(docxHeading(sec.title));
       const rows = sec.items.filter((item) => eq.controles[sec.key][item.key].fields.realise === "OUI").map((item) => {
-        const value = eq.controles[sec.key][item.key];
+        const value = eq.controles[sec.key][item.key] || { action: "", etat: "", fields: {} };
         const parts = printFieldParts(item, value);
         return [item.label, parts.join(" · "), value.action, value.etat];
       });
@@ -4770,7 +5667,7 @@ function docxEquipementElements(eq, locaux) {
     if (sec.key === "branches_batterie" && TYPES_AVEC_BRANCHES_UPS.includes(eq.type)) {
       elements.push(docxHeading(sec.title));
       const rows = (eq.controles.branches_dynamique || []).filter((b) => b.label).map((b) => {
-        const parts = [b.fields.recharge && `Courant de recharge : ${b.fields.recharge} A`, b.fields.residuel && `Courant résiduel : ${b.fields.residuel} A`, b.fields.decharge && `Courant de décharge : ${b.fields.decharge} A`].filter(Boolean).join(" · ");
+        const parts = [b.fields.recharge && `Courant de recharge : ${b.fields.recharge} A`, b.fields.residuel && `Courant résiduel : ${b.fields.residuel} A`].filter(Boolean).join(" · ");
         return [b.label, parts, b.action, b.etat];
       });
       const t2 = docxControlTable(rows);
@@ -4842,48 +5739,63 @@ function docxEquipementElements(eq, locaux) {
     }
     if ((sec.key === "mesures_amont" || sec.key === "mesures_aval") && TYPES_AVEC_GRADINS.includes(eq.type)) {
       elements.push(docxHeading(sec.title));
+      const rows = [];
       sec.items.forEach((item) => {
-        const value = eq.controles[sec.key][item.key];
+        const value = eq.controles[sec.key][item.key] || { action: "", etat: "", fields: {} };
         const fields = value.fields || {};
         if (item.key.startsWith("tensions_")) {
-          elements.push(new DOCX.Paragraph({ spacing: { before: 60, after: 4 }, children: [new DOCX.TextRun({ text: item.label, bold: true, size: 17, color: DOCX_DARK })] }));
-          elements.push(docxPhaseTable([["U (V)", fields.u12, fields.u23, fields.u31], ["THdV (%)", fields.thdv1, fields.thdv2, fields.thdv3]], ["U12", "U23", "U31"]));
-          elements.push(docxSpacer(60));
+          rows.push(["Tension (U12/U23/U31)", fields.u12, fields.u23, fields.u31, moyenneOf(fields.u12, fields.u23, fields.u31)]);
+          rows.push(["THdV (%)", fields.thdv1, fields.thdv2, fields.thdv3, moyenneOf(fields.thdv1, fields.thdv2, fields.thdv3)]);
         } else if (item.key.startsWith("courants_")) {
-          elements.push(new DOCX.Paragraph({ spacing: { before: 60, after: 4 }, children: [new DOCX.TextRun({ text: item.label, bold: true, size: 17, color: DOCX_DARK })] }));
-          elements.push(docxPhaseTable([["I (A)", fields.i1, fields.i2, fields.i3], ["ThdI (%)", fields.thdi1, fields.thdi2, fields.thdi3]]));
-          elements.push(docxSpacer(60));
+          rows.push(["Courant (L1/L2/L3)", fields.i1, fields.i2, fields.i3, moyenneOf(fields.i1, fields.i2, fields.i3)]);
+          rows.push(["ThdI (%)", fields.thdi1, fields.thdi2, fields.thdi3, moyenneOf(fields.thdi1, fields.thdi2, fields.thdi3)]);
         } else {
           const parts = printFieldParts(item, value);
-          if (parts.length) elements.push(new DOCX.Paragraph({ spacing: { after: 6 }, children: [new DOCX.TextRun({ text: item.label + " — " + parts.map((p) => p.split(" : ")[1]).join("   ·   "), size: 17 })] }));
+          if (parts.length) rows.push([item.label, "", "", "", parts.map((p) => p.includes(" : ") ? p.split(" : ").slice(1).join(" : ") : p).join("  ·  ")]);
         }
       });
+      const t = docxBuildMesuresTable(rows);
+      if (t) elements.push(t);
       elements.push(docxSpacer());
       return;
     }
     if ((sec.key === "mesures_reseau_normal" || sec.key === "mesures_reseau_secours") && TYPES_AVEC_BRANCHES_UPS.includes(eq.type)) {
       elements.push(docxHeading(sec.title));
-      const rows4 = sec.items.map((item) => {
-        const value = eq.controles[sec.key][item.key];
-        const parts = printFieldParts(item, value);
-        return [item.label, parts.join(" · "), value.action, value.etat];
-      });
-      const t4 = docxControlTable(rows4);
-      if (t4) elements.push(t4);
+      const tM = docxTableauMesures(sec.items, eq.controles[sec.key]);
+      if (tM) elements.push(tM);
       const s = calcPuissanceApparente(eq, sec.key);
-      if (s !== null) elements.push(new DOCX.Paragraph({ spacing: { before: 60, after: 60 }, children: [new DOCX.TextRun({ text: `Puissance apparente calculée (S = U × I × √3) : ${s} kVA`, bold: true, size: 17, color: DOCX_DARK })] }));
-      else elements.push(docxSpacer());
+      if (s !== null) elements.push(new DOCX.Paragraph({ spacing: { before: 60, after: 40 }, children: [new DOCX.TextRun({ text: `Puissance apparente calculée (S = U × I × √3) : ${s} kVA`, bold: true, size: 17, color: DOCX_DARK })] }));
+      else elements.push(docxSpacer(40));
+      if (eq.type === "Redresseur chargeur" && sec.key === "mesures_reseau_normal") {
+        const photosE = eq.controles.photos_reseau_entree || {};
+        const addPhotosE = (label, files) => {
+          if (!(files || []).length) return;
+          elements.push(new DOCX.Paragraph({ spacing: { before: 40, after: 20 }, children: [new DOCX.TextRun({ text: label, bold: true, size: 16, color: "666666" })] }));
+          files.forEach((p) => {
+            const img = docxImage(p.dataUrl, 160, 120);
+            if (img) elements.push(new DOCX.Paragraph({ spacing: { after: 20 }, children: [img] }));
+          });
+        };
+        addPhotosE("Photo — L1 réseau d'entrée (tension + courant)", photosE.l1);
+        addPhotosE("Photo — L2 réseau d'entrée (tension + courant)", photosE.l2);
+        addPhotosE("Photo — L3 réseau d'entrée (tension + courant)", photosE.l3);
+      }
+      elements.push(docxSpacer());
       return;
     }
-    if (sec.key === "mesures_utilisation" && TYPES_AVEC_BRANCHES_UPS.includes(eq.type)) {
+    if ((sec.key === "mesures_source1" || sec.key === "mesures_source2") && eq.type === "Inverseur de source") {
       elements.push(docxHeading(sec.title));
-      const rowsU = sec.items.map((item) => {
-        const value = eq.controles[sec.key][item.key];
-        const parts = printFieldParts(item, value);
-        return [item.label, parts.join(" · "), value.action, value.etat];
-      });
-      const tU = docxControlTable(rowsU);
+      const tS = docxTableauMesures(sec.items, eq.controles[sec.key]);
+      if (tS) elements.push(tS);
+      elements.push(docxSpacer());
+      return;
+    }
+    if (sec.key === "mesures_utilisation" && TYPES_AVEC_MESURES_UTILISATION.includes(eq.type)) {
+      elements.push(docxHeading(sec.title));
+      const tU = docxTableauMesures(sec.items, eq.controles[sec.key]);
       if (tU) elements.push(tU);
+      const tc = calcTauxCharge(eq);
+      if (tc) elements.push(new DOCX.Paragraph({ spacing: { before: 40, after: 40 }, children: [new DOCX.TextRun({ text: `Taux de charge calculé — L1 : ${tc.t1 ?? "—"}% · L2 : ${tc.t2 ?? "—"}% · L3 : ${tc.t3 ?? "—"}%`, bold: true, size: 17, color: DOCX_DARK })] }));
       elements.push(docxSpacer(60));
       const addPhotos = (label, files) => {
         if (!(files || []).length) return;
@@ -4903,7 +5815,7 @@ function docxEquipementElements(eq, locaux) {
     if (sec.key === "mesures_batterie_ups" && TYPES_AVEC_BRANCHES_UPS.includes(eq.type)) {
       elements.push(docxHeading(sec.title));
       const rows5 = sec.items.map((item) => {
-        const value = eq.controles[sec.key][item.key];
+        const value = eq.controles[sec.key][item.key] || { action: "", etat: "", fields: {} };
         const parts = printFieldParts(item, value);
         return [item.label, parts.join(" · "), value.action, value.etat];
       });
@@ -4911,21 +5823,45 @@ function docxEquipementElements(eq, locaux) {
       if (t5) elements.push(t5);
       const th = calcTensionsBatterieTheoriques(eq);
       if (th) {
-        elements.push(new DOCX.Paragraph({ spacing: { before: 60, after: 60 }, children: [new DOCX.TextRun({ text: `Valeurs théoriques calculées — Nominale : ${th.nominale} V · Égalisation : ${th.egalisation} V · Seuil fin de décharge : ${th.finDecharge} V`, bold: true, size: 17, color: DOCX_DARK })] }));
-      } else elements.push(docxSpacer());
+        const vCellule = calcTensionParCellule(eq);
+        elements.push(new DOCX.Paragraph({ spacing: { before: 60, after: 20 }, children: [new DOCX.TextRun({ text: `Valeurs théoriques calculées — Nominale : ${th.nominale} V · Seuil fin de décharge : ${th.finDecharge} V${vCellule !== null ? ` · Tension par cellule (floating) : ${vCellule} V` : ""}`, bold: true, size: 17, color: DOCX_DARK })] }));
+      }
+      const iSortie = calcCourantSortieRedresseur(eq);
+      if (iSortie !== null) elements.push(new DOCX.Paragraph({ spacing: { before: 20, after: 60 }, children: [new DOCX.TextRun({ text: `Courant de sortie redresseur (calculé) : ${iSortie} A`, bold: true, size: 17, color: DOCX_DARK })] }));
+      else if (!th) elements.push(docxSpacer());
+      return;
+    }
+    if (sec.key === "mesures_onduleur_item" && TYPES_AVEC_BRANCHES_UPS.includes(eq.type)) {
+      elements.push(docxHeading(sec.title));
+      const tO = docxTableauMesures(sec.items, eq.controles[sec.key]);
+      if (tO) elements.push(tO);
+      const capaF = calcCapaciteFiltre(eq);
+      if (capaF) {
+        const partsF = [capaF.c1 !== null && `L1 : ${capaF.c1} µF`, capaF.c2 !== null && `L2 : ${capaF.c2} µF`, capaF.c3 !== null && `L3 : ${capaF.c3} µF`].filter(Boolean);
+        elements.push(new DOCX.Paragraph({ spacing: { before: 40, after: 40 }, children: [new DOCX.TextRun({ text: `Capacité des condensateurs de filtre (calculée) : ${partsF.join("  ·  ")}`, bold: true, size: 17, color: DOCX_DARK })] }));
+      }
+      elements.push(docxSpacer());
       return;
     }
     if (sec.key === "essai_decharge" && TYPES_AVEC_BRANCHES_UPS.includes(eq.type)) {
       elements.push(docxHeading(sec.title));
       const rows6 = sec.items.map((item) => {
-        const value = eq.controles[sec.key][item.key];
+        const value = eq.controles[sec.key][item.key] || { action: "", etat: "", fields: {} };
         const parts = printFieldParts(item, value);
         return [item.label, parts.join(" · "), value.action, value.etat];
       });
       const t6 = docxControlTable(rows6);
       if (t6) elements.push(t6);
-      const th6 = calcTensionsBatterieTheoriques(eq);
-      if (th6) elements.push(new DOCX.Paragraph({ spacing: { before: 60, after: 20 }, children: [new DOCX.TextRun({ text: `Tension nominale : ${th6.nominale} V · Seuil de fin de décharge (critique) : ${th6.finDecharge} V`, bold: true, size: 17, color: DOCX_DARK })] }));
+      const nbB = Math.max(1, Math.round(numOf(eq.controles.batterie_id?.batterie_caracteristiques?.fields?.nombreBranches) || 1));
+      const courantsB = eq.controles.essai_decharge?.courants_branches || {};
+      const detailBranches = Array.from({ length: nbB }, (_, i) => courantsB[`b${i + 1}`] && `Branche ${i + 1} : ${courantsB[`b${i + 1}`]} A`).filter(Boolean).join(" · ");
+      const totalI = calcCourantDechargeTotal(eq);
+      const puissanceD = calcPuissanceDecharge(eq);
+      if (totalI !== null) {
+        elements.push(new DOCX.Paragraph({ spacing: { before: 40, after: 4 }, children: [new DOCX.TextRun({ text: "Courant de décharge par branche", bold: true, size: 17, color: DOCX_DARK })] }));
+        if (detailBranches) elements.push(new DOCX.Paragraph({ spacing: { after: 4 }, children: [new DOCX.TextRun({ text: detailBranches, size: 16, color: "666666" })] }));
+        elements.push(new DOCX.Paragraph({ spacing: { after: 40 }, children: [new DOCX.TextRun({ text: `Total : ${totalI} A${puissanceD !== null ? `  ·  Puissance de décharge (calculée) : ${puissanceD} kW` : ""}`, bold: true, size: 17, color: DOCX_DARK })] }));
+      }
       const a = calcAutonomieTheorique(eq);
       if (a !== null) elements.push(new DOCX.Paragraph({ spacing: { before: 20, after: 60 }, children: [new DOCX.TextRun({ text: `Autonomie avec la charge mesurée (calculée) : ${a} min`, bold: true, size: 17, color: DOCX_DARK })] }));
       else elements.push(docxSpacer());
@@ -4966,7 +5902,7 @@ function docxEquipementElements(eq, locaux) {
     }
     elements.push(docxHeading(sec.title));
     const rows = sec.items.map((item) => {
-      const value = eq.controles[sec.key][item.key];
+      const value = eq.controles[sec.key][item.key] || { action: "", etat: "", fields: {} };
       const parts = printFieldParts(item, value);
       return [item.label, parts.join(" · "), value.action, value.etat];
     });
@@ -4974,7 +5910,7 @@ function docxEquipementElements(eq, locaux) {
     custom.forEach((c) => rows.push([c.label || "(action ajoutée)", "", c.action, c.etat]));
     if (sec.key === "electriques" && TYPES_AVEC_TC.includes(eq.type)) {
       (eq.controles.tc_dynamique || []).filter((tc) => tc.label).forEach((tc) => {
-        const parts = TC_FIELDS_DYNAMIC.map((f) => tc.fields[f.key] && `${f.label} : ${tc.fields[f.key]}${f.unit ? " " + f.unit : ""}`).filter(Boolean).join(" · ");
+        const parts = TC_FIELDS_DYNAMIC(tc.fields).map((f) => tc.fields[f.key] && `${f.label} : ${tc.fields[f.key]}${f.unit ? " " + f.unit : ""}`).filter(Boolean).join(" · ");
         rows.push(["Contrôle TC — " + tc.label, parts, tc.action, tc.etat]);
       });
     }
@@ -5022,7 +5958,7 @@ function docxEquipementElements(eq, locaux) {
 
   // Courbe de décharge batterie (Onduleur) : même principe que la courbe de déclenchement — image
   // en grand format (≈ moitié de page).
-  if (eq.type === "Onduleur 3/3" && (eq.courbeDechargeFiles || []).length) {
+  if (TYPES_AVEC_BRANCHES_UPS.includes(eq.type) && (eq.courbeDechargeFiles || []).length) {
     elements.push(new DOCX.Paragraph({ spacing: { before: 60, after: 40 }, children: [new DOCX.TextRun({ text: "Courbe de décharge batterie", bold: true, size: 19, color: DOCX_DARK })] }));
     eq.courbeDechargeFiles.forEach((f) => {
       if (f.isPdf) {
@@ -5250,8 +6186,23 @@ export default function App() {
         const res = await window.storage.get(STORAGE_KEY, false);
         if (res && res.value) {
           const parsed = JSON.parse(res.value);
-          // Migration : l'équipement "Onduleur" a été renommé "Onduleur 3/3".
-          parsed.forEach((s) => (s.equipements || []).forEach((e) => { if (e.type === "Onduleur") e.type = "Onduleur 3/3"; }));
+          // Migration : les équipements "Onduleur 3/3" / "Onduleur 3/1" / "Onduleur 1/1" sont
+          // consolidés en un seul type "Onduleur", avec le régime (triphasé/monophasé) de chaque
+          // réseau conservé tel qu'il était pour ces anciens types.
+          const REGIMES_PAR_ANCIEN_TYPE = {
+            "Onduleur 3/3": { normal: "Triphasé", secours: "Triphasé", utilisation: "Triphasé", onduleur: "Triphasé" },
+            "Onduleur 3/1": { normal: "Triphasé", secours: "Monophasé", utilisation: "Monophasé", onduleur: "Monophasé" },
+            "Onduleur 1/1": { normal: "Monophasé", secours: "Monophasé", utilisation: "Monophasé", onduleur: "Monophasé" },
+          };
+          parsed.forEach((s) => (s.equipements || []).forEach((e) => {
+            if (REGIMES_PAR_ANCIEN_TYPE[e.type]) {
+              e.controles = e.controles || {};
+              e.controles.regimes_reseaux = REGIMES_PAR_ANCIEN_TYPE[e.type];
+              e.type = "Onduleur";
+            }
+          }));
+          // Répare les équipements dont les données datent d'avant l'ajout de nouveaux contrôles.
+          parsed.forEach((s) => { s.equipements = (s.equipements || []).map(repairEquipementControles); });
           setSites(parsed);
         }
       } catch (e) {
@@ -5384,6 +6335,7 @@ export default function App() {
       try {
         const data = JSON.parse(e.target.result);
         if (!Array.isArray(data.sites) || !Array.isArray(data.interventions)) throw new Error("format invalide");
+        data.sites.forEach((s) => { s.equipements = (s.equipements || []).map(repairEquipementControles); });
         setSites(data.sites);
         setInterventions(data.interventions);
       } catch (err) {
