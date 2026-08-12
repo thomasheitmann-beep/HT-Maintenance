@@ -6982,7 +6982,7 @@ export default function App({ currentUser, onLogout }) {
     const unsub = DOCX_FS.onSnapshot(ref, (snap) => {
       console.log("[Firestore] onSnapshot reçu — exists:", snap.exists(), "hasPendingWrites:", snap.metadata.hasPendingWrites, "fromCache:", snap.metadata.fromCache);
       if (snap.metadata.hasPendingWrites) return; // écho de notre propre écriture, déjà appliqué localement
-      if (!snap.exists()) { console.log("[Firestore] Document sites inexistant sur le serveur (base vide)."); setLoaded(true); return; }
+      if (!snap.exists()) { console.log("[Firestore] Document sites inexistant sur le serveur (base vide)."); applyingRemoteSites.current = true; setLoaded(true); return; }
       const parsed = snap.data().value || [];
       console.log("[Firestore] Sites reçus du serveur:", parsed.length);
       // Migration : les équipements "Onduleur 3/3" / "Onduleur 3/1" / "Onduleur 1/1" sont
@@ -7031,6 +7031,7 @@ export default function App({ currentUser, onLogout }) {
     const unsub = DOCX_FS.onSnapshot(ref, (snap) => {
       if (snap.metadata.hasPendingWrites) return;
       if (snap.exists()) { applyingRemoteIv.current = true; setInterventions(snap.data().value || []); }
+      else { applyingRemoteIv.current = true; }
       setIvLoaded(true);
     }, () => setIvLoaded(true));
     return unsub;
