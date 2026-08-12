@@ -199,7 +199,14 @@ const MARQUE_MODELE_CELLULE_HTA = {
   "Eaton": ["xiria", "SVS"],
   "CG Power": ["RMU-CG"],
 };
-const LISTE_MODELE_CELLULE_HTA_OPTIONS = optionsParMarque(MARQUE_MODELE_CELLULE_HTA, null);
+// Liste de secours (toutes marques confondues) quand aucune marque n'est encore choisie — le
+// champ garde ainsi des suggestions dès le départ, et se resserre une fois la marque sélectionnée.
+function combineValues(mapping) {
+  const all = new Set();
+  Object.values(mapping).forEach((arr) => arr.forEach((v) => all.add(v)));
+  return Array.from(all).sort();
+}
+const LISTE_MODELE_CELLULE_HTA_OPTIONS = optionsParMarque(MARQUE_MODELE_CELLULE_HTA, combineValues(MARQUE_MODELE_CELLULE_HTA));
 // Modèle BT = variante/calibre réel dans la gamme du disjoncteur (ex. Masterpact MTZ1/MTZ2/MTZ3).
 const MARQUE_MODELE_BT = {
   "Schneider Electric": ["Compact NSX100", "Compact NSX250", "Compact NSX630", "Masterpact MTZ1", "Masterpact MTZ2", "Masterpact MTZ3", "Masterpact NT", "Masterpact NW"],
@@ -211,9 +218,9 @@ const MARQUE_MODELE_BT = {
   "Legrand": ["DPX3 160", "DPX3 250", "DPX3 630", "DMX3 1600", "DMX3 2500", "DMX3 4000"],
   "General Electric": ["Record Plus", "Entelliguard G"],
 };
-const LISTE_MODELE_BT_OPTIONS = optionsParMarque(MARQUE_MODELE_BT, null);
+const LISTE_MODELE_BT_OPTIONS = optionsParMarque(MARQUE_MODELE_BT, combineValues(MARQUE_MODELE_BT));
 const LISTE_REFERENCE_RELAIS_HTA_OPTIONS = optionsParChamp("marqueRelais", MARQUE_GAMME_RELAIS_HTA, LISTE_RELAIS_MARQUE);
-const LISTE_REFERENCE_RELAIS_BT_OPTIONS = optionsParChamp("marqueRelais", MARQUE_GAMME_RELAIS_BT, null);
+const LISTE_REFERENCE_RELAIS_BT_OPTIONS = optionsParChamp("marqueRelais", MARQUE_GAMME_RELAIS_BT, combineValues(MARQUE_GAMME_RELAIS_BT));
 const MARQUE_MODELE_ONDULEUR = {
   "Schneider Electric": ["Galaxy VX", "Galaxy VS", "Galaxy PW", "Symmetra PX", "Comet"],
   "APC": ["Symmetra PX", "Smart-UPS"],
@@ -230,7 +237,7 @@ const MARQUE_MODELE_ONDULEUR = {
   "Legrand": ["Keor", "Daker"],
   "General Electric": ["LanPro", "SitePro"],
 };
-const LISTE_MODELE_ONDULEUR_OPTIONS = optionsParMarque(MARQUE_MODELE_ONDULEUR, null);
+const LISTE_MODELE_ONDULEUR_OPTIONS = optionsParMarque(MARQUE_MODELE_ONDULEUR, combineValues(MARQUE_MODELE_ONDULEUR));
 const MARQUE_MODELE_REDRESSEUR = {
   "Benning": ["MC 3", "MPS RCT"],
   "AEG Power Solutions": ["Protect D."],
@@ -240,7 +247,7 @@ const MARQUE_MODELE_REDRESSEUR = {
   "Delta": ["Ultron DC"],
   "EnerSys": ["Alber BCS"],
 };
-const LISTE_MODELE_REDRESSEUR_OPTIONS = optionsParMarque(MARQUE_MODELE_REDRESSEUR, null);
+const LISTE_MODELE_REDRESSEUR_OPTIONS = optionsParMarque(MARQUE_MODELE_REDRESSEUR, combineValues(MARQUE_MODELE_REDRESSEUR));
 const MARQUE_MATERIEL_INVERSEUR = {
   "Socomec": ["ATyS 6", "ATyS 8", "ATyS M", "ATyS P", "STS COMPACT"],
   "Eaton": ["ATC-300", "SC Series"],
@@ -250,7 +257,7 @@ const MARQUE_MATERIEL_INVERSEUR = {
   "Kohler": ["KSS ATS"],
   "GE Digital Energy": ["Sure Source"],
 };
-const LISTE_MATERIEL_INVERSEUR_OPTIONS = optionsParMarque(MARQUE_MATERIEL_INVERSEUR, null);
+const LISTE_MATERIEL_INVERSEUR_OPTIONS = optionsParMarque(MARQUE_MATERIEL_INVERSEUR, combineValues(MARQUE_MATERIEL_INVERSEUR));
 const LISTE_COUPLAGE_TDY = ["Yzn11", "Dyn11", "Dzn10", "Dzn6", "Yyn6", "Yzn5", "Dyn5", "Yyn0", "Yz11", "Yd11", "Dy11", "Dz10", "Dz6", "Yy6", "Dd6", "Yz5", "Yd5", "Dy5", "Yy0", "Dd0"];
 const OUI_NON_LIST = ["OUI", "NON"];
 const TENSION_ISOLEMENT = ["200", "500", "1000", "5000", "10000", "15000"];
@@ -1635,7 +1642,7 @@ function emptyEquipement(type) {
     id: uid(),
     lignageId: uid(), // identifiant stable de l'équipement physique, conservé d'une visite à l'autre
     type,
-    ordre: Date.now(), // détermine la position dans le rapport — modifiable pour intercaler des équipements
+    ordre: 0, // détermine la position dans le rapport — réattribué séquentiellement à la création
     localId: "",
     identification,
     controles,
@@ -4597,11 +4604,13 @@ function EquipementTypeTab({ type, site, allSites, update }) {
   const addItem = () => {
     const eq = emptyEquipement(type);
     if (site.locaux && site.locaux.length) eq.localId = site.locaux[0].id;
+    eq.ordre = (site.equipements.length + 1) * 10;
     update((d) => ({ ...d, equipements: [...d.equipements, eq] }));
   };
   const duplicateItem = (eq) => {
     const copy = JSON.parse(JSON.stringify(eq));
     copy.id = uid();
+    copy.ordre = (site.equipements.length + 1) * 10;
     update((d) => ({ ...d, equipements: [...d.equipements, copy] }));
   };
 
@@ -5103,6 +5112,7 @@ function SiteDetail({ site, allSites, update, onBack, onDelete, onPrint, onPrint
   function addEquipmentType(type) {
     const eq = emptyEquipement(type);
     if (site.locaux && site.locaux.length) eq.localId = site.locaux[0].id;
+    eq.ordre = (site.equipements.length + 1) * 10;
     update((d) => ({ ...d, equipements: [...d.equipements, eq] }));
     setActiveTab(type);
     setAddMenuOpenHTA(false);
@@ -5111,6 +5121,7 @@ function SiteDetail({ site, allSites, update, onBack, onDelete, onPrint, onPrint
   function reprendreEquipement(source) {
     const eq = dupliquerEquipementPourNouvelleVisite(source);
     if (site.locaux && site.locaux.length) eq.localId = site.locaux[0].id;
+    eq.ordre = (site.equipements.length + 1) * 10;
     update((d) => ({ ...d, equipements: [...d.equipements, eq] }));
     setActiveTab(eq.type);
     setReprendreOpen(false);
@@ -6967,10 +6978,13 @@ export default function App({ currentUser, onLogout }) {
   // (onSnapshot), sans recharger la page.
   useEffect(() => {
     const ref = DOCX_FS.doc(db, "app-data", "sites");
+    console.log("[Firestore] Abonnement au document app-data/sites…");
     const unsub = DOCX_FS.onSnapshot(ref, (snap) => {
+      console.log("[Firestore] onSnapshot reçu — exists:", snap.exists(), "hasPendingWrites:", snap.metadata.hasPendingWrites, "fromCache:", snap.metadata.fromCache);
       if (snap.metadata.hasPendingWrites) return; // écho de notre propre écriture, déjà appliqué localement
-      if (!snap.exists()) { setLoaded(true); return; }
+      if (!snap.exists()) { console.log("[Firestore] Document sites inexistant sur le serveur (base vide)."); setLoaded(true); return; }
       const parsed = snap.data().value || [];
+      console.log("[Firestore] Sites reçus du serveur:", parsed.length);
       // Migration : les équipements "Onduleur 3/3" / "Onduleur 3/1" / "Onduleur 1/1" sont
       // consolidés en un seul type "Onduleur", avec le régime (triphasé/monophasé) de chaque
       // réseau conservé tel qu'il était pour ces anciens types.
@@ -6990,7 +7004,7 @@ export default function App({ currentUser, onLogout }) {
       applyingRemoteSites.current = true;
       setSites(parsed);
       setLoaded(true);
-    }, () => setLoaded(true));
+    }, (err) => { console.error("[Firestore] Erreur onSnapshot (sites) :", err); setLoaded(true); });
     return unsub;
   }, []);
 
@@ -6999,8 +7013,10 @@ export default function App({ currentUser, onLogout }) {
     if (applyingRemoteSites.current) { applyingRemoteSites.current = false; return; }
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(async () => {
+      console.log("[Firestore] Tentative d'écriture — sites:", sites.length, "utilisateur:", currentUser?.email);
       try {
         await DOCX_FS.setDoc(DOCX_FS.doc(db, "app-data", "sites"), { value: sites, updatedAt: Date.now(), updatedBy: currentUser?.email || null });
+        console.log("[Firestore] Écriture confirmée avec succès.");
         setSaveError(false);
       } catch (e) {
         console.error("Échec de synchronisation Firestore (sites) :", e);
