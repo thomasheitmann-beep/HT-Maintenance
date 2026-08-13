@@ -7103,16 +7103,18 @@ export default function App({ currentUser, onLogout }) {
     if (!loaded) return;
     const serialized = JSON.stringify(sites);
     if (serialized === lastSyncedSites.current) return; // rien de nouveau par rapport au serveur — pas d'écriture
+    lastSyncedSites.current = serialized; // marqué "en cours de synchronisation" dès maintenant — évite qu'un
+    // nouveau déclenchement de cet effet avant confirmation du serveur ne reprogramme la même écriture.
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(async () => {
       console.log("[Firestore] Tentative d'écriture — sites:", sites.length, "utilisateur:", currentUser?.email);
       try {
         await DOCX_FS.setDoc(DOCX_FS.doc(db, "app-data", "sites"), { value: sites, updatedAt: Date.now(), updatedBy: currentUser?.email || null });
         console.log("[Firestore] Écriture confirmée avec succès.");
-        lastSyncedSites.current = serialized;
         setSaveError(false);
       } catch (e) {
         console.error("Échec de synchronisation Firestore (sites) :", e);
+        lastSyncedSites.current = null; // permet une nouvelle tentative au prochain changement
         setSaveError(true);
       }
     }, 500);
@@ -7139,12 +7141,14 @@ export default function App({ currentUser, onLogout }) {
     if (!ivLoaded) return;
     const serialized = JSON.stringify(interventions);
     if (serialized === lastSyncedIv.current) return;
+    lastSyncedIv.current = serialized;
     if (ivSaveTimer.current) clearTimeout(ivSaveTimer.current);
     ivSaveTimer.current = setTimeout(async () => {
       try {
         await DOCX_FS.setDoc(DOCX_FS.doc(db, "app-data", "interventions"), { value: interventions, updatedAt: Date.now(), updatedBy: currentUser?.email || null });
-        lastSyncedIv.current = serialized;
-      } catch (e) { /* best effort */ }
+      } catch (e) {
+        lastSyncedIv.current = null;
+      }
     }, 500);
     return () => clearTimeout(ivSaveTimer.current);
   }, [interventions, ivLoaded]);
