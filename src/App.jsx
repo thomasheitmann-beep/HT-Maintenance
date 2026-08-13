@@ -7046,7 +7046,7 @@ export default function App({ currentUser, onLogout }) {
   const [printAnnexeSite, setPrintAnnexeSite] = useState(null);
   const [exportConfirm, setExportConfirm] = useState(null);
   const saveTimer = useRef(null);
-  const applyingRemoteSites = useRef(false);
+  const lastSyncedSites = useRef(null); // dernier contenu (JSON) connu comme synchronisé avec le serveur
 
   const [view, setView] = useState("sites"); // "sites" | "interventions" | "calendrier"
   const [interventions, setInterventions] = useState([]);
@@ -7054,18 +7054,26 @@ export default function App({ currentUser, onLogout }) {
   const [selectedIvId, setSelectedIvId] = useState(null);
   const [printIv, setPrintIv] = useState(null);
   const ivSaveTimer = useRef(null);
-  const applyingRemoteIv = useRef(false);
+  const lastSyncedIv = useRef(null);
 
   // Synchronisation temps réel via Firestore : tous les techniciens connectés partagent le même
   // document "sites" et "interventions". Les changements d'un collègue apparaissent automatiquement
   // (onSnapshot), sans recharger la page.
+  // On compare le CONTENU (pas un simple indicateur "vient de recevoir une donnée distante") pour
+  // décider si une écriture est nécessaire — plus robuste face à des mises à jour rapprochées, qui
+  // pouvaient auparavant déclencher une boucle d'écritures répétées.
   useEffect(() => {
     const ref = DOCX_FS.doc(db, "app-data", "sites");
     console.log("[Firestore] Abonnement au document app-data/sites…");
     const unsub = DOCX_FS.onSnapshot(ref, (snap) => {
       console.log("[Firestore] onSnapshot reçu — exists:", snap.exists(), "hasPendingWrites:", snap.metadata.hasPendingWrites, "fromCache:", snap.metadata.fromCache);
       if (snap.metadata.hasPendingWrites) return; // écho de notre propre écriture, déjà appliqué localement
-      if (!snap.exists()) { console.log("[Firestore] Document sites inexistant sur le serveur (base vide)."); applyingRemoteSites.current = true; setLoaded(true); return; }
+      if (!snap.exists()) {
+        console.log("[Firestore] Document sites inexistant sur le serveur (base vide).");
+        lastSyncedSites.current = "[]";
+        setLoaded(true);
+        return;
+      }
       const parsed = snap.data().value || [];
       console.log("[Firestore] Sites reçus du serveur:", parsed.length);
       // Migration : les équipements "Onduleur 3/3" / "Onduleur 3/1" / "Onduleur 1/1" sont
@@ -7084,7 +7092,7 @@ export default function App({ currentUser, onLogout }) {
         }
       }));
       parsed.forEach((s) => { s.equipements = (s.equipements || []).map(repairEquipementControles); });
-      applyingRemoteSites.current = true;
+      lastSyncedSites.current = JSON.stringify(parsed);
       setSites(parsed);
       setLoaded(true);
     }, (err) => { console.error("[Firestore] Erreur onSnapshot (sites) :", err); setLoaded(true); });
@@ -7093,13 +7101,15 @@ export default function App({ currentUser, onLogout }) {
 
   useEffect(() => {
     if (!loaded) return;
-    if (applyingRemoteSites.current) { applyingRemoteSites.current = false; return; }
+    const serialized = JSON.stringify(sites);
+    if (serialized === lastSyncedSites.current) return; // rien de nouveau par rapport au serveur — pas d'écriture
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(async () => {
       console.log("[Firestore] Tentative d'écriture — sites:", sites.length, "utilisateur:", currentUser?.email);
       try {
         await DOCX_FS.setDoc(DOCX_FS.doc(db, "app-data", "sites"), { value: sites, updatedAt: Date.now(), updatedBy: currentUser?.email || null });
         console.log("[Firestore] Écriture confirmée avec succès.");
+        lastSyncedSites.current = serialized;
         setSaveError(false);
       } catch (e) {
         console.error("Échec de synchronisation Firestore (sites) :", e);
@@ -7113,8 +7123,13 @@ export default function App({ currentUser, onLogout }) {
     const ref = DOCX_FS.doc(db, "app-data", "interventions");
     const unsub = DOCX_FS.onSnapshot(ref, (snap) => {
       if (snap.metadata.hasPendingWrites) return;
-      if (snap.exists()) { applyingRemoteIv.current = true; setInterventions(snap.data().value || []); }
-      else { applyingRemoteIv.current = true; }
+      if (snap.exists()) {
+        const parsed = snap.data().value || [];
+        lastSyncedIv.current = JSON.stringify(parsed);
+        setInterventions(parsed);
+      } else {
+        lastSyncedIv.current = "[]";
+      }
       setIvLoaded(true);
     }, () => setIvLoaded(true));
     return unsub;
@@ -7122,10 +7137,14 @@ export default function App({ currentUser, onLogout }) {
 
   useEffect(() => {
     if (!ivLoaded) return;
-    if (applyingRemoteIv.current) { applyingRemoteIv.current = false; return; }
+    const serialized = JSON.stringify(interventions);
+    if (serialized === lastSyncedIv.current) return;
     if (ivSaveTimer.current) clearTimeout(ivSaveTimer.current);
     ivSaveTimer.current = setTimeout(async () => {
-      try { await DOCX_FS.setDoc(DOCX_FS.doc(db, "app-data", "interventions"), { value: interventions, updatedAt: Date.now(), updatedBy: currentUser?.email || null }); } catch (e) { /* best effort */ }
+      try {
+        await DOCX_FS.setDoc(DOCX_FS.doc(db, "app-data", "interventions"), { value: interventions, updatedAt: Date.now(), updatedBy: currentUser?.email || null });
+        lastSyncedIv.current = serialized;
+      } catch (e) { /* best effort */ }
     }, 500);
     return () => clearTimeout(ivSaveTimer.current);
   }, [interventions, ivLoaded]);
