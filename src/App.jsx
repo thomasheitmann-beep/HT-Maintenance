@@ -46,7 +46,7 @@ const I = (key, label, fields) => ({
 // un réglage / une mesure de test : valeurs uniquement, sans conformité
 const S = (key, label, fields) => ({ key, label, kind: "setting", fields: fields || [] });
 
-const F = (key, label, unit, options) => ({ key, label, unit, options });
+const F = (key, label, unit, options, defaultValue) => ({ key, label, unit, options, defaultValue });
 
 /* ---- Listes déroulantes reprises des validations de données Excel ---- */
 const LISTE_INTERVENANTS = ["Thomas HEITMANN"];
@@ -261,6 +261,14 @@ const LISTE_MATERIEL_INVERSEUR_OPTIONS = optionsParMarque(MARQUE_MATERIEL_INVERS
 const LISTE_COUPLAGE_TDY = ["Yzn11", "Dyn11", "Dzn10", "Dzn6", "Yyn6", "Yzn5", "Dyn5", "Yyn0", "Yz11", "Yd11", "Dy11", "Dz10", "Dz6", "Yy6", "Dd6", "Yz5", "Yd5", "Dy5", "Yy0", "Dd0"];
 const OUI_NON_LIST = ["OUI", "NON"];
 const TENSION_ISOLEMENT = ["200", "500", "1000", "5000", "10000", "15000"];
+// CEI 62271-100 : la résistance de contact (quelques dizaines à centaines de µΩ) n'est fiable et
+// répétable qu'avec un courant d'essai DC suffisant (100 A minimum usuel) — sans lui, la valeur
+// mesurée n'a pas de sens comparatif d'une visite à l'autre.
+const LISTE_COURANT_ESSAI_CONTACT = ["100", "200", "300", "500", "1000"];
+// Une seule tension d'injection est utilisée du début à la fin de l'essai (CEI 60076-3 / IEEE 43) —
+// le type de mesure indique simplement jusqu'où l'essai a été poussé : lecture instantanée
+// (standard), ou lecture prolongée avec calcul du ratio (PI à 10/1 min, DAR à 60/10 s).
+const LISTE_TYPE_MESURE_ISOLEMENT = ["Standard (lecture instantanée)", "PI (Indice de Polarisation, 10/1 min)", "DAR (Absorption Diélectrique, 60/10 s)"];
 const UNITE_ISOLEMENT = ["GΩ", "MΩ", "Ω"];
 
 const L1L2L3 = (unit) => [F("l1", "L1", unit), F("l2", "L2", unit), F("l3", "L3", unit)];
@@ -296,7 +304,7 @@ const MECA_CELLULE = [
 ];
 const TYPES_AVEC_MANOEUVRE_DYNAMIQUE = ["Interrupteur HTA", "Interrupteur Fusible HTA", "Comptage HTA", "Disjoncteur HTA", "Contacteur HTA"];
 const SECURITE_CELLULE = [
-  C("continuite_masses", "Contrôle de la continuité des masses", [F("valeur", "Valeur", "mΩ")]),
+  C("continuite_masses", "Contrôle de la continuité des masses", [F("valeur", "Valeur", "mΩ"), F("courantEssai", "Courant d'essai", "mA", ["200", "500", "1000"], "1000")]),
   C("interverrouillage", "Contrôle de l'interverrouillage de sécurité"),
   C("fiche_manoeuvre", "Présence et exactitude de la fiche de manœuvre"),
 ];
@@ -346,6 +354,13 @@ function TC_FIELDS_DYNAMIC(fieldsCourants) {
 // Types d'équipement qui utilisent désormais le contrôle TC dynamique / les organes internes dynamiques
 // (un seul élément affiché par défaut, bouton pour en ajouter — remplace la liste fixe précédente).
 const TYPES_AVEC_TC = ["Comptage HTA", "Contacteur HTA", "Disjoncteur HTA", "Interrupteur HTA", "Interrupteur Fusible HTA"];
+// Sur Interrupteur HTA / Interrupteur Fusible HTA (pas toujours équipés d'un relais), le contrôle TC
+// n'a de sens que si un relais de protection est effectivement présent (déclaré en identification).
+function equipementAvecTC(eq) {
+  if (!TYPES_AVEC_TC.includes(eq.type)) return false;
+  if (eq.type === "Interrupteur HTA" || eq.type === "Interrupteur Fusible HTA") return eq.identification?.presenceRelais === "Oui";
+  return true;
+}
 const TYPES_AVEC_ORGANES_DYNAMIQUE = ["Interrupteur HTA", "Interrupteur Fusible HTA", "Disjoncteur HTA", "Disjoncteur BT", "Interrupteur BT"];
 const TYPES_AVEC_GRADINS = ["Batterie de compensation"];
 // Onduleur : branches de batterie (dynamique, comme les gradins) et relevé détaillé des tensions
@@ -386,7 +401,10 @@ function calcEcheancesUsureUPS(eq) {
 }
 const BRANCHE_FIELD_DEFS = [{ key: "recharge" }, { key: "residuel" }];
 const LISTE_NOM_BRANCHE = Array.from({ length: 6 }, (_, i) => `Branche ${i + 1}`);
-const ELEMENT_FIELD_DEFS = [{ key: "tension" }];
+// IEEE 1188 (VRLA) / IEEE 450 (plomb ouvert) : la résistance/impédance interne de chaque élément
+// est un indicateur de dégradation souvent plus sensible et plus précoce que la seule tension —
+// recommandée en complément, pas en remplacement, du relevé de tension.
+const ELEMENT_FIELD_DEFS = [{ key: "tension" }, { key: "resistance", label: "Résistance interne", unit: "mΩ" }];
 // Un élément est signalé "défectueux" s'il sort de la bande [moyenne - toléranceBasse% ; moyenne + toléranceHaute%].
 function elementBatterieStatus(tension, moyenne, toleranceBasse, toleranceHaute) {
   const v = numOf(tension), m = numOf(moyenne);
@@ -435,6 +453,18 @@ function gradinIntensiteTheorique(q, u) {
   const qn = numOf(q), un = numOf(u);
   if (qn === null || un === null || un === 0) return null;
   return Math.round(((qn * 1000) / (Math.sqrt(3) * un)) * 100) / 100;
+}
+// Vrai si au moins un élément de batterie (Onduleur, Redresseur chargeur) est hors tolérance par
+// rapport à la moyenne relevée — utilisé pour rappeler au technicien de bien répercuter l'anomalie
+// dans l'état final, même si un seul élément est en cause au milieu d'un ensemble conforme.
+function elementsBatterieHorsTolerance(eq) {
+  const entries = eq.controles.elements_dynamique || [];
+  if (!entries.length) return false;
+  const cfg = eq.controles.releve_config || { toleranceBasse: 3, toleranceHaute: 3 };
+  const valeurs = entries.map((e) => numOf(e.fields.tension)).filter((v) => v !== null);
+  if (!valeurs.length) return false;
+  const moyenne = Math.round((valeurs.reduce((a, b) => a + b, 0) / valeurs.length) * 1000) / 1000;
+  return entries.some((e) => elementBatterieStatus(e.fields.tension, moyenne, cfg.toleranceBasse, cfg.toleranceHaute) === "bad");
 }
 // Vrai si au moins un gradin de l'équipement a un courant mesuré hors tolérance (±10 % du courant
 // théorique) — utilisé pour rappeler au technicien de bien répercuter l'anomalie dans l'état final.
@@ -486,9 +516,12 @@ const CONTROLES_DISJONCTEUR = [
   C("resistance_bobine_declenchement", "Résistances de la bobine de déclenchement", [F("rd", "Rd", "Ω"), F("tolerance", "Tolérance", "Ω")]),
   C("etat_isolants_disj", "État général des isolants"),
   C("etat_chambres_coupure", "État général des chambres de coupures"),
-  C("resistance_contact_chambres", "Résistances de contact des chambres de coupure", [...L1L2L3("µΩ"), F("tolerance", "Tolérance", "µΩ")]),
-  C("temps_ouverture", "Mesure du temps d'ouverture", [...L1L2L3("ms"), F("synchronisme", "Synchronisme (ensemble des phases)", "ms")]),
-  C("temps_fermeture", "Mesure du temps de fermeture", [...L1L2L3("ms"), F("synchronisme", "Synchronisme (ensemble des phases)", "ms")]),
+  C("resistance_contact_chambres", "Résistances de contact des chambres de coupure", [...L1L2L3("µΩ"), F("tolerance", "Tolérance", "µΩ"), F("courantEssai", "Courant d'essai", "A", LISTE_COURANT_ESSAI_CONTACT)]),
+  // CEI 62271-100 ne fixe pas de valeur universelle (dépend fortement de la technologie — SF6, vide,
+  // air — et du calibre) : le seul repère pertinent est la valeur donnée par le constructeur pour CE
+  // modèle précis, à comparer à la mesure relevée.
+  C("temps_ouverture", "Mesure du temps d'ouverture", [...L1L2L3("ms"), F("synchronisme", "Synchronisme (ensemble des phases)", "ms"), F("reference", "Valeur de référence constructeur", "ms")]),
+  C("temps_fermeture", "Mesure du temps de fermeture", [...L1L2L3("ms"), F("synchronisme", "Synchronisme (ensemble des phases)", "ms"), F("reference", "Valeur de référence constructeur", "ms")]),
   C("courbe_compensation_sf6", "Courbe de compensation pression SF6 / température", [F("reference", "Référence / commentaire")]),
   C("essai_dielectrique_pole", "Essai diélectrique après intervention sur le pôle"),
 ];
@@ -839,7 +872,7 @@ function buildOnduleurSchema({ normalMono = false, secoursMono = false, utilisat
       ]},
       { key: "releve_tensions", title: "Relevé des tensions batterie", items: [] },
       { key: "thermographie_ups", title: "Thermographie", items: [
-        C("controle_thermo_ups", "Contrôle thermographique"),
+        C("controle_thermo_ups", "Contrôle thermographique", [F("temperature", "Température relevée", "°C"), F("charge", "Charge au moment du contrôle", "%")]),
       ]},
       { key: "pieces_usure_ups", title: "Pièces d'usure", items: [] },
     ],
@@ -924,7 +957,7 @@ function buildRedresseurSchema({ reseauMono = false } = {}) {
       ]},
       { key: "releve_tensions", title: "Relevé des tensions batterie", items: [] },
       { key: "thermographie_ups", title: "Thermographie", items: [
-        C("controle_thermo_ups", "Contrôle thermographique"),
+        C("controle_thermo_ups", "Contrôle thermographique", [F("temperature", "Température relevée", "°C"), F("charge", "Charge au moment du contrôle", "%")]),
       ]},
       { key: "pieces_usure_ups", title: "Pièces d'usure", items: [] },
     ],
@@ -1004,7 +1037,7 @@ function buildInverseurSchema({ source1Mono = false, source2Mono = false, utilis
         C("puissance_fp_utilisation", "Puissance et facteur de puissance", puissanceFpItem(utilisationMono)),
       ]},
       { key: "thermographie_ups", title: "Thermographie", items: [
-        C("controle_thermo_ups", "Contrôle thermographique"),
+        C("controle_thermo_ups", "Contrôle thermographique", [F("temperature", "Température relevée", "°C"), F("charge", "Charge au moment du contrôle", "%")]),
       ]},
     ],
   };
@@ -1052,23 +1085,31 @@ function buildTransformateurSchema({ sec = false } = {}) {
       ]},
       { key: "rapport_transformation", title: "Rapport de transformation", items: [
         C("rapport_par_phase", "Rapport par phase (mesuré)", [F("l1", "L1"), F("l2", "L2"), F("l3", "L3")]),
-        C("resistance_enroulements_primaire", "Résistance des enroulements — Primaire", [...L1L2L3("mΩ")]),
-        C("resistance_enroulements_secondaire", "Résistance des enroulements — Secondaire", [...L1L2L3("mΩ")]),
+        // CEI 60076-1 / IEEE C57.12.90 : mesure hors tension, transformateur à l'équilibre thermique
+        // (pas juste après mise hors service). Chaque phase se mesure individuellement (pas de shunt
+        // entre phases, contrairement à l'isolement) — un écart > 2 % entre phases indique une
+        // anomalie (connexion desserrée, spire en court-circuit). La température relevée permet de
+        // corriger et comparer les valeurs d'une visite à l'autre (résistance du cuivre ≈ +0,4 %/°C).
+        C("resistance_enroulements_primaire", "Résistance des enroulements — Primaire", [...L1L2L3("mΩ"), F("temperature", "Température enroulement", "°C")]),
+        C("resistance_enroulements_secondaire", "Résistance des enroulements — Secondaire", [...L1L2L3("mΩ"), F("temperature", "Température enroulement", "°C")]),
       ]},
       { key: "mesure_isolement", title: "Mesure d'isolement", items: [
-        C("hta_terre", "HTA - Terre", [F("v", "Tension", null, TENSION_ISOLEMENT), F("valeur", "Valeur"), F("unite", "Unité", null, UNITE_ISOLEMENT)]),
-        C("bt_terre_1", "BT - Terre", [F("v", "Tension", null, TENSION_ISOLEMENT), F("valeur", "Valeur"), F("unite", "Unité", null, UNITE_ISOLEMENT)]),
-        C("bt_terre_2", "HTA - BT", [F("v", "Tension", null, TENSION_ISOLEMENT), F("valeur", "Valeur"), F("unite", "Unité", null, UNITE_ISOLEMENT)]),
-        C("pi", "PI (10/1min)", [F("v", "Tension", null, TENSION_ISOLEMENT), F("resultat", "Résultat (PI)")]),
-        C("dar", "DAR (60/10sec)", [F("v", "Tension", null, TENSION_ISOLEMENT), F("resultat", "Résultat (DAR)")]),
+        C("hta_terre", "HTA - Terre (BT shuntée à la terre)", [F("typeMesure", "Type de mesure", null, LISTE_TYPE_MESURE_ISOLEMENT), F("v", "Tension d'injection", null, TENSION_ISOLEMENT), F("valeur", "Valeur"), F("unite", "Unité", null, UNITE_ISOLEMENT), F("pi", "PI (10/1min)"), F("dar", "DAR (60/10sec)")]),
+        C("bt_terre", "BT - Terre (HTA shuntée à la terre)", [F("typeMesure", "Type de mesure", null, LISTE_TYPE_MESURE_ISOLEMENT), F("v", "Tension d'injection", null, TENSION_ISOLEMENT), F("valeur", "Valeur"), F("unite", "Unité", null, UNITE_ISOLEMENT), F("pi", "PI (10/1min)"), F("dar", "DAR (60/10sec)")]),
+        C("hta_bt", "HTA - BT (enroulements court-circuités entre eux)", [F("typeMesure", "Type de mesure", null, LISTE_TYPE_MESURE_ISOLEMENT), F("v", "Tension d'injection", null, TENSION_ISOLEMENT), F("valeur", "Valeur"), F("unite", "Unité", null, UNITE_ISOLEMENT), F("pi", "PI (10/1min)"), F("dar", "DAR (60/10sec)")]),
       ]},
     ],
   };
 }
 
-const SCHEMAS = {
-  "Interrupteur HTA": {
-    identification: [{ key: "repere", label: "Repère / Nom de l'équipement" }, { key: "marque", label: "Marque", options: LISTE_MARQUE_CELLULE_HTA }, { key: "modele", label: "Modèle", options: LISTE_MODELE_CELLULE_HTA_OPTIONS }, { key: "typeCellule", label: "Type de cellule", options: LISTE_TYPE_CELLULE["Interrupteur HTA"] }, { key: "numeroSerie", label: "Numéro de série" }, { key: "rapportTPProtection", label: "Rapport TP de protection (ex. 20000/100)" }],
+function buildInterrupteurHTASchema({ avecRelais = false } = {}) {
+  return {
+    identification: [
+      { key: "repere", label: "Repère / Nom de l'équipement" }, { key: "marque", label: "Marque", options: LISTE_MARQUE_CELLULE_HTA }, { key: "modele", label: "Modèle", options: LISTE_MODELE_CELLULE_HTA_OPTIONS },
+      { key: "typeCellule", label: "Type de cellule", options: LISTE_TYPE_CELLULE["Interrupteur HTA"] }, { key: "numeroSerie", label: "Numéro de série" },
+      { key: "presenceRelais", label: "Présence d'un relais de protection", options: ["Non", "Oui"] },
+      ...(avecRelais ? [{ key: "rapportTPProtection", label: "Rapport TP de protection (ex. 20000/100)" }] : []),
+    ],
     sections: [
       { key: "mecaniques", title: "Contrôles mécaniques", items: [
         ...MECA_CELLULE,
@@ -1085,14 +1126,56 @@ const SCHEMAS = {
       ]},
       { key: "organes", title: "Organes internes", items: [] },
       { key: "securite", title: "Contrôles de sécurité", items: SECURITE_CELLULE },
-      { key: "parametrage_relais", title: "Paramétrage du relais de protection", items: [] },
-      { key: "controles_relais", title: "Contrôles du relais de protection", items: [CIRCUIT_MESURES_COMMANDE] },
+      ...(avecRelais ? [
+        { key: "parametrage_relais", title: "Paramétrage du relais de protection", items: [] },
+        { key: "controles_relais", title: "Contrôles du relais de protection", items: [CIRCUIT_MESURES_COMMANDE] },
+      ] : []),
       { key: "mesure_isolement", title: "Mesure d'isolement", items: [
         C("hta_terre", "HTA - Terre", [F("v", "Tension", null, TENSION_ISOLEMENT), F("valeur", "Valeur"), F("unite", "Unité", null, UNITE_ISOLEMENT)]),
         C("entre_phases", "Entre phases", [F("v", "Tension", null, TENSION_ISOLEMENT), F("valeur", "Valeur"), F("unite", "Unité", null, UNITE_ISOLEMENT)]),
       ]},
     ],
-  },
+  };
+}
+
+function buildInterrupteurFusibleHTASchema({ avecRelais = false } = {}) {
+  return {
+    identification: [
+      { key: "repere", label: "Repère / Nom de l'équipement" }, { key: "marque", label: "Marque", options: LISTE_MARQUE_CELLULE_HTA }, { key: "modele", label: "Modèle", options: LISTE_MODELE_CELLULE_HTA_OPTIONS },
+      { key: "typeCellule", label: "Type de cellule", options: LISTE_TYPE_CELLULE["Interrupteur Fusible HTA"] }, { key: "numeroSerie", label: "Numéro de série" },
+      { key: "presenceRelais", label: "Présence d'un relais de protection", options: ["Non", "Oui"] },
+      ...(avecRelais ? [{ key: "rapportTPProtection", label: "Rapport TP de protection (ex. 20000/100)" }] : []),
+    ],
+    sections: [
+      { key: "mecaniques", title: "Contrôles mécaniques", items: [
+        ...MECA_CELLULE,
+        C("essai_manoeuvre_charge", "Essai de manœuvre en charge"),
+        C("essai_manoeuvre_hors_charge", "Essai de manœuvre hors charge"),
+        C("verrouillage_sect_terre", "Contrôle du verrouillage mécanique interrupteur / sectionneur de terre"),
+      ]},
+      { key: "electriques", title: "Contrôles électriques", items: [
+        C("indicateurs_capacitifs", "Contrôle des indicateurs capacitifs de présence tension"),
+        C("etat_isolants", "État général des isolants"),
+        C("connexions_puissance", "Contrôle des connexions de puissance"),
+        C("tetes_cables", "Contrôle des têtes de câbles"),
+        C("contacts_position", "Contrôle des contacts de position"),
+        ...FUSIBLES,
+      ]},
+      { key: "organes", title: "Organes internes", items: [] },
+      { key: "securite", title: "Contrôles de sécurité", items: SECURITE_CELLULE },
+      ...(avecRelais ? [
+        { key: "parametrage_relais", title: "Paramétrage du relais de protection", items: [] },
+        { key: "controles_relais", title: "Contrôles du relais de protection", items: [CIRCUIT_MESURES_COMMANDE] },
+      ] : []),
+      { key: "mesure_isolement", title: "Mesure d'isolement", items: [
+        C("hta_terre", "HTA - Terre", [F("v", "Tension", null, TENSION_ISOLEMENT), F("valeur", "Valeur"), F("unite", "Unité", null, UNITE_ISOLEMENT)]),
+        C("entre_phases", "Entre phases", [F("v", "Tension", null, TENSION_ISOLEMENT), F("valeur", "Valeur"), F("unite", "Unité", null, UNITE_ISOLEMENT)]),
+      ]},
+    ],
+  };
+}
+const SCHEMAS = {
+  "Interrupteur HTA": buildInterrupteurHTASchema({}),
   "Comptage HTA": {
     identification: [{ key: "repere", label: "Repère / Nom de l'équipement" }, { key: "marque", label: "Marque", options: LISTE_MARQUE_CELLULE_HTA }, { key: "modele", label: "Modèle", options: LISTE_MODELE_CELLULE_HTA_OPTIONS }, { key: "typeCellule", label: "Type de cellule", options: LISTE_TYPE_CELLULE["Comptage HTA"] }, { key: "numeroSerie", label: "Numéro de série" }],
     sections: [
@@ -1112,33 +1195,7 @@ const SCHEMAS = {
       { key: "securite", title: "Contrôles de sécurité", items: SECURITE_CELLULE },
     ],
   },
-  "Interrupteur Fusible HTA": {
-    identification: [{ key: "repere", label: "Repère / Nom de l'équipement" }, { key: "marque", label: "Marque", options: LISTE_MARQUE_CELLULE_HTA }, { key: "modele", label: "Modèle", options: LISTE_MODELE_CELLULE_HTA_OPTIONS }, { key: "typeCellule", label: "Type de cellule", options: LISTE_TYPE_CELLULE["Interrupteur Fusible HTA"] }, { key: "numeroSerie", label: "Numéro de série" }, { key: "rapportTPProtection", label: "Rapport TP de protection (ex. 20000/100)" }],
-    sections: [
-      { key: "mecaniques", title: "Contrôles mécaniques", items: [
-        ...MECA_CELLULE,
-        C("essai_manoeuvre_charge", "Essai de manœuvre en charge"),
-        C("essai_manoeuvre_hors_charge", "Essai de manœuvre hors charge"),
-        C("verrouillage_sect_terre", "Contrôle du verrouillage mécanique interrupteur / sectionneur de terre"),
-      ]},
-      { key: "electriques", title: "Contrôles électriques", items: [
-        C("indicateurs_capacitifs", "Contrôle des indicateurs capacitifs de présence tension"),
-        C("etat_isolants", "État général des isolants"),
-        C("connexions_puissance", "Contrôle des connexions de puissance"),
-        C("tetes_cables", "Contrôle des têtes de câbles"),
-        C("contacts_position", "Contrôle des contacts de position"),
-        ...FUSIBLES,
-      ]},
-      { key: "organes", title: "Organes internes", items: [] },
-      { key: "securite", title: "Contrôles de sécurité", items: SECURITE_CELLULE },
-      { key: "parametrage_relais", title: "Paramétrage du relais de protection", items: [] },
-      { key: "controles_relais", title: "Contrôles du relais de protection", items: [CIRCUIT_MESURES_COMMANDE] },
-      { key: "mesure_isolement", title: "Mesure d'isolement", items: [
-        C("hta_terre", "HTA - Terre", [F("v", "Tension", null, TENSION_ISOLEMENT), F("valeur", "Valeur"), F("unite", "Unité", null, UNITE_ISOLEMENT)]),
-        C("entre_phases", "Entre phases", [F("v", "Tension", null, TENSION_ISOLEMENT), F("valeur", "Valeur"), F("unite", "Unité", null, UNITE_ISOLEMENT)]),
-      ]},
-    ],
-  },
+  "Interrupteur Fusible HTA": buildInterrupteurFusibleHTASchema({}),
   "Disjoncteur HTA": {
     identification: [
       { key: "repere", label: "Repère / Nom de l'équipement" }, 
@@ -1159,7 +1216,7 @@ const SCHEMAS = {
       ]},
       { key: "organes", title: "Organes internes", items: [] },
       { key: "securite", title: "Contrôles de sécurité", items: [
-        C("continuite_masses", "Contrôle de la continuité des masses", [F("valeur", "Valeur", "mΩ")]),
+        C("continuite_masses", "Contrôle de la continuité des masses", [F("valeur", "Valeur", "mΩ"), F("courantEssai", "Courant d'essai", "mA", ["200", "500", "1000"], "1000")]),
         C("interverrouillage", "Contrôle de l'interverrouillage de sécurité"),
         C("fiche_manoeuvre", "Présence et exactitude de la fiche de manœuvre"),
       ]},
@@ -1188,7 +1245,7 @@ const SCHEMAS = {
         ...FUSIBLES,
       ]},
       { key: "securite", title: "Contrôles de sécurité", items: [
-        C("continuite_masses", "Contrôle de la continuité des masses", [F("valeur", "Valeur", "mΩ")]),
+        C("continuite_masses", "Contrôle de la continuité des masses", [F("valeur", "Valeur", "mΩ"), F("courantEssai", "Courant d'essai", "mA", ["200", "500", "1000"], "1000")]),
         C("interverrouillage", "Contrôle de l'interverrouillage de sécurité"),
         C("fiche_manoeuvre", "Présence et exactitude de la fiche de manœuvre"),
       ]},
@@ -1217,11 +1274,11 @@ const SCHEMAS = {
       ]},
       { key: "electriques", title: "Contrôles électriques", items: [
         C("contacts_auxiliaires", "Contacts auxiliaires"),
-        C("resistances_contacts", "Résistances des contacts", [...L1L2L3("µΩ"), F("n", "N", "µΩ")]),
+        C("resistances_contacts", "Résistances des contacts", [...L1L2L3("µΩ"), F("n", "N", "µΩ"), F("courantEssai", "Courant d'essai", "A", LISTE_COURANT_ESSAI_CONTACT)]),
         C("verif_unite_controle", "Vérification unité de contrôle"),
         C("tension_aux_unite", "Tension auxiliaire de l'unité de contrôle", [F("tension", "Tension", null, LISTE_TENSION_ORGANES), F("type", "Type", null, LISTE_TYPE_ORGANES)]),
         C("signalisation", "Signalisation"),
-        C("thermographie_connexions", "Contrôle thermographique des connexions", [F("temperature", "Température relevée", "°C")]),
+        C("thermographie_connexions", "Contrôle thermographique des connexions", [F("temperature", "Température relevée", "°C"), F("charge", "Charge au moment du contrôle", "%")]),
         C("contacts_aux_signalisation", "Vérification des contacts auxiliaires de signalisation (OF/SD)"),
         C("bouton_test_rearmement", "Test du bouton test / réarmement"),
       ]},
@@ -1261,11 +1318,11 @@ const SCHEMAS = {
       ]},
       { key: "electriques", title: "Contrôles électriques", items: [
         C("contacts_auxiliaires", "Contacts auxiliaires"),
-        C("resistances_contacts", "Résistances des contacts", [...L1L2L3("µΩ"), F("n", "N", "µΩ")]),
+        C("resistances_contacts", "Résistances des contacts", [...L1L2L3("µΩ"), F("n", "N", "µΩ"), F("courantEssai", "Courant d'essai", "A", LISTE_COURANT_ESSAI_CONTACT)]),
         C("verif_unite_controle", "Vérification unité de contrôle"),
         C("tension_aux_unite", "Tension auxiliaire de l'unité de contrôle"),
         C("signalisation", "Signalisation"),
-        C("thermographie_connexions", "Contrôle thermographique des connexions", [F("temperature", "Température relevée", "°C")]),
+        C("thermographie_connexions", "Contrôle thermographique des connexions", [F("temperature", "Température relevée", "°C"), F("charge", "Charge au moment du contrôle", "%")]),
         C("contacts_aux_signalisation", "Vérification des contacts auxiliaires de signalisation (OF/SD)"),
         C("bouton_test_rearmement", "Test du bouton test / réarmement"),
       ]},
@@ -1312,7 +1369,7 @@ const SCHEMAS = {
         C("resistances_decharge", "Résistances de décharge", [F("valeur", "Valeur", "MΩ")]),
         C("depoussierage", "Dépoussiérage de l'installation"),
         C("test_ventilateur", "Test de fonctionnement du ventilateur (démarrage / arrêt aux seuils)"),
-        C("thermographie_batt", "Contrôle thermographique", [F("temperature", "Température relevée", "°C")]),
+        C("thermographie_batt", "Contrôle thermographique", [F("temperature", "Température relevée", "°C"), F("charge", "Charge au moment du contrôle", "%")]),
       ]},
       { key: "securite_automatismes", title: "Contrôles sécurité et automatismes", items: [
         C("type_regulateur", "Type de régulateur", [F("type", "Type", null, LISTE_TYPE_REGULATEUR), F("modele", "Modèle"), F("reference", "Référence")]),
@@ -1403,18 +1460,20 @@ const SCHEMAS = {
       ]},
       { key: "electriques", title: "Contrôles électriques", items: [
         C("serrage_connexions", "Contrôle du serrage des connexions", [F("couple", "Couple de serrage", "N.m")]),
-        C("resistance_jonctions", "Résistance de contact aux jonctions", [...L1L2L3("µΩ"), F("n", "N", "µΩ")]),
+        C("resistance_jonctions", "Résistance de contact aux jonctions", [...L1L2L3("µΩ"), F("n", "N", "µΩ"), F("courantEssai", "Courant d'essai", "A", LISTE_COURANT_ESSAI_CONTACT)]),
         C("etat_isolants_entretoises", "État des isolants et entretoises"),
-        C("continuite_masses_jdb", "Continuité des masses et mise à la terre", [F("valeur", "Valeur", "mΩ")]),
-        C("thermographie", "Contrôle thermographique / points chauds", [F("temperature", "Température relevée", "°C")]),
+        C("continuite_masses_jdb", "Continuité des masses et mise à la terre", [F("valeur", "Valeur", "mΩ"), F("courantEssai", "Courant d'essai", "mA", ["200", "500", "1000"], "1000")]),
+        C("thermographie", "Contrôle thermographique / points chauds", [F("temperature", "Température relevée", "°C"), F("charge", "Charge au moment du contrôle", "%")]),
       ]},
       { key: "mesure_isolement", title: "Mesure d'isolement", items: [
-        C("phase1_terre", "Phase 1 - Terre", [F("v", "Tension", null, TENSION_ISOLEMENT), F("valeur", "Valeur"), F("unite", "Unité", null, UNITE_ISOLEMENT)]),
-        C("phase2_terre", "Phase 2 - Terre", [F("v", "Tension", null, TENSION_ISOLEMENT), F("valeur", "Valeur"), F("unite", "Unité", null, UNITE_ISOLEMENT)]),
-        C("phase3_terre", "Phase 3 - Terre", [F("v", "Tension", null, TENSION_ISOLEMENT), F("valeur", "Valeur"), F("unite", "Unité", null, UNITE_ISOLEMENT)]),
-        C("phase_phase", "Phase - Phase", [F("v", "Tension", null, TENSION_ISOLEMENT), F("valeur", "Valeur"), F("unite", "Unité", null, UNITE_ISOLEMENT)]),
-        C("pi_jdb", "PI (10/1min)", [F("v", "Tension", null, TENSION_ISOLEMENT)]),
-        C("dar_jdb", "DAR (60/10sec)", [F("v", "Tension", null, TENSION_ISOLEMENT)]),
+        C("phase1_terre", "Phase 1 - Terre", [F("typeMesure", "Type de mesure", null, LISTE_TYPE_MESURE_ISOLEMENT), F("v", "Tension d'injection", null, TENSION_ISOLEMENT), F("valeur", "Valeur"), F("unite", "Unité", null, UNITE_ISOLEMENT)]),
+        C("phase2_terre", "Phase 2 - Terre", [F("typeMesure", "Type de mesure", null, LISTE_TYPE_MESURE_ISOLEMENT), F("v", "Tension d'injection", null, TENSION_ISOLEMENT), F("valeur", "Valeur"), F("unite", "Unité", null, UNITE_ISOLEMENT)]),
+        C("phase3_terre", "Phase 3 - Terre", [F("typeMesure", "Type de mesure", null, LISTE_TYPE_MESURE_ISOLEMENT), F("v", "Tension d'injection", null, TENSION_ISOLEMENT), F("valeur", "Valeur"), F("unite", "Unité", null, UNITE_ISOLEMENT)]),
+        C("phase1_phase2", "Phase 1 - Phase 2", [F("typeMesure", "Type de mesure", null, LISTE_TYPE_MESURE_ISOLEMENT), F("v", "Tension d'injection", null, TENSION_ISOLEMENT), F("valeur", "Valeur"), F("unite", "Unité", null, UNITE_ISOLEMENT)]),
+        C("phase2_phase3", "Phase 2 - Phase 3", [F("typeMesure", "Type de mesure", null, LISTE_TYPE_MESURE_ISOLEMENT), F("v", "Tension d'injection", null, TENSION_ISOLEMENT), F("valeur", "Valeur"), F("unite", "Unité", null, UNITE_ISOLEMENT)]),
+        C("phase3_phase1", "Phase 3 - Phase 1", [F("typeMesure", "Type de mesure", null, LISTE_TYPE_MESURE_ISOLEMENT), F("v", "Tension d'injection", null, TENSION_ISOLEMENT), F("valeur", "Valeur"), F("unite", "Unité", null, UNITE_ISOLEMENT)]),
+        C("pi_jdb", "PI (10/1min)", [F("v", "Tension d'injection", null, TENSION_ISOLEMENT), F("resultat", "Résultat (PI)")]),
+        C("dar_jdb", "DAR (60/10sec)", [F("v", "Tension d'injection", null, TENSION_ISOLEMENT), F("resultat", "Résultat (DAR)")]),
       ]},
     ],
   },
@@ -1478,6 +1537,8 @@ function getSchema(eq) {
     return buildInverseurSchema({ source1Mono: r.source1 === "Monophasé", source2Mono: r.source2 === "Monophasé", utilisationMono: r.utilisation === "Monophasé" });
   }
   if (eq.type === "Transformateur") return buildTransformateurSchema({ sec: eq.identification?.typeIsolation === "Sec (résine/enrobé)" });
+  if (eq.type === "Interrupteur HTA") return buildInterrupteurHTASchema({ avecRelais: eq.identification?.presenceRelais === "Oui" });
+  if (eq.type === "Interrupteur Fusible HTA") return buildInterrupteurFusibleHTASchema({ avecRelais: eq.identification?.presenceRelais === "Oui" });
   return SCHEMAS[eq.type];
 }
 
@@ -1596,7 +1657,7 @@ function createControlesDefaults(schema) {
     sec.items.forEach((item) => {
       const fieldsDefault = {};
       (item.fields || []).forEach((f) => {
-        fieldsDefault[f.key] = "";
+        fieldsDefault[f.key] = f.defaultValue ?? "";
         if (unitFamilyFor(f.unit)) fieldsDefault[f.key + "Unite"] = f.unit;
       });
       controles[sec.key][item.key] =
@@ -1786,6 +1847,9 @@ function siteExportWarnings(site) {
   site.equipements.forEach((eq) => {
     if (gradinsHorsTolerance(eq) && eq.etatFinal === "Conforme") {
       w.push(`${eq.type}${eq.identification.repere ? " — " + eq.identification.repere : ""} : un courant de gradin est hors tolérance mais l'état final est toujours « Conforme »`);
+    }
+    if (elementsBatterieHorsTolerance(eq) && eq.etatFinal === "Conforme") {
+      w.push(`${eq.type}${eq.identification.repere ? " — " + eq.identification.repere : ""} : un élément de batterie est hors tolérance mais l'état final est toujours « Conforme »`);
     }
   });
   return w;
@@ -3197,6 +3261,10 @@ function ElementsBatteriePanel({ eq, update, idPrefix }) {
         {cfg.saisieParGroupe && <MiniInput label="Éléments / groupe" value={cfg.tailleGroupe} onChange={(v) => setCfg({ tailleGroupe: v })} width={70} />}
         <MiniInput label="Tolérance basse" unit="%" value={cfg.toleranceBasse} onChange={(v) => setCfg({ toleranceBasse: v })} width={62} />
         <MiniInput label="Tolérance haute" unit="%" value={cfg.toleranceHaute} onChange={(v) => setCfg({ toleranceHaute: v })} width={62} />
+        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: "#5B6B7D", cursor: "pointer" }} title="À cocher uniquement si vous disposez d'un appareil de mesure de résistance/impédance interne">
+          <input type="checkbox" checked={!!cfg.avecResistance} onChange={(e) => setCfg({ avecResistance: e.target.checked })} />
+          Mesure de résistance interne disponible
+        </label>
       </div>
 
       <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "center", marginBottom: 12, fontSize: 12.5 }}>
@@ -3223,6 +3291,13 @@ function ElementsBatteriePanel({ eq, update, idPrefix }) {
                   border: `1.5px solid ${elementBatterieStatus(e.fields.tension, moyenne, cfg.toleranceBasse, cfg.toleranceHaute) === "bad" ? "#C0392B" : elementBatterieStatus(e.fields.tension, moyenne, cfg.toleranceBasse, cfg.toleranceHaute) === "ok" ? "#0F8A5F" : "#D8DEE5"}`,
                 }}
               />
+              {cfg.avecResistance && (
+                <input
+                  type="number" step="any" value={e.fields.resistance ?? ""} onChange={(ev) => setField(e.id, "resistance", ev.target.value)}
+                  placeholder="mΩ" title="Résistance interne (mΩ)"
+                  style={{ ...inputStyle, width: "100%", padding: "2px 2px", fontSize: 10, textAlign: "center", marginTop: 2, color: "#8B96A3" }}
+                />
+              )}
             </div>
           ))}
         </div>
@@ -4499,7 +4574,7 @@ function EquipementCard({ eq, update, remove, removable = true, onDuplicate, loc
                 />
               );
             }
-            if (sec.key === "electriques" && TYPES_AVEC_TC.includes(eq.type)) {
+            if (sec.key === "electriques" && equipementAvecTC(eq)) {
               return (
                 <React.Fragment key={sec.key}>
                   <SectionBlock
@@ -4537,6 +4612,8 @@ function EquipementCard({ eq, update, remove, removable = true, onDuplicate, loc
                 </React.Fragment>
               );
             }
+            const tauxChargeCalc = calcTauxCharge(eq);
+            const estThermo = sec.key === "thermographie_ups" || sec.key === "thermographie_connexions" || sec.key === "thermographie" || sec.key === "thermographie_batt";
             return (
               <SectionBlock
                 key={sec.key}
@@ -4549,6 +4626,11 @@ function EquipementCard({ eq, update, remove, removable = true, onDuplicate, loc
                 onAddCustom={() => addCustomAction(sec.key)}
                 onChangeCustom={(id, patch) => changeCustomAction(sec.key, id, patch)}
                 onRemoveCustom={(id) => removeCustomAction(sec.key, id)}
+                extra={estThermo && tauxChargeCalc ? (
+                  <div style={{ fontSize: 11.5, color: "#0A5DA8", background: "rgba(10,93,168,0.08)", padding: "8px 12px", borderRadius: 8, marginTop: 8 }}>
+                    Taux de charge déjà calculé pour cet équipement — L1 : {tauxChargeCalc.t1 ?? "—"}% · L2 : {tauxChargeCalc.t2 ?? "—"}% · L3 : {tauxChargeCalc.t3 ?? "—"}% — à reporter dans « Charge au moment du contrôle » si pertinent pour ce point de mesure.
+                  </div>
+                ) : null}
               />
             );
           })}
@@ -6307,7 +6389,8 @@ function docxEquipementElements(eq, locaux, allSites) {
       const rows3 = entries.filter((e) => e.fields.tension).map((e) => {
         const st = elementBatterieStatus(e.fields.tension, moyenne, cfg.toleranceBasse, cfg.toleranceHaute);
         const etat = st === "bad" ? "Défaillant" : "Conforme";
-        return [e.label, `${e.fields.tension} V`, "", etat];
+        const detail = [`${e.fields.tension} V`, cfg.avecResistance && e.fields.resistance && `${e.fields.resistance} mΩ`].filter(Boolean).join(" · ");
+        return [e.label, detail, "", etat];
       });
       const t3 = docxControlTable(rows3);
       if (t3) elements.push(t3);
@@ -6586,7 +6669,7 @@ function docxEquipementElements(eq, locaux, allSites) {
     });
     const custom = eq.controles[sec.key + "__custom"] || [];
     custom.forEach((c) => rows.push([c.label || "(action ajoutée)", "", c.action, c.etat]));
-    if (sec.key === "electriques" && TYPES_AVEC_TC.includes(eq.type)) {
+    if (sec.key === "electriques" && equipementAvecTC(eq)) {
       (eq.controles.tc_dynamique || []).filter((tc) => tc.label).forEach((tc) => {
         const parts = TC_FIELDS_DYNAMIC(tc.fields).map((f) => tc.fields[f.key] && `${f.label} : ${tc.fields[f.key]}${f.unit ? " " + f.unit : ""}`).filter(Boolean).join(" · ");
         rows.push(["Contrôle TC — " + tc.label, parts, tc.action, tc.etat]);
