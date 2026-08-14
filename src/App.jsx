@@ -7454,11 +7454,14 @@ export default function App({ currentUser, onLogout }) {
       writeInFlight.current = true;
       console.log("[Firestore] Tentative d'écriture — sites:", sites.length, "utilisateur:", currentUser?.email);
       try {
-        await DOCX_FS.setDoc(DOCX_FS.doc(db, "app-data", "sites"), { value: sites, updatedAt: Date.now(), updatedBy: currentUser?.email || null });
+        await Promise.race([
+          DOCX_FS.setDoc(DOCX_FS.doc(db, "app-data", "sites"), { value: sites, updatedAt: Date.now(), updatedBy: currentUser?.email || null }),
+          new Promise((_, reject) => setTimeout(() => reject(new Error("Délai dépassé (15s) — écriture bloquée, probablement au niveau réseau")), 15000)),
+        ]);
         console.log("[Firestore] Écriture confirmée avec succès.");
         setSaveError(false);
       } catch (e) {
-        console.error("Échec de synchronisation Firestore (sites) :", e);
+        console.error("[Firestore] Échec de synchronisation (sites) — code:", e?.code, "message:", e?.message, e);
         lastSyncedSites.current = null; // permet une nouvelle tentative au prochain changement
         setSaveError(true);
       } finally {

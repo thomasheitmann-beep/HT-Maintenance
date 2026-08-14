@@ -1,8 +1,3 @@
-// Configuration Firebase — projet "HT-Maintenance".
-// apiKey et les autres valeurs ci-dessous sont des clés PUBLIQUES côté client (normal pour
-// Firebase) : la vraie sécurité est assurée par les règles Firestore (firestore.rules), qui
-// n'autorisent la lecture/écriture qu'aux utilisateurs authentifiés (voir ce fichier à la racine
-// du projet, à copier dans Firebase Console → Firestore Database → Règles).
 import { initializeApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
 import { initializeFirestore } from "firebase/firestore";
@@ -18,9 +13,11 @@ const firebaseConfig = {
 
 export const firebaseApp = initializeApp(firebaseConfig);
 export const auth = getAuth(firebaseApp);
-// Le transport WebSocket par défaut de Firestore est parfois bloqué silencieusement par Safari/iOS
-// ou certains réseaux mobiles (écritures qui ne partent jamais, sans erreur visible). On force le
-// "long polling" (requêtes HTTP classiques) qui passe partout, au prix d'une latence négligeable.
+// Le transport WebSocket par défaut de Firestore est bloqué de façon silencieuse dans certains
+// environnements réseau (proxy, pare-feu, inspection SSL) : la connexion s'établit (statut 200)
+// mais les écritures ne se terminent jamais, ni en succès ni en échec. On FORCE le long-polling
+// (pas juste une détection automatique, qui peut se tromper) pour contourner ce blocage.
 export const db = initializeFirestore(firebaseApp, {
-  experimentalAutoDetectLongPolling: true,
+  experimentalForceLongPolling: true,
+  useFetchStreams: false,
 });
