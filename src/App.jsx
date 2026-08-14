@@ -1487,14 +1487,17 @@ const SCHEMAS = {
           F("affichageConsignes", "Affichage des consignes de sécurité"),
         ]),
       ]},
-      { key: "materiel_securite", title: "Matériel de sécurité", items: [
-        S("tabouret_tapis", "Tabouret ou tapis isolant", [F("present", "Présent", null, OUI_NON_LIST)]),
-        S("gants_isolants", "Gants isolants", [F("present", "Présent", null, OUI_NON_LIST)]),
-        S("perche_sauvetage", "Perche de sauvetage", [F("present", "Présent", null, OUI_NON_LIST)]),
-        S("perche_vat", "Perche de vérification d'absence de tension", [F("present", "Présent", null, OUI_NON_LIST)]),
-        S("extincteur", "Extincteur (type B - feux électriques)", [F("present", "Présent", null, OUI_NON_LIST)]),
+      { key: "materiel_securite", title: "Matériel de sécurité (NF C18-510)", items: [
+        S("tabouret_tapis", "Tabouret ou tapis isolant", [F("present", "Présent", null, OUI_NON_LIST), F("dateVerification", "Date de dernière vérification", "date")]),
+        S("gants_isolants", "Gants isolants", [F("present", "Présent", null, OUI_NON_LIST), F("dateVerification", "Date de dernière vérification", "date")]),
+        S("perche_sauvetage", "Perche de sauvetage", [F("present", "Présent", null, OUI_NON_LIST), F("dateVerification", "Date de dernière vérification", "date")]),
+        S("perche_vat", "Perche de vérification d'absence de tension (VAT)", [F("present", "Présent", null, OUI_NON_LIST), F("dateVerification", "Date de dernière vérification", "date")]),
+        S("malt_cc", "Dispositif de mise à la terre et en court-circuit (MALT/CC)", [F("present", "Présent", null, OUI_NON_LIST), F("dateVerification", "Date de dernière vérification", "date")]),
+        S("extincteur", "Extincteur CO2 (adapté au risque électrique)", [F("present", "Présent", null, OUI_NON_LIST), F("dateVerification", "Date de dernier contrôle", "date")]),
         S("lampe_securite", "Lampe de sécurité", [F("present", "Présent", null, OUI_NON_LIST)]),
-        S("casque_ecran", "Casque ou écran facial", [F("present", "Présent", null, OUI_NON_LIST)]),
+        S("casque_ecran", "Casque avec écran facial anti-UV / anti-arc", [F("present", "Présent", null, OUI_NON_LIST), F("dateVerification", "Date de dernière vérification", "date")]),
+        S("balisage", "Balisage / signalisation de la zone de travail", [F("present", "Présent", null, OUI_NON_LIST)]),
+        S("carnet_prescription", "Carnet de prescriptions / registre de consignation", [F("present", "Présent", null, OUI_NON_LIST)]),
       ]},
       { key: "enveloppe_protection", title: "Enveloppe de protection", items: [
         C("conformite_enveloppe", "Conformité de l'enveloppe de protection", [
@@ -1647,6 +1650,7 @@ function repairEquipementControles(eq) {
       }
     });
     if (!controles[sec.key + "__custom"]) controles[sec.key + "__custom"] = [];
+    if (sec.key === "parametrage_relais" && !controles.parametrage_relais_seuils) controles.parametrage_relais_seuils = [emptySeuilEntry(PARAM_SEUIL_TYPES[0])];
   });
   return { ...eq, controles };
 }
@@ -3548,6 +3552,27 @@ function CapaciteFiltreCalculee({ eq }) {
     </Card>
   );
 }
+// Schéma synoptique affiché dans l'app — recalculé (via <canvas>) à chaque changement de
+// configuration (type d'onduleur, régimes mono/tri des réseaux).
+function SchemaOnduleur({ eq }) {
+  const [dataUrl, setDataUrl] = useState(null);
+  const typeUPS = eq.identification?.typeUPS;
+  const regimesKey = JSON.stringify(eq.controles?.regimes_reseaux || {});
+  useEffect(() => {
+    const gen = eq.type === "Onduleur" ? genererSchemaOnduleur : eq.type === "Redresseur chargeur" ? genererSchemaRedresseurChargeur : genererSchemaInverseurSource;
+    setDataUrl(gen(eq));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [eq.type, typeUPS, regimesKey]);
+  if (!dataUrl) return null;
+  return (
+    <Card style={{ marginBottom: 14, textAlign: "center" }}>
+      <div style={{ fontSize: 11.5, fontWeight: 700, color: "#5B6B7D", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.4, textAlign: "left" }}>
+        Schéma synoptique
+      </div>
+      <img src={dataUrl} alt="Schéma synoptique" style={{ maxWidth: "100%", height: "auto" }} />
+    </Card>
+  );
+}
 function RapportTheoriqueCalcule({ eq }) {
   const r = calcRapportTheoriqueTransfo(eq);
   if (r === null) return null;
@@ -4070,7 +4095,7 @@ function collectAnomalies(eq) {
 function EquipementCard({ eq, update, remove, removable = true, onDuplicate, locaux = [], allEquipements = [], allSites = [] }) {
   const [open, setOpen] = useState(true);
   const schema = getSchema(eq);
-  const setIdentification = (k, v) => update({ ...eq, identification: { ...eq.identification, [k]: v } });
+  const setIdentification = (k, v) => update(repairEquipementControles({ ...eq, identification: { ...eq.identification, [k]: v } }));
   const setControleItem = (sectionKey, itemKey, v) =>
     update({ ...eq, controles: { ...eq.controles, [sectionKey]: { ...eq.controles[sectionKey], [itemKey]: v } } });
   const addCustomAction = (sectionKey) =>
@@ -4175,6 +4200,8 @@ function EquipementCard({ eq, update, remove, removable = true, onDuplicate, loc
               </div>
             </div>
           )}
+
+          {(eq.type === "Onduleur" || eq.type === "Redresseur chargeur" || eq.type === "Inverseur de source") && <SchemaOnduleur eq={eq} />}
 
           {eq.type === "Bilan de puissance" && (eq.identification.rattachement === "Transformateur" || eq.identification.rattachement === "Disjoncteur BT") && (() => {
             const typeCible = eq.identification.rattachement;
@@ -4614,6 +4641,8 @@ function EquipementCard({ eq, update, remove, removable = true, onDuplicate, loc
             }
             const tauxChargeCalc = calcTauxCharge(eq);
             const estThermo = sec.key === "thermographie_ups" || sec.key === "thermographie_connexions" || sec.key === "thermographie" || sec.key === "thermographie_batt";
+            const estIsolement = sec.key === "mesure_isolement";
+            const estSecuriteEPI = sec.key === "materiel_securite";
             return (
               <SectionBlock
                 key={sec.key}
@@ -4626,11 +4655,25 @@ function EquipementCard({ eq, update, remove, removable = true, onDuplicate, loc
                 onAddCustom={() => addCustomAction(sec.key)}
                 onChangeCustom={(id, patch) => changeCustomAction(sec.key, id, patch)}
                 onRemoveCustom={(id) => removeCustomAction(sec.key, id)}
-                extra={estThermo && tauxChargeCalc ? (
-                  <div style={{ fontSize: 11.5, color: "#0A5DA8", background: "rgba(10,93,168,0.08)", padding: "8px 12px", borderRadius: 8, marginTop: 8 }}>
-                    Taux de charge déjà calculé pour cet équipement — L1 : {tauxChargeCalc.t1 ?? "—"}% · L2 : {tauxChargeCalc.t2 ?? "—"}% · L3 : {tauxChargeCalc.t3 ?? "—"}% — à reporter dans « Charge au moment du contrôle » si pertinent pour ce point de mesure.
-                  </div>
-                ) : null}
+                extra={
+                  estThermo && tauxChargeCalc ? (
+                    <div style={{ fontSize: 11.5, color: "#0A5DA8", background: "rgba(10,93,168,0.08)", padding: "8px 12px", borderRadius: 8, marginTop: 8 }}>
+                      Taux de charge déjà calculé pour cet équipement — L1 : {tauxChargeCalc.t1 ?? "—"}% · L2 : {tauxChargeCalc.t2 ?? "—"}% · L3 : {tauxChargeCalc.t3 ?? "—"}% — à reporter dans « Charge au moment du contrôle » si pertinent pour ce point de mesure.
+                    </div>
+                  ) : estIsolement ? (
+                    <div style={{ fontSize: 11.5, color: "#0A5DA8", background: "rgba(10,93,168,0.08)", padding: "8px 12px", borderRadius: 8, marginTop: 8, lineHeight: 1.6 }}>
+                      <b>Mode opératoire (CEI 60076-3 / IEEE 43)</b> — la tension d'injection est la même du début à la fin d'un essai ; le « type de mesure » indique seulement jusqu'où l'essai est poussé :<br />
+                      • <b>Standard</b> : lecture instantanée.<br />
+                      • <b>PI</b> (Indice de Polarisation) : rapport R(10 min) / R(1 min).<br />
+                      • <b>DAR</b> (Absorption Diélectrique) : rapport R(60 s) / R(10 s).<br />
+                      Pour chaque mesure entre deux enroulements, l'enroulement non testé doit être court-circuité (shunté) et relié à la terre — c'est déjà précisé dans le libellé de chaque ligne ci-dessous.
+                    </div>
+                  ) : estSecuriteEPI ? (
+                    <div style={{ fontSize: 11.5, color: "#0A5DA8", background: "rgba(10,93,168,0.08)", padding: "8px 12px", borderRadius: 8, marginTop: 8 }}>
+                      <b>NF C18-510</b> — chaque équipement de protection individuelle/collective doit faire l'objet d'une vérification périodique (généralement annuelle). La seule présence de l'équipement ne suffit pas s'il est hors date de contrôle : renseignez la date de dernière vérification pour chaque élément.
+                    </div>
+                  ) : null
+                }
               />
             );
           })}
@@ -5939,6 +5982,11 @@ function docxHeading(text) {
     children: [new DOCX.TextRun({ text: "  ", color: DOCX_AMBER }), new DOCX.TextRun({ text: (text || "").toUpperCase(), bold: true, color: DOCX_DARK, size: 22 })],
   });
 }
+// Petite note en italique indiquant la norme/référence appliquée pour un contrôle donné — pour
+// tracer la méthode utilisée sans alourdir le tableau de mesures lui-même.
+function docxNormeNote(texte) {
+  return new DOCX.Paragraph({ spacing: { before: 20, after: 80 }, children: [new DOCX.TextRun({ text: texte, italics: true, size: 15, color: "666666" })] });
+}
 function docxFieldRow(label, value) {
   return new DOCX.TableRow({ children: [
     new DOCX.TableCell({ width: { size: 3400, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_LIGHT }, children: [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: label, size: 18, color: "555555" })] })] }),
@@ -6204,6 +6252,273 @@ function genererGraphiqueHistorique(points, labelY) {
     return null;
   }
 }
+// Schéma synoptique de l'onduleur — s'adapte à la configuration réelle de l'équipement : présence
+// (ou non) du by-pass statique et du réseau secours selon le type (« Onduleur sécurité » n'en a
+// pas), et indication mono/triphasé de chaque réseau d'après les régimes déclarés.
+// Bibliothèque de symboles électriques, reproduisant fidèlement les icônes du modèle de référence
+// utilisé par les techniciens (boîtes vert sauge en pseudo-3D) — réutilisée par tous les schémas
+// synoptiques (Onduleur, Redresseur chargeur, Inverseur de source), dessinés en <canvas>.
+const SCHEMA_VERT = "#9DBF95", SCHEMA_VERT_HAUT = "#B8D4B0", SCHEMA_VERT_COTE = "#7FA377", SCHEMA_TRAIT = "#2A2E24";
+// Boîte pseudo-3D (face avant + dessus + côté légèrement décalés, comme un petit cube) : le
+// contenu (icône) se dessine ensuite par-dessus, centré sur la face avant.
+function draw3DBox(ctx, x, y, w, h, depth) {
+  const d = depth ?? Math.min(w, h) * 0.22;
+  ctx.strokeStyle = SCHEMA_TRAIT; ctx.lineWidth = 1.3;
+  ctx.fillStyle = SCHEMA_VERT_HAUT;
+  ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + d, y - d); ctx.lineTo(x + w + d, y - d); ctx.lineTo(x + w, y); ctx.closePath();
+  ctx.fill(); ctx.stroke();
+  ctx.fillStyle = SCHEMA_VERT_COTE;
+  ctx.beginPath(); ctx.moveTo(x + w, y); ctx.lineTo(x + w + d, y - d); ctx.lineTo(x + w + d, y + h - d); ctx.lineTo(x + w, y + h); ctx.closePath();
+  ctx.fill(); ctx.stroke();
+  ctx.fillStyle = SCHEMA_VERT;
+  ctx.fillRect(x, y, w, h); ctx.strokeRect(x, y, w, h);
+  return { cx: x + w / 2, cy: y + h / 2, right: x + w + d, top: y - d };
+}
+function drawSymboleAC(ctx, cx, cy, s) {
+  ctx.beginPath();
+  for (let i = -s; i <= s; i += 1) ctx.lineTo(cx + i, cy - Math.sin((i / s) * Math.PI) * s * 0.6);
+  ctx.stroke();
+}
+function drawSymboleDC(ctx, cx, cy, s) {
+  ctx.save(); ctx.setLineDash([2.5, 2.5]);
+  ctx.beginPath(); ctx.moveTo(cx - s, cy); ctx.lineTo(cx + s, cy); ctx.stroke();
+  ctx.restore();
+}
+// Icône « interrupteur / sectionneur » : cercle en pointillés (dessiné sur une boîte 3D)
+function drawIconInterrupteur(ctx, x, y, w, h) {
+  const b = draw3DBox(ctx, x, y, w, h);
+  ctx.strokeStyle = SCHEMA_TRAIT; ctx.lineWidth = 1.4;
+  ctx.save(); ctx.setLineDash([3, 3]);
+  ctx.beginPath(); ctx.arc(b.cx, b.cy, Math.min(w, h) * 0.28, 0, Math.PI * 2); ctx.stroke();
+  ctx.restore();
+  return b;
+}
+// Icône « filtre + terre » : sinusoïde au-dessus du symbole de terre
+function drawIconFiltreTerre(ctx, x, y, w, h) {
+  const b = draw3DBox(ctx, x, y, w, h);
+  ctx.strokeStyle = SCHEMA_TRAIT; ctx.lineWidth = 1.3;
+  drawSymboleAC(ctx, b.cx, b.cy - h * 0.16, w * 0.24);
+  ctx.beginPath(); ctx.moveTo(b.cx - w * 0.18, b.cy + h * 0.14); ctx.lineTo(b.cx + w * 0.18, b.cy + h * 0.14); ctx.stroke();
+  return b;
+}
+// Icône « redresseur » (CA -> CC) : diagonale, sinusoïde en haut, CC en bas
+function drawIconRedresseur(ctx, x, y, w, h) {
+  const b = draw3DBox(ctx, x, y, w, h);
+  ctx.strokeStyle = SCHEMA_TRAIT; ctx.lineWidth = 1.3;
+  ctx.beginPath(); ctx.moveTo(x, y + h); ctx.lineTo(x + w, y); ctx.stroke();
+  drawSymboleAC(ctx, x + w * 0.28, y + h * 0.28, w * 0.16);
+  drawSymboleDC(ctx, x + w * 0.72, y + h * 0.74, w * 0.16);
+  return b;
+}
+// Icône « onduleur » (CC -> CA) : diagonale, CC en haut, sinusoïde en bas (miroir du redresseur)
+function drawIconOnduleur(ctx, x, y, w, h) {
+  const b = draw3DBox(ctx, x, y, w, h);
+  ctx.strokeStyle = SCHEMA_TRAIT; ctx.lineWidth = 1.3;
+  ctx.beginPath(); ctx.moveTo(x, y + h); ctx.lineTo(x + w, y); ctx.stroke();
+  drawSymboleDC(ctx, x + w * 0.28, y + h * 0.28, w * 0.16);
+  drawSymboleAC(ctx, x + w * 0.72, y + h * 0.74, w * 0.16);
+  return b;
+}
+// Icône « commutateur statique » : trois sinusoïdes reliées par des diagonales croisées
+// (représente la commutation entre deux sources CA, ex. R0 <-> R2)
+function drawIconCommutateurStatique(ctx, x, y, w, h) {
+  const b = draw3DBox(ctx, x, y, w, h);
+  ctx.strokeStyle = SCHEMA_TRAIT; ctx.lineWidth = 1.2;
+  ctx.beginPath(); ctx.moveTo(x + w * 0.08, y + h * 0.28); ctx.lineTo(x + w * 0.92, y + h * 0.78); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(x + w * 0.92, y + h * 0.28); ctx.lineTo(x + w * 0.08, y + h * 0.78); ctx.stroke();
+  drawSymboleAC(ctx, x + w * 0.18, y + h * 0.3, w * 0.1);
+  drawSymboleAC(ctx, x + w * 0.5, y + h * 0.62, w * 0.1);
+  drawSymboleAC(ctx, x + w * 0.82, y + h * 0.3, w * 0.1);
+  return b;
+}
+function drawBatterie(ctx, cx, cy, s) {
+  ctx.strokeStyle = SCHEMA_TRAIT; ctx.lineWidth = 2;
+  const xs = [cx - s, cx - s * 0.33, cx + s * 0.33, cx + s];
+  const hs = [s * 0.9, s * 0.45, s * 0.9, s * 0.45];
+  xs.forEach((x, i) => { ctx.beginPath(); ctx.moveTo(x, cy - hs[i]); ctx.lineTo(x, cy + hs[i]); ctx.stroke(); });
+}
+function drawTransformateur(ctx, cx, cy, s) {
+  ctx.strokeStyle = SCHEMA_TRAIT; ctx.lineWidth = 1.6;
+  const loop = (x0, dir) => {
+    for (let i = 0; i < 3; i++) { ctx.beginPath(); ctx.arc(x0, cy - s * 0.6 + i * s * 0.6, s * 0.32, dir > 0 ? Math.PI * 1.5 : Math.PI * 0.5, dir > 0 ? Math.PI * 0.5 : Math.PI * 1.5, false); ctx.stroke(); }
+  };
+  loop(cx - s * 0.25, 1); loop(cx + s * 0.25, -1);
+  ctx.beginPath(); ctx.moveTo(cx - s * 0.05, cy - s * 0.9); ctx.lineTo(cx - s * 0.05, cy + s * 0.9); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(cx + s * 0.05, cy - s * 0.9); ctx.lineTo(cx + s * 0.05, cy + s * 0.9); ctx.stroke();
+}
+function genererSchemaOnduleur(eq) {
+  if (typeof document === "undefined" || !document.createElement) return null;
+  try {
+    const avecBypass = eq.identification?.typeUPS !== "Onduleur sécurité";
+    const r = (eq.controles && eq.controles.regimes_reseaux) || {};
+    const regime = (k) => (r[k] === "Monophasé" ? "1~" : "3~");
+    const w = 460, h = avecBypass ? 560 : 420;
+    const canvas = document.createElement("canvas");
+    canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#FFFFFF"; ctx.fillRect(0, 0, w, h);
+    ctx.font = "13px Arial, sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    const line = (x1, y1, x2, y2) => { ctx.strokeStyle = SCHEMA_TRAIT; ctx.lineWidth = 1.4; ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); };
+    const arrowDown = (x, y) => { ctx.fillStyle = SCHEMA_TRAIT; ctx.beginPath(); ctx.moveTo(x - 4, y - 5); ctx.lineTo(x + 4, y - 5); ctx.lineTo(x, y + 3); ctx.fill(); };
+
+    const cxR1 = 130, cxR2 = 330, bw = 100, bh = 70;
+    let yTop = 20;
+    ctx.fillStyle = SCHEMA_TRAIT;
+    ctx.fillText("R1", cxR1, yTop); ctx.fillText("R2", cxR2, yTop);
+    yTop += 25;
+    line(cxR1, yTop, cxR1, yTop + 20);
+    line(cxR2, yTop, cxR2, yTop + 20);
+    yTop += 20;
+    // Barre reliant R1/R2 (les deux réseaux sont disponibles pour l'ensemble redresseur+switch)
+    line(cxR1, yTop, cxR2, yTop);
+    // Interrupteur d'entrée sur R1
+    let y1 = yTop;
+    drawIconInterrupteur(ctx, cxR1 - bw / 2, y1, bw, bh);
+    ctx.fillStyle = "#5B6B7D"; ctx.font = "10.5px Arial, sans-serif"; ctx.fillText(`Réseau normal ${regime("normal")}`, cxR1, y1 - 8);
+    y1 += bh;
+    line(cxR1, y1, cxR1, y1 + 20);
+    y1 += 20;
+    line(cxR1 - 90, y1, cxR2, y1); // barre reliant filtre + redresseur + interrupteur R2
+    // Ligne verticale vers R2 depuis cette barre
+    line(cxR2, yTop, cxR2, y1);
+
+    // Rangée : filtre (petit), redresseur (grand), interrupteur R2
+    const filtreW = 60, filtreH = 55, redW = 130;
+    drawIconFiltreTerre(ctx, cxR1 - 90 - filtreW / 2, y1, filtreW, filtreH);
+    drawIconRedresseur(ctx, cxR1 - redW / 2, y1, redW, bh);
+    drawIconInterrupteur(ctx, cxR2 - bw / 2, y1, bw, bh);
+    ctx.fillStyle = "#5B6B7D"; ctx.font = "10.5px Arial, sans-serif";
+    ctx.fillText("Redresseur", cxR1, y1 + bh + 14);
+    let yAfterRow1 = y1 + bh;
+    line(cxR1, yAfterRow1, cxR1, yAfterRow1 + 25);
+    line(cxR2, yAfterRow1, cxR2, yAfterRow1 + 25);
+    yAfterRow1 += 25;
+    line(cxR1 - 30, yAfterRow1, cxR1 + 30, yAfterRow1); // petite barre côté redresseur (jonction batterie)
+
+    // Batterie, branchée sur le bus continu en sortie du redresseur
+    drawBatterie(ctx, cxR1 + 60, yAfterRow1 + 22, 16);
+    ctx.font = "10px Arial, sans-serif"; ctx.fillStyle = "#5B6B7D"; ctx.fillText("Batterie", cxR1 + 60, yAfterRow1 + 46);
+    line(cxR1, yAfterRow1, cxR1 + 40, yAfterRow1);
+
+    // Onduleur (bloc CC -> CA), sous le redresseur
+    const ondY = yAfterRow1;
+    drawIconOnduleur(ctx, cxR1 - redW / 2, ondY, redW, bh);
+    ctx.fillStyle = "#5B6B7D"; ctx.fillText("Onduleur", cxR1, ondY + bh + 14);
+    let yAfterOnd = ondY + bh + 24;
+    line(cxR1, ondY + bh, cxR1, yAfterOnd);
+    line(cxR2, yAfterRow1, cxR2, yAfterOnd); // R2 descend en parallèle jusqu'au commutateur
+    ctx.font = "11px Arial, sans-serif"; ctx.fillStyle = SCHEMA_TRAIT; ctx.fillText("R0", cxR1 - 22, yAfterOnd - 4);
+
+    if (avecBypass) {
+      // Commutateur statique (triple sinusoïde) — reçoit R0 (sortie onduleur) et R2 (via by-pass)
+      const csW = 340, csH = 60;
+      const csX = cxR1 - csW / 2 + (cxR2 - cxR1) / 2;
+      drawIconCommutateurStatique(ctx, cxR1 - 60, yAfterOnd, csW - 40, csH);
+      line(cxR1, yAfterOnd - 24, cxR1, yAfterOnd);
+      line(cxR2, yAfterOnd - 24 > 0 ? yAfterOnd : yAfterOnd, cxR2, yAfterOnd);
+      let yAfterCS = yAfterOnd + csH + 20;
+      const csMidX = cxR1 - 60 + (csW - 40) / 2;
+      line(csMidX, yAfterOnd + csH, csMidX, yAfterCS);
+      // Interrupteur de sortie
+      drawIconInterrupteur(ctx, csMidX - bw / 2, yAfterCS, bw, bh);
+      let yFinal = yAfterCS + bh;
+      line(csMidX, yFinal, csMidX, yFinal + 24);
+      arrowDown(csMidX, yFinal + 24);
+      ctx.font = "13px Arial, sans-serif"; ctx.fillStyle = SCHEMA_TRAIT; ctx.fillText("RS", csMidX, yFinal + 40);
+    } else {
+      let yFinal = yAfterOnd;
+      line(cxR1, yFinal, cxR1, yFinal + 24);
+      arrowDown(cxR1, yFinal + 24);
+      ctx.font = "13px Arial, sans-serif"; ctx.fillStyle = SCHEMA_TRAIT; ctx.fillText("RS", cxR1, yFinal + 40);
+      ctx.font = "10.5px Arial, sans-serif"; ctx.fillStyle = "#5B6B7D"; ctx.fillText(`Utilisation ${regime("utilisation")}`, cxR1 + 60, yFinal + 15);
+    }
+
+    ctx.font = "11px Arial, sans-serif"; ctx.fillStyle = "#5B6B7D"; ctx.textAlign = "left";
+    ctx.fillText(avecBypass ? "Configuration : avec commutateur statique et réseau secours" : "Configuration : Onduleur sécurité (sans commutateur statique)", 8, h - 10);
+    return canvas.toDataURL("image/png");
+  } catch (e) {
+    return null;
+  }
+}
+// Schéma synoptique du redresseur chargeur : réseau -> filtre -> redresseur (bloc CA/CC) -> batterie
+// en floating, avec sortie continue vers l'utilisation.
+function genererSchemaRedresseurChargeur(eq) {
+  if (typeof document === "undefined" || !document.createElement) return null;
+  try {
+    const r = (eq.controles && eq.controles.regimes_reseaux) || {};
+    const regime = (k) => (r[k] === "Monophasé" ? "1~" : "3~");
+    const w = 380, h = 300;
+    const canvas = document.createElement("canvas");
+    canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#FFFFFF"; ctx.fillRect(0, 0, w, h);
+    ctx.font = "13px Arial, sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    const line = (x1, y1, x2, y2) => { ctx.strokeStyle = SCHEMA_TRAIT; ctx.lineWidth = 1.4; ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); };
+    const arrowDown = (x, y) => { ctx.fillStyle = SCHEMA_TRAIT; ctx.beginPath(); ctx.moveTo(x - 4, y - 5); ctx.lineTo(x + 4, y - 5); ctx.lineTo(x, y + 3); ctx.fill(); };
+    const cx = 190, bw = 100, bh = 70, redW = 130;
+
+    let y = 20;
+    ctx.fillStyle = SCHEMA_TRAIT; ctx.fillText("R1", cx, y);
+    y += 25; line(cx, y, cx, y + 20); y += 20;
+    drawIconInterrupteur(ctx, cx - bw / 2, y, bw, bh);
+    ctx.fillStyle = "#5B6B7D"; ctx.font = "10.5px Arial, sans-serif"; ctx.fillText(`Réseau ${regime("normal")}`, cx, y - 8);
+    y += bh; line(cx, y, cx, y + 20); y += 20;
+    drawIconRedresseur(ctx, cx - redW / 2, y, redW, bh);
+    ctx.fillStyle = "#5B6B7D"; ctx.fillText("Redresseur / Chargeur", cx, y + bh + 14);
+    let yAfter = y + bh + 24;
+    line(cx, y + bh, cx, yAfter);
+    line(cx - 30, yAfter, cx + 30, yAfter);
+    drawBatterie(ctx, cx + 60, yAfter + 22, 16);
+    ctx.font = "10px Arial, sans-serif"; ctx.fillText("Batterie (floating)", cx + 60, yAfter + 46);
+    line(cx, yAfter, cx + 40, yAfter);
+    line(cx, yAfter, cx, yAfter + 24);
+    arrowDown(cx, yAfter + 24);
+    ctx.font = "13px Arial, sans-serif"; ctx.fillStyle = SCHEMA_TRAIT; ctx.fillText("RS", cx, yAfter + 40);
+    ctx.font = "10.5px Arial, sans-serif"; ctx.fillStyle = "#5B6B7D"; ctx.fillText("Utilisation continue", cx - 90, yAfter + 15);
+
+    ctx.font = "11px Arial, sans-serif"; ctx.fillStyle = "#5B6B7D"; ctx.textAlign = "left";
+    ctx.fillText("Redresseur chargeur — sortie continue régulée, batterie en tampon (floating)", 8, h - 10);
+    return canvas.toDataURL("image/png");
+  } catch (e) {
+    return null;
+  }
+}
+// Schéma synoptique de l'inverseur de source : deux sources commutées (pas de conversion de
+// puissance, juste un transfert) vers l'utilisation.
+function genererSchemaInverseurSource(eq) {
+  if (typeof document === "undefined" || !document.createElement) return null;
+  try {
+    const r = (eq.controles && eq.controles.regimes_reseaux) || {};
+    const regime = (k) => (r[k] === "Monophasé" ? "1~" : "3~");
+    const w = 480, h = 230;
+    const canvas = document.createElement("canvas");
+    canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#FFFFFF"; ctx.fillRect(0, 0, w, h);
+    ctx.font = "11px Arial, sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    const line = (x1, y1, x2, y2) => { ctx.strokeStyle = SCHEMA_TRAIT; ctx.lineWidth = 1.4; ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); };
+    const arrowRight = (x, y) => { ctx.fillStyle = SCHEMA_TRAIT; ctx.beginPath(); ctx.moveTo(x - 5, y - 4); ctx.lineTo(x + 5, y); ctx.lineTo(x - 5, y + 4); ctx.fill(); };
+    const yMid = 115, yTop = 60, yBot = 170, bw = 100, bh = 60;
+
+    drawIconInterrupteur(ctx, 10, yTop - bh / 2, bw, bh);
+    ctx.fillStyle = "#5B6B7D"; ctx.fillText(`Source 1 (R1) ${regime("source1")}`, 60, yTop - bh / 2 - 10);
+    drawIconInterrupteur(ctx, 10, yBot - bh / 2, bw, bh);
+    ctx.fillText(`Source 2 (R2) ${regime("source2")}`, 60, yBot - bh / 2 - 10);
+    line(110, yTop, 220, yTop); line(110, yBot, 220, yBot);
+    line(220, yTop, 220, yMid - 20); line(220, yBot, 220, yMid + 20);
+    drawIconCommutateurStatique(ctx, 220, yMid - 30, 110, 60);
+    ctx.fillStyle = "#5B6B7D"; ctx.fillText("Commutateur statique", 275, yMid + 44);
+    line(330, yMid, 370, yMid); arrowRight(365, yMid);
+    drawIconInterrupteur(ctx, 380, yMid - bh / 2, 90, bh);
+    ctx.font = "10.5px Arial, sans-serif"; ctx.fillText(`Utilisation ${regime("utilisation")}`, 425, yMid - bh / 2 - 10);
+
+    ctx.font = "11px Arial, sans-serif"; ctx.fillStyle = "#5B6B7D"; ctx.textAlign = "left";
+    ctx.fillText("Inverseur de source — commutation entre deux sources, sans conversion de puissance", 8, h - 10);
+    return canvas.toDataURL("image/png");
+  } catch (e) {
+    return null;
+  }
+}
 function genererGraphiqueSynthese(counts) {
   if (typeof document === "undefined" || !document.createElement) return null;
   const total = counts.conforme + counts.degrade + counts.defaillant;
@@ -6311,6 +6626,21 @@ function docxEquipementElements(eq, locaux, allSites) {
     const t = docxFieldTable(schema.identification.map((f) => [f.label, eq.identification[f.key]]));
     if (t) { elements.push(t); elements.push(docxSpacer()); }
   }
+  if (eq.type === "Onduleur" || eq.type === "Redresseur chargeur" || eq.type === "Inverseur de source") {
+    const gen = eq.type === "Onduleur" ? genererSchemaOnduleur : eq.type === "Redresseur chargeur" ? genererSchemaRedresseurChargeur : genererSchemaInverseurSource;
+    const schemaImg = gen(eq);
+    if (schemaImg) {
+      let imgW = 400, imgH = 190;
+      if (eq.type === "Onduleur") { imgW = 300; imgH = eq.identification?.typeUPS !== "Onduleur sécurité" ? 365 : 274; }
+      else if (eq.type === "Redresseur chargeur") { imgW = 300; imgH = 237; }
+      else { imgW = 400; imgH = 192; }
+      const img = docxImage(schemaImg, imgW, imgH);
+      if (img) {
+        elements.push(docxHeading("Schéma synoptique"));
+        elements.push(new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, spacing: { after: 100 }, children: [img] }));
+      }
+    }
+  }
   const isRelais = TYPES_AVEC_RELAIS.includes(eq.type);
   schema.sections.forEach((sec) => {
     if (isRelais && sec.key === "parametrage_relais") {
@@ -6377,6 +6707,7 @@ function docxEquipementElements(eq, locaux, allSites) {
     if (sec.key === "releve_tensions" && TYPES_AVEC_BRANCHES_UPS.includes(eq.type)) {
       elements.push(docxHeading(sec.title));
       const cfg = eq.controles.releve_config || { mode: "Floating", toleranceBasse: 3, toleranceHaute: 3 };
+      if (cfg.avecResistance) elements.push(docxNormeNote("Résistance interne par élément : IEEE 1188 (VRLA) / IEEE 450 — indicateur complémentaire à la tension, souvent plus précoce pour détecter une dégradation."));
       const entries = eq.controles.elements_dynamique || [];
       const valeurs = entries.map((e) => numOf(e.fields.tension)).filter((v) => v !== null);
       const moyenne = valeurs.length ? Math.round((valeurs.reduce((a, b) => a + b, 0) / valeurs.length) * 1000) / 1000 : null;
@@ -6616,6 +6947,7 @@ function docxEquipementElements(eq, locaux, allSites) {
     }
     if (sec.key === "rapport_transformation" && eq.type === "Transformateur") {
       elements.push(docxHeading(sec.title));
+      elements.push(docxNormeNote("Rapport de transformation et tolérance : CEI 60076-1. Résistance des enroulements, mesure hors tension à l'équilibre thermique, par phase : CEI 60076-1 / IEEE C57.12.90."));
       const rTheo = calcRapportTheoriqueTransfo(eq);
       if (rTheo !== null) {
         const tolTheo = calcToleranceRapportTransfo(rTheo);
@@ -6662,6 +6994,15 @@ function docxEquipementElements(eq, locaux, allSites) {
       return;
     }
     elements.push(docxHeading(sec.title));
+    if (sec.key === "mesure_isolement") {
+      elements.push(docxNormeNote("CEI 60076-3 / IEEE 43. Tension d'injection identique du début à la fin de l'essai — le type de mesure indique jusqu'où il est poussé : Standard (lecture instantanée), PI = R(10 min)/R(1 min), DAR = R(60 s)/R(10 s). L'enroulement non testé doit être court-circuité (shunté) et relié à la terre."));
+    } else if (["resistance_contact_chambres", "resistances_contacts", "resistance_jonctions"].some((k) => sec.items.some((it) => it.key === k))) {
+      elements.push(docxNormeNote("CEI 62271-100. Mesure fiable et comparable d'une visite à l'autre uniquement avec un courant d'essai DC suffisant (100 A minimum usuel)."));
+    } else if (sec.items.some((it) => it.key === "continuite_masses" || it.key === "continuite_masses_jdb")) {
+      elements.push(docxNormeNote("NF C 15-100 / CEI 61557-4. Courant d'essai minimum recommandé : 200 mA."));
+    } else if (sec.key === "materiel_securite") {
+      elements.push(docxNormeNote("NF C18-510. Chaque équipement de protection individuelle/collective doit faire l'objet d'une vérification périodique (généralement annuelle) — la seule présence de l'équipement ne suffit pas s'il est hors date de contrôle."));
+    }
     const rows = sec.items.map((item) => {
       const value = eq.controles[sec.key][item.key] || { action: "", etat: "", fields: {} };
       const parts = printFieldParts(item, value);
