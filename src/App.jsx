@@ -7388,6 +7388,7 @@ export default function App({ currentUser, onLogout }) {
   const [exportConfirm, setExportConfirm] = useState(null);
   const saveTimer = useRef(null);
   const lastSyncedSites = useRef(null); // dernier contenu (JSON) connu comme synchronisé avec le serveur
+  const writeInFlight = useRef(false); // verrou dur : empêche toute nouvelle écriture tant que la précédente n'est pas terminée
 
   const [view, setView] = useState("sites"); // "sites" | "interventions" | "calendrier"
   const [interventions, setInterventions] = useState([]);
@@ -7443,11 +7444,14 @@ export default function App({ currentUser, onLogout }) {
   useEffect(() => {
     if (!loaded) return;
     const serialized = JSON.stringify(sites);
-    if (serialized === lastSyncedSites.current) return; // rien de nouveau par rapport au serveur — pas d'écriture
+    if (serialized === lastSyncedSites.current) { console.log("[Firestore] Contenu identique au dernier synchronisé — pas de nouvelle écriture."); return; }
+    if (writeInFlight.current) { console.log("[Firestore] Écriture déjà en cours — nouvelle tentative ignorée pour l'instant."); return; }
+    console.log("[Firestore] Changement détecté (longueur avant:", (lastSyncedSites.current || "").length, "après:", serialized.length, ") — programmation d'une écriture.");
     lastSyncedSites.current = serialized; // marqué "en cours de synchronisation" dès maintenant — évite qu'un
     // nouveau déclenchement de cet effet avant confirmation du serveur ne reprogramme la même écriture.
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(async () => {
+      writeInFlight.current = true;
       console.log("[Firestore] Tentative d'écriture — sites:", sites.length, "utilisateur:", currentUser?.email);
       try {
         await DOCX_FS.setDoc(DOCX_FS.doc(db, "app-data", "sites"), { value: sites, updatedAt: Date.now(), updatedBy: currentUser?.email || null });
@@ -7457,6 +7461,8 @@ export default function App({ currentUser, onLogout }) {
         console.error("Échec de synchronisation Firestore (sites) :", e);
         lastSyncedSites.current = null; // permet une nouvelle tentative au prochain changement
         setSaveError(true);
+      } finally {
+        writeInFlight.current = false;
       }
     }, 500);
     return () => clearTimeout(saveTimer.current);
