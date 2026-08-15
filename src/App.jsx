@@ -1177,7 +1177,7 @@ function buildInterrupteurFusibleHTASchema({ avecRelais = false } = {}) {
 const SCHEMAS = {
   "Interrupteur HTA": buildInterrupteurHTASchema({}),
   "Comptage HTA": {
-    identification: [{ key: "repere", label: "Repère / Nom de l'équipement" }, { key: "marque", label: "Marque", options: LISTE_MARQUE_CELLULE_HTA }, { key: "modele", label: "Modèle", options: LISTE_MODELE_CELLULE_HTA_OPTIONS }, { key: "typeCellule", label: "Type de cellule", options: LISTE_TYPE_CELLULE["Comptage HTA"] }, { key: "numeroSerie", label: "Numéro de série" }],
+    identification: [{ key: "repere", label: "Repère / Nom de l'équipement" }, { key: "marque", label: "Marque", options: LISTE_MARQUE_CELLULE_HTA }, { key: "modele", label: "Modèle", options: LISTE_MODELE_CELLULE_HTA_OPTIONS }, { key: "typeCellule", label: "Type de cellule", options: LISTE_TYPE_CELLULE["Comptage HTA"] }, { key: "numeroSerie", label: "Numéro de série" }, { key: "rapportTPProtection", label: "Rapport TP (ex. 20000/100)" }],
     sections: [
       { key: "mecaniques", title: "Contrôles mécaniques", items: MECA_CELLULE },
       { key: "electriques", title: "Contrôles électriques", items: [
@@ -1920,16 +1920,131 @@ function fetchClientsData() {
 // Auto-complétion du client à partir de la base de contacts — sélectionner une organisation
 // pré-remplit automatiquement l'e-mail d'envoi du rapport (ou propose un choix s'il y a plusieurs
 // contacts connus pour cette organisation).
-function ClientAutocomplete({ clientValue, onChangeClient, onChangeEmail }) {
+// Panneau de gestion des clients — permet d'enregistrer un client (nom + e-mail) à l'avance, sans
+// passer par la création d'un site complet, de modifier un client existant (ex. e-mail périmé),
+// et d'exporter/importer la liste en Excel pour des modifications en masse.
+function GererClientsModal({ registry, setRegistry, allSites, onClose }) {
+  const [nom, setNom] = useState("");
+  const [email, setEmail] = useState("");
+  const fileInputRef = useRef(null);
+  const [importMsg, setImportMsg] = useState("");
+  const dejaSurSite = useMemo(() => new Set((allSites || []).map((s) => (s.client || "").trim().toLowerCase()).filter(Boolean)), [allSites]);
+  const ajouter = () => {
+    if (!nom.trim()) return;
+    const key = nom.trim().toLowerCase();
+    if (registry.some((c) => c.nom.trim().toLowerCase() === key)) return; // déjà présent
+    setRegistry([...registry, { id: uid(), nom: nom.trim(), email: email.trim() }]);
+    setNom(""); setEmail("");
+  };
+  const supprimer = (id) => setRegistry(registry.filter((c) => c.id !== id));
+  const modifier = (id, patch) => setRegistry(registry.map((c) => (c.id === id ? { ...c, ...patch } : c)));
+
+  const exporterExcel = async () => {
+    const XLSX = await import("xlsx");
+    const rows = registry.map((c) => ({ ID: c.id, Nom: c.nom, "E-mail": c.email || "" }));
+    const ws = XLSX.utils.json_to_sheet(rows);
+    ws["!cols"] = [{ wch: 22 }, { wch: 32 }, { wch: 32 }];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Clients");
+    XLSX.writeFile(wb, `Clients_HT-Maintenance_${todayISO()}.xlsx`);
+  };
+  const importerExcel = async (file) => {
+    setImportMsg("");
+    try {
+      const XLSX = await import("xlsx");
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf, { type: "array" });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws);
+      let maj = 0, crees = 0;
+      const next = [...registry];
+      rows.forEach((r) => {
+        const rid = r.ID || r.id;
+        const rnom = (r.Nom || r.nom || "").toString().trim();
+        const remail = (r["E-mail"] || r.Email || r.email || "").toString().trim();
+        if (!rnom) return;
+        const idxParId = rid ? next.findIndex((c) => c.id === rid) : -1;
+        const idxParNom = idxParId === -1 ? next.findIndex((c) => c.nom.trim().toLowerCase() === rnom.toLowerCase()) : -1;
+        const idx = idxParId !== -1 ? idxParId : idxParNom;
+        if (idx !== -1) { next[idx] = { ...next[idx], nom: rnom, email: remail }; maj++; }
+        else { next.push({ id: uid(), nom: rnom, email: remail }); crees++; }
+      });
+      setRegistry(next);
+      setImportMsg(`Import terminé — ${maj} client(s) mis à jour, ${crees} créé(s).`);
+    } catch (e) {
+      setImportMsg("Échec de l'import — vérifiez que le fichier est bien celui exporté depuis cette page.");
+    }
+  };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(4,9,16,0.72)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200, padding: 16 }} onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <Card style={{ width: "100%", maxWidth: 620, maxHeight: "85vh", overflowY: "auto" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: "#1A1F26" }}>Gérer les clients</div>
+          <button onClick={onClose} style={btnGhost()}><X size={14} /></button>
+        </div>
+        <div style={{ fontSize: 11.5, color: "#8B96A3", marginBottom: 14 }}>
+          Enregistrez un client à l'avance, modifiez-en un existant (ex. e-mail périmé), ou exportez la liste en Excel pour des modifications en masse — réimportez ensuite le fichier modifié.
+        </div>
+        <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+          <button onClick={exporterExcel} style={btnGhost(BRAND.blue)} disabled={registry.length === 0}><Download size={14} /> Exporter en Excel</button>
+          <button onClick={() => fileInputRef.current?.click()} style={btnGhost(BRAND.blue)}><Upload size={14} /> Importer depuis Excel</button>
+          <input ref={fileInputRef} type="file" accept=".xlsx,.xls" style={{ display: "none" }} onChange={(e) => { if (e.target.files?.[0]) importerExcel(e.target.files[0]); e.target.value = ""; }} />
+        </div>
+        {importMsg && <div style={{ fontSize: 11.5, color: importMsg.startsWith("Échec") ? "#C0392B" : "#0F8A5F", marginBottom: 12 }}>{importMsg}</div>}
+
+        <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
+          <TextInput value={nom} onChange={(e) => setNom(e.target.value)} placeholder="Nom du client" style={{ flex: "1 1 180px" }} />
+          <TextInput value={email} onChange={(e) => setEmail(e.target.value)} placeholder="E-mail (optionnel)" type="email" style={{ flex: "1 1 180px" }} />
+          <button onClick={ajouter} style={btnGhost(BRAND.blue)} disabled={!nom.trim()}><Plus size={14} /> Ajouter</button>
+        </div>
+        <div style={{ fontSize: 11.5, fontWeight: 700, color: "#5B6B7D", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.4 }}>
+          Clients enregistrés ({registry.length})
+        </div>
+        {registry.length === 0 ? (
+          <div style={{ fontSize: 12, color: "#8B96A3" }}>Aucun client enregistré à l'avance pour l'instant.</div>
+        ) : (
+          registry.map((c) => (
+            <div key={c.id} style={{ display: "flex", gap: 8, alignItems: "center", padding: "8px 0", borderBottom: "1px solid #E2E6EB", flexWrap: "wrap" }}>
+              <TextInput value={c.nom} onChange={(e) => modifier(c.id, { nom: e.target.value })} style={{ flex: "1 1 160px", fontSize: 12.5 }} />
+              <TextInput value={c.email || ""} onChange={(e) => modifier(c.id, { email: e.target.value })} placeholder="sans e-mail" type="email" style={{ flex: "1 1 160px", fontSize: 12.5 }} />
+              {dejaSurSite.has(c.nom.trim().toLowerCase()) && <span style={{ fontSize: 10, color: "#0F8A5F", whiteSpace: "nowrap" }}>a déjà un site</span>}
+              <button onClick={() => supprimer(c.id)} style={{ background: "none", border: "none", color: "#C0392B", cursor: "pointer", padding: 4 }} title="Retirer"><Trash2 size={14} /></button>
+            </div>
+          ))
+        )}
+      </Card>
+    </div>
+  );
+}
+function ClientAutocomplete({ clientValue, onChangeClient, onChangeEmail, allSites, clientsRegistry }) {
   const [data, setData] = useState(null);
   const [open, setOpen] = useState(false);
   const [contactsOrg, setContactsOrg] = useState(null);
   useEffect(() => { fetchClientsData().then(setData); }, []);
+  // Clients déjà utilisés sur vos propres sites — un même client a souvent plusieurs sites, ça évite
+  // la ressaisie et les incohérences de nommage (ex. "SODEXO" vs "Sodexo" selon les visites).
+  const clientsInternes = useMemo(() => {
+    const parEmail = new Map();
+    (clientsRegistry || []).forEach((c) => {
+      if (!c.nom) return;
+      const key = c.nom.trim().toLowerCase();
+      parEmail.set(key, { organisation: c.nom, contacts: c.email ? [{ nom: c.nom, email: c.email, fonction: "" }] : [], interne: true });
+    });
+    (allSites || []).forEach((s) => {
+      if (!s.client) return;
+      const key = s.client.trim().toLowerCase();
+      if (!parEmail.has(key)) parEmail.set(key, { organisation: s.client, contacts: s.emailEnvoi ? [{ nom: s.client, email: s.emailEnvoi, fonction: "" }] : [], interne: true });
+    });
+    return Array.from(parEmail.values());
+  }, [allSites, clientsRegistry]);
   const suggestions = useMemo(() => {
-    if (!data || !clientValue || clientValue.length < 2) return [];
+    if (!clientValue || clientValue.length < 2) return [];
     const q = clientValue.toLowerCase();
-    return data.filter((o) => o.organisation.toLowerCase().includes(q)).slice(0, 8);
-  }, [data, clientValue]);
+    const internes = clientsInternes.filter((o) => o.organisation.toLowerCase().includes(q));
+    const externes = (data || []).filter((o) => o.organisation.toLowerCase().includes(q) && !internes.some((i) => i.organisation.toLowerCase() === o.organisation.toLowerCase()));
+    return [...internes, ...externes].slice(0, 8);
+  }, [data, clientsInternes, clientValue]);
   const pickOrg = (org) => {
     onChangeClient(org.organisation);
     setOpen(false);
@@ -1948,9 +2063,12 @@ function ClientAutocomplete({ clientValue, onChangeClient, onChangeEmail }) {
       {open && suggestions.length > 0 && (
         <div style={{ position: "absolute", left: 0, right: 0, top: "100%", background: "#F7F8FA", border: "1px solid #D8DEE5", borderRadius: 8, marginTop: 2, zIndex: 60, maxHeight: 220, overflowY: "auto", boxShadow: "0 8px 24px rgba(0,0,0,0.35)" }}>
           {suggestions.map((o) => (
-            <div key={o.organisation} onMouseDown={() => pickOrg(o)} style={{ padding: "8px 12px", fontSize: 12.5, color: "#3E4A5C", cursor: "pointer", borderBottom: "1px solid #E2E6EB" }}>
-              {o.organisation}
-              {o.contacts[0] && <div style={{ fontSize: 10.5, color: "#8B96A3" }}>{o.contacts[0].email}</div>}
+            <div key={o.organisation} onMouseDown={() => pickOrg(o)} style={{ padding: "8px 12px", fontSize: 12.5, color: "#3E4A5C", cursor: "pointer", borderBottom: "1px solid #E2E6EB", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+              <div>
+                {o.organisation}
+                {o.contacts[0] && <div style={{ fontSize: 10.5, color: "#8B96A3" }}>{o.contacts[0].email}</div>}
+              </div>
+              {o.interne && <span style={{ fontSize: 9.5, color: "#0F8A5F", background: "rgba(15,138,95,0.1)", padding: "2px 6px", borderRadius: 4, whiteSpace: "nowrap" }}>déjà utilisé</span>}
             </div>
           ))}
         </div>
@@ -3602,6 +3720,31 @@ function TauxChargeCalcule({ eq }) {
 }
 // Historique du taux de charge sur les visites précédentes du même équipement physique (repris via
 // « Reprendre un équipement existant »). N'apparaît que s'il y a au moins 2 points à comparer.
+// Extraction générique d'un historique de valeur (résistance, isolement...) sur plusieurs visites
+// d'un même équipement (suivi via lignageId lors des reprises), filtré aux 3 dernières années.
+function getHistoriqueChamp(allSites, eq, extractFn) {
+  const lignageId = eq.lignageId || eq.id;
+  const seuilAnnee = new Date().getFullYear() - 3;
+  const points = [];
+  (allSites || []).forEach((s) => {
+    (s.equipements || []).forEach((e) => {
+      if ((e.lignageId || e.id) !== lignageId) return;
+      const date = s.rapport && s.rapport.date;
+      if (date && Number(date.slice(0, 4)) < seuilAnnee) return;
+      const val = extractFn(e);
+      if (val === null || val === undefined || isNaN(val)) return;
+      points.push({ date, valeur: val });
+    });
+  });
+  points.sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+  return points;
+}
+function moyenneL1L2L3(fields) {
+  if (!fields) return null;
+  const vals = [fields.l1, fields.l2, fields.l3].map(numOf).filter((v) => v !== null);
+  if (!vals.length) return null;
+  return Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 100) / 100;
+}
 function HistoriqueTauxCharge({ eq, allSites }) {
   const historique = useMemo(() => getHistoriqueEquipement(allSites, eq), [allSites, eq]);
   if (historique.length < 2) return null;
@@ -3618,6 +3761,43 @@ function HistoriqueTauxCharge({ eq, allSites }) {
           </div>
         ))}
       </div>
+    </Card>
+  );
+}
+// Historique (3 dernières années) de la résistance des enroulements et des mesures d'isolement,
+// pour repérer une dérive du transformateur avant qu'elle ne devienne critique.
+function HistoriqueTransformateur({ eq, allSites }) {
+  const histoResPrim = useMemo(() => getHistoriqueChamp(allSites, eq, (e) => moyenneL1L2L3(e.controles?.rapport_transformation?.resistance_enroulements_primaire?.fields)), [allSites, eq]);
+  const histoResSec = useMemo(() => getHistoriqueChamp(allSites, eq, (e) => moyenneL1L2L3(e.controles?.rapport_transformation?.resistance_enroulements_secondaire?.fields)), [allSites, eq]);
+  const histoIsolHT = useMemo(() => getHistoriqueChamp(allSites, eq, (e) => numOf(e.controles?.mesure_isolement?.hta_terre?.fields?.valeur)), [allSites, eq]);
+  const histoIsolBT = useMemo(() => getHistoriqueChamp(allSites, eq, (e) => numOf(e.controles?.mesure_isolement?.bt_terre?.fields?.valeur)), [allSites, eq]);
+  const histoIsolHTBT = useMemo(() => getHistoriqueChamp(allSites, eq, (e) => numOf(e.controles?.mesure_isolement?.hta_bt?.fields?.valeur)), [allSites, eq]);
+  const series = [
+    { label: "Résistance enroulement primaire", unite: "mΩ", points: histoResPrim },
+    { label: "Résistance enroulement secondaire", unite: "mΩ", points: histoResSec },
+    { label: "Isolement HTA - Terre", unite: eq.controles?.mesure_isolement?.hta_terre?.fields?.unite || "", points: histoIsolHT },
+    { label: "Isolement BT - Terre", unite: eq.controles?.mesure_isolement?.bt_terre?.fields?.unite || "", points: histoIsolBT },
+    { label: "Isolement HTA - BT", unite: eq.controles?.mesure_isolement?.hta_bt?.fields?.unite || "", points: histoIsolHTBT },
+  ].filter((s) => s.points.length >= 2);
+  if (!series.length) return null;
+  return (
+    <Card style={{ marginBottom: 14 }}>
+      <div style={{ fontSize: 11.5, fontWeight: 700, color: "#5B6B7D", marginBottom: 10, textTransform: "uppercase", letterSpacing: 0.4 }}>
+        Historique résistance / isolement (3 dernières années)
+      </div>
+      {series.map((s, si) => (
+        <div key={si} style={{ marginBottom: si < series.length - 1 ? 14 : 0 }}>
+          <div style={{ fontSize: 11.5, color: "#3E4A5C", marginBottom: 4 }}>{s.label}</div>
+          <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "flex-end" }}>
+            {s.points.map((p, i) => (
+              <div key={i} style={{ textAlign: "center" }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#0A5DA8" }}>{p.valeur} {s.unite}</div>
+                <div style={{ fontSize: 10.5, color: "#8B96A3" }}>{p.date ? p.date.slice(0, 4) : "—"}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
     </Card>
   );
 }
@@ -4161,6 +4341,34 @@ function EquipementCard({ eq, update, remove, removable = true, onDuplicate, loc
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 14 }}>
                 {schema.identification.map((f) => {
                   const opts = typeof f.options === "function" ? f.options(eq.identification) : f.options;
+                  if (f.key === "rapportTPProtection" && eq.type !== "Comptage HTA") {
+                    const comptageAvecTP = allEquipements.find((e) => e.type === "Comptage HTA" && e.identification.rapportTPProtection && e.id !== eq.id);
+                    return (
+                      <Field key={f.key} label={f.label}>
+                        <TextInput value={eq.identification[f.key] || ""} onChange={(e2) => setIdentification(f.key, e2.target.value)} placeholder="ex. 20000/100" />
+                        {comptageAvecTP && eq.identification[f.key] !== comptageAvecTP.identification.rapportTPProtection && (
+                          <div
+                            onClick={() => setIdentification(f.key, comptageAvecTP.identification.rapportTPProtection)}
+                            style={{ fontSize: 10.5, color: "#0A5DA8", marginTop: 4, cursor: "pointer" }}
+                          >
+                            Reprendre {comptageAvecTP.identification.rapportTPProtection} depuis la cellule Comptage HTA ({comptageAvecTP.identification.repere || "sans repère"})
+                          </div>
+                        )}
+                      </Field>
+                    );
+                  }
+                  if (eq.type === "Bilan de puissance" && f.key === "referenceRattachement" && (eq.identification.rattachement === "Transformateur" || eq.identification.rattachement === "Disjoncteur BT")) {
+                    const candidats = allEquipements.filter((e) => e.type === eq.identification.rattachement && e.id !== eq.id);
+                    return (
+                      <Field key={f.key} label={f.label}>
+                        <Select value={eq.identification[f.key] || ""} onChange={(e2) => setIdentification(f.key, e2.target.value)}>
+                          <option value="">— Choisir un {eq.identification.rattachement.toLowerCase()} —</option>
+                          {candidats.map((c) => <option key={c.id} value={c.identification.repere || c.id}>{c.identification.repere || `${eq.identification.rattachement} sans repère`}</option>)}
+                        </Select>
+                        {candidats.length === 0 && <div style={{ fontSize: 10.5, color: "#8B96A3", marginTop: 4 }}>Aucun {eq.identification.rattachement.toLowerCase()} créé sur ce site pour l'instant.</div>}
+                      </Field>
+                    );
+                  }
                   if (eq.type === "Analyse d'huile" && f.key === "transformateurAssocie") {
                     const transfosHuile = allEquipements.filter((e) => e.type === "Transformateur" && e.identification.typeIsolation !== "Sec (résine/enrobé)" && e.id !== eq.id);
                     return (
@@ -4558,6 +4766,33 @@ function EquipementCard({ eq, update, remove, removable = true, onDuplicate, loc
                     onChangeCustom={(id, patch) => changeCustomAction(sec.key, id, patch)}
                     onRemoveCustom={(id) => removeCustomAction(sec.key, id)}
                   />
+                </React.Fragment>
+              );
+            }
+            if (sec.key === "mesure_isolement" && eq.type === "Transformateur") {
+              return (
+                <React.Fragment key={sec.key}>
+                  <SectionBlock
+                    title={sec.title}
+                    items={sec.items}
+                    values={eq.controles[sec.key]}
+                    onChangeItem={(itemKey, v) => setControleItem(sec.key, itemKey, v)}
+                    idPrefix={`${eq.id}-${sec.key}`}
+                    custom={eq.controles[sec.key + "__custom"] || []}
+                    onAddCustom={() => addCustomAction(sec.key)}
+                    onChangeCustom={(id, patch) => changeCustomAction(sec.key, id, patch)}
+                    onRemoveCustom={(id) => removeCustomAction(sec.key, id)}
+                    extra={
+                      <div style={{ fontSize: 11.5, color: "#0A5DA8", background: "rgba(10,93,168,0.08)", padding: "8px 12px", borderRadius: 8, marginTop: 8, lineHeight: 1.6 }}>
+                        <b>Mode opératoire (CEI 60076-3 / IEEE 43)</b> — la tension d'injection est la même du début à la fin d'un essai ; le « type de mesure » indique seulement jusqu'où l'essai est poussé :<br />
+                        • <b>Standard</b> : lecture instantanée.<br />
+                        • <b>PI</b> (Indice de Polarisation) : rapport R(10 min) / R(1 min).<br />
+                        • <b>DAR</b> (Absorption Diélectrique) : rapport R(60 s) / R(10 s).<br />
+                        Pour chaque mesure entre deux enroulements, l'enroulement non testé doit être court-circuité (shunté) et relié à la terre — c'est déjà précisé dans le libellé de chaque ligne ci-dessous.
+                      </div>
+                    }
+                  />
+                  <HistoriqueTransformateur eq={eq} allSites={allSites} />
                 </React.Fragment>
               );
             }
@@ -5220,7 +5455,7 @@ function PrintIntervention({ iv }) {
   );
 }
 
-function SiteDetail({ site, allSites, update, onBack, onDelete, onPrint, onPrintAnnexe, onCreateIntervention }) {
+function SiteDetail({ site, allSites, update, onBack, onDelete, onPrint, onPrintAnnexe, onCreateIntervention, clientsRegistry }) {
   const [reprendreOpen, setReprendreOpen] = useState(false);
   const presentTypes = useMemo(() => EQUIPMENT_TYPES.filter((t) => site.equipements.some((e) => e.type === t)), [site.equipements]);
   const [activeTab, setActiveTab] = useState("rapport");
@@ -5280,6 +5515,8 @@ function SiteDetail({ site, allSites, update, onBack, onDelete, onPrint, onPrint
                 clientValue={site.client}
                 onChangeClient={(v) => update((d) => ({ ...d, client: v }))}
                 onChangeEmail={(v) => update((d) => ({ ...d, emailEnvoi: v }))}
+                allSites={allSites}
+                clientsRegistry={clientsRegistry}
               />
             </Field>
             <Field label="E-mail d'envoi du rapport"><TextInput type="email" value={site.emailEnvoi || ""} onChange={(e) => update((d) => ({ ...d, emailEnvoi: e.target.value }))} placeholder="contact@client.fr" /></Field>
@@ -6352,89 +6589,99 @@ function genererSchemaOnduleur(eq) {
     const avecBypass = eq.identification?.typeUPS !== "Onduleur sécurité";
     const r = (eq.controles && eq.controles.regimes_reseaux) || {};
     const regime = (k) => (r[k] === "Monophasé" ? "1~" : "3~");
-    const w = 460, h = avecBypass ? 560 : 420;
+    const w = 480, h = avecBypass ? 780 : 560;
     const canvas = document.createElement("canvas");
     canvas.width = w; canvas.height = h;
     const ctx = canvas.getContext("2d");
     ctx.fillStyle = "#FFFFFF"; ctx.fillRect(0, 0, w, h);
-    ctx.font = "13px Arial, sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
     const line = (x1, y1, x2, y2) => { ctx.strokeStyle = SCHEMA_TRAIT; ctx.lineWidth = 1.4; ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); };
     const arrowDown = (x, y) => { ctx.fillStyle = SCHEMA_TRAIT; ctx.beginPath(); ctx.moveTo(x - 4, y - 5); ctx.lineTo(x + 4, y - 5); ctx.lineTo(x, y + 3); ctx.fill(); };
+    const label = (txt, x, y, color, font) => { ctx.fillStyle = color || "#5B6B7D"; ctx.font = font || "11px Arial, sans-serif"; ctx.fillText(txt, x, y); };
+    // Les boîtes ont un effet pseudo-3D dont le sommet remonte de "depth" au-dessus de y — un
+    // libellé positionné sans en tenir compte chevauche systématiquement la boîte. boxDepth()
+    // calcule ce décalage pour toujours placer le texte clairement au-dessus.
+    const boxDepth = (bw2, bh2) => Math.min(bw2, bh2) * 0.22;
 
-    const cxR1 = 130, cxR2 = 330, bw = 100, bh = 70;
-    let yTop = 20;
-    ctx.fillStyle = SCHEMA_TRAIT;
-    ctx.fillText("R1", cxR1, yTop); ctx.fillText("R2", cxR2, yTop);
-    yTop += 25;
-    line(cxR1, yTop, cxR1, yTop + 20);
-    line(cxR2, yTop, cxR2, yTop + 20);
-    yTop += 20;
-    // Barre reliant R1/R2 (les deux réseaux sont disponibles pour l'ensemble redresseur+switch)
-    line(cxR1, yTop, cxR2, yTop);
-    // Interrupteur d'entrée sur R1
-    let y1 = yTop;
-    drawIconInterrupteur(ctx, cxR1 - bw / 2, y1, bw, bh);
-    ctx.fillStyle = "#5B6B7D"; ctx.font = "10.5px Arial, sans-serif"; ctx.fillText(`Réseau normal ${regime("normal")}`, cxR1, y1 - 8);
-    y1 += bh;
-    line(cxR1, y1, cxR1, y1 + 20);
-    y1 += 20;
-    line(cxR1 - 90, y1, cxR2, y1); // barre reliant filtre + redresseur + interrupteur R2
-    // Ligne verticale vers R2 depuis cette barre
-    line(cxR2, yTop, cxR2, y1);
+    // Un seul couloir principal (cxM) pour le trajet de puissance normal ; le réseau secours (cxR2)
+    // ne rejoint que le commutateur, sans longer tout le schéma en parallèle.
+    const cxM = 150, cxR2 = 390;
+    const bw = 100, bh = 66, redW = 130;
+    const depthBW = boxDepth(bw, bh), depthRed = boxDepth(redW, bh);
+    const GAP_LIGNE = 26, LABEL_MARGIN = 14;
 
-    // Rangée : filtre (petit), redresseur (grand), interrupteur R2
-    const filtreW = 60, filtreH = 55, redW = 130;
-    drawIconFiltreTerre(ctx, cxR1 - 90 - filtreW / 2, y1, filtreW, filtreH);
-    drawIconRedresseur(ctx, cxR1 - redW / 2, y1, redW, bh);
-    drawIconInterrupteur(ctx, cxR2 - bw / 2, y1, bw, bh);
-    ctx.fillStyle = "#5B6B7D"; ctx.font = "10.5px Arial, sans-serif";
-    ctx.fillText("Redresseur", cxR1, y1 + bh + 14);
-    let yAfterRow1 = y1 + bh;
-    line(cxR1, yAfterRow1, cxR1, yAfterRow1 + 25);
-    line(cxR2, yAfterRow1, cxR2, yAfterRow1 + 25);
-    yAfterRow1 += 25;
-    line(cxR1 - 30, yAfterRow1, cxR1 + 30, yAfterRow1); // petite barre côté redresseur (jonction batterie)
+    let y = 16;
+    label("R1", cxM, y, SCHEMA_TRAIT, "14px Arial, sans-serif");
+    if (avecBypass) label("R2", cxR2, y, SCHEMA_TRAIT, "14px Arial, sans-serif");
+    y += 26;
+    line(cxM, y, cxM, y + GAP_LIGNE); if (avecBypass) line(cxR2, y, cxR2, y + GAP_LIGNE);
+    y += GAP_LIGNE;
 
-    // Batterie, branchée sur le bus continu en sortie du redresseur
-    drawBatterie(ctx, cxR1 + 60, yAfterRow1 + 22, 16);
-    ctx.font = "10px Arial, sans-serif"; ctx.fillStyle = "#5B6B7D"; ctx.fillText("Batterie", cxR1 + 60, yAfterRow1 + 46);
-    line(cxR1, yAfterRow1, cxR1 + 40, yAfterRow1);
+    // Réseau normal (interrupteur)
+    y += depthBW + LABEL_MARGIN + 8;
+    label(`Réseau normal ${regime("normal")}`, cxM, y - depthBW - LABEL_MARGIN);
+    drawIconInterrupteur(ctx, cxM - bw / 2, y, bw, bh);
+    let yReseauNormalBas = y + bh;
+    y = yReseauNormalBas + GAP_LIGNE;
+    line(cxM, yReseauNormalBas, cxM, y);
 
-    // Onduleur (bloc CC -> CA), sous le redresseur
-    const ondY = yAfterRow1;
-    drawIconOnduleur(ctx, cxR1 - redW / 2, ondY, redW, bh);
-    ctx.fillStyle = "#5B6B7D"; ctx.fillText("Onduleur", cxR1, ondY + bh + 14);
-    let yAfterOnd = ondY + bh + 24;
-    line(cxR1, ondY + bh, cxR1, yAfterOnd);
-    line(cxR2, yAfterRow1, cxR2, yAfterOnd); // R2 descend en parallèle jusqu'au commutateur
-    ctx.font = "11px Arial, sans-serif"; ctx.fillStyle = SCHEMA_TRAIT; ctx.fillText("R0", cxR1 - 22, yAfterOnd - 4);
+    // Filtre + Redresseur, côte à côte, alignés sur la même ligne horizontale
+    const filtreW = 55, filtreH = 55;
+    const cxFiltre = cxM - redW / 2 - 30 - filtreW / 2;
+    y += depthRed + LABEL_MARGIN + 6;
+    label("Redresseur", cxM, y - depthRed - LABEL_MARGIN);
+    drawIconFiltreTerre(ctx, cxFiltre - filtreW / 2, y, filtreW, filtreH);
+    drawIconRedresseur(ctx, cxM - redW / 2, y, redW, bh);
+    line(cxFiltre, y + filtreH / 2, cxM - redW / 2, y + filtreH / 2); // filtre -> redresseur
+    let yRedresseurBas = y + bh;
+    y = yRedresseurBas + 50;
+    line(cxM, yRedresseurBas, cxM, y);
+
+    // Batterie : bien visible, sur sa propre branche à droite du bus continu, avec un espace dédié
+    const xBatt = cxM + 150, yBatt = yRedresseurBas + 25;
+    line(cxM, yBatt, xBatt - 26, yBatt);
+    drawBatterie(ctx, xBatt, yBatt, 24);
+    label("Batterie", xBatt, yBatt + 42, "#3E4A5C", "12px Arial, sans-serif");
+
+    // Onduleur
+    y += depthRed + LABEL_MARGIN + 6;
+    label("Onduleur", cxM, y - depthRed - LABEL_MARGIN);
+    drawIconOnduleur(ctx, cxM - redW / 2, y, redW, bh);
+    let yOnduleurBas = y + bh;
+    let yApresOnduleur = yOnduleurBas + GAP_LIGNE;
+    line(cxM, yOnduleurBas, cxM, yApresOnduleur);
+    label("R0", cxM - redW / 2 - 20, yOnduleurBas + bh / 2 + 10, SCHEMA_TRAIT, "11px Arial, sans-serif");
 
     if (avecBypass) {
-      // Commutateur statique (triple sinusoïde) — reçoit R0 (sortie onduleur) et R2 (via by-pass)
-      const csW = 340, csH = 60;
-      const csX = cxR1 - csW / 2 + (cxR2 - cxR1) / 2;
-      drawIconCommutateurStatique(ctx, cxR1 - 60, yAfterOnd, csW - 40, csH);
-      line(cxR1, yAfterOnd - 24, cxR1, yAfterOnd);
-      line(cxR2, yAfterOnd - 24 > 0 ? yAfterOnd : yAfterOnd, cxR2, yAfterOnd);
-      let yAfterCS = yAfterOnd + csH + 20;
-      const csMidX = cxR1 - 60 + (csW - 40) / 2;
-      line(csMidX, yAfterOnd + csH, csMidX, yAfterCS);
-      // Interrupteur de sortie
-      drawIconInterrupteur(ctx, csMidX - bw / 2, yAfterCS, bw, bh);
-      let yFinal = yAfterCS + bh;
-      line(csMidX, yFinal, csMidX, yFinal + 24);
-      arrowDown(csMidX, yFinal + 24);
-      ctx.font = "13px Arial, sans-serif"; ctx.fillStyle = SCHEMA_TRAIT; ctx.fillText("RS", csMidX, yFinal + 40);
+      // Le réseau secours rejoint directement le commutateur statique, sans longer tout le schéma
+      label(`Réseau secours ${regime("secours")}`, cxR2, yRedresseurBas - 4);
+      line(cxR2, yRedresseurBas + 10, cxR2, yApresOnduleur);
+      const csW = cxR2 - cxM + bw, csH = 64;
+      const depthCS = boxDepth(csW, csH);
+      const csLeft = cxM - bw / 2;
+      yApresOnduleur += depthCS + LABEL_MARGIN + 6;
+      line(cxM, yOnduleurBas, cxM, yApresOnduleur); // réajuste le trait avec le nouveau y
+      label("Commutateur statique", cxM + (csW - bw) / 2, yApresOnduleur - depthCS - LABEL_MARGIN);
+      drawIconCommutateurStatique(ctx, csLeft, yApresOnduleur, csW, csH);
+      const csMidX = csLeft + csW / 2;
+      let yApresCS = yApresOnduleur + csH + GAP_LIGNE + depthBW + LABEL_MARGIN + 6;
+      line(csMidX, yApresOnduleur + csH, csMidX, yApresCS);
+      label("Interrupteur de sortie", csMidX, yApresCS - depthBW - LABEL_MARGIN);
+      drawIconInterrupteur(ctx, csMidX - bw / 2, yApresCS, bw, bh);
+      let yFinal = yApresCS + bh;
+      line(csMidX, yFinal, csMidX, yFinal + GAP_LIGNE);
+      arrowDown(csMidX, yFinal + GAP_LIGNE);
+      label("RS", csMidX, yFinal + GAP_LIGNE + 18, SCHEMA_TRAIT, "14px Arial, sans-serif");
     } else {
-      let yFinal = yAfterOnd;
-      line(cxR1, yFinal, cxR1, yFinal + 24);
-      arrowDown(cxR1, yFinal + 24);
-      ctx.font = "13px Arial, sans-serif"; ctx.fillStyle = SCHEMA_TRAIT; ctx.fillText("RS", cxR1, yFinal + 40);
-      ctx.font = "10.5px Arial, sans-serif"; ctx.fillStyle = "#5B6B7D"; ctx.fillText(`Utilisation ${regime("utilisation")}`, cxR1 + 60, yFinal + 15);
+      let yFinal = yApresOnduleur;
+      line(cxM, yFinal, cxM, yFinal + GAP_LIGNE);
+      arrowDown(cxM, yFinal + GAP_LIGNE);
+      label("RS", cxM, yFinal + GAP_LIGNE + 18, SCHEMA_TRAIT, "14px Arial, sans-serif");
+      label(`Utilisation ${regime("utilisation")}`, cxM + 100, yFinal + 10);
     }
 
-    ctx.font = "11px Arial, sans-serif"; ctx.fillStyle = "#5B6B7D"; ctx.textAlign = "left";
-    ctx.fillText(avecBypass ? "Configuration : avec commutateur statique et réseau secours" : "Configuration : Onduleur sécurité (sans commutateur statique)", 8, h - 10);
+    ctx.textAlign = "left";
+    label(avecBypass ? "Configuration : avec commutateur statique et réseau secours" : "Configuration : Onduleur sécurité (sans commutateur statique)", 8, h - 12, "#5B6B7D", "11px Arial, sans-serif");
     return canvas.toDataURL("image/png");
   } catch (e) {
     return null;
@@ -6447,7 +6694,7 @@ function genererSchemaRedresseurChargeur(eq) {
   try {
     const r = (eq.controles && eq.controles.regimes_reseaux) || {};
     const regime = (k) => (r[k] === "Monophasé" ? "1~" : "3~");
-    const w = 380, h = 300;
+    const w = 380, h = 430;
     const canvas = document.createElement("canvas");
     canvas.width = w; canvas.height = h;
     const ctx = canvas.getContext("2d");
@@ -6455,25 +6702,29 @@ function genererSchemaRedresseurChargeur(eq) {
     ctx.font = "13px Arial, sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
     const line = (x1, y1, x2, y2) => { ctx.strokeStyle = SCHEMA_TRAIT; ctx.lineWidth = 1.4; ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); };
     const arrowDown = (x, y) => { ctx.fillStyle = SCHEMA_TRAIT; ctx.beginPath(); ctx.moveTo(x - 4, y - 5); ctx.lineTo(x + 4, y - 5); ctx.lineTo(x, y + 3); ctx.fill(); };
+    const boxDepth = (bw2, bh2) => Math.min(bw2, bh2) * 0.22;
     const cx = 190, bw = 100, bh = 70, redW = 130;
+    const LABEL_MARGIN = 14;
 
     let y = 20;
     ctx.fillStyle = SCHEMA_TRAIT; ctx.fillText("R1", cx, y);
     y += 25; line(cx, y, cx, y + 20); y += 20;
+    y += boxDepth(bw, bh) + LABEL_MARGIN + 6;
+    ctx.fillStyle = "#5B6B7D"; ctx.font = "10.5px Arial, sans-serif"; ctx.fillText(`Réseau ${regime("normal")}`, cx, y - boxDepth(bw, bh) - LABEL_MARGIN);
     drawIconInterrupteur(ctx, cx - bw / 2, y, bw, bh);
-    ctx.fillStyle = "#5B6B7D"; ctx.font = "10.5px Arial, sans-serif"; ctx.fillText(`Réseau ${regime("normal")}`, cx, y - 8);
     y += bh; line(cx, y, cx, y + 20); y += 20;
+    y += boxDepth(redW, bh) + LABEL_MARGIN + 6;
+    ctx.fillStyle = "#5B6B7D"; ctx.fillText("Redresseur / Chargeur", cx, y - boxDepth(redW, bh) - LABEL_MARGIN);
     drawIconRedresseur(ctx, cx - redW / 2, y, redW, bh);
-    ctx.fillStyle = "#5B6B7D"; ctx.fillText("Redresseur / Chargeur", cx, y + bh + 14);
     let yAfter = y + bh + 24;
     line(cx, y + bh, cx, yAfter);
     line(cx - 30, yAfter, cx + 30, yAfter);
-    drawBatterie(ctx, cx + 60, yAfter + 22, 16);
-    ctx.font = "10px Arial, sans-serif"; ctx.fillText("Batterie (floating)", cx + 60, yAfter + 46);
-    line(cx, yAfter, cx + 40, yAfter);
+    drawBatterie(ctx, cx + 70, yAfter + 26, 22);
+    ctx.font = "11px Arial, sans-serif"; ctx.fillStyle = "#3E4A5C"; ctx.fillText("Batterie (floating)", cx + 70, yAfter + 62);
+    line(cx, yAfter, cx + 48, yAfter);
     line(cx, yAfter, cx, yAfter + 24);
     arrowDown(cx, yAfter + 24);
-    ctx.font = "13px Arial, sans-serif"; ctx.fillStyle = SCHEMA_TRAIT; ctx.fillText("RS", cx, yAfter + 40);
+    ctx.font = "13px Arial, sans-serif"; ctx.fillStyle = SCHEMA_TRAIT; ctx.fillText("RS", cx, yAfter + 42);
     ctx.font = "10.5px Arial, sans-serif"; ctx.fillStyle = "#5B6B7D"; ctx.fillText("Utilisation continue", cx - 90, yAfter + 15);
 
     ctx.font = "11px Arial, sans-serif"; ctx.fillStyle = "#5B6B7D"; ctx.textAlign = "left";
@@ -6490,7 +6741,7 @@ function genererSchemaInverseurSource(eq) {
   try {
     const r = (eq.controles && eq.controles.regimes_reseaux) || {};
     const regime = (k) => (r[k] === "Monophasé" ? "1~" : "3~");
-    const w = 480, h = 230;
+    const w = 500, h = 260;
     const canvas = document.createElement("canvas");
     canvas.width = w; canvas.height = h;
     const ctx = canvas.getContext("2d");
@@ -6498,19 +6749,23 @@ function genererSchemaInverseurSource(eq) {
     ctx.font = "11px Arial, sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
     const line = (x1, y1, x2, y2) => { ctx.strokeStyle = SCHEMA_TRAIT; ctx.lineWidth = 1.4; ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); };
     const arrowRight = (x, y) => { ctx.fillStyle = SCHEMA_TRAIT; ctx.beginPath(); ctx.moveTo(x - 5, y - 4); ctx.lineTo(x + 5, y); ctx.lineTo(x - 5, y + 4); ctx.fill(); };
-    const yMid = 115, yTop = 60, yBot = 170, bw = 100, bh = 60;
+    const boxDepth = (bw2, bh2) => Math.min(bw2, bh2) * 0.22;
+    const LABEL_MARGIN = 14;
+    const yMid = 130, yTop = 65, yBot = 195, bw = 100, bh = 60;
+    const depthBW = boxDepth(bw, bh);
 
-    drawIconInterrupteur(ctx, 10, yTop - bh / 2, bw, bh);
-    ctx.fillStyle = "#5B6B7D"; ctx.fillText(`Source 1 (R1) ${regime("source1")}`, 60, yTop - bh / 2 - 10);
-    drawIconInterrupteur(ctx, 10, yBot - bh / 2, bw, bh);
-    ctx.fillText(`Source 2 (R2) ${regime("source2")}`, 60, yBot - bh / 2 - 10);
-    line(110, yTop, 220, yTop); line(110, yBot, 220, yBot);
-    line(220, yTop, 220, yMid - 20); line(220, yBot, 220, yMid + 20);
-    drawIconCommutateurStatique(ctx, 220, yMid - 30, 110, 60);
-    ctx.fillStyle = "#5B6B7D"; ctx.fillText("Commutateur statique", 275, yMid + 44);
-    line(330, yMid, 370, yMid); arrowRight(365, yMid);
-    drawIconInterrupteur(ctx, 380, yMid - bh / 2, 90, bh);
-    ctx.font = "10.5px Arial, sans-serif"; ctx.fillText(`Utilisation ${regime("utilisation")}`, 425, yMid - bh / 2 - 10);
+    drawIconInterrupteur(ctx, 20, yTop - bh / 2, bw, bh);
+    ctx.fillStyle = "#5B6B7D"; ctx.fillText(`Source 1 (R1) ${regime("source1")}`, 70, yTop - bh / 2 - depthBW - LABEL_MARGIN);
+    drawIconInterrupteur(ctx, 20, yBot - bh / 2, bw, bh);
+    ctx.fillText(`Source 2 (R2) ${regime("source2")}`, 70, yBot - bh / 2 - depthBW - LABEL_MARGIN);
+    line(120, yTop, 230, yTop); line(120, yBot, 230, yBot);
+    line(230, yTop, 230, yMid - 20); line(230, yBot, 230, yMid + 20);
+    const depthCS = boxDepth(110, 60);
+    ctx.fillText("Commutateur statique", 285, yMid - 30 - depthCS - LABEL_MARGIN);
+    drawIconCommutateurStatique(ctx, 230, yMid - 30, 110, 60);
+    line(340, yMid, 380, yMid); arrowRight(375, yMid);
+    ctx.font = "10.5px Arial, sans-serif"; ctx.fillText(`Utilisation ${regime("utilisation")}`, 435, yMid - bh / 2 - depthBW - LABEL_MARGIN);
+    drawIconInterrupteur(ctx, 390, yMid - bh / 2, 90, bh);
 
     ctx.font = "11px Arial, sans-serif"; ctx.fillStyle = "#5B6B7D"; ctx.textAlign = "left";
     ctx.fillText("Inverseur de source — commutation entre deux sources, sans conversion de puissance", 8, h - 10);
@@ -6631,9 +6886,9 @@ function docxEquipementElements(eq, locaux, allSites) {
     const schemaImg = gen(eq);
     if (schemaImg) {
       let imgW = 400, imgH = 190;
-      if (eq.type === "Onduleur") { imgW = 300; imgH = eq.identification?.typeUPS !== "Onduleur sécurité" ? 365 : 274; }
-      else if (eq.type === "Redresseur chargeur") { imgW = 300; imgH = 237; }
-      else { imgW = 400; imgH = 192; }
+      if (eq.type === "Onduleur") { imgW = 300; imgH = eq.identification?.typeUPS !== "Onduleur sécurité" ? 488 : 350; }
+      else if (eq.type === "Redresseur chargeur") { imgW = 300; imgH = 340; }
+      else { imgW = 400; imgH = 208; }
       const img = docxImage(schemaImg, imgW, imgH);
       if (img) {
         elements.push(docxHeading("Schéma synoptique"));
@@ -7377,6 +7632,27 @@ function downloadBlob(blob, filename) {
   setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
 
+// Accès à Firestore via son API REST (simples requêtes HTTPS) plutôt que via le SDK temps réel
+// (WebChannel/long-polling), qui reste bloqué indéfiniment (ni succès ni erreur) dans certains
+// environnements réseau — une requête HTTPS classique est bien plus difficile à bloquer ainsi.
+// Contrepartie : pas de mise à jour instantanée entre techniciens, remplacée par une actualisation
+// périodique (voir REST_POLL_INTERVAL_MS).
+const FIRESTORE_REST_BASE = "https://firestore.googleapis.com/v1/projects/ht-maintenance/databases/(default)/documents";
+const REST_POLL_INTERVAL_MS = 7000;
+async function firestoreRestGet(docPath, idToken) {
+  const res = await fetch(`${FIRESTORE_REST_BASE}/${docPath}`, { headers: { Authorization: `Bearer ${idToken}` } });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`Firestore REST GET ${res.status}`);
+  return res.json();
+}
+async function firestoreRestSet(docPath, valueJson, updatedAt, updatedBy, idToken) {
+  const body = { fields: { value: { stringValue: valueJson }, updatedAt: { integerValue: String(updatedAt) }, updatedBy: { stringValue: updatedBy || "" } } };
+  const url = `${FIRESTORE_REST_BASE}/${docPath}?updateMask.fieldPaths=value&updateMask.fieldPaths=updatedAt&updateMask.fieldPaths=updatedBy`;
+  const res = await fetch(url, { method: "PATCH", headers: { "Content-Type": "application/json", Authorization: `Bearer ${idToken}` }, body: JSON.stringify(body) });
+  if (!res.ok) throw new Error(`Firestore REST PATCH ${res.status}`);
+  return res.json();
+}
+
 export default function App({ currentUser, onLogout }) {
   const [sites, setSites] = useState([]);
   const [loaded, setLoaded] = useState(false);
@@ -7397,111 +7673,180 @@ export default function App({ currentUser, onLogout }) {
   const [printIv, setPrintIv] = useState(null);
   const ivSaveTimer = useRef(null);
   const lastSyncedIv = useRef(null);
+  const ivWriteInFlight = useRef(false);
 
-  // Synchronisation temps réel via Firestore : tous les techniciens connectés partagent le même
-  // document "sites" et "interventions". Les changements d'un collègue apparaissent automatiquement
-  // (onSnapshot), sans recharger la page.
-  // On compare le CONTENU (pas un simple indicateur "vient de recevoir une donnée distante") pour
-  // décider si une écriture est nécessaire — plus robuste face à des mises à jour rapprochées, qui
-  // pouvaient auparavant déclencher une boucle d'écritures répétées.
+  // Registre des clients — permet d'enregistrer un client (nom + e-mail) à l'avance, sans avoir à
+  // créer un site complet ; partagé entre techniciens comme sites/interventions.
+  const [clientsRegistry, setClientsRegistry] = useState([]);
+  const [clientsLoaded, setClientsLoaded] = useState(false);
+  const clientsSaveTimer = useRef(null);
+  const lastSyncedClients = useRef(null);
+  const clientsWriteInFlight = useRef(false);
+  const [gererClientsOpen, setGererClientsOpen] = useState(false);
+
+  // Synchronisation via l'API REST de Firestore : tous les techniciens connectés partagent le
+  // même document "sites" et "interventions". Une actualisation périodique (toutes les 7s) fait
+  // apparaître les changements d'un collègue — pas instantané comme avant, mais bien plus fiable
+  // (voir le commentaire sur FIRESTORE_REST_BASE plus haut).
   useEffect(() => {
-    const ref = DOCX_FS.doc(db, "app-data", "sites");
-    console.log("[Firestore] Abonnement au document app-data/sites…");
-    const unsub = DOCX_FS.onSnapshot(ref, (snap) => {
-      console.log("[Firestore] onSnapshot reçu — exists:", snap.exists(), "hasPendingWrites:", snap.metadata.hasPendingWrites, "fromCache:", snap.metadata.fromCache);
-      if (snap.metadata.hasPendingWrites) return; // écho de notre propre écriture, déjà appliqué localement
-      if (!snap.exists()) {
-        console.log("[Firestore] Document sites inexistant sur le serveur (base vide).");
-        lastSyncedSites.current = "[]";
-        setLoaded(true);
-        return;
-      }
-      const parsed = snap.data().value || [];
-      console.log("[Firestore] Sites reçus du serveur:", parsed.length);
-      // Migration : les équipements "Onduleur 3/3" / "Onduleur 3/1" / "Onduleur 1/1" sont
-      // consolidés en un seul type "Onduleur", avec le régime (triphasé/monophasé) de chaque
-      // réseau conservé tel qu'il était pour ces anciens types.
-      const REGIMES_PAR_ANCIEN_TYPE = {
-        "Onduleur 3/3": { normal: "Triphasé", secours: "Triphasé", utilisation: "Triphasé", onduleur: "Triphasé" },
-        "Onduleur 3/1": { normal: "Triphasé", secours: "Monophasé", utilisation: "Monophasé", onduleur: "Monophasé" },
-        "Onduleur 1/1": { normal: "Monophasé", secours: "Monophasé", utilisation: "Monophasé", onduleur: "Monophasé" },
-      };
-      parsed.forEach((s) => (s.equipements || []).forEach((e) => {
-        if (REGIMES_PAR_ANCIEN_TYPE[e.type]) {
-          e.controles = e.controles || {};
-          e.controles.regimes_reseaux = REGIMES_PAR_ANCIEN_TYPE[e.type];
-          e.type = "Onduleur";
+    let cancelled = false;
+    let intervalId = null;
+    async function poll() {
+      if (!currentUser) return;
+      if (writeInFlight.current) return; // n'écrase pas l'état local pendant une écriture en cours
+      try {
+        const idToken = await currentUser.getIdToken();
+        const data = await firestoreRestGet("app-data/sites", idToken);
+        if (cancelled) return;
+        if (!data || !data.fields) {
+          if (lastSyncedSites.current === null) lastSyncedSites.current = "[]";
+          setLoaded(true);
+          return;
         }
-      }));
-      parsed.forEach((s) => { s.equipements = (s.equipements || []).map(repairEquipementControles); });
-      lastSyncedSites.current = JSON.stringify(parsed);
-      setSites(parsed);
-      setLoaded(true);
-    }, (err) => { console.error("[Firestore] Erreur onSnapshot (sites) :", err); setLoaded(true); });
-    return unsub;
-  }, []);
+        const rawValue = (data.fields.value && data.fields.value.stringValue) || "[]";
+        if (rawValue === lastSyncedSites.current) { setLoaded(true); return; }
+        const parsed = JSON.parse(rawValue);
+        const REGIMES_PAR_ANCIEN_TYPE = {
+          "Onduleur 3/3": { normal: "Triphasé", secours: "Triphasé", utilisation: "Triphasé", onduleur: "Triphasé" },
+          "Onduleur 3/1": { normal: "Triphasé", secours: "Monophasé", utilisation: "Monophasé", onduleur: "Monophasé" },
+          "Onduleur 1/1": { normal: "Monophasé", secours: "Monophasé", utilisation: "Monophasé", onduleur: "Monophasé" },
+        };
+        parsed.forEach((s) => (s.equipements || []).forEach((e) => {
+          if (REGIMES_PAR_ANCIEN_TYPE[e.type]) {
+            e.controles = e.controles || {};
+            e.controles.regimes_reseaux = REGIMES_PAR_ANCIEN_TYPE[e.type];
+            e.type = "Onduleur";
+          }
+        }));
+        parsed.forEach((s) => { s.equipements = (s.equipements || []).map(repairEquipementControles); });
+        lastSyncedSites.current = rawValue;
+        setSites(parsed);
+        setLoaded(true);
+      } catch (e) {
+        console.error("[Firestore REST] Erreur lecture (sites) :", e);
+        setLoaded(true);
+      }
+    }
+    poll();
+    intervalId = setInterval(poll, REST_POLL_INTERVAL_MS);
+    return () => { cancelled = true; clearInterval(intervalId); };
+  }, [currentUser]);
 
   useEffect(() => {
-    if (!loaded) return;
+    if (!loaded || !currentUser) return;
     const serialized = JSON.stringify(sites);
-    if (serialized === lastSyncedSites.current) { console.log("[Firestore] Contenu identique au dernier synchronisé — pas de nouvelle écriture."); return; }
-    if (writeInFlight.current) { console.log("[Firestore] Écriture déjà en cours — nouvelle tentative ignorée pour l'instant."); return; }
-    console.log("[Firestore] Changement détecté (longueur avant:", (lastSyncedSites.current || "").length, "après:", serialized.length, ") — programmation d'une écriture.");
-    lastSyncedSites.current = serialized; // marqué "en cours de synchronisation" dès maintenant — évite qu'un
-    // nouveau déclenchement de cet effet avant confirmation du serveur ne reprogramme la même écriture.
+    if (serialized === lastSyncedSites.current) return;
+    if (writeInFlight.current) return;
+    lastSyncedSites.current = serialized;
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(async () => {
       writeInFlight.current = true;
-      console.log("[Firestore] Tentative d'écriture — sites:", sites.length, "utilisateur:", currentUser?.email);
       try {
-        await Promise.race([
-          DOCX_FS.setDoc(DOCX_FS.doc(db, "app-data", "sites"), { value: sites, updatedAt: Date.now(), updatedBy: currentUser?.email || null }),
-          new Promise((_, reject) => setTimeout(() => reject(new Error("Délai dépassé (15s) — écriture bloquée, probablement au niveau réseau")), 15000)),
-        ]);
-        console.log("[Firestore] Écriture confirmée avec succès.");
+        const idToken = await currentUser.getIdToken();
+        await firestoreRestSet("app-data/sites", serialized, Date.now(), currentUser?.email, idToken);
         setSaveError(false);
       } catch (e) {
-        console.error("[Firestore] Échec de synchronisation (sites) — code:", e?.code, "message:", e?.message, e);
-        lastSyncedSites.current = null; // permet une nouvelle tentative au prochain changement
+        console.error("[Firestore REST] Échec d'écriture (sites) :", e);
+        lastSyncedSites.current = null;
         setSaveError(true);
       } finally {
         writeInFlight.current = false;
       }
     }, 500);
     return () => clearTimeout(saveTimer.current);
-  }, [sites, loaded]);
+  }, [sites, loaded, currentUser]);
 
   useEffect(() => {
-    const ref = DOCX_FS.doc(db, "app-data", "interventions");
-    const unsub = DOCX_FS.onSnapshot(ref, (snap) => {
-      if (snap.metadata.hasPendingWrites) return;
-      if (snap.exists()) {
-        const parsed = snap.data().value || [];
-        lastSyncedIv.current = JSON.stringify(parsed);
-        setInterventions(parsed);
-      } else {
-        lastSyncedIv.current = "[]";
+    let cancelled = false;
+    let intervalId = null;
+    async function poll() {
+      if (!currentUser) return;
+      if (ivWriteInFlight.current) return;
+      try {
+        const idToken = await currentUser.getIdToken();
+        const data = await firestoreRestGet("app-data/interventions", idToken);
+        if (cancelled) return;
+        if (!data || !data.fields) { if (lastSyncedIv.current === null) lastSyncedIv.current = "[]"; setIvLoaded(true); return; }
+        const rawValue = (data.fields.value && data.fields.value.stringValue) || "[]";
+        if (rawValue === lastSyncedIv.current) { setIvLoaded(true); return; }
+        lastSyncedIv.current = rawValue;
+        setInterventions(JSON.parse(rawValue));
+        setIvLoaded(true);
+      } catch (e) {
+        setIvLoaded(true);
       }
-      setIvLoaded(true);
-    }, () => setIvLoaded(true));
-    return unsub;
-  }, []);
+    }
+    poll();
+    intervalId = setInterval(poll, REST_POLL_INTERVAL_MS);
+    return () => { cancelled = true; clearInterval(intervalId); };
+  }, [currentUser]);
 
   useEffect(() => {
-    if (!ivLoaded) return;
+    if (!ivLoaded || !currentUser) return;
     const serialized = JSON.stringify(interventions);
     if (serialized === lastSyncedIv.current) return;
+    if (ivWriteInFlight.current) return;
     lastSyncedIv.current = serialized;
     if (ivSaveTimer.current) clearTimeout(ivSaveTimer.current);
     ivSaveTimer.current = setTimeout(async () => {
+      ivWriteInFlight.current = true;
       try {
-        await DOCX_FS.setDoc(DOCX_FS.doc(db, "app-data", "interventions"), { value: interventions, updatedAt: Date.now(), updatedBy: currentUser?.email || null });
+        const idToken = await currentUser.getIdToken();
+        await firestoreRestSet("app-data/interventions", serialized, Date.now(), currentUser?.email, idToken);
       } catch (e) {
         lastSyncedIv.current = null;
+      } finally {
+        ivWriteInFlight.current = false;
       }
     }, 500);
     return () => clearTimeout(ivSaveTimer.current);
-  }, [interventions, ivLoaded]);
+  }, [interventions, ivLoaded, currentUser]);
+
+  useEffect(() => {
+    let cancelled = false;
+    let intervalId = null;
+    async function poll() {
+      if (!currentUser) return;
+      if (clientsWriteInFlight.current) return;
+      try {
+        const idToken = await currentUser.getIdToken();
+        const data = await firestoreRestGet("app-data/clients", idToken);
+        if (cancelled) return;
+        if (!data || !data.fields) { if (lastSyncedClients.current === null) lastSyncedClients.current = "[]"; setClientsLoaded(true); return; }
+        const rawValue = (data.fields.value && data.fields.value.stringValue) || "[]";
+        if (rawValue === lastSyncedClients.current) { setClientsLoaded(true); return; }
+        lastSyncedClients.current = rawValue;
+        setClientsRegistry(JSON.parse(rawValue));
+        setClientsLoaded(true);
+      } catch (e) {
+        setClientsLoaded(true);
+      }
+    }
+    poll();
+    intervalId = setInterval(poll, REST_POLL_INTERVAL_MS);
+    return () => { cancelled = true; clearInterval(intervalId); };
+  }, [currentUser]);
+
+  useEffect(() => {
+    if (!clientsLoaded || !currentUser) return;
+    const serialized = JSON.stringify(clientsRegistry);
+    if (serialized === lastSyncedClients.current) return;
+    if (clientsWriteInFlight.current) return;
+    lastSyncedClients.current = serialized;
+    if (clientsSaveTimer.current) clearTimeout(clientsSaveTimer.current);
+    clientsSaveTimer.current = setTimeout(async () => {
+      clientsWriteInFlight.current = true;
+      try {
+        const idToken = await currentUser.getIdToken();
+        await firestoreRestSet("app-data/clients", serialized, Date.now(), currentUser?.email, idToken);
+      } catch (e) {
+        lastSyncedClients.current = null;
+      } finally {
+        clientsWriteInFlight.current = false;
+      }
+    }, 500);
+    return () => clearTimeout(clientsSaveTimer.current);
+  }, [clientsRegistry, clientsLoaded, currentUser]);
 
   // Génère le rapport (Rapport ou Rapport d'intervention) et le télécharge en .docx
   // réel (compatible Microsoft Word ET Pages sur Mac), entièrement modifiable.
@@ -7694,6 +8039,9 @@ export default function App({ currentUser, onLogout }) {
               )}
               {!selected && !selectedIv && view === "sites" && (
                 <div style={{ position: "relative", display: "flex", gap: 8 }}>
+                  <button onClick={() => setGererClientsOpen(true)} style={btnGhost(BRAND.blue)} title="Enregistrer un client (nom + e-mail) à l'avance, sans créer de site">
+                    <Building2 size={14} /> <span className="hide-mobile">Gérer les clients</span>
+                  </button>
                   <button onClick={() => setReprendreSiteOpen((o) => !o)} disabled={sites.length === 0}
                     style={{ ...btnGhost(BRAND.blue), opacity: sites.length === 0 ? 0.4 : 1, cursor: sites.length === 0 ? "not-allowed" : "pointer" }}
                     title="Reprendre un site déjà créé (nom, locaux et équipements) pour une nouvelle visite">
@@ -7754,7 +8102,7 @@ export default function App({ currentUser, onLogout }) {
           )}
 
           {selected ? (
-            <SiteDetail site={selected} allSites={sites} update={(updater) => updateSite(selected.id, updater)} onBack={() => setSelectedId(null)} onDelete={deleteSite} onPrint={requestPrintSite} onPrintAnnexe={setPrintAnnexeSite} onCreateIntervention={createIntervention} />
+            <SiteDetail site={selected} allSites={sites} update={(updater) => updateSite(selected.id, updater)} onBack={() => setSelectedId(null)} onDelete={deleteSite} onPrint={requestPrintSite} onPrintAnnexe={setPrintAnnexeSite} onCreateIntervention={createIntervention} clientsRegistry={clientsRegistry} />
           ) : selectedIv ? (
             <InterventionEditor iv={selectedIv} update={(updater) => updateIntervention(selectedIv.id, updater)} onBack={() => setSelectedIvId(null)} onDelete={deleteIntervention} onPrint={requestPrintIv} />
           ) : view === "sites" ? (
@@ -7768,6 +8116,10 @@ export default function App({ currentUser, onLogout }) {
           )}
         </div>
       </div>
+
+      {gererClientsOpen && (
+        <GererClientsModal registry={clientsRegistry} setRegistry={setClientsRegistry} allSites={sites} onClose={() => setGererClientsOpen(false)} />
+      )}
 
       {exportConfirm && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(4,9,16,0.72)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200, padding: 16 }} onClick={() => setExportConfirm(null)}>
