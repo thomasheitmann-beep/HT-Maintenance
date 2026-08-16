@@ -66,6 +66,8 @@ const LISTE_FABRICANT_FUSIBLE = ["Schneider", "ABB", "SIBA", "Ferraz Limitor", "
 const LISTE_TYPE_FUSIBLE = ["CEF", "FDW", "SHAWMUT", "SOLFUSE", "LIMITOR", "HHD"];
 const LISTE_IN_FUSIBLE = ["4", "10", "16", "20", "25", "32", "40", "50", "63", "80", "100", "125", "160", "200"];
 const LISTE_UN_FUSIBLE = ["12", "24", "36"];
+const LISTE_DUREE_VIE_FUSIBLE = ["10", "15", "20", "25", "30"];
+const LISTE_ANNEES_MES = Array.from({ length: 41 }, (_, i) => String(new Date().getFullYear() - i));
 const LISTE_COURBE_RELAIS = ["Constant", "Inverse Normale CEI", "Très Inverse CEI", "Extrèment Inverse CEI", "Inverse Temps Long CEI"];
 const LISTE_TYPE_RELAIS = ["Indépendant", "Dépendant"];
 const LISTE_TEMPO_UNITE = ["ms", "s"];
@@ -107,8 +109,26 @@ const LISTE_TYPE_CELLULE = {
   "Contacteur HTA": ["DISJONCTEUR - DM1", "DISJONCTEUR - D1G", "DISJONCTEUR - DM2", "DISJONCTEUR - D2G", "DISJONCTEUR - PGC", "DISJONCTEUR - PGB", "DISJONCTEUR - SBC"],
 };
 const LISTE_MARQUE_BRK = ["MASTERPACT", "COMPACT", "IZM", "NZM", "MEGAMAX", "ISOMAX", "EMAX", "EMAX 2", "SPECTRONIC", "MPACT", "3WL", "3WN", "DMX", "DMX³", "DPX"];
+// Type de cellule du contacteur HTA, par marque (contrairement aux disjoncteurs/interrupteurs, la
+// gamme "contacteur" est plus restreinte chez certains constructeurs).
+const MARQUE_TYPE_CELLULE_CONTACTEUR = {
+  "Schneider Electric": ["RM6 - Contacteur", "SM6 - Contacteur", "PIX - Contacteur"],
+  "Merlin Gerin": ["RM6 - Contacteur", "SM6 - Contacteur"],
+  "ABB": ["UniSec - Contacteur", "SafeRing - Contacteur"],
+  "Siemens": ["8DJH - Contacteur"],
+};
+const LISTE_TYPE_CELLULE_CONTACTEUR_OPTIONS = optionsParMarque(MARQUE_TYPE_CELLULE_CONTACTEUR, combineValues(MARQUE_TYPE_CELLULE_CONTACTEUR));
 const LISTE_TYPE_TRANSFORMATEUR = ["TRANSFORMATEUR DE DISTRIBUTION", "TRANSFORMATEUR", "AUTO-TRANSFORMATEUR", "TRANSFORMATEUR A DOUBLE SECONDAIRE", "TRANSFORMATEUR SEC ENROBÉ"];
 const LISTE_TYPE_ISOLATION_TDY = ["Immergé (huile)", "Sec (résine/enrobé)"];
+// Type de refroidissement (CEI 60076-2), pertinent uniquement pour les transformateurs immergés.
+const LISTE_REFROIDISSEMENT_TRANSFO = ["ONAN", "ONAF", "OFAF", "OFWF", "ODAF"];
+const DESCRIPTION_REFROIDISSEMENT_TRANSFO = {
+  ONAN: "Circulation naturelle de l'huile et de l'air (convection libre, sans ventilateur ni pompe) — le mode le plus courant sur les transformateurs de distribution.",
+  ONAF: "Circulation naturelle de l'huile, air forcé par ventilateurs — puissance de refroidissement accrue par rapport à l'ONAN, pour les charges plus élevées.",
+  OFAF: "Huile et air forcés (pompe à huile + ventilateurs) — utilisé sur les transformateurs de forte puissance.",
+  OFWF: "Huile forcée, refroidie par eau forcée (échangeur huile/eau) — utilisé quand l'air ambiant ne suffit pas à évacuer les calories.",
+  ODAF: "Huile dirigée (circulation forcée guidée à travers les enroulements) et air forcé — le mode le plus performant, réservé aux très fortes puissances.",
+};
 const LISTE_TYPE_JDB = ["Jeu de barres", "Gaine à barres"];
 const LISTE_MARQUE_BATTERIE = ["ABB", "AEG", "Alpes Technologies", "Alstom", "Beluk", "Chauvin Arnoux", "Comar Condensatori", "EPCOS", "ESTA", "Fabrimex", "Frako", "Kautz", "Merlin Gerin", "Schneider Electric", "Sermes", "Socomec", "Varilec", "Vishay", "Legrand", "Circutor", "Enerlux", "ICAR", "Ducati Energia", "Zezal"];
 const LISTE_TYPE_COMPENSATION = ["Compensateur d'énergie réactive", "Power Factor Correction"];
@@ -290,6 +310,17 @@ const FUSIBLE_FIELDS = [
   F("reference", "Référence"),
   F("in", "In", "A", LISTE_IN_FUSIBLE),
   F("un", "Un", "kV", LISTE_UN_FUSIBLE),
+  F("anneeMiseEnService", "Année de mise en service", null, LISTE_ANNEES_MES),
+  F("dureeVieConstructeur", "Durée de vie constructeur", "ans", LISTE_DUREE_VIE_FUSIBLE, "10"),
+  {
+    key: "avertissementAge", label: "Âge / Avertissement",
+    compute: (f) => {
+      const annee = numOf(f.anneeMiseEnService), duree = numOf(f.dureeVieConstructeur) ?? 10;
+      if (annee === null) return "";
+      const age = new Date().getFullYear() - annee;
+      return age > duree ? `⚠ ${age} ans — durée de vie constructeur (${duree} ans) dépassée, à surveiller / envisager le remplacement` : `${age} an(s) — dans la durée de vie constructeur (${duree} ans)`;
+    },
+  },
   ...L1L2L3("µΩ"),
   F("valeur", "R mesurée à 20°C", "mΩ"),
   { key: "tol_min", label: "Tolérance min", unit: "mΩ", unitFrom: "valeur", compute: (f) => { const v = numOf(f.valeur); return v === null ? "" : Math.floor(v * 0.9); } },
@@ -318,6 +349,27 @@ const LISTE_RAPPORT_PRIMAIRE_TC = ["10", "15", "20", "30", "40", "50", "60", "75
 const LISTE_RAPPORT_PRIMAIRE_TORE = ["20", "30", "40", "50", "60", "75", "100", "150", "200"];
 // Références commerciales courantes des tores homopolaires (gamme Schneider Electric SCH — liste + saisie libre).
 const LISTE_MODELE_TORE_HOMOPOLAIRE = ["SCH2", "SCH12", "SCH46", "SCH80", "SCH120", "SCH200", "SCH250"];
+// Modèles de TC/TP par marque — ex. Schneider Electric ARM3 (bobiné) / N2F (tore de mesure).
+const MARQUE_MODELE_TC = {
+  "Schneider Electric": ["ARM1", "ARM3", "N2F", "N1F"],
+  "Merlin Gerin": ["ARM1", "ARM3", "N2F"],
+  "ABB": ["KOTEP", "KOTEO"],
+  "Siemens": ["4MA7", "4MB"],
+  "GE Grid Solutions": ["JAK", "JVM"],
+};
+const LISTE_MODELE_TC_OPTIONS = optionsParMarque(MARQUE_MODELE_TC, combineValues(MARQUE_MODELE_TC));
+const LISTE_MARQUE_TC = Object.keys(MARQUE_MODELE_TC);
+const MARQUE_MODELE_TP = {
+  "Schneider Electric": ["VRQ2", "VRC"],
+  "ABB": ["VDC", "VEO"],
+  "Siemens": ["4MS", "4MR"],
+  "Trench": ["EPU", "EEU"],
+  "Ritz": ["EOK", "EOL"],
+};
+const LISTE_MODELE_TP_OPTIONS = optionsParMarque(MARQUE_MODELE_TP, combineValues(MARQUE_MODELE_TP));
+const LISTE_MARQUE_TP = Object.keys(MARQUE_MODELE_TP);
+// Tension assignée (isolement) — caractéristique constructeur usuelle des TC/TP HTA.
+const LISTE_TENSION_ASSIGNEE_HTA = ["7.2", "12", "17.5", "24", "36"];
 const LISTE_TYPE_TC = ["Bobiné", "Tore", "Barre", "Enroulé"];
 const LISTE_COUPLAGE_TC = ["S1-S2", "1S1-1S2", "2S1-2S2", "P1-P2"];
 const LISTE_PUISSANCE_TC = ["2.5", "5", "7.5", "10", "15", "20", "30"];
@@ -329,6 +381,14 @@ const LISTE_CLASSE_TC_TOUTES = [...LISTE_CLASSE_TC_PROTECTION, ...LISTE_CLASSE_T
 // TP (transformateurs de potentiel/tension) : rapports courants HTA.
 const LISTE_RAPPORT_TP = ["5500/100", "10000/100", "15000/100", "20000/100", "20000/100/√3", "33000/100/√3"];
 const LISTE_CLASSE_TP = ["0.2", "0.5", "1", "3P"];
+const LISTE_TYPE_TP = ["Inductif", "Capacitif"];
+const LISTE_PUISSANCE_TP = ["10", "15", "25", "30", "50", "75", "100"];
+// Caractéristiques constructeur complètes du TP dédié — même niveau de détail que les TC.
+const TP_FIELDS_DYNAMIQUE = [
+  F("marque", "Marque", null, LISTE_MARQUE_TP), F("modele", "Modèle", null, LISTE_MODELE_TP_OPTIONS), F("reference", "Référence"),
+  F("type", "Type", null, LISTE_TYPE_TP), F("tensionAssignee", "Tension assignée", "kV", LISTE_TENSION_ASSIGNEE_HTA), F("puissance", "Puissance", "VA", LISTE_PUISSANCE_TP), F("classe", "Classe de précision", null, LISTE_CLASSE_TP),
+  F("rapport", "Rapport", null, LISTE_RAPPORT_TP),
+];
 // Un TC "Protection / Mesure" peut avoir deux enroulements secondaires distincts (deux noyaux),
 // donc deux couples rapport/classe différents — champs affichés uniquement dans ce cas.
 function TC_FIELDS_DYNAMIC(fieldsCourants) {
@@ -338,7 +398,9 @@ function TC_FIELDS_DYNAMIC(fieldsCourants) {
   const classeOptions = fonction === "Protection" ? LISTE_CLASSE_TC_PROTECTION : fonction === "Mesure" ? LISTE_CLASSE_TC_MESURE : LISTE_CLASSE_TC_TOUTES;
   const base = [
     F("fonction", "Fonction", null, LISTE_TC_FONCTION),
+    F("marque", "Marque", null, LISTE_MARQUE_TC), F("modele", "Modèle", null, LISTE_MODELE_TC_OPTIONS),
     F("type", "Type", null, LISTE_TYPE_TC), F("couplage", "Couplage (bornes)", null, LISTE_COUPLAGE_TC), F("puissance", "Puissance", "VA", LISTE_PUISSANCE_TC),
+    F("tensionAssignee", "Tension assignée", "kV", LISTE_TENSION_ASSIGNEE_HTA),
     F("classe", estDouble ? "Classe (protection)" : "Classe", null, classeOptions),
     F("rapportPrimaire", "Rapport primaire", null, estTore ? LISTE_RAPPORT_PRIMAIRE_TORE : LISTE_RAPPORT_PRIMAIRE_TC), F("secondaire", "Secondaire", "A", LISTE_TC_SECONDAIRE),
   ];
@@ -359,6 +421,7 @@ const TYPES_AVEC_TC = ["Comptage HTA", "Contacteur HTA", "Disjoncteur HTA", "Int
 function equipementAvecTC(eq) {
   if (!TYPES_AVEC_TC.includes(eq.type)) return false;
   if (eq.type === "Interrupteur HTA" || eq.type === "Interrupteur Fusible HTA") return eq.identification?.presenceRelais === "Oui";
+  if (eq.type === "Comptage HTA" || eq.type === "Contacteur HTA") return eq.identification?.presenceTC === "Oui"; // généralement absent d'origine sur ces équipements
   return true;
 }
 const TYPES_AVEC_ORGANES_DYNAMIQUE = ["Interrupteur HTA", "Interrupteur Fusible HTA", "Disjoncteur HTA", "Disjoncteur BT", "Interrupteur BT"];
@@ -465,6 +528,58 @@ function elementsBatterieHorsTolerance(eq) {
   if (!valeurs.length) return false;
   const moyenne = Math.round((valeurs.reduce((a, b) => a + b, 0) / valeurs.length) * 1000) / 1000;
   return entries.some((e) => elementBatterieStatus(e.fields.tension, moyenne, cfg.toleranceBasse, cfg.toleranceHaute) === "bad");
+}
+// Détection générique : toute mesure (L1/L2/L3, valeur, Rd...) qui dépasse la tolérance déclarée
+// dans le MÊME contrôle (motif très répandu : résistances de contact, bobine de déclenchement,
+// continuité des masses...). Couvre automatiquement tout nouveau contrôle suivant ce motif, sans
+// avoir à l'ajouter au cas par cas.
+function valeursHorsToleranceGenerique(eq) {
+  const controles = eq.controles || {};
+  for (const secKey in controles) {
+    const sec = controles[secKey];
+    if (!sec || typeof sec !== "object") continue;
+    for (const itemKey in sec) {
+      if (itemKey.endsWith("__custom")) continue;
+      const item = sec[itemKey];
+      if (!item || !item.fields || typeof item.fields !== "object") continue;
+      const f = item.fields;
+      const tol = numOf(f.tolerance ?? f.tol_max);
+      if (tol === null) continue;
+      const tolMin = f.tol_min !== undefined ? numOf(f.tol_min) : null;
+      for (const k of ["l1", "l2", "l3", "valeur", "rd", "n"]) {
+        const v = numOf(f[k]);
+        if (v === null) continue;
+        if (v > tol || (tolMin !== null && v < tolMin)) return true;
+      }
+    }
+  }
+  return false;
+}
+// Temps d'ouverture/fermeture disjoncteur : écart significatif (> 20 %) par rapport à la valeur de
+// référence constructeur renseignée — pas de seuil normatif universel (CEI 62271-100), donc on reste
+// volontairement large pour ne signaler qu'un écart net.
+function tempsManoeuvreHorsTolerance(eq) {
+  const elec = (eq.controles && (eq.controles.controles_disjoncteur || eq.controles.electriques)) || {};
+  return ["temps_ouverture", "temps_fermeture"].some((k) => {
+    const f = elec[k] && elec[k].fields;
+    if (!f) return false;
+    const ref = numOf(f.reference);
+    if (ref === null || ref === 0) return false;
+    return ["l1", "l2", "l3"].some((p) => {
+      const v = numOf(f[p]);
+      return v !== null && Math.abs(v - ref) / ref > 0.2;
+    });
+  });
+}
+// Rapport de transformation mesuré vs théorique (±0,5 % CEI 60076-1).
+function rapportTransformationHorsTolerance(eq) {
+  if (eq.type !== "Transformateur") return false;
+  const rTheo = calcRapportTheoriqueTransfo(eq);
+  if (rTheo === null) return false;
+  const tol = calcToleranceRapportTransfo(rTheo);
+  const f = eq.controles.rapport_transformation && eq.controles.rapport_transformation.rapport_par_phase && eq.controles.rapport_transformation.rapport_par_phase.fields;
+  if (!f || !tol) return false;
+  return ["l1", "l2", "l3"].some((k) => { const v = numOf(f[k]); return v !== null && (v < tol.min || v > tol.max); });
 }
 // Vrai si au moins un gradin de l'équipement a un courant mesuré hors tolérance (±10 % du courant
 // théorique) — utilisé pour rappeler au technicien de bien répercuter l'anomalie dans l'état final.
@@ -1052,6 +1167,7 @@ function buildTransformateurSchema({ sec = false } = {}) {
       { key: "puissance", label: "Puissance (KVA)", numeric: true }, { key: "tensionPrimaire", label: "Tension primaire (KV)", numeric: true },
       { key: "couplage", label: "Couplage", options: LISTE_COUPLAGE_TDY }, { key: "tensionSecondaire", label: "Tension secondaire (V)", numeric: true },
       { key: "ucc", label: "Ucc (%)", numeric: true },
+      ...(!sec ? [{ key: "typeRefroidissement", label: "Type de refroidissement", options: LISTE_REFROIDISSEMENT_TRANSFO }] : []),
       ...(sec ? [{ key: "classeIsolation", label: "Classe d'isolation (sec)", options: ["F", "H"] }] : []),
     ],
     sections: [
@@ -1108,7 +1224,7 @@ function buildInterrupteurHTASchema({ avecRelais = false } = {}) {
       { key: "repere", label: "Repère / Nom de l'équipement" }, { key: "marque", label: "Marque", options: LISTE_MARQUE_CELLULE_HTA }, { key: "modele", label: "Modèle", options: LISTE_MODELE_CELLULE_HTA_OPTIONS },
       { key: "typeCellule", label: "Type de cellule", options: LISTE_TYPE_CELLULE["Interrupteur HTA"] }, { key: "numeroSerie", label: "Numéro de série" },
       { key: "presenceRelais", label: "Présence d'un relais de protection", options: ["Non", "Oui"] },
-      ...(avecRelais ? [{ key: "rapportTPProtection", label: "Rapport TP de protection (ex. 20000/100)" }] : []),
+      ...(avecRelais ? [{ key: "marqueTP", label: "Marque du TP" }, { key: "referenceTP", label: "Référence du TP" }, { key: "rapportTPProtection", label: "Rapport TP de protection", options: LISTE_RAPPORT_TP }, { key: "classeTP", label: "Classe de précision (TP)", options: LISTE_CLASSE_TP }] : []),
     ],
     sections: [
       { key: "mecaniques", title: "Contrôles mécaniques", items: [
@@ -1144,7 +1260,7 @@ function buildInterrupteurFusibleHTASchema({ avecRelais = false } = {}) {
       { key: "repere", label: "Repère / Nom de l'équipement" }, { key: "marque", label: "Marque", options: LISTE_MARQUE_CELLULE_HTA }, { key: "modele", label: "Modèle", options: LISTE_MODELE_CELLULE_HTA_OPTIONS },
       { key: "typeCellule", label: "Type de cellule", options: LISTE_TYPE_CELLULE["Interrupteur Fusible HTA"] }, { key: "numeroSerie", label: "Numéro de série" },
       { key: "presenceRelais", label: "Présence d'un relais de protection", options: ["Non", "Oui"] },
-      ...(avecRelais ? [{ key: "rapportTPProtection", label: "Rapport TP de protection (ex. 20000/100)" }] : []),
+      ...(avecRelais ? [{ key: "marqueTP", label: "Marque du TP" }, { key: "referenceTP", label: "Référence du TP" }, { key: "rapportTPProtection", label: "Rapport TP de protection", options: LISTE_RAPPORT_TP }, { key: "classeTP", label: "Classe de précision (TP)", options: LISTE_CLASSE_TP }] : []),
     ],
     sections: [
       { key: "mecaniques", title: "Contrôles mécaniques", items: [
@@ -1177,7 +1293,7 @@ function buildInterrupteurFusibleHTASchema({ avecRelais = false } = {}) {
 const SCHEMAS = {
   "Interrupteur HTA": buildInterrupteurHTASchema({}),
   "Comptage HTA": {
-    identification: [{ key: "repere", label: "Repère / Nom de l'équipement" }, { key: "marque", label: "Marque", options: LISTE_MARQUE_CELLULE_HTA }, { key: "modele", label: "Modèle", options: LISTE_MODELE_CELLULE_HTA_OPTIONS }, { key: "typeCellule", label: "Type de cellule", options: LISTE_TYPE_CELLULE["Comptage HTA"] }, { key: "numeroSerie", label: "Numéro de série" }, { key: "rapportTPProtection", label: "Rapport TP (ex. 20000/100)" }],
+    identification: [{ key: "repere", label: "Repère / Nom de l'équipement" }, { key: "marque", label: "Marque", options: LISTE_MARQUE_CELLULE_HTA }, { key: "modele", label: "Modèle", options: LISTE_MODELE_CELLULE_HTA_OPTIONS }, { key: "typeCellule", label: "Type de cellule", options: LISTE_TYPE_CELLULE["Comptage HTA"] }, { key: "numeroSerie", label: "Numéro de série" }, { key: "marqueTP", label: "Marque du TP" }, { key: "referenceTP", label: "Référence du TP" }, { key: "rapportTPProtection", label: "Rapport TP de protection", options: LISTE_RAPPORT_TP }, { key: "classeTP", label: "Classe de précision (TP)", options: LISTE_CLASSE_TP }],
     sections: [
       { key: "mecaniques", title: "Contrôles mécaniques", items: MECA_CELLULE },
       { key: "electriques", title: "Contrôles électriques", items: [
@@ -1186,7 +1302,7 @@ const SCHEMAS = {
         C("connexions_puissance", "Contrôle des connexions de puissance"),
         C("tetes_cables", "Contrôle des têtes de câbles"),
         C("contacts_position", "Contrôle des contacts de position"),
-        C("tp", "Contrôle des transformateurs de potentiel (TP)", [...TC_FIELDS, F("rapport", "Rapport", null, LISTE_RAPPORT_TP)]),
+        C("tp", "Contrôle des transformateurs de potentiel (TP)", TP_FIELDS_DYNAMIQUE),
         ...FUSIBLES,
         C("rapport_tc_comptage", "Contrôle du rapport de transformation des TC de comptage", [...L1L2L3()]),
         C("scelles_plombs", "Vérification des scellés / plombs réglementaires"),
@@ -1204,7 +1320,7 @@ const SCHEMAS = {
       { key: "typeCellule", label: "Type de cellule", options: LISTE_TYPE_CELLULE["Disjoncteur HTA"] }, { key: "numeroSerie", label: "Numéro de série" },
       { key: "referenceDisjoncteur", label: "Référence du disjoncteur", options: LISTE_REF_DISJONCTEUR }, { key: "numeroSerieDisjoncteur", label: "Numéro de série (disjoncteur)" },
       { key: "marqueRelais", label: "Marque du relais de protection", options: LISTE_MARQUE_RELAIS_HTA }, { key: "referenceRelais", label: "Référence du relais", options: LISTE_REFERENCE_RELAIS_HTA_OPTIONS }, { key: "numeroSerieRelais", label: "Numéro de série (relais)" },
-      { key: "rapportTPProtection", label: "Rapport TP de protection (ex. 20000/100)" },
+      { key: "marqueTP", label: "Marque du TP" }, { key: "referenceTP", label: "Référence du TP" }, { key: "rapportTPProtection", label: "Rapport TP de protection", options: LISTE_RAPPORT_TP }, { key: "classeTP", label: "Classe de précision (TP)", options: LISTE_CLASSE_TP },
     ],
     sections: [
       { key: "mecaniques", title: "Contrôles mécaniques", items: MECA_CELLULE },
@@ -1230,10 +1346,10 @@ const SCHEMAS = {
       { key: "repere", label: "Repère / Nom de l'équipement" }, 
       { key: "marque", label: "Marque", options: LISTE_MARQUE_CELLULE_HTA },
       { key: "modele", label: "Modèle", options: LISTE_MODELE_CELLULE_HTA_OPTIONS },
-      { key: "typeCellule", label: "Type de cellule", options: LISTE_TYPE_CELLULE["Contacteur HTA"] }, { key: "numeroSerie", label: "Numéro de série" },
+      { key: "typeCellule", label: "Type de cellule", options: LISTE_TYPE_CELLULE_CONTACTEUR_OPTIONS }, { key: "numeroSerie", label: "Numéro de série" },
       { key: "referenceContacteur", label: "Référence du contacteur", options: LISTE_REF_DISJONCTEUR }, { key: "numeroSerieContacteur", label: "Numéro de série (contacteur)" },
       { key: "marqueRelais", label: "Marque du relais de protection", options: LISTE_MARQUE_RELAIS_HTA }, { key: "referenceRelais", label: "Référence du relais", options: LISTE_REFERENCE_RELAIS_HTA_OPTIONS }, { key: "numeroSerieRelais", label: "Numéro de série (relais)" },
-      { key: "rapportTPProtection", label: "Rapport TP de protection (ex. 20000/100)" },
+      { key: "marqueTP", label: "Marque du TP" }, { key: "referenceTP", label: "Référence du TP" }, { key: "rapportTPProtection", label: "Rapport TP de protection", options: LISTE_RAPPORT_TP }, { key: "classeTP", label: "Classe de précision (TP)", options: LISTE_CLASSE_TP },
     ],
     sections: [
       { key: "mecaniques", title: "Contrôles mécaniques", items: MECA_CELLULE },
@@ -1849,12 +1965,13 @@ function siteExportWarnings(site) {
   if (!site.rapport.intervenant) w.push("L'intervenant principal n'est pas renseigné");
   if (site.equipements.length === 0) w.push("Aucun équipement n'a été ajouté sur ce site");
   site.equipements.forEach((eq) => {
-    if (gradinsHorsTolerance(eq) && eq.etatFinal === "Conforme") {
-      w.push(`${eq.type}${eq.identification.repere ? " — " + eq.identification.repere : ""} : un courant de gradin est hors tolérance mais l'état final est toujours « Conforme »`);
-    }
-    if (elementsBatterieHorsTolerance(eq) && eq.etatFinal === "Conforme") {
-      w.push(`${eq.type}${eq.identification.repere ? " — " + eq.identification.repere : ""} : un élément de batterie est hors tolérance mais l'état final est toujours « Conforme »`);
-    }
+    const nomEq = `${eq.type}${eq.identification.repere ? " — " + eq.identification.repere : ""}`;
+    if (eq.etatFinal !== "Conforme") return; // déjà signalé comme non conforme, pas besoin d'alerte supplémentaire
+    if (gradinsHorsTolerance(eq)) w.push(`${nomEq} : un courant de gradin est hors tolérance mais l'état final est toujours « Conforme »`);
+    if (elementsBatterieHorsTolerance(eq)) w.push(`${nomEq} : un élément de batterie est hors tolérance mais l'état final est toujours « Conforme »`);
+    if (valeursHorsToleranceGenerique(eq)) w.push(`${nomEq} : une mesure dépasse la tolérance indiquée (résistance de contact, bobine, continuité...) mais l'état final est toujours « Conforme »`);
+    if (tempsManoeuvreHorsTolerance(eq)) w.push(`${nomEq} : un temps de manœuvre s'écarte significativement de la référence constructeur mais l'état final est toujours « Conforme »`);
+    if (rapportTransformationHorsTolerance(eq)) w.push(`${nomEq} : le rapport de transformation mesuré sort de la tolérance CEI 60076-1 mais l'état final est toujours « Conforme »`);
   });
   return w;
 }
@@ -4071,7 +4188,17 @@ function DisjoncteurRelaisPanel({ eq, update, custom, onAddCustom, onChangeCusto
                     const champReglage = champsReglage.find((f) => f.key === "reglage");
                     const unite = champReglage ? champReglage.unit : null;
                     const aide = calcInjectionAide(s.fields.reglage, unite, eq, ansiFamily(s.label), s.fields.modeDetection, estCEI ? (s.essai.fields.multipleInjection || "2") : null);
-                    if (aide === null) return null;
+                    const hintStyle = { fontSize: 11, color: "#8B96A3", fontStyle: "italic" };
+                    if (aide === null) {
+                      if (unite === "%") {
+                        return <span style={hintStyle}>Réglage en % (déséquilibre / différentielle) — pas d'aide à l'injection calculée ici, se référer à la méthode du constructeur du relais.</span>;
+                      }
+                      if (unite && numOf(s.fields.reglage) !== null) {
+                        const manque = unite === "kW" ? "un TC ET un rapport TP (identification)" : unite === "V" ? "un rapport TP (identification)" : "un TC (rapport primaire/secondaire renseigné)";
+                        return <span style={hintStyle}>Aide non disponible — renseignez {manque} pour ce calcul.</span>;
+                      }
+                      return null;
+                    }
                     const en3U3I = s.essai.fields.typeValise === "3U3I (triphasé)";
                     const pill = { fontSize: 11, color: "#0A5DA8", background: "rgba(10,93,168,0.08)", padding: "4px 8px", borderRadius: 6 };
                     if (typeof aide === "object" && aide.type === "puissance") {
@@ -4410,6 +4537,12 @@ function EquipementCard({ eq, update, remove, removable = true, onDuplicate, loc
           )}
 
           {(eq.type === "Onduleur" || eq.type === "Redresseur chargeur" || eq.type === "Inverseur de source") && <SchemaOnduleur eq={eq} />}
+
+          {eq.type === "Transformateur" && eq.identification?.typeRefroidissement && DESCRIPTION_REFROIDISSEMENT_TRANSFO[eq.identification.typeRefroidissement] && (
+            <div style={{ fontSize: 11.5, color: "#0A5DA8", background: "rgba(10,93,168,0.08)", padding: "8px 12px", borderRadius: 8, marginBottom: 14 }}>
+              <b>{eq.identification.typeRefroidissement}</b> (CEI 60076-2) — {DESCRIPTION_REFROIDISSEMENT_TRANSFO[eq.identification.typeRefroidissement]}
+            </div>
+          )}
 
           {eq.type === "Bilan de puissance" && (eq.identification.rattachement === "Transformateur" || eq.identification.rattachement === "Disjoncteur BT") && (() => {
             const typeCible = eq.identification.rattachement;
@@ -4878,6 +5011,7 @@ function EquipementCard({ eq, update, remove, removable = true, onDuplicate, loc
             const estThermo = sec.key === "thermographie_ups" || sec.key === "thermographie_connexions" || sec.key === "thermographie" || sec.key === "thermographie_batt";
             const estIsolement = sec.key === "mesure_isolement";
             const estSecuriteEPI = sec.key === "materiel_securite";
+            const estComptageSansTC = sec.key === "electriques" && (eq.type === "Comptage HTA" || eq.type === "Contacteur HTA") && !equipementAvecTC(eq);
             return (
               <SectionBlock
                 key={sec.key}
@@ -4891,7 +5025,14 @@ function EquipementCard({ eq, update, remove, removable = true, onDuplicate, loc
                 onChangeCustom={(id, patch) => changeCustomAction(sec.key, id, patch)}
                 onRemoveCustom={(id) => removeCustomAction(sec.key, id)}
                 extra={
-                  estThermo && tauxChargeCalc ? (
+                  estComptageSansTC ? (
+                    <div style={{ marginTop: 8 }}>
+                      <div style={{ fontSize: 11.5, color: "#8B96A3", marginBottom: 6 }}>{eq.type === "Comptage HTA" ? "Une cellule de comptage n'a généralement pas de TC dédié." : "Cet équipement n'a pas de TC par défaut."}</div>
+                      <button onClick={() => setIdentification("presenceTC", "Oui")} style={btnGhost(BRAND.blue)}>
+                        <Plus size={13} /> Ajouter un TC
+                      </button>
+                    </div>
+                  ) : estThermo && tauxChargeCalc ? (
                     <div style={{ fontSize: 11.5, color: "#0A5DA8", background: "rgba(10,93,168,0.08)", padding: "8px 12px", borderRadius: 8, marginTop: 8 }}>
                       Taux de charge déjà calculé pour cet équipement — L1 : {tauxChargeCalc.t1 ?? "—"}% · L2 : {tauxChargeCalc.t2 ?? "—"}% · L3 : {tauxChargeCalc.t3 ?? "—"}% — à reporter dans « Charge au moment du contrôle » si pertinent pour ce point de mesure.
                     </div>
@@ -6880,6 +7021,9 @@ function docxEquipementElements(eq, locaux, allSites) {
   if (schema.identification.length) {
     const t = docxFieldTable(schema.identification.map((f) => [f.label, eq.identification[f.key]]));
     if (t) { elements.push(t); elements.push(docxSpacer()); }
+  }
+  if (eq.type === "Transformateur" && eq.identification?.typeRefroidissement && DESCRIPTION_REFROIDISSEMENT_TRANSFO[eq.identification.typeRefroidissement]) {
+    elements.push(docxNormeNote(`${eq.identification.typeRefroidissement} (CEI 60076-2) — ${DESCRIPTION_REFROIDISSEMENT_TRANSFO[eq.identification.typeRefroidissement]}`));
   }
   if (eq.type === "Onduleur" || eq.type === "Redresseur chargeur" || eq.type === "Inverseur de source") {
     const gen = eq.type === "Onduleur" ? genererSchemaOnduleur : eq.type === "Redresseur chargeur" ? genererSchemaRedresseurChargeur : genererSchemaInverseurSource;
