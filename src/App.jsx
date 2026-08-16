@@ -7627,7 +7627,7 @@ async function generateAnnexePhotosDocx(site) {
     });
   }
   if (total === 0) children.push(new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: "Aucune photo n'a été ajoutée sur ce site.", italics: true, size: 20, color: "666666" })] }));
-  const doc = new DOCX.Document({ sections: [{ properties: { page: { margin: { top: 500, bottom: 500, left: 600, right: 600 } } }, footers: { default: docxFooterPagination() }, children }] });
+  const doc = new DOCX.Document({ features: { updateFields: true }, sections: [{ properties: { page: { margin: { top: 500, bottom: 500, left: 600, right: 600 } } }, footers: { default: docxFooterPagination() }, children }] });
   return DOCX.Packer.toBlob(doc);
 }
 function docxCoverPage(site) {
@@ -7738,7 +7738,7 @@ async function generateSiteDocx(site, allSites) {
   children.push(docxSpacer(200));
   children.push(new DOCX.Paragraph({ border: { top: { color: DOCX_SILVER, space: 4, style: DOCX.BorderStyle.SINGLE, size: 4 } }, spacing: { before: 100 }, children: [new DOCX.TextRun({ text: "HT Maintenance — Maintenance électrique HTA / BT", size: 14, color: "888888", italics: true })] }));
 
-  const doc = new DOCX.Document({ sections: [{ properties: { page: { margin: { top: 500, bottom: 500, left: 600, right: 600 } } }, footers: { default: docxFooterPagination() }, children }] });
+  const doc = new DOCX.Document({ features: { updateFields: true }, sections: [{ properties: { page: { margin: { top: 500, bottom: 500, left: 600, right: 600 } } }, footers: { default: docxFooterPagination() }, children }] });
   return DOCX.Packer.toBlob(doc);
 }
 
@@ -7819,7 +7819,7 @@ async function generateInterventionDocx(iv) {
   if (sigClient) { children.push(new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: "Signature client :", size: 16, color: "666666" })] })); children.push(new DOCX.Paragraph({ spacing: { after: 80 }, children: [sigClient] })); }
   if (sigHT) { children.push(new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: "Signature technicien :", size: 16, color: "666666" })] })); children.push(new DOCX.Paragraph({ spacing: { after: 80 }, children: [sigHT] })); }
 
-  const doc = new DOCX.Document({ sections: [{ properties: { page: { margin: { top: 500, bottom: 500, left: 600, right: 600 } } }, footers: { default: docxFooterPagination() }, children } ] });
+  const doc = new DOCX.Document({ features: { updateFields: true }, sections: [{ properties: { page: { margin: { top: 500, bottom: 500, left: 600, right: 600 } } }, footers: { default: docxFooterPagination() }, children } ] });
   return DOCX.Packer.toBlob(doc);
 }
 
