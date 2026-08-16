@@ -2057,18 +2057,24 @@ function GererClientsModal({ registry, setRegistry, allSites, onClose }) {
   const modifier = (id, patch) => setRegistry(registry.map((c) => (c.id === id ? { ...c, ...patch } : c)));
 
   const exporterExcel = async () => {
-    const XLSX = await import("xlsx");
-    const rows = registry.map((c) => ({ ID: c.id, Nom: c.nom, "E-mail": c.email || "" }));
-    const ws = XLSX.utils.json_to_sheet(rows);
-    ws["!cols"] = [{ wch: 22 }, { wch: 32 }, { wch: 32 }];
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Clients");
-    XLSX.writeFile(wb, `Clients_HT-Maintenance_${todayISO()}.xlsx`);
+    try {
+      const mod = await import("xlsx");
+      const XLSX = mod.utils ? mod : mod.default; // interop CJS/ESM : selon le bundler, les exports peuvent se retrouver sous .default
+      const rows = registry.map((c) => ({ ID: c.id, Nom: c.nom, "E-mail": c.email || "" }));
+      const ws = XLSX.utils.json_to_sheet(rows);
+      ws["!cols"] = [{ wch: 22 }, { wch: 32 }, { wch: 32 }];
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Clients");
+      XLSX.writeFile(wb, `Clients_HT-Maintenance_${todayISO()}.xlsx`);
+    } catch (e) {
+      setImportMsg("Échec de l'export — " + (e?.message || "erreur inconnue"));
+    }
   };
   const importerExcel = async (file) => {
     setImportMsg("");
     try {
-      const XLSX = await import("xlsx");
+      const mod = await import("xlsx");
+      const XLSX = mod.utils ? mod : mod.default;
       const buf = await file.arrayBuffer();
       const wb = XLSX.read(buf, { type: "array" });
       const ws = wb.Sheets[wb.SheetNames[0]];
@@ -2089,7 +2095,8 @@ function GererClientsModal({ registry, setRegistry, allSites, onClose }) {
       setRegistry(next);
       setImportMsg(`Import terminé — ${maj} client(s) mis à jour, ${crees} créé(s).`);
     } catch (e) {
-      setImportMsg("Échec de l'import — vérifiez que le fichier est bien celui exporté depuis cette page.");
+      console.error("[Import Excel clients] Erreur :", e);
+      setImportMsg("Échec de l'import — " + (e?.message || "vérifiez que le fichier est bien un .xlsx valide."));
     }
   };
 
@@ -2196,6 +2203,49 @@ function ClientAutocomplete({ clientValue, onChangeClient, onChangeEmail, allSit
           {contactsOrg.contacts.map((c) => (
             <div key={c.email} onClick={() => { onChangeEmail(c.email); setContactsOrg(null); }} style={{ padding: "4px 6px", cursor: "pointer", color: "#3E4A5C" }}>
               {c.nom} — {c.email}{c.fonction ? ` (${c.fonction})` : ""}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+// Suggestions de noms de site déjà utilisés — même principe que ClientAutocomplete, pour retrouver
+// rapidement un nom déjà saisi (utile quand un même client a plusieurs sites, ou pour rester cohérent
+// d'une visite à l'autre) sans passer par le mécanisme complet de reprise de site.
+function SiteNomAutocomplete({ nomValue, onChangeNom, allSites }) {
+  const [open, setOpen] = useState(false);
+  const nomsConnus = useMemo(() => {
+    const vus = new Set();
+    const liste = [];
+    (allSites || []).forEach((s) => {
+      if (!s.nom) return;
+      const key = s.nom.trim().toLowerCase();
+      if (vus.has(key)) return;
+      vus.add(key);
+      liste.push(s.nom);
+    });
+    return liste;
+  }, [allSites]);
+  const suggestions = useMemo(() => {
+    if (!nomValue || nomValue.length < 2) return [];
+    const q = nomValue.toLowerCase();
+    return nomsConnus.filter((n) => n.toLowerCase().includes(q)).slice(0, 8);
+  }, [nomsConnus, nomValue]);
+  return (
+    <div style={{ position: "relative" }}>
+      <TextInput
+        value={nomValue}
+        onChange={(e) => { onChangeNom(e.target.value); setOpen(true); }}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        placeholder="Nom du site"
+      />
+      {open && suggestions.length > 0 && (
+        <div style={{ position: "absolute", left: 0, right: 0, top: "100%", background: "#F7F8FA", border: "1px solid #D8DEE5", borderRadius: 8, marginTop: 2, zIndex: 60, maxHeight: 220, overflowY: "auto", boxShadow: "0 8px 24px rgba(0,0,0,0.35)" }}>
+          {suggestions.map((n) => (
+            <div key={n} onMouseDown={() => { onChangeNom(n); setOpen(false); }} style={{ padding: "8px 12px", fontSize: 12.5, color: "#3E4A5C", cursor: "pointer", borderBottom: "1px solid #E2E6EB" }}>
+              {n}
             </div>
           ))}
         </div>
@@ -3793,16 +3843,24 @@ function SchemaOnduleur({ eq }) {
   const [dataUrl, setDataUrl] = useState(null);
   const typeUPS = eq.identification?.typeUPS;
   const regimesKey = JSON.stringify(eq.controles?.regimes_reseaux || {});
-  useEffect(() => {
+  const regenerer = () => {
     const gen = eq.type === "Onduleur" ? genererSchemaOnduleur : eq.type === "Redresseur chargeur" ? genererSchemaRedresseurChargeur : genererSchemaInverseurSource;
     setDataUrl(gen(eq));
+  };
+  useEffect(() => {
+    regenerer();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [eq.type, typeUPS, regimesKey]);
   if (!dataUrl) return null;
   return (
     <Card style={{ marginBottom: 14, textAlign: "center" }}>
-      <div style={{ fontSize: 11.5, fontWeight: 700, color: "#5B6B7D", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.4, textAlign: "left" }}>
-        Schéma synoptique
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+        <div style={{ fontSize: 11.5, fontWeight: 700, color: "#5B6B7D", textTransform: "uppercase", letterSpacing: 0.4 }}>
+          Schéma synoptique
+        </div>
+        <button onClick={regenerer} style={btnGhost(BRAND.blue)} title="Régénère le schéma d'après les caractéristiques actuelles de l'équipement">
+          <RefreshCw size={13} /> Actualiser
+        </button>
       </div>
       <img src={dataUrl} alt="Schéma synoptique" style={{ maxWidth: "100%", height: "auto" }} />
     </Card>
@@ -5661,7 +5719,7 @@ function SiteDetail({ site, allSites, update, onBack, onDelete, onPrint, onPrint
               />
             </Field>
             <Field label="E-mail d'envoi du rapport"><TextInput type="email" value={site.emailEnvoi || ""} onChange={(e) => update((d) => ({ ...d, emailEnvoi: e.target.value }))} placeholder="contact@client.fr" /></Field>
-            <Field label="Nom du site"><TextInput value={site.nom} onChange={(e) => update((d) => ({ ...d, nom: e.target.value }))} placeholder="Nom du site" /></Field>
+            <Field label="Nom du site"><SiteNomAutocomplete nomValue={site.nom} onChangeNom={(v) => update((d) => ({ ...d, nom: v }))} allSites={allSites} /></Field>
             <Field label="Local"><TextInput value={site.local} onChange={(e) => update((d) => ({ ...d, local: e.target.value }))} placeholder="Local / emplacement" /></Field>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
