@@ -134,7 +134,7 @@ const LISTE_MARQUE_BATTERIE = ["ABB", "AEG", "Alpes Technologies", "Alstom", "Be
 const LISTE_TYPE_COMPENSATION = ["Compensateur d'énergie réactive", "Power Factor Correction"];
 const LISTE_TYPE_REGULATEUR = ["Statique", "Électromécanique"];
 const LISTE_ACCESSIBILITE = ["Conforme", "Difficile", "Très difficile"];
-const LISTE_TYPE_UPS = ["UPS", "NO BREAK", "ASI", "ONDULEUR", "Alimentation statique sans interruption", "Alimentation statique ininterrompue", "Onduleur sécurité"];
+const LISTE_TYPE_UPS = ["Onduleur", "ASI", "UPS", "Onduleur sécurité"];
 const LISTE_CONFIG_UPS = ["Unitaire", "Unitaire sans bypass", "Parallèle modulaire", "Parallèle centralisé"];
 const LISTE_TENSION_ENTREE_SORTIE = ["400 V / 400 V", "400 V / 230 V", "230 V / 230 V"];
 const LISTE_REGIME_SORTIE_UPS = ["3+N", "3", "1"];
@@ -868,15 +868,12 @@ function buildOnduleurSchema({ normalMono = false, secoursMono = false, utilisat
   return {
     identification: [
       { key: "repere", label: "Repère / Nom de l'équipement" },
-      { key: "marque", label: "Marque", options: LISTE_MARQUE_ONDULEUR }, { key: "modele", label: "Modèle", options: LISTE_MODELE_ONDULEUR_OPTIONS }, { key: "typeUPS", label: "Type", options: LISTE_TYPE_UPS },
+      { key: "marque", label: "Marque", options: LISTE_MARQUE_ONDULEUR }, { key: "modele", label: "Modèle", options: LISTE_MODELE_ONDULEUR_OPTIONS },
       { key: "configuration", label: "Configuration", options: LISTE_CONFIG_UPS },
       { key: "puissanceKVA", label: "Puissance (kVA)", numeric: true }, { key: "puissanceKW", label: "Puissance (kW)", numeric: true },
       { key: "tensionEntreeSortie", label: "Tension entrée / sortie", options: LISTE_TENSION_ENTREE_SORTIE },
       { key: "regimeSortie", label: "Régime de sortie", options: LISTE_REGIME_SORTIE_UPS },
-      { key: "transformateurAmont", label: "Transformateur amont", options: LISTE_TRANSFORMATEUR_AMONT },
       { key: "autoTransformateurAmont", label: "Auto-transformateur amont", options: LISTE_AUTO_TRANSFORMATEUR_AMONT },
-      { key: "alimentationReseaux", label: "Réseaux normal / secours", options: LISTE_ALIMENTATION_RESEAUX },
-      { key: "transformateurSortie", label: "Transformateur de sortie", options: LISTE_TRANSFORMATEUR_SORTIE },
       { key: "anneeMiseEnService", label: "Année de mise en service", numeric: true },
     ],
     sections: [
@@ -2046,6 +2043,21 @@ function GererClientsModal({ registry, setRegistry, allSites, onClose }) {
   const fileInputRef = useRef(null);
   const [importMsg, setImportMsg] = useState("");
   const dejaSurSite = useMemo(() => new Set((allSites || []).map((s) => (s.client || "").trim().toLowerCase()).filter(Boolean)), [allSites]);
+  // Liste fusionnée pour l'export : le registre (nom + e-mail saisis) complété par les clients
+  // détectés sur les sites existants mais jamais explicitement enregistrés ici — l'export doit
+  // couvrir tous les clients connus, pas seulement ceux ajoutés manuellement.
+  const clientsPourExport = useMemo(() => {
+    const vus = new Set(registry.map((c) => c.nom.trim().toLowerCase()));
+    const depuisSites = [];
+    (allSites || []).forEach((s) => {
+      if (!s.client) return;
+      const key = s.client.trim().toLowerCase();
+      if (vus.has(key)) return;
+      vus.add(key);
+      depuisSites.push({ id: "site_" + key, nom: s.client, email: s.emailEnvoi || "" });
+    });
+    return [...registry, ...depuisSites];
+  }, [registry, allSites]);
   const ajouter = () => {
     if (!nom.trim()) return;
     const key = nom.trim().toLowerCase();
@@ -2060,13 +2072,14 @@ function GererClientsModal({ registry, setRegistry, allSites, onClose }) {
     try {
       const mod = await import("xlsx");
       const XLSX = mod.utils ? mod : mod.default; // interop CJS/ESM : selon le bundler, les exports peuvent se retrouver sous .default
-      const rows = registry.map((c) => ({ ID: c.id, Nom: c.nom, "E-mail": c.email || "" }));
+      const rows = clientsPourExport.map((c) => ({ ID: c.id, Nom: c.nom, "E-mail": c.email || "" }));
       const ws = XLSX.utils.json_to_sheet(rows);
       ws["!cols"] = [{ wch: 22 }, { wch: 32 }, { wch: 32 }];
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, "Clients");
       XLSX.writeFile(wb, `Clients_HT-Maintenance_${todayISO()}.xlsx`);
     } catch (e) {
+      console.error("[Export Excel clients] Erreur :", e);
       setImportMsg("Échec de l'export — " + (e?.message || "erreur inconnue"));
     }
   };
@@ -2111,7 +2124,7 @@ function GererClientsModal({ registry, setRegistry, allSites, onClose }) {
           Enregistrez un client à l'avance, modifiez-en un existant (ex. e-mail périmé), ou exportez la liste en Excel pour des modifications en masse — réimportez ensuite le fichier modifié.
         </div>
         <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
-          <button onClick={exporterExcel} style={btnGhost(BRAND.blue)} disabled={registry.length === 0}><Download size={14} /> Exporter en Excel</button>
+          <button onClick={exporterExcel} style={btnGhost(BRAND.blue)} disabled={clientsPourExport.length === 0} title={clientsPourExport.length === 0 ? "Aucun client connu pour l'instant (ni enregistré, ni sur un site)" : ""}><Download size={14} /> Exporter en Excel</button>
           <button onClick={() => fileInputRef.current?.click()} style={btnGhost(BRAND.blue)}><Upload size={14} /> Importer depuis Excel</button>
           <input ref={fileInputRef} type="file" accept=".xlsx,.xls" style={{ display: "none" }} onChange={(e) => { if (e.target.files?.[0]) importerExcel(e.target.files[0]); e.target.value = ""; }} />
         </div>
@@ -6794,9 +6807,22 @@ function drawSymboleDC(ctx, cx, cy, s) {
 // Symbole normalisé CEI du sectionneur/interrupteur, en orientation VERTICALE (le flux traverse
 // ces boîtes de haut en bas dans le schéma) : contact fixe (trait horizontal), pivot, lame ouverte
 // en diagonale rejoignant la sortie basse.
-function drawIconInterrupteur(ctx, x, y, w, h) {
+// Symbole normalisé CEI du sectionneur/interrupteur, orientable selon le sens du flux dans le
+// schéma : "vertical" (par défaut — Onduleur, Redresseur chargeur, flux de haut en bas) ou
+// "horizontal" (Inverseur de source, flux de gauche à droite).
+function drawIconInterrupteur(ctx, x, y, w, h, orientation) {
   const b = draw3DBox(ctx, x, y, w, h);
   ctx.strokeStyle = SCHEMA_TRAIT; ctx.lineWidth = 1.6;
+  if (orientation === "horizontal") {
+    const cy = b.cy;
+    const xContact = x + w * 0.38, xSortie = x + w * 0.85, yHaut = cy - h * 0.22;
+    ctx.beginPath(); ctx.moveTo(x + w * 0.15, cy); ctx.lineTo(xContact, cy); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(xContact, cy - h * 0.12); ctx.lineTo(xContact, cy + h * 0.12); ctx.stroke();
+    ctx.beginPath(); ctx.arc(xContact + w * 0.05, cy, w * 0.045, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(xContact + w * 0.08, cy + h * 0.05); ctx.lineTo(xSortie, yHaut); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(xSortie, yHaut); ctx.lineTo(x + w * 0.92, yHaut); ctx.stroke();
+    return b;
+  }
   const cx = b.cx;
   const yContact = y + h * 0.38, yPivotEnd = y + h * 0.85, xSortie = cx + w * 0.22;
   // ligne d'arrivée (du haut) + contact fixe (trait horizontal)
@@ -6863,6 +6889,17 @@ function drawIconTransformateur(ctx, x, y, w, h) {
   const r = Math.min(w, h) * 0.22;
   ctx.beginPath(); ctx.arc(b.cx, b.cy - r * 0.65, r, 0, Math.PI * 2); ctx.stroke();
   ctx.beginPath(); ctx.arc(b.cx, b.cy + r * 0.65, r, 0, Math.PI * 2); ctx.stroke();
+  return b;
+}
+// Icône « chargeur » : régulation DC -> DC (symbole CC répété avec une flèche), pour la branche
+// entre le bus continu du redresseur et la batterie.
+function drawIconChargeur(ctx, x, y, w, h) {
+  const b = draw3DBox(ctx, x, y, w, h);
+  ctx.strokeStyle = SCHEMA_TRAIT; ctx.lineWidth = 1.3;
+  drawSymboleDC(ctx, b.cx - w * 0.2, b.cy, w * 0.11);
+  ctx.beginPath(); ctx.moveTo(b.cx - w * 0.02, b.cy); ctx.lineTo(b.cx + w * 0.1, b.cy); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(b.cx + w * 0.1, b.cy); ctx.lineTo(b.cx + w * 0.04, b.cy - 4); ctx.moveTo(b.cx + w * 0.1, b.cy); ctx.lineTo(b.cx + w * 0.04, b.cy + 4); ctx.stroke();
+  drawSymboleDC(ctx, b.cx + w * 0.26, b.cy, w * 0.11);
   return b;
 }
 function drawTransformateur(ctx, cx, cy, s) {
@@ -6955,7 +6992,7 @@ function genererSchemaOnduleur(eq) {
     const chW = 46, chH = 34;
     const xChargeur = cxM + 55;
     line(cxM, yBatt, xChargeur, yBatt);
-    draw3DBox(ctx, xChargeur - chW / 2, yBatt - chH / 2, chW, chH);
+    drawIconChargeur(ctx, xChargeur - chW / 2, yBatt - chH / 2, chW, chH);
     ctx.fillStyle = "#5B6B7D"; ctx.font = "9px Arial, sans-serif"; ctx.fillText("Chargeur", xChargeur, yBatt - chH / 2 - 10);
     line(xChargeur + chW / 2, yBatt, xBatt - 26, yBatt);
     drawBatterie(ctx, xBatt, yBatt, 24);
@@ -6988,10 +7025,10 @@ function genererSchemaOnduleur(eq) {
       drawIconInterrupteur(ctx, csMidX - bw / 2, yApresCS, bw, bh);
       let yFinal = yApresCS + bh;
       if (avecTransfoSortie) {
-        line(csMidX, yFinal, csMidX, yFinal + 22);
-        drawTransformateur(ctx, csMidX, yFinal + 42, 22);
-        label("Transfo. sortie", csMidX + 65, yFinal + 42, "#5B6B7D", "10px Arial, sans-serif");
-        yFinal += 62;
+        line(csMidX, yFinal, csMidX, yFinal + 16);
+        drawIconTransformateur(ctx, csMidX - tfW / 2, yFinal + 16, tfW, tfH);
+        label("Transfo. sortie", csMidX + tfW / 2 + 40, yFinal + 16 + tfH / 2, "#5B6B7D", "10px Arial, sans-serif");
+        yFinal += 16 + tfH;
       }
       line(csMidX, yFinal, csMidX, yFinal + GAP_LIGNE);
       arrowDown(csMidX, yFinal + GAP_LIGNE);
@@ -6999,10 +7036,10 @@ function genererSchemaOnduleur(eq) {
     } else {
       let yFinal = yApresOnduleur;
       if (avecTransfoSortie) {
-        line(cxM, yFinal, cxM, yFinal + 22);
-        drawTransformateur(ctx, cxM, yFinal + 42, 22);
-        label("Transfo. sortie", cxM + 65, yFinal + 42, "#5B6B7D", "10px Arial, sans-serif");
-        yFinal += 62;
+        line(cxM, yFinal, cxM, yFinal + 16);
+        drawIconTransformateur(ctx, cxM - tfW / 2, yFinal + 16, tfW, tfH);
+        label("Transfo. sortie", cxM + tfW / 2 + 40, yFinal + 16 + tfH / 2, "#5B6B7D", "10px Arial, sans-serif");
+        yFinal += 16 + tfH;
       }
       line(cxM, yFinal, cxM, yFinal + GAP_LIGNE);
       arrowDown(cxM, yFinal + GAP_LIGNE);
@@ -7084,9 +7121,9 @@ function genererSchemaInverseurSource(eq) {
     const yMid = 130, yTop = 65, yBot = 195, bw = 100, bh = 60;
     const depthBW = boxDepth(bw, bh);
 
-    drawIconInterrupteur(ctx, 20, yTop - bh / 2, bw, bh);
+    drawIconInterrupteur(ctx, 20, yTop - bh / 2, bw, bh, "horizontal");
     ctx.fillStyle = "#5B6B7D"; ctx.fillText(`Source 1 (R1) ${regime("source1")}`, 70, yTop - bh / 2 - depthBW - LABEL_MARGIN);
-    drawIconInterrupteur(ctx, 20, yBot - bh / 2, bw, bh);
+    drawIconInterrupteur(ctx, 20, yBot - bh / 2, bw, bh, "horizontal");
     ctx.fillText(`Source 2 (R2) ${regime("source2")}`, 70, yBot - bh / 2 - depthBW - LABEL_MARGIN);
     line(120, yTop, 230, yTop); line(120, yBot, 230, yBot);
     line(230, yTop, 230, yMid - 20); line(230, yBot, 230, yMid + 20);
@@ -7095,7 +7132,7 @@ function genererSchemaInverseurSource(eq) {
     drawIconCommutateurStatique(ctx, 230, yMid - 30, 110, 60);
     line(340, yMid, 380, yMid); arrowRight(375, yMid);
     ctx.font = "10.5px Arial, sans-serif"; ctx.fillText(`Utilisation ${regime("utilisation")}`, 435, yMid - bh / 2 - depthBW - LABEL_MARGIN);
-    drawIconInterrupteur(ctx, 390, yMid - bh / 2, 90, bh);
+    drawIconInterrupteur(ctx, 390, yMid - bh / 2, 90, bh, "horizontal");
 
     ctx.font = "11px Arial, sans-serif"; ctx.fillStyle = "#5B6B7D"; ctx.textAlign = "left";
     ctx.fillText("Inverseur de source — commutation entre deux sources, sans conversion de puissance", 8, h - 10);
