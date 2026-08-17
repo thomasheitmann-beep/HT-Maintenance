@@ -143,7 +143,6 @@ const LISTE_NB_BRANCHES = ["1", "2", "3", "4", "5", "6"];
 const LISTE_MACHINE_ETAT = ["Propre", "À nettoyer", "Nettoyé"];
 const LISTE_ENVIRONNEMENT_UPS = ["Propre", "Dépoussiérée", "Nécessite une dépollution industrielle"];
 const LISTE_TRANSFORMATEUR_AMONT = ["Sans transformateur amont", "Avec transformateur amont", "Avec transformateur amont réseau 1", "Avec transformateur amont réseau 2", "Avec transformateurs amont réseau 1 et réseau 2"];
-const LISTE_AUTO_TRANSFORMATEUR_AMONT = ["Sans auto-transformateur amont", "Avec auto-transformateur amont", "Avec auto-transformateur amont réseau 1", "Avec auto-transformateur amont réseau 2", "Avec auto-transformateurs amont réseau 1 et réseau 2"];
 const LISTE_ALIMENTATION_RESEAUX = ["1 réseau d'alimentation", "1 réseau d'alimentation (réseaux normal et secours pontés au bornier)", "2 réseaux d'alimentation indépendants (normal et secours séparés)"];
 const LISTE_TRANSFORMATEUR_SORTIE = ["Sans transformateur de sortie", "Avec transformateur de sortie"];
 const LISTE_RATTACHEMENT_BILAN = ["Transformateur", "Disjoncteur BT", "TGBT"];
@@ -873,7 +872,6 @@ function buildOnduleurSchema({ normalMono = false, secoursMono = false, utilisat
       { key: "puissanceKVA", label: "Puissance (kVA)", numeric: true }, { key: "puissanceKW", label: "Puissance (kW)", numeric: true },
       { key: "tensionEntreeSortie", label: "Tension entrée / sortie", options: LISTE_TENSION_ENTREE_SORTIE },
       { key: "regimeSortie", label: "Régime de sortie", options: LISTE_REGIME_SORTIE_UPS },
-      { key: "autoTransformateurAmont", label: "Auto-transformateur amont", options: LISTE_AUTO_TRANSFORMATEUR_AMONT },
       { key: "anneeMiseEnService", label: "Année de mise en service", numeric: true },
     ],
     sections: [
@@ -1909,6 +1907,7 @@ function emptyIntervention(numeroRI) {
     anomaliesRecommandations: "",
     conclusion: "Conforme",
     validation: { nomClient: "", signatureClient: null, technicienHT: "", signatureHT: null },
+    statut: "En cours",
     linkedSiteId: null,
     linkedEquipementId: null,
   };
@@ -2285,7 +2284,7 @@ function unitFamilyFor(u) {
 
 // Champ "liste déroulante + saisie libre" : liste personnalisée (pas de <datalist> natif, mal
 // géré sur iOS où les suggestions restent invisibles/coupées au-dessus du clavier).
-function Combo({ value, onChange, options, listId, style, placeholder, numeric }) {
+function Combo({ value, onChange, options, listId, style, placeholder, numeric, onBlur }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
   useEffect(() => {
@@ -2308,6 +2307,7 @@ function Combo({ value, onChange, options, listId, style, placeholder, numeric }
         value={value ?? ""}
         onChange={(e) => onChange(e.target.value)}
         onFocus={() => setOpen(true)}
+        onBlur={() => { setTimeout(() => setOpen(false), 120); if (onBlur) onBlur(); }}
         placeholder={placeholder}
         style={{ ...inputStyle, ...(style || {}), width: "100%" }}
       />
@@ -4538,7 +4538,7 @@ function collectAnomalies(eq) {
   return lines;
 }
 
-function EquipementCard({ eq, update, remove, removable = true, onDuplicate, locaux = [], allEquipements = [], allSites = [] }) {
+function EquipementCard({ eq, update, remove, removable = true, onDuplicate, locaux = [], allEquipements = [], allSites = [], caracteristiquesLibrary = {}, apprendreCaracteristique }) {
   const [open, setOpen] = useState(true);
   const schema = getSchema(eq);
   const setIdentification = (k, v) => update(repairEquipementControles({ ...eq, identification: { ...eq.identification, [k]: v } }));
@@ -4654,14 +4654,17 @@ function EquipementCard({ eq, update, remove, removable = true, onDuplicate, loc
                       </Field>
                     );
                   }
+                  const apprises = (caracteristiquesLibrary[eq.type] && caracteristiquesLibrary[eq.type][f.key]) || [];
+                  const optsAvecBibliotheque = opts ? Array.from(new Set([...opts, ...apprises])) : null;
                   return (
                   <Field key={f.key} label={f.label}>
-                    {opts ? (
+                    {optsAvecBibliotheque ? (
                       <Combo
                         value={eq.identification[f.key]}
                         onChange={(v) => setIdentification(f.key, v)}
-                        options={opts}
+                        options={optsAvecBibliotheque}
                         listId={`${eq.id}-ident-${f.key}`}
+                        onBlur={() => apprendreCaracteristique && apprendreCaracteristique(eq.type, f.key, eq.identification[f.key])}
                       />
                     ) : f.numeric ? (
                       <TextInput type="number" step="any" value={eq.identification[f.key] || ""} onChange={(e) => setIdentification(f.key, e.target.value)} />
@@ -5237,7 +5240,7 @@ function EquipementCard({ eq, update, remove, removable = true, onDuplicate, loc
   );
 }
 
-function EquipementTypeTab({ type, site, allSites, update }) {
+function EquipementTypeTab({ type, site, allSites, update, caracteristiquesLibrary, apprendreCaracteristique }) {
   const items = equipementsTries(site.equipements.filter((e) => e.type === type));
   const updateItem = (id, next) => update((d) => ({ ...d, equipements: d.equipements.map((e) => (e.id === id ? next : e)) }));
   const removeItem = (id) => update((d) => ({ ...d, equipements: d.equipements.filter((e) => e.id !== id) }));
@@ -5264,7 +5267,7 @@ function EquipementTypeTab({ type, site, allSites, update }) {
           Aucun équipement de type « {type} » enregistré pour ce site.
         </div>
       ) : (
-        items.map((eq) => <EquipementCard key={eq.id} eq={eq} update={(next) => updateItem(eq.id, next)} remove={() => removeItem(eq.id)} onDuplicate={() => duplicateItem(eq)} locaux={site.locaux} allEquipements={site.equipements} allSites={allSites} />)
+        items.map((eq) => <EquipementCard key={eq.id} eq={eq} update={(next) => updateItem(eq.id, next)} remove={() => removeItem(eq.id)} onDuplicate={() => duplicateItem(eq)} locaux={site.locaux} allEquipements={site.equipements} allSites={allSites} caracteristiquesLibrary={caracteristiquesLibrary} apprendreCaracteristique={apprendreCaracteristique} />)
       )}
     </div>
   );
@@ -5736,7 +5739,7 @@ function PrintIntervention({ iv }) {
   );
 }
 
-function SiteDetail({ site, allSites, update, onBack, onDelete, onPrint, onPrintAnnexe, onCreateIntervention, clientsRegistry }) {
+function SiteDetail({ site, allSites, update, onBack, onDelete, onPrint, onPrintAnnexe, onCreateIntervention, clientsRegistry, caracteristiquesLibrary, apprendreCaracteristique }) {
   const [reprendreOpen, setReprendreOpen] = useState(false);
   const presentTypes = useMemo(() => EQUIPMENT_TYPES.filter((t) => site.equipements.some((e) => e.type === t)), [site.equipements]);
   const [activeTab, setActiveTab] = useState("rapport");
@@ -5897,7 +5900,7 @@ function SiteDetail({ site, allSites, update, onBack, onDelete, onPrint, onPrint
       </div>
 
       {activeTab === "rapport" && <RapportTab site={site} update={update} />}
-      {presentTypes.includes(activeTab) && <EquipementTypeTab type={activeTab} site={site} allSites={allSites} update={update} />}
+      {presentTypes.includes(activeTab) && <EquipementTypeTab type={activeTab} site={site} allSites={allSites} update={update} caracteristiquesLibrary={caracteristiquesLibrary} apprendreCaracteristique={apprendreCaracteristique} />}
     </div>
   );
 }
@@ -5952,6 +5955,14 @@ function InterventionEditor({ iv, update, onBack, onDelete, onPrint }) {
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
             <StatusBadge label={iv.conclusion} />
+            <span style={{ fontSize: 11, fontWeight: 700, padding: "5px 10px", borderRadius: 6, color: iv.statut === "Clôturée" ? "#0F8A5F" : "#8B96A3", background: iv.statut === "Clôturée" ? "rgba(15,138,95,0.1)" : "rgba(139,150,163,0.12)" }}>
+              {iv.statut === "Clôturée" ? "CLÔTURÉE" : "EN COURS"}
+            </span>
+            {iv.statut === "Clôturée" ? (
+              <button onClick={() => set("statut", "En cours")} style={btnGhost()}><RotateCcw size={13} /> Rouvrir</button>
+            ) : (
+              <button onClick={() => set("statut", "Clôturée")} style={btnGhost(BRAND.blue)}><CheckCircle2 size={13} /> Clôturer</button>
+            )}
             <button onClick={() => onPrint(iv)} style={btnGhost("#FFC107")}><FileText size={13} /> Rapport Word</button>
             <button onClick={envoyerParMail} style={btnGhost("#FFC107")}><Mail size={13} /> Préparer l'email</button>
             <InlineConfirmButton icon={Trash2} label="Supprimer" onConfirm={() => onDelete(iv.id)} />
@@ -6194,6 +6205,7 @@ function InterventionPrefillPicker({ sites, onCancel, onConfirm }) {
 function InterventionsOverview({ interventions, sites, onOpen, onCreate }) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [groupeParClient, setGroupeParClient] = useState(false);
 
   const filtered = useMemo(() => {
     if (!query.trim()) return interventions;
@@ -6203,6 +6215,39 @@ function InterventionsOverview({ interventions, sites, onOpen, onCreate }) {
 
   const sorted = useMemo(() => [...filtered].sort((a, b) => new Date(b.date) - new Date(a.date)), [filtered]);
 
+  // Une intervention est clôturée si le technicien l'a marquée manuellement comme telle, ou si elle
+  // est signée par le client ET le technicien.
+  const estCloturee = (iv) => iv.statut === "Clôturée" || !!(iv.validation && iv.validation.signatureClient && iv.validation.signatureHT);
+
+  const groupes = useMemo(() => {
+    const parClient = new Map();
+    sorted.forEach((iv) => {
+      const key = (iv.client || "Client non renseigné").trim() || "Client non renseigné";
+      if (!parClient.has(key)) parClient.set(key, []);
+      parClient.get(key).push(iv);
+    });
+    return Array.from(parClient.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+  }, [sorted]);
+
+  const IvRow = ({ iv }) => (
+    <div key={iv.id} onClick={() => onOpen(iv.id)} className="iv-row"
+      style={{ background: "#FFFFFF", border: "1px solid #D8DEE5", borderRadius: 12, padding: "13px 16px", cursor: "pointer" }}
+      onMouseEnter={(e) => (e.currentTarget.style.borderColor = "#9AA5B1")} onMouseLeave={(e) => (e.currentTarget.style.borderColor = "#D8DEE5")}
+    >
+      <div className="iv-row-meta hide-mobile" style={{ flex: "0 0 100px", fontSize: 11.5, color: "#5B6B7D", fontWeight: 700 }}>{iv.numeroRI}</div>
+      <div className="iv-row-main" style={{ flex: "1 1 220px", minWidth: 0 }}>
+        <div style={{ fontSize: 13.5, fontWeight: 700, color: "#1A1F26", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: 6 }}>
+          {!groupeParClient && (iv.client || "Client non renseigné")}
+          {estCloturee(iv) && <span title="Clôturée (signée client + technicien)" style={{ fontSize: 10, color: "#0F8A5F", background: "rgba(15,138,95,0.1)", padding: "2px 6px", borderRadius: 4, fontWeight: 700 }}>CLÔTURÉE</span>}
+        </div>
+        <div style={{ fontSize: 12, color: "#5B6B7D" }}>{iv.numeroRI} · {iv.site || "—"}</div>
+      </div>
+      <div className="iv-row-meta" style={{ flex: "0 0 100px", fontSize: 12, color: "#3E4A5C" }}>{iv.date}</div>
+      <div className="iv-row-meta" style={{ flex: "0 0 120px" }}><StatusBadge label={iv.conclusion} /></div>
+      <ChevronRight size={16} color="#9AA5B1" className="hide-mobile" />
+    </div>
+  );
+
   return (
     <div>
       <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
@@ -6210,6 +6255,9 @@ function InterventionsOverview({ interventions, sites, onOpen, onCreate }) {
           <Search size={15} style={{ position: "absolute", left: 11, top: 10, color: "#8B96A3" }} />
           <TextInput placeholder="Rechercher N° RI, client, site, technicien…" value={query} onChange={(e) => setQuery(e.target.value)} style={{ paddingLeft: 32 }} />
         </div>
+        <button onClick={() => setGroupeParClient((g) => !g)} style={btnGhost(groupeParClient ? BRAND.blue : undefined)}>
+          <Building2 size={14} /> {groupeParClient ? "Grouper par date" : "Grouper par client"}
+        </button>
         <button onClick={() => onCreate(null, null)} style={btnGhost("#FFC107")}><Plus size={14} /> Rapport vierge</button>
         <button onClick={() => setPickerOpen(true)} style={btnPrimary()}><Plus size={15} /> Pré-remplir depuis un site</button>
       </div>
@@ -6222,23 +6270,22 @@ function InterventionsOverview({ interventions, sites, onOpen, onCreate }) {
           </div>
           <div style={{ fontSize: 12.5, color: "#8B96A3" }}>Créez votre premier rapport à transmettre au client.</div>
         </div>
-      ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {sorted.map((iv) => (
-            <div key={iv.id} onClick={() => onOpen(iv.id)} className="iv-row"
-              style={{ background: "#FFFFFF", border: "1px solid #D8DEE5", borderRadius: 12, padding: "13px 16px", cursor: "pointer" }}
-              onMouseEnter={(e) => (e.currentTarget.style.borderColor = "#9AA5B1")} onMouseLeave={(e) => (e.currentTarget.style.borderColor = "#D8DEE5")}
-            >
-              <div className="iv-row-meta hide-mobile" style={{ flex: "0 0 100px", fontSize: 11.5, color: "#5B6B7D", fontWeight: 700 }}>{iv.numeroRI}</div>
-              <div className="iv-row-main" style={{ flex: "1 1 220px", minWidth: 0 }}>
-                <div style={{ fontSize: 13.5, fontWeight: 700, color: "#1A1F26", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{iv.client || "Client non renseigné"}</div>
-                <div style={{ fontSize: 12, color: "#5B6B7D" }}>{iv.numeroRI} · {iv.site || "—"}</div>
+      ) : groupeParClient ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
+          {groupes.map(([client, ivs]) => (
+            <div key={client}>
+              <div style={{ fontSize: 12.5, fontWeight: 700, color: "#5B6B7D", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.4, display: "flex", alignItems: "center", gap: 8 }}>
+                {client} <span style={{ fontWeight: 400, color: "#8B96A3", textTransform: "none" }}>({ivs.length} intervention{ivs.length > 1 ? "s" : ""})</span>
               </div>
-              <div className="iv-row-meta" style={{ flex: "0 0 100px", fontSize: 12, color: "#3E4A5C" }}>{iv.date}</div>
-              <div className="iv-row-meta" style={{ flex: "0 0 120px" }}><StatusBadge label={iv.conclusion} /></div>
-              <ChevronRight size={16} color="#9AA5B1" className="hide-mobile" />
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {ivs.map((iv) => <IvRow key={iv.id} iv={iv} />)}
+              </div>
             </div>
           ))}
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {sorted.map((iv) => <IvRow key={iv.id} iv={iv} />)}
         </div>
       )}
 
@@ -8052,6 +8099,15 @@ export default function App({ currentUser, onLogout }) {
   const clientsWriteInFlight = useRef(false);
   const [gererClientsOpen, setGererClientsOpen] = useState(false);
 
+  // Bibliothèque des caractéristiques (marque, modèle, type...) déjà saisies par équipement — toute
+  // valeur tapée dans un champ à suggestions rejoint automatiquement les propositions futures pour
+  // ce même champ, sur ce même type d'équipement. Partagée entre techniciens comme les clients.
+  const [caracteristiquesLibrary, setCaracteristiquesLibrary] = useState({});
+  const [caracLoaded, setCaracLoaded] = useState(false);
+  const caracSaveTimer = useRef(null);
+  const lastSyncedCarac = useRef(null);
+  const caracWriteInFlight = useRef(false);
+
   // Synchronisation via l'API REST de Firestore : tous les techniciens connectés partagent le
   // même document "sites" et "interventions". Une actualisation périodique (toutes les 7s) fait
   // apparaître les changements d'un collègue — pas instantané comme avant, mais bien plus fiable
@@ -8215,6 +8271,64 @@ export default function App({ currentUser, onLogout }) {
     }, 500);
     return () => clearTimeout(clientsSaveTimer.current);
   }, [clientsRegistry, clientsLoaded, currentUser]);
+
+  useEffect(() => {
+    let cancelled = false;
+    let intervalId = null;
+    async function poll() {
+      if (!currentUser) return;
+      if (caracWriteInFlight.current) return;
+      try {
+        const idToken = await currentUser.getIdToken();
+        const data = await firestoreRestGet("app-data/caracteristiques", idToken);
+        if (cancelled) return;
+        if (!data || !data.fields) { if (lastSyncedCarac.current === null) lastSyncedCarac.current = "{}"; setCaracLoaded(true); return; }
+        const rawValue = (data.fields.value && data.fields.value.stringValue) || "{}";
+        if (rawValue === lastSyncedCarac.current) { setCaracLoaded(true); return; }
+        lastSyncedCarac.current = rawValue;
+        setCaracteristiquesLibrary(JSON.parse(rawValue));
+        setCaracLoaded(true);
+      } catch (e) {
+        setCaracLoaded(true);
+      }
+    }
+    poll();
+    intervalId = setInterval(poll, REST_POLL_INTERVAL_MS);
+    return () => { cancelled = true; clearInterval(intervalId); };
+  }, [currentUser]);
+
+  useEffect(() => {
+    if (!caracLoaded || !currentUser) return;
+    const serialized = JSON.stringify(caracteristiquesLibrary);
+    if (serialized === lastSyncedCarac.current) return;
+    if (caracWriteInFlight.current) return;
+    lastSyncedCarac.current = serialized;
+    if (caracSaveTimer.current) clearTimeout(caracSaveTimer.current);
+    caracSaveTimer.current = setTimeout(async () => {
+      caracWriteInFlight.current = true;
+      try {
+        const idToken = await currentUser.getIdToken();
+        await firestoreRestSet("app-data/caracteristiques", serialized, Date.now(), currentUser?.email, idToken);
+      } catch (e) {
+        lastSyncedCarac.current = null;
+      } finally {
+        caracWriteInFlight.current = false;
+      }
+    }, 500);
+    return () => clearTimeout(caracSaveTimer.current);
+  }, [caracteristiquesLibrary, caracLoaded, currentUser]);
+
+  // Ajoute une valeur à la bibliothèque pour un type d'équipement + champ donné, si elle n'y est
+  // pas déjà (et n'est pas vide) — appelée quand l'utilisateur tape une nouvelle valeur.
+  const apprendreCaracteristique = (eqType, fieldKey, valeur) => {
+    if (!valeur || !valeur.trim()) return;
+    setCaracteristiquesLibrary((prev) => {
+      const pourType = prev[eqType] || {};
+      const existantes = pourType[fieldKey] || [];
+      if (existantes.some((v) => v.trim().toLowerCase() === valeur.trim().toLowerCase())) return prev;
+      return { ...prev, [eqType]: { ...pourType, [fieldKey]: [...existantes, valeur.trim()] } };
+    });
+  };
 
   // Génère le rapport (Rapport ou Rapport d'intervention) et le télécharge en .docx
   // réel (compatible Microsoft Word ET Pages sur Mac), entièrement modifiable.
@@ -8426,7 +8540,7 @@ export default function App({ currentUser, onLogout }) {
                       ))}
                     </div>
                   )}
-                  <button onClick={addSite} style={btnPrimary()}><Plus size={16} /> Nouveau site</button>
+                  <button onClick={addSite} style={btnPrimary()}><Plus size={16} /> Nouvelle intervention</button>
                 </div>
               )}
             </div>
@@ -8470,7 +8584,7 @@ export default function App({ currentUser, onLogout }) {
           )}
 
           {selected ? (
-            <SiteDetail site={selected} allSites={sites} update={(updater) => updateSite(selected.id, updater)} onBack={() => setSelectedId(null)} onDelete={deleteSite} onPrint={requestPrintSite} onPrintAnnexe={setPrintAnnexeSite} onCreateIntervention={createIntervention} clientsRegistry={clientsRegistry} />
+            <SiteDetail site={selected} allSites={sites} update={(updater) => updateSite(selected.id, updater)} onBack={() => setSelectedId(null)} onDelete={deleteSite} onPrint={requestPrintSite} onPrintAnnexe={setPrintAnnexeSite} onCreateIntervention={createIntervention} clientsRegistry={clientsRegistry} caracteristiquesLibrary={caracteristiquesLibrary} apprendreCaracteristique={apprendreCaracteristique} />
           ) : selectedIv ? (
             <InterventionEditor iv={selectedIv} update={(updater) => updateIntervention(selectedIv.id, updater)} onBack={() => setSelectedIvId(null)} onDelete={deleteIntervention} onPrint={requestPrintIv} />
           ) : view === "sites" ? (
