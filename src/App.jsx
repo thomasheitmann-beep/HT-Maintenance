@@ -6788,7 +6788,15 @@ function genererSchemaOnduleur(eq) {
     const avecBypass = eq.identification?.typeUPS !== "Onduleur sécurité";
     const r = (eq.controles && eq.controles.regimes_reseaux) || {};
     const regime = (k) => (r[k] === "Monophasé" ? "1~" : "3~");
-    const w = 480, h = avecBypass ? 780 : 560;
+    // Transformateur(s) amont, réseaux pontés, transformateur de sortie : ces caractéristiques
+    // existaient déjà en identification mais n'étaient jamais lues par le schéma.
+    const transfoAmont = eq.identification?.transformateurAmont || "";
+    const avecTransfoR1 = transfoAmont.includes("réseau 1") || transfoAmont === "Avec transformateur amont";
+    const avecTransfoR2 = transfoAmont.includes("réseau 2");
+    const reseauxPontes = (eq.identification?.alimentationReseaux || "").includes("pontés");
+    const avecTransfoSortie = eq.identification?.transformateurSortie === "Avec transformateur de sortie";
+    const TRANSFO_H = 60; // espace vertical réservé à un symbole transformateur amont
+    const w = 480, h = (avecBypass ? 780 : 560) + (avecTransfoR1 || avecTransfoR2 ? TRANSFO_H : 0) + (avecTransfoSortie ? 75 : 0);
     const canvas = document.createElement("canvas");
     canvas.width = w; canvas.height = h;
     const ctx = canvas.getContext("2d");
@@ -6812,9 +6820,27 @@ function genererSchemaOnduleur(eq) {
     let y = 16;
     label("R1", cxM, y, SCHEMA_TRAIT, "14px Arial, sans-serif");
     if (avecBypass) label("R2", cxR2, y, SCHEMA_TRAIT, "14px Arial, sans-serif");
+    if (reseauxPontes && avecBypass) {
+      // Réseaux normal et secours pontés au bornier : une seule source réelle, matérialisée par un
+      // pontage (trait horizontal) entre R1 et R2 juste sous les libellés.
+      line(cxM, y + 10, cxR2, y + 10);
+      label("(pontés — source unique)", (cxM + cxR2) / 2, y + 22, "#8B96A3", "9.5px Arial, sans-serif");
+    }
     y += 26;
     line(cxM, y, cxM, y + GAP_LIGNE); if (avecBypass) line(cxR2, y, cxR2, y + GAP_LIGNE);
     y += GAP_LIGNE;
+
+    // Transformateur(s) d'isolement amont, si déclarés en identification
+    if (avecTransfoR1) {
+      drawTransformateur(ctx, cxM, y + 20, 22);
+      label("Transfo. amont", cxM + 55, y + 20, "#5B6B7D", "10px Arial, sans-serif");
+      line(cxM, y, cxM, y + 40); y += 40;
+      line(cxM, y, cxM, y + 16); y += 16;
+    }
+    if (avecTransfoR2 && avecBypass) {
+      drawTransformateur(ctx, cxR2, y + 20, 22);
+      label("Transfo. amont", cxR2 + 55, y + 20, "#5B6B7D", "10px Arial, sans-serif");
+    }
 
     // Réseau normal (interrupteur)
     y += depthBW + LABEL_MARGIN + 8;
@@ -6868,11 +6894,23 @@ function genererSchemaOnduleur(eq) {
       label("Interrupteur de sortie", csMidX, yApresCS - depthBW - LABEL_MARGIN);
       drawIconInterrupteur(ctx, csMidX - bw / 2, yApresCS, bw, bh);
       let yFinal = yApresCS + bh;
+      if (avecTransfoSortie) {
+        line(csMidX, yFinal, csMidX, yFinal + 22);
+        drawTransformateur(ctx, csMidX, yFinal + 42, 22);
+        label("Transfo. sortie", csMidX + 65, yFinal + 42, "#5B6B7D", "10px Arial, sans-serif");
+        yFinal += 62;
+      }
       line(csMidX, yFinal, csMidX, yFinal + GAP_LIGNE);
       arrowDown(csMidX, yFinal + GAP_LIGNE);
       label("RS", csMidX, yFinal + GAP_LIGNE + 18, SCHEMA_TRAIT, "14px Arial, sans-serif");
     } else {
       let yFinal = yApresOnduleur;
+      if (avecTransfoSortie) {
+        line(cxM, yFinal, cxM, yFinal + 22);
+        drawTransformateur(ctx, cxM, yFinal + 42, 22);
+        label("Transfo. sortie", cxM + 65, yFinal + 42, "#5B6B7D", "10px Arial, sans-serif");
+        yFinal += 62;
+      }
       line(cxM, yFinal, cxM, yFinal + GAP_LIGNE);
       arrowDown(cxM, yFinal + GAP_LIGNE);
       label("RS", cxM, yFinal + GAP_LIGNE + 18, SCHEMA_TRAIT, "14px Arial, sans-serif");
