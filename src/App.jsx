@@ -6724,12 +6724,21 @@ function drawSymboleDC(ctx, cx, cy, s) {
   ctx.restore();
 }
 // Icône « interrupteur / sectionneur » : cercle en pointillés (dessiné sur une boîte 3D)
+// Symbole normalisé CEI du sectionneur/interrupteur : ligne horizontale, point de contact fixe
+// (trait vertical), pivot (petit cercle), et lame ouverte en diagonale rejoignant l'autre borne.
 function drawIconInterrupteur(ctx, x, y, w, h) {
   const b = draw3DBox(ctx, x, y, w, h);
-  ctx.strokeStyle = SCHEMA_TRAIT; ctx.lineWidth = 1.4;
-  ctx.save(); ctx.setLineDash([3, 3]);
-  ctx.beginPath(); ctx.arc(b.cx, b.cy, Math.min(w, h) * 0.28, 0, Math.PI * 2); ctx.stroke();
-  ctx.restore();
+  ctx.strokeStyle = SCHEMA_TRAIT; ctx.lineWidth = 1.6;
+  const cy = b.cy;
+  const xContact = x + w * 0.38, xPivotEnd = x + w * 0.85, yHaut = cy - h * 0.22;
+  // ligne d'arrivée + contact fixe (trait vertical)
+  ctx.beginPath(); ctx.moveTo(x + w * 0.15, cy); ctx.lineTo(xContact, cy); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(xContact, cy - h * 0.12); ctx.lineTo(xContact, cy + h * 0.12); ctx.stroke();
+  // pivot (petit cercle)
+  ctx.beginPath(); ctx.arc(xContact + w * 0.05, cy, w * 0.045, 0, Math.PI * 2); ctx.stroke();
+  // lame ouverte, en diagonale, jusqu'à la borne opposée
+  ctx.beginPath(); ctx.moveTo(xContact + w * 0.08, cy + h * 0.05); ctx.lineTo(xPivotEnd, yHaut); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(xPivotEnd, yHaut); ctx.lineTo(x + w * 0.92, yHaut); ctx.stroke();
   return b;
 }
 // Icône « filtre + terre » : sinusoïde au-dessus du symbole de terre
@@ -6776,14 +6785,16 @@ function drawBatterie(ctx, cx, cy, s) {
   const hs = [s * 0.9, s * 0.45, s * 0.9, s * 0.45];
   xs.forEach((x, i) => { ctx.beginPath(); ctx.moveTo(x, cy - hs[i]); ctx.lineTo(x, cy + hs[i]); ctx.stroke(); });
 }
+// Symbole transformateur simplifié : deux cercles qui se chevauchent, avec une borne courte en
+// haut et en bas (représentation courante en schéma unifilaire simplifié).
 function drawTransformateur(ctx, cx, cy, s) {
-  ctx.strokeStyle = SCHEMA_TRAIT; ctx.lineWidth = 1.6;
-  const loop = (x0, dir) => {
-    for (let i = 0; i < 3; i++) { ctx.beginPath(); ctx.arc(x0, cy - s * 0.6 + i * s * 0.6, s * 0.32, dir > 0 ? Math.PI * 1.5 : Math.PI * 0.5, dir > 0 ? Math.PI * 0.5 : Math.PI * 1.5, false); ctx.stroke(); }
-  };
-  loop(cx - s * 0.25, 1); loop(cx + s * 0.25, -1);
-  ctx.beginPath(); ctx.moveTo(cx - s * 0.05, cy - s * 0.9); ctx.lineTo(cx - s * 0.05, cy + s * 0.9); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(cx + s * 0.05, cy - s * 0.9); ctx.lineTo(cx + s * 0.05, cy + s * 0.9); ctx.stroke();
+  ctx.strokeStyle = SCHEMA_TRAIT; ctx.lineWidth = 1.8;
+  const r = s * 0.42;
+  const cyHaut = cy - s * 0.28, cyBas = cy + s * 0.28;
+  ctx.beginPath(); ctx.arc(cx, cyHaut, r, 0, Math.PI * 2); ctx.stroke();
+  ctx.beginPath(); ctx.arc(cx, cyBas, r, 0, Math.PI * 2); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(cx, cyHaut - r); ctx.lineTo(cx, cyHaut - r - s * 0.35); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(cx, cyBas + r); ctx.lineTo(cx, cyBas + r + s * 0.35); ctx.stroke();
 }
 function genererSchemaOnduleur(eq) {
   if (typeof document === "undefined" || !document.createElement) return null;
