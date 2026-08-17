@@ -5362,6 +5362,7 @@ function computeBRKValues(eq) {
 }
 
 function PrintEquipement({ eq }) {
+  eq = repairEquipementControles(eq); // filet de sécurité, même principe que côté Word
   const schema = getSchema(eq);
   const isRelaisSeuils = TYPES_AVEC_RELAIS.includes(eq.type);
   const brk = eq.type === "Disjoncteur BT" ? computeBRKValues(eq) : null;
@@ -6815,34 +6816,30 @@ function drawIconInterrupteur(ctx, x, y, w, h, orientation) {
   ctx.strokeStyle = SCHEMA_TRAIT; ctx.lineWidth = 1.6;
   if (orientation === "horizontal") {
     const cy = b.cy;
-    const xContact = x + w * 0.38, xSortie = x + w * 0.85, yHaut = cy - h * 0.22;
-    ctx.beginPath(); ctx.moveTo(x + w * 0.15, cy); ctx.lineTo(xContact, cy); ctx.stroke();
+    const xContact = x + w * 0.32, xOuvert = x + w * 0.6, yHaut = cy - h * 0.22;
+    ctx.beginPath(); ctx.moveTo(x + w * 0.12, cy); ctx.lineTo(xContact, cy); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(xContact, cy - h * 0.12); ctx.lineTo(xContact, cy + h * 0.12); ctx.stroke();
     ctx.beginPath(); ctx.arc(xContact + w * 0.05, cy, w * 0.045, 0, Math.PI * 2); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(xContact + w * 0.08, cy + h * 0.05); ctx.lineTo(xSortie, yHaut); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(xSortie, yHaut); ctx.lineTo(x + w * 0.92, yHaut); ctx.stroke();
+    // lame ouverte en diagonale, puis retour à l'axe central pour la sortie (alignée avec les
+    // traits extérieurs qui continuent le schéma de part et d'autre de la boîte)
+    ctx.beginPath(); ctx.moveTo(xContact + w * 0.08, cy - h * 0.02); ctx.lineTo(xOuvert, yHaut); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(xOuvert, yHaut); ctx.lineTo(x + w * 0.88, cy); ctx.stroke();
     return b;
   }
   const cx = b.cx;
-  const yContact = y + h * 0.38, yPivotEnd = y + h * 0.85, xSortie = cx + w * 0.22;
+  const yContact = y + h * 0.32, yOuvert = y + h * 0.6, xOffset = cx + w * 0.22;
   // ligne d'arrivée (du haut) + contact fixe (trait horizontal)
-  ctx.beginPath(); ctx.moveTo(cx, y + h * 0.15); ctx.lineTo(cx, yContact); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(cx, y + h * 0.12); ctx.lineTo(cx, yContact); ctx.stroke();
   ctx.beginPath(); ctx.moveTo(cx - w * 0.12, yContact); ctx.lineTo(cx + w * 0.12, yContact); ctx.stroke();
   // pivot (petit cercle)
   ctx.beginPath(); ctx.arc(cx, yContact + h * 0.05, w * 0.045, 0, Math.PI * 2); ctx.stroke();
-  // lame ouverte, en diagonale, vers la sortie basse
-  ctx.beginPath(); ctx.moveTo(cx + w * 0.05, yContact + h * 0.08); ctx.lineTo(xSortie, yPivotEnd); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(xSortie, yPivotEnd); ctx.lineTo(xSortie, y + h * 0.92); ctx.stroke();
+  // lame ouverte, en diagonale, puis retour à l'axe central pour la sortie basse — reste aligné
+  // avec le trait extérieur qui continue le schéma sous la boîte.
+  ctx.beginPath(); ctx.moveTo(cx + w * 0.05, yContact + h * 0.08); ctx.lineTo(xOffset, yOuvert); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(xOffset, yOuvert); ctx.lineTo(cx, y + h * 0.88); ctx.stroke();
   return b;
 }
 // Icône « filtre + terre » : sinusoïde au-dessus du symbole de terre
-function drawIconFiltreTerre(ctx, x, y, w, h) {
-  const b = draw3DBox(ctx, x, y, w, h);
-  ctx.strokeStyle = SCHEMA_TRAIT; ctx.lineWidth = 1.3;
-  drawSymboleAC(ctx, b.cx, b.cy - h * 0.16, w * 0.24);
-  ctx.beginPath(); ctx.moveTo(b.cx - w * 0.18, b.cy + h * 0.14); ctx.lineTo(b.cx + w * 0.18, b.cy + h * 0.14); ctx.stroke();
-  return b;
-}
 // Icône « redresseur » (CA -> CC) : diagonale, sinusoïde en haut, CC en bas
 function drawIconRedresseur(ctx, x, y, w, h) {
   const b = draw3DBox(ctx, x, y, w, h);
@@ -6865,12 +6862,17 @@ function drawIconOnduleur(ctx, x, y, w, h) {
 // (représente la commutation entre deux sources CA, ex. R0 <-> R2)
 function drawIconCommutateurStatique(ctx, x, y, w, h) {
   const b = draw3DBox(ctx, x, y, w, h);
-  ctx.strokeStyle = SCHEMA_TRAIT; ctx.lineWidth = 1.2;
-  ctx.beginPath(); ctx.moveTo(x + w * 0.08, y + h * 0.28); ctx.lineTo(x + w * 0.92, y + h * 0.78); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(x + w * 0.92, y + h * 0.28); ctx.lineTo(x + w * 0.08, y + h * 0.78); ctx.stroke();
-  drawSymboleAC(ctx, x + w * 0.18, y + h * 0.3, w * 0.1);
-  drawSymboleAC(ctx, x + w * 0.5, y + h * 0.62, w * 0.1);
-  drawSymboleAC(ctx, x + w * 0.82, y + h * 0.3, w * 0.1);
+  ctx.strokeStyle = SCHEMA_TRAIT; ctx.lineWidth = 1.3;
+  // Trois sinusoïdes (3 phases), alignées sur une même ligne, bien espacées, sans chevauchement
+  const yPhases = y + h * 0.38;
+  drawSymboleAC(ctx, x + w * 0.2, yPhases, w * 0.11);
+  drawSymboleAC(ctx, x + w * 0.5, yPhases, w * 0.11);
+  drawSymboleAC(ctx, x + w * 0.8, yPhases, w * 0.11);
+  // Petit symbole de commutation (double flèche croisée), confiné à une bande basse séparée —
+  // ne touche plus les sinusoïdes.
+  const yFleche = y + h * 0.78;
+  ctx.beginPath(); ctx.moveTo(x + w * 0.35, yFleche - 7); ctx.lineTo(x + w * 0.65, yFleche + 7); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(x + w * 0.65, yFleche - 7); ctx.lineTo(x + w * 0.35, yFleche + 7); ctx.stroke();
   return b;
 }
 function drawBatterie(ctx, cx, cy, s) {
@@ -6902,15 +6904,7 @@ function drawIconChargeur(ctx, x, y, w, h) {
   drawSymboleDC(ctx, b.cx + w * 0.26, b.cy, w * 0.11);
   return b;
 }
-function drawTransformateur(ctx, cx, cy, s) {
-  ctx.strokeStyle = SCHEMA_TRAIT; ctx.lineWidth = 1.8;
-  const r = s * 0.42;
-  const cyHaut = cy - s * 0.28, cyBas = cy + s * 0.28;
-  ctx.beginPath(); ctx.arc(cx, cyHaut, r, 0, Math.PI * 2); ctx.stroke();
-  ctx.beginPath(); ctx.arc(cx, cyBas, r, 0, Math.PI * 2); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(cx, cyHaut - r); ctx.lineTo(cx, cyHaut - r - s * 0.35); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(cx, cyBas + r); ctx.lineTo(cx, cyBas + r + s * 0.35); ctx.stroke();
-}
+
 function genererSchemaOnduleur(eq) {
   if (typeof document === "undefined" || !document.createElement) return null;
   try {
@@ -6993,7 +6987,7 @@ function genererSchemaOnduleur(eq) {
     const xChargeur = cxM + 55;
     line(cxM, yBatt, xChargeur, yBatt);
     drawIconChargeur(ctx, xChargeur - chW / 2, yBatt - chH / 2, chW, chH);
-    ctx.fillStyle = "#5B6B7D"; ctx.font = "9px Arial, sans-serif"; ctx.fillText("Chargeur", xChargeur, yBatt - chH / 2 - 10);
+    ctx.fillStyle = "#5B6B7D"; ctx.font = "9px Arial, sans-serif"; ctx.textAlign = "center"; ctx.fillText("Chargeur", xChargeur, yBatt + chH / 2 + 12);
     line(xChargeur + chW / 2, yBatt, xBatt - 26, yBatt);
     drawBatterie(ctx, xBatt, yBatt, 24);
     label("Batterie", xBatt, yBatt + 42, "#3E4A5C", "12px Arial, sans-serif");
@@ -7235,6 +7229,10 @@ function docxImage(dataUrl, w, h) {
 }
 
 function docxEquipementElements(eq, locaux, allSites) {
+  // Filet de sécurité : quelle que soit l'origine des données (ancien format, migration, edge case),
+  // on s'assure que la structure de contrôles est complète avant de générer le rapport — évite un
+  // plantage si une section conditionnelle (ex. relais activé) n'a pas été réparée en amont.
+  eq = repairEquipementControles(eq);
   const schema = getSchema(eq);
   if (!schema) {
     return [new DOCX.Paragraph({ children: [new DOCX.PageBreak()] }), docxEquipHeader(eq.type || "Équipement", docxBookmarkId(eq)), docxSpacer(40),
