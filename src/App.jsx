@@ -3842,6 +3842,9 @@ function CapaciteFiltreCalculee({ eq }) {
 function SchemaOnduleur({ eq }) {
   const [dataUrl, setDataUrl] = useState(null);
   const typeUPS = eq.identification?.typeUPS;
+  const transformateurAmont = eq.identification?.transformateurAmont;
+  const alimentationReseaux = eq.identification?.alimentationReseaux;
+  const transformateurSortie = eq.identification?.transformateurSortie;
   const regimesKey = JSON.stringify(eq.controles?.regimes_reseaux || {});
   const regenerer = () => {
     const gen = eq.type === "Onduleur" ? genererSchemaOnduleur : eq.type === "Redresseur chargeur" ? genererSchemaRedresseurChargeur : genererSchemaInverseurSource;
@@ -3850,7 +3853,7 @@ function SchemaOnduleur({ eq }) {
   useEffect(() => {
     regenerer();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [eq.type, typeUPS, regimesKey]);
+  }, [eq.type, typeUPS, regimesKey, transformateurAmont, alimentationReseaux, transformateurSortie]);
   if (!dataUrl) return null;
   return (
     <Card style={{ marginBottom: 14, textAlign: "center" }}>
