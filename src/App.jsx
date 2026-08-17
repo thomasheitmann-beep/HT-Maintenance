@@ -3802,8 +3802,24 @@ function AutonomieCalculee({ eq }) {
 function RegimeReseauSelector({ eq, update, reseau }) {
   if (eq.type !== "Onduleur" && eq.type !== "Redresseur chargeur" && eq.type !== "Inverseur de source") return null;
   const regimes = eq.controles.regimes_reseaux || {};
+  // Le réseau secours (by-pass) est relié directement à la sortie, sans transformation : sa tension
+  // — et donc son régime mono/triphasé — est toujours identique à celle de l'utilisation. On
+  // affiche cette valeur en lecture seule plutôt que de la faire tracker séparément.
+  if (reseau === "secours") {
+    const value = regimes.utilisation || "Triphasé";
+    return (
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+        <span style={{ fontSize: 11.5, fontWeight: 700, color: "#5B6B7D" }}>Régime :</span>
+        <span style={{ fontSize: 12, color: "#3E4A5C" }}>{value} <span style={{ color: "#8B96A3", fontStyle: "italic" }}>(identique à l'utilisation — le by-pass relie directement à la sortie)</span></span>
+      </div>
+    );
+  }
   const value = regimes[reseau] || "Triphasé";
-  const setRegime = (v) => update({ ...eq, controles: { ...eq.controles, regimes_reseaux: { ...regimes, [reseau]: v } } });
+  const setRegime = (v) => {
+    const next = { ...regimes, [reseau]: v };
+    if (reseau === "utilisation") next.secours = v; // synchronisation automatique
+    update({ ...eq, controles: { ...eq.controles, regimes_reseaux: next } });
+  };
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
       <span style={{ fontSize: 11.5, fontWeight: 700, color: "#5B6B7D" }}>Régime :</span>
@@ -3839,7 +3855,7 @@ function CapaciteFiltreCalculee({ eq }) {
 }
 // Schéma synoptique affiché dans l'app — recalculé (via <canvas>) à chaque changement de
 // configuration (type d'onduleur, régimes mono/tri des réseaux).
-function SchemaOnduleur({ eq }) {
+function SchemaOnduleur({ eq, update }) {
   const [dataUrl, setDataUrl] = useState(null);
   const typeUPS = eq.identification?.typeUPS;
   const transformateurAmont = eq.identification?.transformateurAmont;
@@ -3855,8 +3871,27 @@ function SchemaOnduleur({ eq }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [eq.type, typeUPS, regimesKey, transformateurAmont, alimentationReseaux, transformateurSortie]);
   if (!dataUrl) return null;
+
+  const setIdent = (k, v) => update && update(repairEquipementControles({ ...eq, identification: { ...eq.identification, [k]: v } }));
+  const regimes = eq.controles?.regimes_reseaux || {};
+  const setRegime = (reseau, v) => {
+    if (!update) return;
+    const next = { ...regimes, [reseau]: v };
+    if (reseau === "utilisation") next.secours = v; // le by-pass suit toujours l'utilisation
+    update({ ...eq, controles: { ...eq.controles, regimes_reseaux: next } });
+  };
+  const miniSelect = (label, value, onChange, options) => (
+    <div style={{ marginBottom: 10 }}>
+      <div style={{ fontSize: 10.5, color: "#8B96A3", marginBottom: 3 }}>{label}</div>
+      <Select value={value || ""} onChange={(e) => onChange(e.target.value)} style={{ width: "100%", padding: "5px 7px", fontSize: 12 }}>
+        {options.map((o) => <option key={o} value={o}>{o}</option>)}
+      </Select>
+    </div>
+  );
+  const miniRegime = (label, reseau) => miniSelect(label, regimes[reseau] || "Triphasé", (v) => setRegime(reseau, v), ["Triphasé", "Monophasé"]);
+
   return (
-    <Card style={{ marginBottom: 14, textAlign: "center" }}>
+    <Card style={{ marginBottom: 14 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
         <div style={{ fontSize: 11.5, fontWeight: 700, color: "#5B6B7D", textTransform: "uppercase", letterSpacing: 0.4 }}>
           Schéma synoptique
@@ -3865,7 +3900,37 @@ function SchemaOnduleur({ eq }) {
           <RefreshCw size={13} /> Actualiser
         </button>
       </div>
-      <img src={dataUrl} alt="Schéma synoptique" style={{ maxWidth: "100%", height: "auto" }} />
+      <div style={{ display: "flex", gap: 18, flexWrap: "wrap", alignItems: "flex-start" }}>
+        <div style={{ flex: "1 1 260px", textAlign: "center" }}>
+          <img src={dataUrl} alt="Schéma synoptique" style={{ maxWidth: "100%", height: "auto" }} />
+        </div>
+        {update && (
+          <div style={{ flex: "0 1 200px", minWidth: 180, borderLeft: "1px solid #2A3038", paddingLeft: 16 }}>
+            <div style={{ fontSize: 10.5, fontWeight: 700, color: "#5B6B7D", marginBottom: 10, textTransform: "uppercase", letterSpacing: 0.4 }}>
+              Configuration
+            </div>
+            {eq.type === "Onduleur" && (
+              <>
+                {miniSelect("Type", typeUPS || "", (v) => setIdent("typeUPS", v), LISTE_TYPE_UPS)}
+                {miniSelect("Transformateur amont", transformateurAmont || "", (v) => setIdent("transformateurAmont", v), LISTE_TRANSFORMATEUR_AMONT)}
+                {miniSelect("Réseaux normal / secours", alimentationReseaux || "", (v) => setIdent("alimentationReseaux", v), LISTE_ALIMENTATION_RESEAUX)}
+                {miniSelect("Transformateur de sortie", transformateurSortie || "", (v) => setIdent("transformateurSortie", v), LISTE_TRANSFORMATEUR_SORTIE)}
+                {miniRegime("Régime réseau normal", "normal")}
+                {miniRegime("Régime onduleur", "onduleur")}
+                {miniRegime("Régime utilisation", "utilisation")}
+              </>
+            )}
+            {eq.type === "Redresseur chargeur" && miniRegime("Régime réseau", "normal")}
+            {eq.type === "Inverseur de source" && (
+              <>
+                {miniRegime("Régime source 1", "source1")}
+                {miniRegime("Régime source 2", "source2")}
+                {miniRegime("Régime utilisation", "utilisation")}
+              </>
+            )}
+          </div>
+        )}
+      </div>
     </Card>
   );
 }
@@ -4597,7 +4662,7 @@ function EquipementCard({ eq, update, remove, removable = true, onDuplicate, loc
             </div>
           )}
 
-          {(eq.type === "Onduleur" || eq.type === "Redresseur chargeur" || eq.type === "Inverseur de source") && <SchemaOnduleur eq={eq} />}
+          {(eq.type === "Onduleur" || eq.type === "Redresseur chargeur" || eq.type === "Inverseur de source") && <SchemaOnduleur eq={eq} update={update} />}
 
           {eq.type === "Transformateur" && eq.identification?.typeRefroidissement && DESCRIPTION_REFROIDISSEMENT_TRANSFO[eq.identification.typeRefroidissement] && (
             <div style={{ fontSize: 11.5, color: "#0A5DA8", background: "rgba(10,93,168,0.08)", padding: "8px 12px", borderRadius: 8, marginBottom: 14 }}>
@@ -6726,19 +6791,22 @@ function drawSymboleDC(ctx, cx, cy, s) {
 // Icône « interrupteur / sectionneur » : cercle en pointillés (dessiné sur une boîte 3D)
 // Symbole normalisé CEI du sectionneur/interrupteur : ligne horizontale, point de contact fixe
 // (trait vertical), pivot (petit cercle), et lame ouverte en diagonale rejoignant l'autre borne.
+// Symbole normalisé CEI du sectionneur/interrupteur, en orientation VERTICALE (le flux traverse
+// ces boîtes de haut en bas dans le schéma) : contact fixe (trait horizontal), pivot, lame ouverte
+// en diagonale rejoignant la sortie basse.
 function drawIconInterrupteur(ctx, x, y, w, h) {
   const b = draw3DBox(ctx, x, y, w, h);
   ctx.strokeStyle = SCHEMA_TRAIT; ctx.lineWidth = 1.6;
-  const cy = b.cy;
-  const xContact = x + w * 0.38, xPivotEnd = x + w * 0.85, yHaut = cy - h * 0.22;
-  // ligne d'arrivée + contact fixe (trait vertical)
-  ctx.beginPath(); ctx.moveTo(x + w * 0.15, cy); ctx.lineTo(xContact, cy); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(xContact, cy - h * 0.12); ctx.lineTo(xContact, cy + h * 0.12); ctx.stroke();
+  const cx = b.cx;
+  const yContact = y + h * 0.38, yPivotEnd = y + h * 0.85, xSortie = cx + w * 0.22;
+  // ligne d'arrivée (du haut) + contact fixe (trait horizontal)
+  ctx.beginPath(); ctx.moveTo(cx, y + h * 0.15); ctx.lineTo(cx, yContact); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(cx - w * 0.12, yContact); ctx.lineTo(cx + w * 0.12, yContact); ctx.stroke();
   // pivot (petit cercle)
-  ctx.beginPath(); ctx.arc(xContact + w * 0.05, cy, w * 0.045, 0, Math.PI * 2); ctx.stroke();
-  // lame ouverte, en diagonale, jusqu'à la borne opposée
-  ctx.beginPath(); ctx.moveTo(xContact + w * 0.08, cy + h * 0.05); ctx.lineTo(xPivotEnd, yHaut); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(xPivotEnd, yHaut); ctx.lineTo(x + w * 0.92, yHaut); ctx.stroke();
+  ctx.beginPath(); ctx.arc(cx, yContact + h * 0.05, w * 0.045, 0, Math.PI * 2); ctx.stroke();
+  // lame ouverte, en diagonale, vers la sortie basse
+  ctx.beginPath(); ctx.moveTo(cx + w * 0.05, yContact + h * 0.08); ctx.lineTo(xSortie, yPivotEnd); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(xSortie, yPivotEnd); ctx.lineTo(xSortie, y + h * 0.92); ctx.stroke();
   return b;
 }
 // Icône « filtre + terre » : sinusoïde au-dessus du symbole de terre
@@ -6787,6 +6855,16 @@ function drawBatterie(ctx, cx, cy, s) {
 }
 // Symbole transformateur simplifié : deux cercles qui se chevauchent, avec une borne courte en
 // haut et en bas (représentation courante en schéma unifilaire simplifié).
+// Icône « transformateur » en boîte 3D, cohérente visuellement avec les autres symboles (deux
+// cercles chevauchés, sans les bornes qui n'ont plus lieu d'être une fois dans la boîte).
+function drawIconTransformateur(ctx, x, y, w, h) {
+  const b = draw3DBox(ctx, x, y, w, h);
+  ctx.strokeStyle = SCHEMA_TRAIT; ctx.lineWidth = 1.6;
+  const r = Math.min(w, h) * 0.22;
+  ctx.beginPath(); ctx.arc(b.cx, b.cy - r * 0.65, r, 0, Math.PI * 2); ctx.stroke();
+  ctx.beginPath(); ctx.arc(b.cx, b.cy + r * 0.65, r, 0, Math.PI * 2); ctx.stroke();
+  return b;
+}
 function drawTransformateur(ctx, cx, cy, s) {
   ctx.strokeStyle = SCHEMA_TRAIT; ctx.lineWidth = 1.8;
   const r = s * 0.42;
@@ -6845,15 +6923,15 @@ function genererSchemaOnduleur(eq) {
     y += GAP_LIGNE;
 
     // Transformateur(s) d'isolement amont, si déclarés en identification
+    const tfW = 60, tfH = 46;
     if (avecTransfoR1) {
-      drawTransformateur(ctx, cxM, y + 20, 22);
-      label("Transfo. amont", cxM + 55, y + 20, "#5B6B7D", "10px Arial, sans-serif");
-      line(cxM, y, cxM, y + 40); y += 40;
-      line(cxM, y, cxM, y + 16); y += 16;
+      drawIconTransformateur(ctx, cxM - tfW / 2, y, tfW, tfH);
+      label("Transfo. amont", cxM + tfW / 2 + 40, y + tfH / 2, "#5B6B7D", "10px Arial, sans-serif");
+      line(cxM, y + tfH, cxM, y + tfH + 16); y += tfH + 16;
     }
     if (avecTransfoR2 && avecBypass) {
-      drawTransformateur(ctx, cxR2, y + 20, 22);
-      label("Transfo. amont", cxR2 + 55, y + 20, "#5B6B7D", "10px Arial, sans-serif");
+      drawIconTransformateur(ctx, cxR2 - tfW / 2, y, tfW, tfH);
+      label("Transfo. amont", cxR2 + tfW / 2 + 40, y + tfH / 2, "#5B6B7D", "10px Arial, sans-serif");
     }
 
     // Réseau normal (interrupteur)
@@ -6865,20 +6943,21 @@ function genererSchemaOnduleur(eq) {
     line(cxM, yReseauNormalBas, cxM, y);
 
     // Filtre + Redresseur, côte à côte, alignés sur la même ligne horizontale
-    const filtreW = 55, filtreH = 55;
-    const cxFiltre = cxM - redW / 2 - 30 - filtreW / 2;
     y += depthRed + LABEL_MARGIN + 6;
     label("Redresseur", cxM, y - depthRed - LABEL_MARGIN);
-    drawIconFiltreTerre(ctx, cxFiltre - filtreW / 2, y, filtreW, filtreH);
     drawIconRedresseur(ctx, cxM - redW / 2, y, redW, bh);
-    line(cxFiltre, y + filtreH / 2, cxM - redW / 2, y + filtreH / 2); // filtre -> redresseur
     let yRedresseurBas = y + bh;
     y = yRedresseurBas + 50;
     line(cxM, yRedresseurBas, cxM, y);
 
-    // Batterie : bien visible, sur sa propre branche à droite du bus continu, avec un espace dédié
-    const xBatt = cxM + 150, yBatt = yRedresseurBas + 25;
-    line(cxM, yBatt, xBatt - 26, yBatt);
+    // Batterie : sur sa propre branche à droite du bus continu, précédée du chargeur qui la régule
+    const xBatt = cxM + 160, yBatt = yRedresseurBas + 25;
+    const chW = 46, chH = 34;
+    const xChargeur = cxM + 55;
+    line(cxM, yBatt, xChargeur, yBatt);
+    draw3DBox(ctx, xChargeur - chW / 2, yBatt - chH / 2, chW, chH);
+    ctx.fillStyle = "#5B6B7D"; ctx.font = "9px Arial, sans-serif"; ctx.fillText("Chargeur", xChargeur, yBatt - chH / 2 - 10);
+    line(xChargeur + chW / 2, yBatt, xBatt - 26, yBatt);
     drawBatterie(ctx, xBatt, yBatt, 24);
     label("Batterie", xBatt, yBatt + 42, "#3E4A5C", "12px Arial, sans-serif");
 
