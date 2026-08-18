@@ -1893,13 +1893,16 @@ function nextNumeroRI(interventions) {
   return `RI-${year}-${String(n).padStart(3, "0")}`;
 }
 
+function emptyEquipementIv() {
+  return { id: uid(), type: "", constructeur: "", modele: "", numeroSerie: "", localisation: "", reference: "" };
+}
 function emptyIntervention(numeroRI) {
   return {
     id: uid(),
     numeroRI,
     client: "", site: "", emailClient: "", date: todayISO(), dateFin: "", technicien: "", techniciensSupplementaires: [], journeesSupplementaires: [],
     heureDebut: "", heureFin: "",
-    equipement: { type: "", constructeur: "", modele: "", numeroSerie: "", localisation: "", reference: "" },
+    equipements: [],
     nature: { preventive: false, corrective: false, miseEnService: false, expertise: false },
     travauxActions: [],
     travauxRealises: "",
@@ -1911,6 +1914,17 @@ function emptyIntervention(numeroRI) {
     linkedSiteId: null,
     linkedEquipementId: null,
   };
+}
+// Filet de sécurité / migration : les interventions créées avant l'introduction du support
+// multi-équipements n'avaient qu'un seul objet "equipement" — on le convertit en liste à la volée,
+// sans jamais perdre les données existantes.
+function repairIntervention(iv) {
+  if (!iv.equipements) {
+    const ancien = iv.equipement;
+    const nonVide = ancien && (ancien.type || ancien.constructeur || ancien.modele || ancien.numeroSerie || ancien.localisation || ancien.reference);
+    iv.equipements = nonVide ? [{ id: uid(), ...ancien }] : [];
+  }
+  return iv;
 }
 
 function dureeIntervention(heureDebut, heureFin) {
@@ -1924,9 +1938,21 @@ function dureeIntervention(heureDebut, heureFin) {
   return `${h}h${String(m).padStart(2, "0")}`;
 }
 
-function prefillInterventionFromSite(site, eq, numeroRI) {
+function prefillInterventionFromSite(site, eqOrList, numeroRI) {
   const base = emptyIntervention(numeroRI);
-  const idf = eq ? eq.identification : {};
+  const list = Array.isArray(eqOrList) ? eqOrList : (eqOrList ? [eqOrList] : []);
+  const equipements = list.map((eq) => {
+    const idf = eq.identification || {};
+    return {
+      id: uid(),
+      type: eq.type || "",
+      constructeur: idf.marque || (site.locaux || []).find((l) => l.id === eq.localId)?.marque || "",
+      modele: idf.typeCellule || idf.typeTransformateur || idf.typeDisjoncteur || "",
+      numeroSerie: idf.numeroSerie || idf.numeroSerieDisjoncteur || idf.numeroSerieContacteur || idf.numeroSerieRelais || "",
+      localisation: site.local,
+      reference: idf.repere || "",
+    };
+  });
   return {
     ...base,
     client: site.client,
@@ -1935,19 +1961,12 @@ function prefillInterventionFromSite(site, eq, numeroRI) {
     technicien: site.rapport.intervenant || "",
     heureDebut: site.rapport.heureArrivee || "",
     heureFin: site.rapport.heureFin || "",
-    equipement: {
-      type: eq ? eq.type : "",
-      constructeur: idf.marque || (site.locaux || []).find((l) => l.id === (eq && eq.localId))?.marque || "",
-      modele: idf.typeCellule || idf.typeTransformateur || idf.typeDisjoncteur || "",
-      numeroSerie: idf.numeroSerie || idf.numeroSerieDisjoncteur || idf.numeroSerieContacteur || idf.numeroSerieRelais || "",
-      localisation: site.local,
-      reference: idf.repere || "",
-    },
+    equipements,
     nature: { ...base.nature, preventive: true },
-    conclusion: eq ? eq.etatFinal : rankToLabel(overallRank(site)),
-    anomaliesRecommandations: eq ? eq.remarques || "" : "",
+    conclusion: list.length === 1 ? list[0].etatFinal : rankToLabel(overallRank(site)),
+    anomaliesRecommandations: list.length === 1 ? (list[0].remarques || "") : "",
     linkedSiteId: site.id,
-    linkedEquipementId: eq ? eq.id : null,
+    linkedEquipementId: list.length === 1 ? list[0].id : null,
   };
 }
 
@@ -5662,16 +5681,18 @@ function PrintIntervention({ iv }) {
           </div>
         </PrintSection>
 
-        <PrintSection title="Équipement">
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "2px 24px" }}>
-            <PrintFieldRow label="Type" value={iv.equipement.type} />
-            <PrintFieldRow label="Constructeur" value={iv.equipement.constructeur} />
-            <PrintFieldRow label="Modèle" value={iv.equipement.modele} />
-            <PrintFieldRow label="N° de série" value={iv.equipement.numeroSerie} />
-            <PrintFieldRow label="Localisation" value={iv.equipement.localisation} />
-            <PrintFieldRow label="Référence" value={iv.equipement.reference} />
-          </div>
-        </PrintSection>
+        {(repairIntervention(iv).equipements || []).map((eq, i) => (
+          <PrintSection key={eq.id} title={`Équipement${(iv.equipements.length > 1) ? " " + (i + 1) : ""}`}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "2px 24px" }}>
+              <PrintFieldRow label="Type" value={eq.type} />
+              <PrintFieldRow label="Constructeur" value={eq.constructeur} />
+              <PrintFieldRow label="Modèle" value={eq.modele} />
+              <PrintFieldRow label="N° de série" value={eq.numeroSerie} />
+              <PrintFieldRow label="Localisation" value={eq.localisation} />
+              <PrintFieldRow label="Référence" value={eq.reference} />
+            </div>
+          </PrintSection>
+        ))}
 
         <PrintSection title="Travaux réalisés">
           {iv.travauxActions && iv.travauxActions.length > 0 && (
@@ -5918,8 +5939,11 @@ function IvField({ label, children, span }) {
 }
 
 function InterventionEditor({ iv, update, onBack, onDelete, onPrint }) {
+  iv = repairIntervention(iv);
   const set = (k, v) => update((d) => ({ ...d, [k]: v }));
-  const setEquip = (k, v) => update((d) => ({ ...d, equipement: { ...d.equipement, [k]: v } }));
+  const setEquip = (eqId, k, v) => update((d) => ({ ...d, equipements: (d.equipements || []).map((e) => (e.id === eqId ? { ...e, [k]: v } : e)) }));
+  const addEquip = () => update((d) => ({ ...d, equipements: [...(d.equipements || []), emptyEquipementIv()] }));
+  const removeEquip = (eqId) => update((d) => ({ ...d, equipements: (d.equipements || []).filter((e) => e.id !== eqId) }));
   const setNature = (k, v) => update((d) => ({ ...d, nature: { ...d.nature, [k]: v } }));
   const setMesure = (k, v) => update((d) => ({ ...d, mesures: { ...d.mesures, [k]: v } }));
   const setValidation = (k, v) => update((d) => ({ ...d, validation: { ...d.validation, [k]: v } }));
@@ -6032,19 +6056,34 @@ function InterventionEditor({ iv, update, onBack, onDelete, onPrint }) {
       </Card>
 
       <Card style={{ marginBottom: 14 }}>
-        <SectionTitle>Équipement</SectionTitle>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 14 }}>
-          <IvField label="Type">
-            <Combo value={iv.equipement.type} onChange={(v) => setEquip("type", v)} options={EQUIPMENT_TYPES} listId={`${iv.id}-type`} />
-          </IvField>
-          <IvField label="Constructeur">
-            <Combo value={iv.equipement.constructeur} onChange={(v) => setEquip("constructeur", v)} options={LISTE_MARQUES} listId={`${iv.id}-construct`} />
-          </IvField>
-          <IvField label="Modèle"><TextInput value={iv.equipement.modele} onChange={(e) => setEquip("modele", e.target.value)} /></IvField>
-          <IvField label="N° de série"><TextInput value={iv.equipement.numeroSerie} onChange={(e) => setEquip("numeroSerie", e.target.value)} /></IvField>
-          <IvField label="Localisation"><TextInput value={iv.equipement.localisation} onChange={(e) => setEquip("localisation", e.target.value)} /></IvField>
-          <IvField label="Référence"><TextInput value={iv.equipement.reference} onChange={(e) => setEquip("reference", e.target.value)} /></IvField>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+          <SectionTitle>Équipement(s)</SectionTitle>
+          <button onClick={addEquip} style={btnGhost(BRAND.blue)}><Plus size={13} /> Ajouter un équipement</button>
         </div>
+        {(iv.equipements || []).length === 0 ? (
+          <div style={{ fontSize: 12, color: "#8B96A3" }}>Aucun équipement lié — informations générales du site uniquement.</div>
+        ) : (
+          (iv.equipements || []).map((eq, i) => (
+            <div key={eq.id} style={{ marginBottom: i < iv.equipements.length - 1 ? 18 : 0, paddingBottom: i < iv.equipements.length - 1 ? 18 : 0, borderBottom: i < iv.equipements.length - 1 ? "1px solid #2A3038" : "none" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                <span style={{ fontSize: 11, fontWeight: 700, color: "#5B6B7D" }}>Équipement {i + 1}</span>
+                <button onClick={() => removeEquip(eq.id)} style={{ background: "none", border: "none", color: "#EF4444", cursor: "pointer", padding: 4 }} title="Retirer"><Trash2 size={14} /></button>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 14 }}>
+                <IvField label="Type">
+                  <Combo value={eq.type} onChange={(v) => setEquip(eq.id, "type", v)} options={EQUIPMENT_TYPES} listId={`${iv.id}-type-${eq.id}`} />
+                </IvField>
+                <IvField label="Constructeur">
+                  <Combo value={eq.constructeur} onChange={(v) => setEquip(eq.id, "constructeur", v)} options={LISTE_MARQUES} listId={`${iv.id}-construct-${eq.id}`} />
+                </IvField>
+                <IvField label="Modèle"><TextInput value={eq.modele} onChange={(e) => setEquip(eq.id, "modele", e.target.value)} /></IvField>
+                <IvField label="N° de série"><TextInput value={eq.numeroSerie} onChange={(e) => setEquip(eq.id, "numeroSerie", e.target.value)} /></IvField>
+                <IvField label="Localisation"><TextInput value={eq.localisation} onChange={(e) => setEquip(eq.id, "localisation", e.target.value)} /></IvField>
+                <IvField label="Référence"><TextInput value={eq.reference} onChange={(e) => setEquip(eq.id, "reference", e.target.value)} /></IvField>
+              </div>
+            </div>
+          ))
+        )}
       </Card>
 
       <Card style={{ marginBottom: 14 }}>
@@ -6159,8 +6198,10 @@ function InterventionEditor({ iv, update, onBack, onDelete, onPrint }) {
 function InterventionPrefillPicker({ sites, onCancel, onConfirm }) {
   const [siteId, setSiteId] = useState("");
   const site = sites.find((s) => s.id === siteId) || null;
-  const [equipId, setEquipId] = useState("");
+  const [equipIds, setEquipIds] = useState([]);
   const equipOptions = site ? site.equipements.map((e) => ({ id: e.id, label: `${e.type}${e.identification.repere ? " — " + e.identification.repere : ""}`, eq: e })) : [];
+  const toggle = (id) => setEquipIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
+  const toutSelectionne = equipOptions.length > 0 && equipIds.length === equipOptions.length;
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(4,9,16,0.72)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "32px 16px", overflowY: "auto", zIndex: 50 }} onClick={(e) => e.target === e.currentTarget && onCancel()}>
@@ -6171,19 +6212,28 @@ function InterventionPrefillPicker({ sites, onCancel, onConfirm }) {
         </div>
         <div style={{ padding: 24 }}>
           <IvField label="Site">
-            <Select value={siteId} onChange={(e) => { setSiteId(e.target.value); setEquipId(""); }}>
+            <Select value={siteId} onChange={(e) => { setSiteId(e.target.value); setEquipIds([]); }}>
               <option value="">— Choisir un site —</option>
               {sites.map((s) => <option key={s.id} value={s.id}>{s.nom || "Site sans nom"} — {s.client}</option>)}
             </Select>
           </IvField>
-          {site && (
+          {site && equipOptions.length > 0 && (
             <div style={{ marginTop: 14 }}>
-              <IvField label="Équipement (optionnel)">
-                <Select value={equipId} onChange={(e) => setEquipId(e.target.value)}>
-                  <option value="">— Aucun (informations générales uniquement) —</option>
-                  {equipOptions.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
-                </Select>
-              </IvField>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                <span style={{ fontSize: 12, fontWeight: 700, color: "#5B6B7D" }}>Équipements (un ou plusieurs, optionnel)</span>
+                <span onClick={() => setEquipIds(toutSelectionne ? [] : equipOptions.map((o) => o.id))} style={{ fontSize: 11.5, color: "#0A5DA8", cursor: "pointer" }}>
+                  {toutSelectionne ? "Tout désélectionner" : "Tout sélectionner"}
+                </span>
+              </div>
+              <div style={{ maxHeight: 220, overflowY: "auto", border: "1px solid #E2E6EB", borderRadius: 8 }}>
+                {equipOptions.map((o) => (
+                  <label key={o.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", borderBottom: "1px solid #F0F2F5", cursor: "pointer", fontSize: 12.5, color: "#3E4A5C" }}>
+                    <input type="checkbox" checked={equipIds.includes(o.id)} onChange={() => toggle(o.id)} style={{ accentColor: BRAND.blue }} />
+                    {o.label}
+                  </label>
+                ))}
+              </div>
+              {equipIds.length === 0 && <div style={{ fontSize: 10.5, color: "#8B96A3", marginTop: 4 }}>Aucun sélectionné = informations générales du site uniquement.</div>}
             </div>
           )}
         </div>
@@ -6191,7 +6241,7 @@ function InterventionPrefillPicker({ sites, onCancel, onConfirm }) {
           <button onClick={onCancel} style={btnGhost()}>Annuler</button>
           <button
             disabled={!site}
-            onClick={() => onConfirm(site, equipId ? equipOptions.find((o) => o.id === equipId).eq : null)}
+            onClick={() => onConfirm(site, equipOptions.filter((o) => equipIds.includes(o.id)).map((o) => o.eq))}
             style={{ ...btnPrimary(), opacity: site ? 1 : 0.5, cursor: site ? "pointer" : "not-allowed" }}
           >
             Créer le rapport
@@ -7957,6 +8007,7 @@ async function generateSiteDocx(site, allSites) {
 
 async function generateInterventionDocx(iv) {
   await ensureDocx();
+  iv = repairIntervention(iv);
   const duree = dureeIntervention(iv.heureDebut, iv.heureFin);
   const logoImg = docxImage(LOGO_DARK, 46, 35);
   const headerTable = new DOCX.Table({ width: { size: 8800, type: DOCX.WidthType.DXA }, columnWidths: [8800], rows: [new DOCX.TableRow({ children: [new DOCX.TableCell({
@@ -7979,10 +8030,7 @@ async function generateInterventionDocx(iv) {
     ["Date(s) d'intervention", ivJourneesTexte || iv.date],
     ["Technicien(s)", tousTechniciens],
     ["Durée totale (journée 1)", duree],
-  ];
-  const equipRows = [
-    ["Type", iv.equipement.type], ["Constructeur", iv.equipement.constructeur], ["Modèle", iv.equipement.modele],
-    ["N° de série", iv.equipement.numeroSerie], ["Localisation", iv.equipement.localisation], ["Référence", iv.equipement.reference],
+    ["Statut", iv.statut === "Clôturée" ? "Clôturée" : "En cours"],
   ];
   const natureText = NATURE_INTERVENTION.filter((n) => iv.nature[n.key]).map((n) => n.label).join(", ") || "—";
   const mesuresRows = [
@@ -7996,10 +8044,22 @@ async function generateInterventionDocx(iv) {
   if (infoTable) children.push(infoTable);
   children.push(docxSpacer());
 
-  children.push(docxHeading("Équipement"));
-  const equipTable = docxFieldTable(equipRows);
-  if (equipTable) children.push(equipTable);
-  children.push(docxSpacer());
+  const listeEquip = iv.equipements || [];
+  if (listeEquip.length) {
+    children.push(docxHeading(listeEquip.length > 1 ? `Équipements (${listeEquip.length})` : "Équipement"));
+    listeEquip.forEach((eq, i) => {
+      if (listeEquip.length > 1) {
+        children.push(new DOCX.Paragraph({ spacing: { before: i > 0 ? 120 : 0, after: 40 }, children: [new DOCX.TextRun({ text: `Équipement ${i + 1}`, bold: true, size: 18, color: DOCX_DARK })] }));
+      }
+      const equipRows = [
+        ["Type", eq.type], ["Constructeur", eq.constructeur], ["Modèle", eq.modele],
+        ["N° de série", eq.numeroSerie], ["Localisation", eq.localisation], ["Référence", eq.reference],
+      ];
+      const t = docxFieldTable(equipRows);
+      if (t) children.push(t);
+      children.push(docxSpacer());
+    });
+  }
 
   children.push(docxHeading("Nature de l'intervention"));
   children.push(new DOCX.Paragraph({ spacing: { after: 80 }, children: [new DOCX.TextRun({ text: natureText, size: 18 })] }));
