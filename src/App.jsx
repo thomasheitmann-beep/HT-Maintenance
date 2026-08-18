@@ -147,6 +147,7 @@ const LISTE_ENVIRONNEMENT_UPS = ["Propre", "Dépoussiérée", "Nécessite une d�
 const LISTE_TRANSFORMATEUR_AMONT = ["Sans transformateur amont", "Avec transformateur amont", "Avec transformateur amont réseau 1", "Avec transformateur amont réseau 2", "Avec transformateurs amont réseau 1 et réseau 2"];
 const LISTE_ALIMENTATION_RESEAUX = ["1 réseau d'alimentation", "1 réseau d'alimentation (réseaux normal et secours pontés au bornier)", "2 réseaux d'alimentation indépendants (normal et secours séparés)"];
 const LISTE_TRANSFORMATEUR_SORTIE = ["Sans transformateur de sortie", "Avec transformateur de sortie"];
+const LISTE_PRESENCE_CHARGEUR = ["Présent", "Non présent"];
 const LISTE_RATTACHEMENT_BILAN = ["Transformateur", "Disjoncteur BT", "TGBT"];
 const LISTE_TYPE_SOURCE_INV = ["ASI (Alimentation Statique sans Interruption)", "Onduleur", "Groupe électrogène", "Groupe tournant", "Turbine à gaz", "TGBT", "Transformateur", "Fournisseur ERDF ou autre", "Aucune"];
 const LISTE_REGIME_NEUTRE_BT = ["TNS", "TT", "TNC", "IT"];
@@ -431,6 +432,9 @@ const TYPES_AVEC_GRADINS = ["Batterie de compensation"];
 // par élément, avec classification automatique (Normal / À surveiller / Critique) par rapport à
 // la moyenne mesurée — reprend le principe du fichier Excel (comparaison à la tension de floating).
 const TYPES_AVEC_BRANCHES_UPS = ["Onduleur", "Redresseur chargeur"];
+// Pièces d'usure (batteries, ventilateurs...) : concerne aussi l'Onduleur simplifié, mais SANS la
+// courbe de décharge / suivi par élément propre à TYPES_AVEC_BRANCHES_UPS.
+const TYPES_AVEC_PIECES_USURE = [...TYPES_AVEC_BRANCHES_UPS, "Onduleur simplifié"];
 // Types qui partagent le bloc "Mesures — Utilisation" (mesures triphasées + photos par phase +
 // taux de charge calculé) : l'Onduleur, et le Bilan de puissance qui réutilise la même structure.
 const TYPES_AVEC_MESURES_UTILISATION = ["Onduleur", "Bilan de puissance", "Inverseur de source"];
@@ -443,8 +447,11 @@ const CATEGORIES_USURE_UPS = [
   { key: "ventilateurs", label: "Ventilateurs", dureeDefaut: 4 },
 ];
 const CATEGORIES_USURE_REDRESSEUR = CATEGORIES_USURE_UPS.filter((c) => c.key !== "condensateursAlternatifs");
+const CATEGORIES_USURE_UPS_SIMPLIFIE = CATEGORIES_USURE_UPS.filter((c) => c.key === "batteries" || c.key === "ventilateurs");
 function getCategoriesUsure(type) {
-  return type === "Redresseur chargeur" ? CATEGORIES_USURE_REDRESSEUR : CATEGORIES_USURE_UPS;
+  if (type === "Redresseur chargeur") return CATEGORIES_USURE_REDRESSEUR;
+  if (type === "Onduleur simplifié") return CATEGORIES_USURE_UPS_SIMPLIFIE;
+  return CATEGORIES_USURE_UPS;
 }
 function emptyModeleUsure(dureeDefaut) {
   return { id: uid(), description: "", marque: "", modele: "", quantite: "", anneeMiseEnService: "", dureeVie: dureeDefaut ?? "" };
@@ -1525,6 +1532,7 @@ const SCHEMAS = {
       { key: "repere", label: "Repère / Nom de l'équipement" },
       { key: "marque", label: "Marque", options: LISTE_MARQUE_ONDULEUR }, { key: "modele", label: "Modèle", options: LISTE_MODELE_ONDULEUR_OPTIONS },
       { key: "puissanceKVA", label: "Puissance (kVA)", options: LISTE_PUISSANCE_ONDULEUR_SIMPLIFIE },
+      { key: "puissanceKW", label: "Puissance (kW)", numeric: true },
       { key: "tensionEntree", label: "Tension d'entrée (monophasé)", options: LISTE_TENSION_MONOPHASE },
       { key: "tensionSortie", label: "Tension de sortie (monophasé)", options: LISTE_TENSION_MONOPHASE },
       { key: "anneeMiseEnService", label: "Année de mise en service", numeric: true },
@@ -1536,16 +1544,23 @@ const SCHEMAS = {
       { key: "etat_general", title: "État général", items: [
         C("indicateurs", "Indicateurs / signalisations en face avant"), C("alarmes", "Test alarme / défaut"),
         C("ventilation", "Ventilation"), C("connexions", "Connexions de puissance"),
+        C("bypassInterne", "By-pass manuel interne"), C("bypassExterne", "By-pass manuel externe"),
       ]},
       { key: "mesures_ecran", title: "Mesures affichées à l'écran", items: [
         C("mesures", "Relevé des mesures", [
           F("tensionEntree", "Tension d'entrée", "V"), F("tensionSortie", "Tension de sortie", "V"),
           F("courantEntree", "Courant d'entrée", "A"), F("courantSortie", "Courant de sortie", "A"),
+          F("frequenceEntree", "Fréquence d'entrée", "Hz"), F("frequenceSortie", "Fréquence de sortie", "Hz"),
+          F("puissanceActiveSortie", "Puissance active de sortie (P)", "kW"), F("puissanceReactiveSortie", "Puissance réactive de sortie (Q)", "kVAR"),
         ]),
       ]},
       { key: "batterie", title: "Batterie", items: [
+        C("mesures_batterie", "Relevé batterie", [
+          F("tensionFloating", "Tension de floating", "V"), F("courantDecharge", "Courant de décharge", "A"),
+        ]),
         C("test_decharge", "Test de décharge batterie"),
       ]},
+      { key: "pieces_usure_ups", title: "Pièces d'usure", items: [] },
     ],
   },
   "Redresseur chargeur": buildRedresseurSchema({}),
@@ -1837,6 +1852,8 @@ function emptyEquipement(type) {
     controles.branches_dynamique = [emptyDynamicEntry(LISTE_NOM_BRANCHE[0], BRANCHE_FIELD_DEFS, true)];
     controles.elements_dynamique = [emptyDynamicEntry("Élément 1", ELEMENT_FIELD_DEFS, false)];
     controles.releve_config = { mode: "Floating", saisieParGroupe: false, tailleGroupe: 2, toleranceBasse: 3, toleranceHaute: 3 };
+  }
+  if (TYPES_AVEC_PIECES_USURE.includes(type)) {
     controles.pieces_usure_ups = {};
     getCategoriesUsure(type).forEach((cat) => { controles.pieces_usure_ups[cat.key] = [emptyModeleUsure(cat.dureeDefaut)]; });
   }
@@ -1924,7 +1941,7 @@ function nextNumeroRI(interventions) {
 }
 
 function emptyEquipementIv() {
-  return { id: uid(), type: "", constructeur: "", modele: "", numeroSerie: "", localisation: "", reference: "" };
+  return { id: uid(), type: "", constructeur: "", modele: "", numeroSerie: "", localisation: "", reference: "", etat: "Conforme", remarque: "" };
 }
 function emptyIntervention(numeroRI) {
   return {
@@ -1981,6 +1998,8 @@ function prefillInterventionFromSite(site, eqOrList, numeroRI) {
       numeroSerie: idf.numeroSerie || idf.numeroSerieDisjoncteur || idf.numeroSerieContacteur || idf.numeroSerieRelais || "",
       localisation: site.local,
       reference: idf.repere || "",
+      etat: eq.etatFinal || "Conforme",
+      remarque: eq.remarques || "",
     };
   });
   return {
@@ -2442,11 +2461,44 @@ function readFileAsDataUrl(file) {
   });
 }
 
+// Comme compressImage, mais retourne un Blob (pour l'upload vers Firebase Storage) plutôt qu'un
+// data: URL base64 (qui gonflerait le document Firestore).
+function compressImageToBlob(file, maxDim = 1100, quality = 0.68) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new window.Image();
+      img.onload = () => {
+        let { width, height } = img;
+        if (width > maxDim || height > maxDim) {
+          const scale = maxDim / Math.max(width, height);
+          width = Math.round(width * scale);
+          height = Math.round(height * scale);
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, width, height);
+        canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error("compression impossible"))), "image/jpeg", quality);
+      };
+      img.onerror = () => reject(new Error("image invalide"));
+      img.src = e.target.result;
+    };
+    reader.onerror = () => reject(new Error("lecture impossible"));
+    reader.readAsDataURL(file);
+  });
+}
+
 // Galerie de pièces jointes générique : photo / capture d'écran (compressée) ou document PDF (stocké tel quel).
 function FileGallery({ files, onChange, idPrefix }) {
   const inputRef = useRef(null);
   const [busy, setBusy] = useState(false);
   const list = files || [];
+  // Toujours lire la liste la plus récente au moment de l'écriture (pas celle capturée à l'ouverture
+  // de handleFiles) — évite qu'un deuxième ajout rapide n'écrase le premier avant sa fin.
+  const listRef = useRef(list);
+  useEffect(() => { listRef.current = list; }, [list]);
 
   async function handleFiles(fileList) {
     setBusy(true);
@@ -2455,13 +2507,24 @@ function FileGallery({ files, onChange, idPrefix }) {
     for (const file of picked) {
       try {
         const isPdf = file.type === "application/pdf";
-        const dataUrl = isPdf ? await readFileAsDataUrl(file) : await compressImage(file);
+        let dataUrl;
+        if (isPdf) {
+          // Les PDF restent en base64 : rares et généralement petits comparés aux photos —
+          // pas prioritaire pour la migration Storage.
+          dataUrl = await readFileAsDataUrl(file);
+        } else if (CURRENT_USER_FOR_STORAGE) {
+          const blob = await compressImageToBlob(file);
+          const idToken = await CURRENT_USER_FOR_STORAGE.getIdToken();
+          dataUrl = await firebaseStorageUpload(`photos/${uid()}.jpg`, blob, idToken);
+        } else {
+          dataUrl = await compressImage(file); // repli si utilisateur non encore disponible
+        }
         added.push({ id: uid(), dataUrl, name: file.name, isPdf, caption: "" });
       } catch (e) {
         // fichier ignoré si illisible
       }
     }
-    onChange([...list, ...added]);
+    onChange([...listRef.current, ...added]);
     setBusy(false);
   }
 
@@ -2567,6 +2630,8 @@ function PhotoGallery({ photos, onChange, idPrefix }) {
   const inputRef = useRef(null);
   const [busy, setBusy] = useState(false);
   const list = photos || [];
+  const listRef = useRef(list);
+  useEffect(() => { listRef.current = list; }, [list]);
 
   async function handleFiles(fileList) {
     setBusy(true);
@@ -2574,13 +2639,20 @@ function PhotoGallery({ photos, onChange, idPrefix }) {
     const added = [];
     for (const file of files) {
       try {
-        const dataUrl = await compressImage(file);
+        let dataUrl;
+        if (CURRENT_USER_FOR_STORAGE) {
+          const blob = await compressImageToBlob(file);
+          const idToken = await CURRENT_USER_FOR_STORAGE.getIdToken();
+          dataUrl = await firebaseStorageUpload(`photos/${uid()}.jpg`, blob, idToken);
+        } else {
+          dataUrl = await compressImage(file);
+        }
         added.push({ id: uid(), dataUrl, caption: "" });
       } catch (e) {
         // fichier ignoré si illisible
       }
     }
-    onChange([...list, ...added]);
+    onChange([...listRef.current, ...added]);
     setBusy(false);
   }
 
@@ -3923,6 +3995,7 @@ function SchemaOnduleur({ eq, update }) {
   const transformateurAmont = eq.identification?.transformateurAmont;
   const alimentationReseaux = eq.identification?.alimentationReseaux;
   const transformateurSortie = eq.identification?.transformateurSortie;
+  const presenceChargeur = eq.identification?.presenceChargeur;
   const regimesKey = JSON.stringify(eq.controles?.regimes_reseaux || {});
   const regenerer = () => {
     const gen = eq.type === "Onduleur" ? genererSchemaOnduleur : eq.type === "Redresseur chargeur" ? genererSchemaRedresseurChargeur : genererSchemaInverseurSource;
@@ -3931,7 +4004,7 @@ function SchemaOnduleur({ eq, update }) {
   useEffect(() => {
     regenerer();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [eq.type, typeUPS, regimesKey, transformateurAmont, alimentationReseaux, transformateurSortie]);
+  }, [eq.type, typeUPS, regimesKey, transformateurAmont, alimentationReseaux, transformateurSortie, presenceChargeur]);
   if (!dataUrl) return null;
 
   const setIdent = (k, v) => update && update(repairEquipementControles({ ...eq, identification: { ...eq.identification, [k]: v } }));
@@ -3977,6 +4050,7 @@ function SchemaOnduleur({ eq, update }) {
                 {miniSelect("Transformateur amont", transformateurAmont || "", (v) => setIdent("transformateurAmont", v), LISTE_TRANSFORMATEUR_AMONT)}
                 {miniSelect("Réseaux normal / secours", alimentationReseaux || "", (v) => setIdent("alimentationReseaux", v), LISTE_ALIMENTATION_RESEAUX)}
                 {miniSelect("Transformateur de sortie", transformateurSortie || "", (v) => setIdent("transformateurSortie", v), LISTE_TRANSFORMATEUR_SORTIE)}
+                {miniSelect("Chargeur", presenceChargeur || "Présent", (v) => setIdent("presenceChargeur", v), LISTE_PRESENCE_CHARGEUR)}
                 {miniRegime("Régime réseau normal", "normal")}
                 {miniRegime("Régime onduleur", "onduleur")}
                 {miniRegime("Régime utilisation", "utilisation")}
@@ -5020,7 +5094,7 @@ function EquipementCard({ eq, update, remove, removable = true, onDuplicate, loc
                 </React.Fragment>
               );
             }
-            if (sec.key === "pieces_usure_ups" && TYPES_AVEC_BRANCHES_UPS.includes(eq.type)) {
+            if (sec.key === "pieces_usure_ups" && TYPES_AVEC_PIECES_USURE.includes(eq.type)) {
               return <PiecesUsureUPSPanel key={sec.key} eq={eq} update={update} />;
             }
             if (sec.key === "usure" && TYPES_AVEC_GRADINS.includes(eq.type)) {
@@ -5720,7 +5794,9 @@ function PrintIntervention({ iv }) {
               <PrintFieldRow label="N° de série" value={eq.numeroSerie} />
               <PrintFieldRow label="Localisation" value={eq.localisation} />
               <PrintFieldRow label="Référence" value={eq.reference} />
+              <PrintFieldRow label="Statut" value={eq.etat} />
             </div>
+            {eq.remarque && <div style={{ marginTop: 6, fontSize: 12, color: "#3E4A5C" }}><strong>Remarque :</strong> {eq.remarque}</div>}
           </PrintSection>
         ))}
 
@@ -5866,7 +5942,7 @@ function SiteDetail({ site, allSites, update, onBack, onDelete, onPrint, onPrint
             <button onClick={() => onPrintAnnexe(site)} style={btnGhost("#0F8A5F")} title="Génère un fichier Word séparé regroupant toutes les photos du site, classées par équipement et par contrôle">
               <ImagePlus size={13} /> Annexe photos
             </button>
-            <button onClick={() => onCreateIntervention(site, null)} style={btnGhost(BRAND.blue)}>
+            <button onClick={() => onCreateIntervention(site, site.equipements)} style={btnGhost(BRAND.blue)} title="Crée un rapport d'intervention pré-rempli avec tous les équipements de ce site">
               <ClipboardList size={13} /> Rapport d'intervention
             </button>
             <InlineConfirmButton icon={Trash2} label="Supprimer le site" onConfirm={() => onDelete(site.id)} />
@@ -6110,6 +6186,16 @@ function InterventionEditor({ iv, update, onBack, onDelete, onPrint }) {
                 <IvField label="N° de série"><TextInput value={eq.numeroSerie} onChange={(e) => setEquip(eq.id, "numeroSerie", e.target.value)} /></IvField>
                 <IvField label="Localisation"><TextInput value={eq.localisation} onChange={(e) => setEquip(eq.id, "localisation", e.target.value)} /></IvField>
                 <IvField label="Référence"><TextInput value={eq.reference} onChange={(e) => setEquip(eq.id, "reference", e.target.value)} /></IvField>
+                <IvField label="Statut">
+                  <Select value={eq.etat || "Conforme"} onChange={(e) => setEquip(eq.id, "etat", e.target.value)}>
+                    {EQUIP_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+                  </Select>
+                </IvField>
+              </div>
+              <div style={{ marginTop: 10 }}>
+                <IvField label="Remarque">
+                  <TextArea value={eq.remarque || ""} onChange={(e) => setEquip(eq.id, "remarque", e.target.value)} rows={2} />
+                </IvField>
               </div>
             </div>
           ))
@@ -7040,6 +7126,7 @@ function genererSchemaOnduleur(eq) {
     const avecTransfoR2 = transfoAmont.includes("réseau 2");
     const reseauxPontes = (eq.identification?.alimentationReseaux || "").includes("pontés");
     const avecTransfoSortie = eq.identification?.transformateurSortie === "Avec transformateur de sortie";
+    const avecChargeur = eq.identification?.presenceChargeur !== "Non présent"; // présent par défaut
     const TRANSFO_H = 60; // espace vertical réservé à un symbole transformateur amont
     const w = 480, h = (avecBypass ? 780 : 560) + (avecTransfoR1 || avecTransfoR2 ? TRANSFO_H : 0) + (avecTransfoSortie ? 75 : 0);
     const canvas = document.createElement("canvas");
@@ -7104,13 +7191,18 @@ function genererSchemaOnduleur(eq) {
     line(cxM, yRedresseurBas, cxM, y);
 
     // Batterie : sur sa propre branche à droite du bus continu, précédée du chargeur qui la régule
+    // (si présent — sinon la batterie est reliée directement au bus continu du redresseur).
     const xBatt = cxM + 160, yBatt = yRedresseurBas + 25;
-    const chW = 46, chH = 34;
-    const xChargeur = cxM + 55;
-    line(cxM, yBatt, xChargeur, yBatt);
-    drawIconChargeur(ctx, xChargeur - chW / 2, yBatt - chH / 2, chW, chH);
-    ctx.fillStyle = "#5B6B7D"; ctx.font = "9px Arial, sans-serif"; ctx.textAlign = "center"; ctx.fillText("Chargeur", xChargeur, yBatt + chH / 2 + 12);
-    line(xChargeur + chW / 2, yBatt, xBatt - 26, yBatt);
+    if (avecChargeur) {
+      const chW = 46, chH = 34;
+      const xChargeur = cxM + 55;
+      line(cxM, yBatt, xChargeur, yBatt);
+      drawIconChargeur(ctx, xChargeur - chW / 2, yBatt - chH / 2, chW, chH);
+      ctx.fillStyle = "#5B6B7D"; ctx.font = "9px Arial, sans-serif"; ctx.textAlign = "center"; ctx.fillText("Chargeur", xChargeur, yBatt + chH / 2 + 12);
+      line(xChargeur + chW / 2, yBatt, xBatt - 26, yBatt);
+    } else {
+      line(cxM, yBatt, xBatt - 26, yBatt);
+    }
     drawBatterie(ctx, xBatt, yBatt, 24);
     label("Batterie", xBatt, yBatt + 42, "#3E4A5C", "12px Arial, sans-serif");
 
@@ -7668,7 +7760,7 @@ function docxEquipementElements(eq, locaux, allSites) {
       else elements.push(docxSpacer());
       return;
     }
-    if (sec.key === "pieces_usure_ups" && TYPES_AVEC_BRANCHES_UPS.includes(eq.type)) {
+    if (sec.key === "pieces_usure_ups" && TYPES_AVEC_PIECES_USURE.includes(eq.type)) {
       // Non repris tel quel : seule la synthèse (type de pièce + année de remplacement) est
       // destinée au client — description/marque/modèle/quantité/mise en service restent internes.
       elements.push(docxHeading("Échéances de remplacement prévues"));
@@ -7879,10 +7971,44 @@ function collectPhotosEquipement(eq) {
   });
   return result;
 }
+// Récupère les octets d'une photo stockée sur Firebase Storage (URL courte) et la convertit en
+// data: URL base64 — nécessaire uniquement le temps de générer le Word, puisque la bibliothèque
+// docx attend les images en mémoire, pas une URL à télécharger elle-même.
+async function urlToDataUrl(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Téléchargement photo impossible (${res.status})`);
+  const blob = await res.blob();
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error("lecture impossible"));
+    reader.readAsDataURL(blob);
+  });
+}
+// Parcourt une copie du site/de l'intervention et remplace chaque URL Storage par son contenu en
+// base64, pour que le reste de la génération Word (docxImage) fonctionne exactement comme avant,
+// sans aucune modification — seule cette étape de préparation est nouvelle.
+async function resolvePhotosForDocx(obj) {
+  const clone = JSON.parse(JSON.stringify(obj));
+  const nodes = [];
+  (function walk(node) {
+    if (Array.isArray(node)) { node.forEach(walk); return; }
+    if (node && typeof node === "object") {
+      if (typeof node.dataUrl === "string" && node.dataUrl.startsWith("http")) nodes.push(node);
+      Object.values(node).forEach(walk);
+    }
+  })(clone);
+  await Promise.all(nodes.map(async (node) => {
+    try { node.dataUrl = await urlToDataUrl(node.dataUrl); }
+    catch (e) { console.error("[Word] Photo introuvable, ignorée :", e); node.dataUrl = null; }
+  }));
+  return clone;
+}
 // Génère un fichier Word séparé regroupant l'ensemble des photos du site, classées par équipement
 // puis par contrôle d'origine (au lieu d'être dispersées dans le rapport principal).
 async function generateAnnexePhotosDocx(site) {
   await ensureDocx();
+  site = await resolvePhotosForDocx(site);
   const logoImg = docxImage(LOGO_DARK, 46, 35);
   const headerTable = new DOCX.Table({ width: { size: 8800, type: DOCX.WidthType.DXA }, columnWidths: [8800], rows: [new DOCX.TableRow({ children: [new DOCX.TableCell({
     width: { size: 8800, type: DOCX.WidthType.DXA }, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_DARK },
@@ -7965,6 +8091,7 @@ function docxCoverPage(site) {
 
 async function generateSiteDocx(site, allSites) {
   await ensureDocx();
+  site = await resolvePhotosForDocx(site);
   const rank = overallRank(site);
   const rankLabel = rankToLabel(rank);
   const logoImg = docxImage(LOGO_DARK, 46, 35);
@@ -8033,6 +8160,7 @@ async function generateSiteDocx(site, allSites) {
 async function generateInterventionDocx(iv) {
   await ensureDocx();
   iv = repairIntervention(iv);
+  iv = await resolvePhotosForDocx(iv);
   const duree = dureeIntervention(iv.heureDebut, iv.heureFin);
   const logoImg = docxImage(LOGO_DARK, 46, 35);
   const headerTable = new DOCX.Table({ width: { size: 8800, type: DOCX.WidthType.DXA }, columnWidths: [8800], rows: [new DOCX.TableRow({ children: [new DOCX.TableCell({
@@ -8082,6 +8210,16 @@ async function generateInterventionDocx(iv) {
       ];
       const t = docxFieldTable(equipRows);
       if (t) children.push(t);
+      children.push(new DOCX.Paragraph({ spacing: { before: 60, after: 40 }, children: [
+        new DOCX.TextRun({ text: "Statut : ", bold: true, size: 18, color: DOCX_DARK }),
+        new DOCX.TextRun({ text: (eq.etat || "Conforme").toUpperCase(), bold: true, size: 18, color: docxEtatColor(eq.etat || "Conforme") }),
+      ]}));
+      if (eq.remarque && eq.remarque.trim()) {
+        children.push(new DOCX.Paragraph({ spacing: { after: 60 }, children: [
+          new DOCX.TextRun({ text: "Remarque : ", bold: true, size: 18, color: DOCX_DARK }),
+          new DOCX.TextRun({ text: eq.remarque, size: 18, color: "3E4A5C" }),
+        ]}));
+      }
       children.push(docxSpacer());
     });
   }
@@ -8138,6 +8276,35 @@ function downloadBlob(blob, filename) {
 // Contrepartie : pas de mise à jour instantanée entre techniciens, remplacée par une actualisation
 // périodique (voir REST_POLL_INTERVAL_MS).
 const FIRESTORE_REST_BASE = "https://firestore.googleapis.com/v1/projects/ht-maintenance/databases/(default)/documents";
+// Bucket Firebase Storage (voir firebase.js) — les photos y sont uploadées individuellement au lieu
+// d'être stockées en base64 dans le document Firestore, qui plafonne à 1 Mo par document et ne
+// peut absorber que quelques photos avant d'échouer silencieusement.
+const STORAGE_BUCKET = "ht-maintenance.firebasestorage.app";
+async function firebaseStorageUpload(path, blob, idToken) {
+  const encodedPath = encodeURIComponent(path);
+  const url = `https://firebasestorage.googleapis.com/v0/b/${STORAGE_BUCKET}/o?uploadType=media&name=${encodedPath}`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": blob.type || "application/octet-stream", Authorization: `Bearer ${idToken}` },
+    body: blob,
+  });
+  if (!res.ok) throw new Error(`Firebase Storage upload ${res.status}`);
+  const data = await res.json();
+  return `https://firebasestorage.googleapis.com/v0/b/${STORAGE_BUCKET}/o/${encodedPath}?alt=media&token=${data.downloadTokens}`;
+}
+// Convertit un data: URL (base64) existant en Blob, pour migrer les anciennes photos vers Storage.
+function dataUrlToBlob(dataUrl) {
+  const match = dataUrl.match(/^data:(.*?);base64,(.*)$/);
+  if (!match) throw new Error("dataUrl invalide");
+  const mime = match[1];
+  const binary = atob(match[2]);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return new Blob([bytes], { type: mime });
+}
+// L'utilisateur courant, mis à jour par le composant racine — évite de faire traverser `currentUser`
+// à travers des dizaines de composants intermédiaires (galeries de photos imbriquées profondément).
+let CURRENT_USER_FOR_STORAGE = null;
 const REST_POLL_INTERVAL_MS = 7000;
 async function firestoreRestGet(docPath, idToken) {
   const res = await fetch(`${FIRESTORE_REST_BASE}/${docPath}`, { headers: { Authorization: `Bearer ${idToken}` } });
@@ -8154,6 +8321,7 @@ async function firestoreRestSet(docPath, valueJson, updatedAt, updatedBy, idToke
 }
 
 export default function App({ currentUser, onLogout }) {
+  useEffect(() => { CURRENT_USER_FOR_STORAGE = currentUser; }, [currentUser]);
   const [sites, setSites] = useState([]);
   const [loaded, setLoaded] = useState(false);
   const [selectedId, setSelectedId] = useState(null);
@@ -8165,6 +8333,8 @@ export default function App({ currentUser, onLogout }) {
   const saveTimer = useRef(null);
   const lastSyncedSites = useRef(null); // dernier contenu (JSON) connu comme synchronisé avec le serveur
   const writeInFlight = useRef(false); // verrou dur : empêche toute nouvelle écriture tant que la précédente n'est pas terminée
+  const saveErrorRef = useRef(false); // miroir synchrone de saveError, lu par le poll (les refs sont à jour immédiatement, contrairement au state)
+  const pendingRetrySites = useRef(null); // dernier JSON qui a échoué à l'écriture, à retenter automatiquement
 
   const [view, setView] = useState("sites"); // "sites" | "interventions" | "calendrier"
   const [interventions, setInterventions] = useState([]);
@@ -8203,6 +8373,9 @@ export default function App({ currentUser, onLogout }) {
     async function poll() {
       if (!currentUser) return;
       if (writeInFlight.current) return; // n'écrase pas l'état local pendant une écriture en cours
+      if (saveErrorRef.current) return; // la dernière écriture a échoué : l'état local est "en avance"
+      // sur le serveur (ex. une photo tout juste ajoutée) — ne jamais l'écraser tant que la
+      // sauvegarde n'a pas réussi, sous peine de faire disparaître silencieusement les changements.
       try {
         const idToken = await currentUser.getIdToken();
         const data = await firestoreRestGet("app-data/sites", idToken);
@@ -8241,6 +8414,75 @@ export default function App({ currentUser, onLogout }) {
     return () => { cancelled = true; clearInterval(intervalId); };
   }, [currentUser]);
 
+  // Migration automatique des anciennes photos stockées en base64 (avant le passage à Firebase
+  // Storage) : les remplace progressivement par des URL courtes, par petits lots pour ne pas tout
+  // bloquer d'un coup. Tourne en tâche de fond tant qu'il en reste.
+  const sitesRefForMigration = useRef(sites);
+  useEffect(() => { sitesRefForMigration.current = sites; }, [sites]);
+  useEffect(() => {
+    if (!loaded || !currentUser) return;
+    let cancelled = false;
+    let migrating = false;
+    async function migrateOnce() {
+      if (migrating) return;
+      migrating = true;
+      try {
+        const idToken = await currentUser.getIdToken();
+        const next = JSON.parse(JSON.stringify(sitesRefForMigration.current));
+        const pending = [];
+        (function walk(node) {
+          if (Array.isArray(node)) { node.forEach(walk); return; }
+          if (node && typeof node === "object") {
+            if (typeof node.dataUrl === "string" && node.dataUrl.startsWith("data:image")) pending.push(node);
+            Object.values(node).forEach(walk);
+          }
+        })(next);
+        if (pending.length === 0 || cancelled) return;
+        for (const node of pending.slice(0, 5)) {
+          try {
+            const blob = dataUrlToBlob(node.dataUrl);
+            node.dataUrl = await firebaseStorageUpload(`photos/${uid()}.jpg`, blob, idToken);
+          } catch (e) {
+            console.error("[Migration photo] échec pour une photo :", e);
+          }
+        }
+        if (!cancelled) setSites(next);
+      } catch (e) {
+        console.error("[Migration photo] erreur générale :", e);
+      } finally {
+        migrating = false;
+      }
+    }
+    migrateOnce();
+    const id = setInterval(migrateOnce, 6000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [loaded, currentUser]);
+
+  // Nouvelle tentative automatique tant qu'une écriture a échoué — sans ça, un échec silencieux
+  // (ex. document trop volumineux au moment T, mais qui passerait après suppression d'une photo)
+  // resterait bloqué indéfiniment sans que l'utilisateur n'ait à ressaisir quoi que ce soit.
+  useEffect(() => {
+    if (!loaded || !currentUser) return;
+    const retryId = setInterval(async () => {
+      if (!saveErrorRef.current || !pendingRetrySites.current || writeInFlight.current) return;
+      writeInFlight.current = true;
+      const toRetry = pendingRetrySites.current;
+      try {
+        const idToken = await currentUser.getIdToken();
+        await firestoreRestSet("app-data/sites", toRetry, Date.now(), currentUser?.email, idToken);
+        lastSyncedSites.current = toRetry;
+        setSaveError(false);
+        saveErrorRef.current = false;
+        pendingRetrySites.current = null;
+      } catch (e) {
+        // toujours en échec — on retentera au prochain cycle
+      } finally {
+        writeInFlight.current = false;
+      }
+    }, 10000);
+    return () => clearInterval(retryId);
+  }, [loaded, currentUser]);
+
   useEffect(() => {
     if (!loaded || !currentUser) return;
     const serialized = JSON.stringify(sites);
@@ -8254,10 +8496,15 @@ export default function App({ currentUser, onLogout }) {
         const idToken = await currentUser.getIdToken();
         await firestoreRestSet("app-data/sites", serialized, Date.now(), currentUser?.email, idToken);
         setSaveError(false);
+        saveErrorRef.current = false;
+        pendingRetrySites.current = null;
       } catch (e) {
         console.error("[Firestore REST] Échec d'écriture (sites) :", e);
+        const tropVolumineux = /400|too large|exceeds|maximum size/i.test(String(e && e.message));
         lastSyncedSites.current = null;
-        setSaveError(true);
+        saveErrorRef.current = true;
+        pendingRetrySites.current = serialized;
+        setSaveError(tropVolumineux ? "taille" : true);
       } finally {
         writeInFlight.current = false;
       }
@@ -8663,8 +8910,10 @@ export default function App({ currentUser, onLogout }) {
           )}
 
           {saveError && (
-            <div style={{ background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)", color: "#B91C1C", borderRadius: 10, padding: "10px 14px", fontSize: 12.5, marginBottom: 14 }}>
-              La sauvegarde a échoué — vos dernières modifications ne sont peut-être pas enregistrées.
+            <div style={{ background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)", color: "#B91C1C", borderRadius: 10, padding: "10px 14px", fontSize: 12.5, marginBottom: 14, fontWeight: saveError === "taille" ? 700 : 400 }}>
+              {saveError === "taille"
+                ? "⚠ Sauvegarde impossible : trop de photos accumulées sur vos sites (limite de taille dépassée). Supprimez quelques anciennes photos pour débloquer l'enregistrement — nouvelle tentative automatique en cours."
+                : "La sauvegarde a échoué — vos dernières modifications ne sont peut-être pas enregistrées. Nouvelle tentative automatique en cours."}
             </div>
           )}
 
