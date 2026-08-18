@@ -1551,7 +1551,7 @@ const SCHEMAS = {
           F("tensionEntree", "Tension d'entrée", "V"), F("tensionSortie", "Tension de sortie", "V"),
           F("courantEntree", "Courant d'entrée", "A"), F("courantSortie", "Courant de sortie", "A"),
           F("frequenceEntree", "Fréquence d'entrée", "Hz"), F("frequenceSortie", "Fréquence de sortie", "Hz"),
-          F("puissanceActiveSortie", "Puissance active de sortie (P)", "kW"), F("puissanceReactiveSortie", "Puissance réactive de sortie (Q)", "kVAR"),
+          F("puissanceActiveSortie", "Puissance active de sortie (P)", "W"), F("puissanceReactiveSortie", "Puissance réactive de sortie (Q)", "VAR"),
         ]),
       ]},
       { key: "batterie", title: "Batterie", items: [
@@ -1996,7 +1996,7 @@ function prefillInterventionFromSite(site, eqOrList, numeroRI) {
       constructeur: idf.marque || (site.locaux || []).find((l) => l.id === eq.localId)?.marque || "",
       modele: idf.typeCellule || idf.typeTransformateur || idf.typeDisjoncteur || "",
       numeroSerie: idf.numeroSerie || idf.numeroSerieDisjoncteur || idf.numeroSerieContacteur || idf.numeroSerieRelais || "",
-      localisation: site.local,
+      localisation: (site.locaux || []).find((l) => l.id === eq.localId)?.nom || site.local || "",
       reference: idf.repere || "",
       etat: eq.etatFinal || "Conforme",
       remarque: eq.remarques || "",
@@ -7028,24 +7028,33 @@ function drawSymboleDC(ctx, cx, cy, s) {
 // plein (contact/pivot confondus), une lame ouverte en diagonale, puis retour à l'axe central pour
 // rester aligné avec les traits extérieurs qui continuent le schéma. Orientable (vertical par
 // défaut — Onduleur, Redresseur chargeur ; horizontal — Inverseur de source).
+// Symbole normalisé du sectionneur/interrupteur, fidèle au modèle de référence exact : contact
+// fixe = trait perpendiculaire + cercle (combinés), lame ouverte qui s'écarte du pivot sans y
+// revenir, borne opposée reliée par un tracé coudé séparé (l'écart visible = position ouverte).
+// Paramétré en fractions le long du flux (f, -0.5..0.5) et perpendiculairement (p, -0.5..0.5),
+// ce qui permet une seule définition pour les deux orientations (horizontale / verticale).
 function drawIconInterrupteur(ctx, x, y, w, h, orientation) {
   const b = draw3DBox(ctx, x, y, w, h);
   ctx.strokeStyle = SCHEMA_TRAIT; ctx.fillStyle = SCHEMA_TRAIT; ctx.lineWidth = 1.6;
-  if (orientation === "horizontal") {
-    const cy = b.cy;
-    const xPivot = x + w * 0.34, xDevie = x + w * 0.62, yDevie = cy - h * 0.24;
-    ctx.beginPath(); ctx.moveTo(x + w * 0.1, cy); ctx.lineTo(xPivot, cy); ctx.stroke();
-    ctx.beginPath(); ctx.arc(xPivot, cy, w * 0.04, 0, Math.PI * 2); ctx.fill();
-    ctx.beginPath(); ctx.moveTo(xPivot, cy); ctx.lineTo(xDevie, yDevie); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(xDevie, yDevie); ctx.lineTo(x + w * 0.9, cy); ctx.stroke();
-    return b;
-  }
-  const cx = b.cx;
-  const yPivot = y + h * 0.34, yDevie = y + h * 0.62, xDevie = cx + w * 0.24;
-  ctx.beginPath(); ctx.moveTo(cx, y + h * 0.1); ctx.lineTo(cx, yPivot); ctx.stroke();
-  ctx.beginPath(); ctx.arc(cx, yPivot, w * 0.04, 0, Math.PI * 2); ctx.fill();
-  ctx.beginPath(); ctx.moveTo(cx, yPivot); ctx.lineTo(xDevie, yDevie); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(xDevie, yDevie); ctx.lineTo(cx, y + h * 0.9); ctx.stroke();
+  const horiz = orientation === "horizontal";
+  const flowScale = horiz ? w : h;
+  const perpScale = horiz ? h : w;
+  const pt = (f, p) => horiz
+    ? [b.cx + f * flowScale, b.cy + p * perpScale]
+    : [b.cx + p * perpScale, b.cy + f * flowScale];
+  const line = (p1, p2) => { ctx.beginPath(); ctx.moveTo(p1[0], p1[1]); ctx.lineTo(p2[0], p2[1]); ctx.stroke(); };
+
+  const entryStart = pt(-0.42, 0), pivot = pt(-0.15, 0);
+  const tickTop = pt(-0.15, -0.22), tickBot = pt(-0.15, 0.22);
+  const bladeStart = pt(-0.18, 0.15), bladeEnd = pt(-0.37, 0.38);
+  const rightStart = pt(0.0, 0.32), bend = pt(0.18, 0), exitEnd = pt(0.42, 0);
+
+  line(entryStart, pivot);
+  line(tickTop, tickBot);
+  ctx.beginPath(); ctx.arc(pivot[0], pivot[1], flowScale * 0.09, 0, Math.PI * 2); ctx.stroke();
+  line(bladeStart, bladeEnd);
+  line(rightStart, bend);
+  line(bend, exitEnd);
   return b;
 }
 // Icône « filtre + terre » : sinusoïde au-dessus du symbole de terre
@@ -7072,15 +7081,25 @@ function drawIconOnduleur(ctx, x, y, w, h) {
 // Symbole du commutateur statique, fidèle au modèle de référence : deux diagonales convergeant
 // vers un point bas central (forme d'entonnoir — les deux sources se rejoignent en une seule
 // sortie), avec une sinusoïde dans chacune des trois zones ainsi formées.
+// Symbole en zigzag « Z », placé le long de la diagonale (représente un point de commutation).
+function drawZigzagZ(ctx, cx, cy, s) {
+  ctx.beginPath();
+  ctx.moveTo(cx - s, cy - s * 0.6);
+  ctx.lineTo(cx + s, cy - s * 0.6);
+  ctx.lineTo(cx - s, cy + s * 0.6);
+  ctx.lineTo(cx + s, cy + s * 0.6);
+  ctx.stroke();
+}
+// Symbole du commutateur statique, fidèle au modèle de référence : une diagonale unique du coin
+// haut-gauche au coin bas-droit, avec trois symboles en "Z" disposés le long de cette diagonale.
 function drawIconCommutateurStatique(ctx, x, y, w, h) {
   const b = draw3DBox(ctx, x, y, w, h);
-  ctx.strokeStyle = SCHEMA_TRAIT; ctx.lineWidth = 1.3;
-  const cx = x + w / 2, yPointe = y + h * 0.85;
-  ctx.beginPath(); ctx.moveTo(x + w * 0.08, y + h * 0.15); ctx.lineTo(cx, yPointe); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(x + w * 0.92, y + h * 0.15); ctx.lineTo(cx, yPointe); ctx.stroke();
-  drawSymboleAC(ctx, x + w * 0.22, y + h * 0.38, w * 0.11);
-  drawSymboleAC(ctx, x + w * 0.78, y + h * 0.38, w * 0.11);
-  drawSymboleAC(ctx, cx, y + h * 0.68, w * 0.11);
+  ctx.strokeStyle = SCHEMA_TRAIT; ctx.lineWidth = 1.4;
+  const x1 = x + w * 0.1, y1 = y + h * 0.1, x2 = x + w * 0.9, y2 = y + h * 0.9;
+  ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+  [0.22, 0.5, 0.78].forEach((t) => {
+    drawZigzagZ(ctx, x1 + (x2 - x1) * t, y1 + (y2 - y1) * t, w * 0.09);
+  });
   return b;
 }
 function drawBatterie(ctx, cx, cy, s) {
