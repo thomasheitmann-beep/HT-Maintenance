@@ -33,7 +33,7 @@ const EQUIPMENT_TYPES_HTABT = [
   "Bilan de puissance",
 ];
 // Redresseur chargeur et inverseur de source statique à venir.
-const EQUIPMENT_TYPES_CONVERSION = ["Onduleur", "Redresseur chargeur", "Inverseur de source"];
+const EQUIPMENT_TYPES_CONVERSION = ["Onduleur", "Onduleur simplifié", "Redresseur chargeur", "Inverseur de source"];
 const EQUIPMENT_TYPES = [...EQUIPMENT_TYPES_HTABT, ...EQUIPMENT_TYPES_CONVERSION];
 
 // petit constructeur : un contrôle avec Action + État final (+ champs de mesure optionnels)
@@ -137,6 +137,8 @@ const LISTE_ACCESSIBILITE = ["Conforme", "Difficile", "Très difficile"];
 const LISTE_TYPE_UPS = ["Onduleur", "ASI", "UPS", "Onduleur sécurité"];
 const LISTE_CONFIG_UPS = ["Unitaire", "Unitaire sans bypass", "Parallèle modulaire", "Parallèle centralisé"];
 const LISTE_TENSION_ENTREE_SORTIE = ["400 V / 400 V", "400 V / 230 V", "230 V / 230 V"];
+const LISTE_TENSION_MONOPHASE = ["230 V", "220 V", "240 V"];
+const LISTE_PUISSANCE_ONDULEUR_SIMPLIFIE = ["0.5", "0.7", "1", "1.5", "2", "3", "5", "6", "8", "10"];
 const LISTE_REGIME_SORTIE_UPS = ["3+N", "3", "1"];
 const LISTE_TECHNO_BATTERIE = ["PE", "PO", "GEL", "Cd-Ni"];
 const LISTE_NB_BRANCHES = ["1", "2", "3", "4", "5", "6"];
@@ -1518,6 +1520,34 @@ const SCHEMAS = {
     ],
   },
   "Onduleur": buildOnduleurSchema({}),
+  "Onduleur simplifié": {
+    identification: [
+      { key: "repere", label: "Repère / Nom de l'équipement" },
+      { key: "marque", label: "Marque", options: LISTE_MARQUE_ONDULEUR }, { key: "modele", label: "Modèle", options: LISTE_MODELE_ONDULEUR_OPTIONS },
+      { key: "puissanceKVA", label: "Puissance (kVA)", options: LISTE_PUISSANCE_ONDULEUR_SIMPLIFIE },
+      { key: "tensionEntree", label: "Tension d'entrée (monophasé)", options: LISTE_TENSION_MONOPHASE },
+      { key: "tensionSortie", label: "Tension de sortie (monophasé)", options: LISTE_TENSION_MONOPHASE },
+      { key: "anneeMiseEnService", label: "Année de mise en service", numeric: true },
+    ],
+    sections: [
+      { key: "environnement", title: "État de l'installation", items: [
+        C("local", "Local / emplacement"), C("temperature", "Température ambiante"), C("proprete", "Propreté / environnement"),
+      ]},
+      { key: "etat_general", title: "État général", items: [
+        C("indicateurs", "Indicateurs / signalisations en face avant"), C("alarmes", "Test alarme / défaut"),
+        C("ventilation", "Ventilation"), C("connexions", "Connexions de puissance"),
+      ]},
+      { key: "mesures_ecran", title: "Mesures affichées à l'écran", items: [
+        C("mesures", "Relevé des mesures", [
+          F("tensionEntree", "Tension d'entrée", "V"), F("tensionSortie", "Tension de sortie", "V"),
+          F("courantEntree", "Courant d'entrée", "A"), F("courantSortie", "Courant de sortie", "A"),
+        ]),
+      ]},
+      { key: "batterie", title: "Batterie", items: [
+        C("test_decharge", "Test de décharge batterie"),
+      ]},
+    ],
+  },
   "Redresseur chargeur": buildRedresseurSchema({}),
   "Inverseur de source": buildInverseurSchema({}),
   "Bilan de puissance": {
@@ -6908,32 +6938,28 @@ function drawSymboleDC(ctx, cx, cy, s) {
 // Symbole normalisé CEI du sectionneur/interrupteur, orientable selon le sens du flux dans le
 // schéma : "vertical" (par défaut — Onduleur, Redresseur chargeur, flux de haut en bas) ou
 // "horizontal" (Inverseur de source, flux de gauche à droite).
+// Symbole normalisé du sectionneur/interrupteur, fidèle au modèle de référence : un simple point
+// plein (contact/pivot confondus), une lame ouverte en diagonale, puis retour à l'axe central pour
+// rester aligné avec les traits extérieurs qui continuent le schéma. Orientable (vertical par
+// défaut — Onduleur, Redresseur chargeur ; horizontal — Inverseur de source).
 function drawIconInterrupteur(ctx, x, y, w, h, orientation) {
   const b = draw3DBox(ctx, x, y, w, h);
-  ctx.strokeStyle = SCHEMA_TRAIT; ctx.lineWidth = 1.6;
+  ctx.strokeStyle = SCHEMA_TRAIT; ctx.fillStyle = SCHEMA_TRAIT; ctx.lineWidth = 1.6;
   if (orientation === "horizontal") {
     const cy = b.cy;
-    const xContact = x + w * 0.32, xOuvert = x + w * 0.6, yHaut = cy - h * 0.22;
-    ctx.beginPath(); ctx.moveTo(x + w * 0.12, cy); ctx.lineTo(xContact, cy); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(xContact, cy - h * 0.12); ctx.lineTo(xContact, cy + h * 0.12); ctx.stroke();
-    ctx.beginPath(); ctx.arc(xContact + w * 0.05, cy, w * 0.045, 0, Math.PI * 2); ctx.stroke();
-    // lame ouverte en diagonale, puis retour à l'axe central pour la sortie (alignée avec les
-    // traits extérieurs qui continuent le schéma de part et d'autre de la boîte)
-    ctx.beginPath(); ctx.moveTo(xContact + w * 0.08, cy - h * 0.02); ctx.lineTo(xOuvert, yHaut); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(xOuvert, yHaut); ctx.lineTo(x + w * 0.88, cy); ctx.stroke();
+    const xPivot = x + w * 0.34, xDevie = x + w * 0.62, yDevie = cy - h * 0.24;
+    ctx.beginPath(); ctx.moveTo(x + w * 0.1, cy); ctx.lineTo(xPivot, cy); ctx.stroke();
+    ctx.beginPath(); ctx.arc(xPivot, cy, w * 0.04, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(xPivot, cy); ctx.lineTo(xDevie, yDevie); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(xDevie, yDevie); ctx.lineTo(x + w * 0.9, cy); ctx.stroke();
     return b;
   }
   const cx = b.cx;
-  const yContact = y + h * 0.32, yOuvert = y + h * 0.6, xOffset = cx + w * 0.22;
-  // ligne d'arrivée (du haut) + contact fixe (trait horizontal)
-  ctx.beginPath(); ctx.moveTo(cx, y + h * 0.12); ctx.lineTo(cx, yContact); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(cx - w * 0.12, yContact); ctx.lineTo(cx + w * 0.12, yContact); ctx.stroke();
-  // pivot (petit cercle)
-  ctx.beginPath(); ctx.arc(cx, yContact + h * 0.05, w * 0.045, 0, Math.PI * 2); ctx.stroke();
-  // lame ouverte, en diagonale, puis retour à l'axe central pour la sortie basse — reste aligné
-  // avec le trait extérieur qui continue le schéma sous la boîte.
-  ctx.beginPath(); ctx.moveTo(cx + w * 0.05, yContact + h * 0.08); ctx.lineTo(xOffset, yOuvert); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(xOffset, yOuvert); ctx.lineTo(cx, y + h * 0.88); ctx.stroke();
+  const yPivot = y + h * 0.34, yDevie = y + h * 0.62, xDevie = cx + w * 0.24;
+  ctx.beginPath(); ctx.moveTo(cx, y + h * 0.1); ctx.lineTo(cx, yPivot); ctx.stroke();
+  ctx.beginPath(); ctx.arc(cx, yPivot, w * 0.04, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(cx, yPivot); ctx.lineTo(xDevie, yDevie); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(xDevie, yDevie); ctx.lineTo(cx, y + h * 0.9); ctx.stroke();
   return b;
 }
 // Icône « filtre + terre » : sinusoïde au-dessus du symbole de terre
@@ -6957,19 +6983,18 @@ function drawIconOnduleur(ctx, x, y, w, h) {
 }
 // Icône « commutateur statique » : trois sinusoïdes reliées par des diagonales croisées
 // (représente la commutation entre deux sources CA, ex. R0 <-> R2)
+// Symbole du commutateur statique, fidèle au modèle de référence : deux diagonales convergeant
+// vers un point bas central (forme d'entonnoir — les deux sources se rejoignent en une seule
+// sortie), avec une sinusoïde dans chacune des trois zones ainsi formées.
 function drawIconCommutateurStatique(ctx, x, y, w, h) {
   const b = draw3DBox(ctx, x, y, w, h);
   ctx.strokeStyle = SCHEMA_TRAIT; ctx.lineWidth = 1.3;
-  // Trois sinusoïdes (3 phases), alignées sur une même ligne, bien espacées, sans chevauchement
-  const yPhases = y + h * 0.38;
-  drawSymboleAC(ctx, x + w * 0.2, yPhases, w * 0.11);
-  drawSymboleAC(ctx, x + w * 0.5, yPhases, w * 0.11);
-  drawSymboleAC(ctx, x + w * 0.8, yPhases, w * 0.11);
-  // Petit symbole de commutation (double flèche croisée), confiné à une bande basse séparée —
-  // ne touche plus les sinusoïdes.
-  const yFleche = y + h * 0.78;
-  ctx.beginPath(); ctx.moveTo(x + w * 0.35, yFleche - 7); ctx.lineTo(x + w * 0.65, yFleche + 7); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(x + w * 0.65, yFleche - 7); ctx.lineTo(x + w * 0.35, yFleche + 7); ctx.stroke();
+  const cx = x + w / 2, yPointe = y + h * 0.85;
+  ctx.beginPath(); ctx.moveTo(x + w * 0.08, y + h * 0.15); ctx.lineTo(cx, yPointe); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(x + w * 0.92, y + h * 0.15); ctx.lineTo(cx, yPointe); ctx.stroke();
+  drawSymboleAC(ctx, x + w * 0.22, y + h * 0.38, w * 0.11);
+  drawSymboleAC(ctx, x + w * 0.78, y + h * 0.38, w * 0.11);
+  drawSymboleAC(ctx, cx, y + h * 0.68, w * 0.11);
   return b;
 }
 function drawBatterie(ctx, cx, cy, s) {
