@@ -7085,9 +7085,19 @@ function drawIconOnduleur(ctx, x, y, w, h) {
 // Symbole du commutateur statique, fidèle au modèle de référence : forme de tente (pic en haut au
 // centre, deux diagonales descendant vers les coins bas), avec une sinusoïde dans chacune des
 // trois zones ainsi formées (gauche, droite, bas-centre).
-function drawIconCommutateurStatique(ctx, x, y, w, h) {
+function drawIconCommutateurStatique(ctx, x, y, w, h, orientation) {
   const b = draw3DBox(ctx, x, y, w, h);
   ctx.strokeStyle = SCHEMA_TRAIT; ctx.lineWidth = 1.3;
+  if (orientation === "vertical") {
+    // Pic à gauche, deux diagonales vers les coins droits (entrées en haut/bas à gauche, sortie à droite)
+    const cy = y + h / 2, xPic = x + w * 0.15;
+    ctx.beginPath(); ctx.moveTo(xPic, cy); ctx.lineTo(x + w * 0.85, y + h * 0.08); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(xPic, cy); ctx.lineTo(x + w * 0.85, y + h * 0.92); ctx.stroke();
+    drawSymboleAC(ctx, x + w * 0.38, y + h * 0.22, w * 0.16);
+    drawSymboleAC(ctx, x + w * 0.38, y + h * 0.78, w * 0.16);
+    drawSymboleAC(ctx, x + w * 0.68, cy, w * 0.16);
+    return b;
+  }
   const cx = x + w / 2, yPic = y + h * 0.15;
   ctx.beginPath(); ctx.moveTo(cx, yPic); ctx.lineTo(x + w * 0.08, y + h * 0.85); ctx.stroke();
   ctx.beginPath(); ctx.moveTo(cx, yPic); ctx.lineTo(x + w * 0.92, y + h * 0.85); ctx.stroke();
@@ -7304,9 +7314,11 @@ function genererSchemaRedresseurChargeur(eq) {
     drawIconRedresseur(ctx, cx - redW / 2, y, redW, bh);
     let yAfter = y + bh + 24;
     line(cx, y + bh, cx, yAfter);
-    drawBatterie(ctx, cx + 70, yAfter + 26, 22);
-    ctx.font = "11px Arial, sans-serif"; ctx.fillStyle = "#3E4A5C"; ctx.fillText("Batterie (floating)", cx + 70, yAfter + 62);
-    line(cx, yAfter, cx + 48, yAfter);
+    const yBatt = yAfter + 26;
+    drawBatterie(ctx, cx + 70, yBatt, 22);
+    ctx.font = "11px Arial, sans-serif"; ctx.fillStyle = "#3E4A5C"; ctx.fillText("Batterie (floating)", cx + 70, yBatt + 36);
+    line(cx, yAfter, cx, yBatt);
+    line(cx, yBatt, cx + 48, yBatt);
     line(cx, yAfter, cx, yAfter + 24);
     arrowDown(cx, yAfter + 24);
     ctx.font = "13px Arial, sans-serif"; ctx.fillStyle = SCHEMA_TRAIT; ctx.fillText("RS", cx, yAfter + 42);
@@ -7340,12 +7352,16 @@ function genererSchemaInverseurSource(eq) {
 
     ctx.fillStyle = "#5B6B7D"; ctx.fillText(`Source 1 (R1) ${regime("source1")}`, 70, yTop - 14);
     ctx.fillText(`Source 2 (R2) ${regime("source2")}`, 70, yBot - 14);
+    const csW = 70, csH = 130;
+    const csX = 230, csY = yMid - csH / 2;
+    const yEntreeHaut = csY + csH * 0.22, yEntreeBas = csY + csH * 0.78;
     line(20, yTop, 230, yTop); line(20, yBot, 230, yBot);
-    line(230, yTop, 230, yMid - 20); line(230, yBot, 230, yMid + 20);
-    const depthCS = boxDepth(110, 60);
-    ctx.fillText("Commutateur statique", 285, yMid - 30 - depthCS - LABEL_MARGIN);
-    drawIconCommutateurStatique(ctx, 230, yMid - 30, 110, 60);
-    line(340, yMid, 460, yMid); arrowRight(455, yMid);
+    line(230, yTop, 230, yEntreeHaut); line(230, yBot, 230, yEntreeBas);
+    const depthCS = boxDepth(csW, csH);
+    ctx.fillText("Commutateur", csX + csW + 46, yMid - 8);
+    ctx.fillText("statique", csX + csW + 46, yMid + 8);
+    drawIconCommutateurStatique(ctx, csX, csY, csW, csH, "vertical");
+    line(csX + csW, yMid, 460, yMid); arrowRight(455, yMid);
     ctx.font = "10.5px Arial, sans-serif"; ctx.fillText(`Utilisation ${regime("utilisation")}`, 460, yMid - 16);
 
     ctx.font = "11px Arial, sans-serif"; ctx.fillStyle = "#5B6B7D"; ctx.textAlign = "left";
