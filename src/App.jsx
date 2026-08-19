@@ -7082,24 +7082,18 @@ function drawIconOnduleur(ctx, x, y, w, h) {
 // vers un point bas central (forme d'entonnoir — les deux sources se rejoignent en une seule
 // sortie), avec une sinusoïde dans chacune des trois zones ainsi formées.
 // Symbole en zigzag « Z », placé le long de la diagonale (représente un point de commutation).
-function drawZigzagZ(ctx, cx, cy, s) {
-  ctx.beginPath();
-  ctx.moveTo(cx - s, cy - s * 0.6);
-  ctx.lineTo(cx + s, cy - s * 0.6);
-  ctx.lineTo(cx - s, cy + s * 0.6);
-  ctx.lineTo(cx + s, cy + s * 0.6);
-  ctx.stroke();
-}
-// Symbole du commutateur statique, fidèle au modèle de référence : une diagonale unique du coin
-// haut-gauche au coin bas-droit, avec trois symboles en "Z" disposés le long de cette diagonale.
+// Symbole du commutateur statique, fidèle au modèle de référence : forme de tente (pic en haut au
+// centre, deux diagonales descendant vers les coins bas), avec une sinusoïde dans chacune des
+// trois zones ainsi formées (gauche, droite, bas-centre).
 function drawIconCommutateurStatique(ctx, x, y, w, h) {
   const b = draw3DBox(ctx, x, y, w, h);
-  ctx.strokeStyle = SCHEMA_TRAIT; ctx.lineWidth = 1.4;
-  const x1 = x + w * 0.1, y1 = y + h * 0.1, x2 = x + w * 0.9, y2 = y + h * 0.9;
-  ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
-  [0.22, 0.5, 0.78].forEach((t) => {
-    drawZigzagZ(ctx, x1 + (x2 - x1) * t, y1 + (y2 - y1) * t, w * 0.09);
-  });
+  ctx.strokeStyle = SCHEMA_TRAIT; ctx.lineWidth = 1.3;
+  const cx = x + w / 2, yPic = y + h * 0.15;
+  ctx.beginPath(); ctx.moveTo(cx, yPic); ctx.lineTo(x + w * 0.08, y + h * 0.85); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(cx, yPic); ctx.lineTo(x + w * 0.92, y + h * 0.85); ctx.stroke();
+  drawSymboleAC(ctx, x + w * 0.22, y + h * 0.38, w * 0.1);
+  drawSymboleAC(ctx, x + w * 0.78, y + h * 0.38, w * 0.1);
+  drawSymboleAC(ctx, cx, y + h * 0.68, w * 0.1);
   return b;
 }
 function drawBatterie(ctx, cx, cy, s) {
@@ -7193,11 +7187,10 @@ function genererSchemaOnduleur(eq) {
       label("Transfo. amont", cxR2 + tfW / 2 + 40, y + tfH / 2, "#5B6B7D", "10px Arial, sans-serif");
     }
 
-    // Réseau normal (interrupteur)
-    y += depthBW + LABEL_MARGIN + 8;
-    label(`Réseau normal ${regime("normal")}`, cxM, y - depthBW - LABEL_MARGIN);
-    drawIconInterrupteur(ctx, cxM - bw / 2, y, bw, bh);
-    let yReseauNormalBas = y + bh;
+    // Réseau normal — relié directement au redresseur (plus d'interrupteur intermédiaire)
+    label(`Réseau normal ${regime("normal")}`, cxM, y + 10);
+    let yReseauNormalBas = y + 22;
+    line(cxM, y, cxM, yReseauNormalBas);
     y = yReseauNormalBas + GAP_LIGNE;
     line(cxM, yReseauNormalBas, cxM, y);
 
@@ -7246,11 +7239,11 @@ function genererSchemaOnduleur(eq) {
       label("Commutateur statique", cxM + (csW - bw) / 2, yApresOnduleur - depthCS - LABEL_MARGIN);
       drawIconCommutateurStatique(ctx, csLeft, yApresOnduleur, csW, csH);
       const csMidX = csLeft + csW / 2;
-      let yApresCS = yApresOnduleur + csH + GAP_LIGNE + depthBW + LABEL_MARGIN + 6;
-      line(csMidX, yApresOnduleur + csH, csMidX, yApresCS);
-      label("Interrupteur de sortie", csMidX, yApresCS - depthBW - LABEL_MARGIN);
-      drawIconInterrupteur(ctx, csMidX - bw / 2, yApresCS, bw, bh);
-      let yFinal = yApresCS + bh;
+      // Sortie — reliée directement (plus d'interrupteur intermédiaire)
+      let yApresCS = yApresOnduleur + csH + GAP_LIGNE + 22;
+      line(csMidX, yApresOnduleur + csH, csMidX, yApresOnduleur + csH + GAP_LIGNE);
+      label("Sortie", csMidX, yApresOnduleur + csH + GAP_LIGNE + 10);
+      let yFinal = yApresCS;
       if (avecTransfoSortie) {
         line(csMidX, yFinal, csMidX, yFinal + 16);
         drawIconTransformateur(ctx, csMidX - tfW / 2, yFinal + 16, tfW, tfH);
@@ -7303,16 +7296,14 @@ function genererSchemaRedresseurChargeur(eq) {
     let y = 20;
     ctx.fillStyle = SCHEMA_TRAIT; ctx.fillText("R1", cx, y);
     y += 25; line(cx, y, cx, y + 20); y += 20;
-    y += boxDepth(bw, bh) + LABEL_MARGIN + 6;
-    ctx.fillStyle = "#5B6B7D"; ctx.font = "10.5px Arial, sans-serif"; ctx.fillText(`Réseau ${regime("normal")}`, cx, y - boxDepth(bw, bh) - LABEL_MARGIN);
-    drawIconInterrupteur(ctx, cx - bw / 2, y, bw, bh);
-    y += bh; line(cx, y, cx, y + 20); y += 20;
+    ctx.fillStyle = "#5B6B7D"; ctx.font = "10.5px Arial, sans-serif"; ctx.fillText(`Réseau ${regime("normal")}`, cx, y + 10);
+    y += 22; line(cx, y - 22, cx, y);
+    line(cx, y, cx, y + 20); y += 20;
     y += boxDepth(redW, bh) + LABEL_MARGIN + 6;
     ctx.fillStyle = "#5B6B7D"; ctx.fillText("Redresseur / Chargeur", cx, y - boxDepth(redW, bh) - LABEL_MARGIN);
     drawIconRedresseur(ctx, cx - redW / 2, y, redW, bh);
     let yAfter = y + bh + 24;
     line(cx, y + bh, cx, yAfter);
-    line(cx - 30, yAfter, cx + 30, yAfter);
     drawBatterie(ctx, cx + 70, yAfter + 26, 22);
     ctx.font = "11px Arial, sans-serif"; ctx.fillStyle = "#3E4A5C"; ctx.fillText("Batterie (floating)", cx + 70, yAfter + 62);
     line(cx, yAfter, cx + 48, yAfter);
@@ -7345,21 +7336,17 @@ function genererSchemaInverseurSource(eq) {
     const arrowRight = (x, y) => { ctx.fillStyle = SCHEMA_TRAIT; ctx.beginPath(); ctx.moveTo(x - 5, y - 4); ctx.lineTo(x + 5, y); ctx.lineTo(x - 5, y + 4); ctx.fill(); };
     const boxDepth = (bw2, bh2) => Math.min(bw2, bh2) * 0.22;
     const LABEL_MARGIN = 14;
-    const yMid = 130, yTop = 65, yBot = 195, bw = 100, bh = 60;
-    const depthBW = boxDepth(bw, bh);
+    const yMid = 130, yTop = 65, yBot = 195;
 
-    drawIconInterrupteur(ctx, 20, yTop - bh / 2, bw, bh, "horizontal");
-    ctx.fillStyle = "#5B6B7D"; ctx.fillText(`Source 1 (R1) ${regime("source1")}`, 70, yTop - bh / 2 - depthBW - LABEL_MARGIN);
-    drawIconInterrupteur(ctx, 20, yBot - bh / 2, bw, bh, "horizontal");
-    ctx.fillText(`Source 2 (R2) ${regime("source2")}`, 70, yBot - bh / 2 - depthBW - LABEL_MARGIN);
-    line(120, yTop, 230, yTop); line(120, yBot, 230, yBot);
+    ctx.fillStyle = "#5B6B7D"; ctx.fillText(`Source 1 (R1) ${regime("source1")}`, 70, yTop - 14);
+    ctx.fillText(`Source 2 (R2) ${regime("source2")}`, 70, yBot - 14);
+    line(20, yTop, 230, yTop); line(20, yBot, 230, yBot);
     line(230, yTop, 230, yMid - 20); line(230, yBot, 230, yMid + 20);
     const depthCS = boxDepth(110, 60);
     ctx.fillText("Commutateur statique", 285, yMid - 30 - depthCS - LABEL_MARGIN);
     drawIconCommutateurStatique(ctx, 230, yMid - 30, 110, 60);
-    line(340, yMid, 380, yMid); arrowRight(375, yMid);
-    ctx.font = "10.5px Arial, sans-serif"; ctx.fillText(`Utilisation ${regime("utilisation")}`, 435, yMid - bh / 2 - depthBW - LABEL_MARGIN);
-    drawIconInterrupteur(ctx, 390, yMid - bh / 2, 90, bh, "horizontal");
+    line(340, yMid, 460, yMid); arrowRight(455, yMid);
+    ctx.font = "10.5px Arial, sans-serif"; ctx.fillText(`Utilisation ${regime("utilisation")}`, 460, yMid - 16);
 
     ctx.font = "11px Arial, sans-serif"; ctx.fillStyle = "#5B6B7D"; ctx.textAlign = "left";
     ctx.fillText("Inverseur de source — commutation entre deux sources, sans conversion de puissance", 8, h - 10);
