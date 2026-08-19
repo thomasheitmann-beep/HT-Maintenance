@@ -7173,42 +7173,47 @@ function genererSchemaOnduleur(eq) {
     const GAP_LIGNE = 26, LABEL_MARGIN = 14;
 
     let y = 16;
+    let yPontageFinal = null; // position où R2 rejoint le pontage — utilisé plus bas pour prolonger le trait sans coupure
     label("R1", cxM, y, SCHEMA_TRAIT, "14px Arial, sans-serif");
-    if (avecBypass) label("R2", cxR2, y, SCHEMA_TRAIT, "14px Arial, sans-serif");
-    if (reseauxPontes && avecBypass && !avecTransfoR1 && !avecTransfoR2) {
-      // Réseaux normal et secours pontés au bornier, sans transformateur : une seule source réelle,
-      // matérialisée par un pontage juste sous les libellés R1/R2.
-      line(cxM, y + 10, cxR2, y + 10);
-      label("(pontés — source unique)", (cxM + cxR2) / 2, y + 22, "#8B96A3", "9.5px Arial, sans-serif");
-    }
+    // Pontés = une seule source réelle : pas de repère "R2" ni de trait indépendant en haut, pour
+    // ne jamais donner l'impression que R2 remonte vers une entrée séparée. Tout part de R1.
+    if (avecBypass && !reseauxPontes) label("R2", cxR2, y, SCHEMA_TRAIT, "14px Arial, sans-serif");
     y += 26;
-    line(cxM, y, cxM, y + GAP_LIGNE); if (avecBypass) line(cxR2, y, cxR2, y + GAP_LIGNE);
+    line(cxM, y, cxM, y + GAP_LIGNE);
+    if (avecBypass && !reseauxPontes) line(cxR2, y, cxR2, y + GAP_LIGNE);
     y += GAP_LIGNE;
 
-    // Transformateur(s) d'isolement amont, si déclarés en identification
+    // Transformateur d'isolement amont sur R1, si déclaré en identification
     const tfW = 60, tfH = 46;
     if (avecTransfoR1) {
       drawIconTransformateur(ctx, cxM - tfW / 2, y, tfW, tfH);
       label("Transfo. amont", cxM + tfW / 2 + 40, y + tfH / 2, "#5B6B7D", "10px Arial, sans-serif");
     }
-    if (avecTransfoR2 && avecBypass) {
+    if (avecTransfoR2 && avecBypass && !reseauxPontes) {
       drawIconTransformateur(ctx, cxR2 - tfW / 2, y, tfW, tfH);
       label("Transfo. amont", cxR2 + tfW / 2 + 40, y + tfH / 2, "#5B6B7D", "10px Arial, sans-serif");
     }
-    if (avecTransfoR1 || avecTransfoR2) {
-      const yApresTransfo = y + tfH;
-      if (reseauxPontes && avecBypass) {
-        // Pontage côté secondaire (après transformation) — c'est là que les deux réseaux sont
-        // effectivement réunis en une seule source, pas avant transformation.
-        const yPontage = yApresTransfo + 14;
-        if (avecTransfoR1) line(cxM, yApresTransfo, cxM, yPontage); else line(cxM, y, cxM, yPontage);
-        if (avecTransfoR2) line(cxR2, yApresTransfo, cxR2, yPontage); else line(cxR2, y, cxR2, yPontage);
-        line(cxM, yPontage, cxR2, yPontage);
-        label("(pontés — source unique)", (cxM + cxR2) / 2, yPontage + 12, "#8B96A3", "9.5px Arial, sans-serif");
-        y = yPontage + 16;
+    if (reseauxPontes && avecBypass) {
+      // Pontage : dérive depuis le trajet de R1 (après son transformateur s'il existe), jamais
+      // depuis une entrée R2 indépendante. Le transformateur R2 (s'il existe) est alimenté par ce
+      // pontage, pas l'inverse.
+      const yDepart = avecTransfoR1 ? y + tfH : y;
+      const yPontage = yDepart + 14;
+      line(cxM, yDepart, cxM, yPontage);
+      line(cxM, yPontage, cxR2, yPontage);
+      label("(pontés — source unique)", (cxM + cxR2) / 2, yPontage + 12, "#8B96A3", "9.5px Arial, sans-serif");
+      if (avecTransfoR2) {
+        line(cxR2, yPontage, cxR2, yPontage + 10);
+        drawIconTransformateur(ctx, cxR2 - tfW / 2, yPontage + 10, tfW, tfH);
+        label("Transfo. R2", cxR2 + tfW / 2 + 40, yPontage + 10 + tfH / 2, "#5B6B7D", "10px Arial, sans-serif");
+        yPontageFinal = yPontage + 10 + tfH;
       } else {
-        y = yApresTransfo + 16;
+        yPontageFinal = yPontage;
       }
+      y = (avecTransfoR1 ? yDepart : yPontage) + 16;
+      line(cxM, y - 16, cxM, y);
+    } else if (avecTransfoR1) {
+      y = y + tfH + 16;
       line(cxM, y - 16, cxM, y);
     }
 
@@ -7253,9 +7258,15 @@ function genererSchemaOnduleur(eq) {
     label("R0", cxM - redW / 2 - 20, yOnduleurBas + bh / 2 + 10, SCHEMA_TRAIT, "11px Arial, sans-serif");
 
     if (avecBypass) {
-      // Le réseau secours rejoint directement le commutateur statique, sans longer tout le schéma
-      label(`Réseau secours ${regime("secours")}`, cxR2, yRedresseurBas - 4);
-      line(cxR2, yRedresseurBas + 10, cxR2, yApresOnduleur);
+      // Le réseau secours rejoint directement le commutateur statique, sans longer tout le schéma —
+      // sauf si pontés : dans ce cas, le trait doit être continu depuis le pontage jusqu'au
+      // commutateur, sans coupure (puisque c'est électriquement la même source).
+      if (reseauxPontes && yPontageFinal !== null) {
+        line(cxR2, yPontageFinal, cxR2, yApresOnduleur);
+      } else {
+        label(`Réseau secours ${regime("secours")}`, cxR2, yRedresseurBas - 4);
+        line(cxR2, yRedresseurBas + 10, cxR2, yApresOnduleur);
+      }
       const csW = cxR2 - cxM + bw, csH = 64;
       const depthCS = boxDepth(csW, csH);
       const csLeft = cxM - bw / 2;
