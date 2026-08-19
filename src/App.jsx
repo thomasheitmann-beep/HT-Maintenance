@@ -8564,7 +8564,10 @@ export default function App({ currentUser, onLogout }) {
         // de 500ms avant écriture n'a pas encore expiré) — ne surtout pas l'écraser avec une version
         // serveur plus ancienne, sous peine de faire disparaître ou "sauter" ce qui vient d'être tapé.
         const localActuel = JSON.stringify(sitesRefForPoll.current);
-        if (localActuel !== lastSyncedSites.current) { setLoaded(true); return; }
+        // Ne s'applique qu'après un premier chargement réussi (lastSyncedSites déjà défini) — sinon
+        // ce filet de sécurité bloquait le tout premier chargement (l'état local vide "[]" au
+        // démarrage ne correspondant jamais au repère initial null), empêchant les sites d'apparaître.
+        if (lastSyncedSites.current !== null && localActuel !== lastSyncedSites.current) { setLoaded(true); return; }
         const REGIMES_PAR_ANCIEN_TYPE = {
           "Onduleur 3/3": { normal: "Triphasé", secours: "Triphasé", utilisation: "Triphasé", onduleur: "Triphasé" },
           "Onduleur 3/1": { normal: "Triphasé", secours: "Monophasé", utilisation: "Monophasé", onduleur: "Monophasé" },
@@ -8701,7 +8704,7 @@ export default function App({ currentUser, onLogout }) {
         const rawValue = (data.fields.value && data.fields.value.stringValue) || "[]";
         if (rawValue === lastSyncedIv.current) { setIvLoaded(true); return; }
         // Même protection que pour les sites : ne pas écraser une saisie en attente d'enregistrement.
-        if (JSON.stringify(ivRefForPoll.current) !== lastSyncedIv.current) { setIvLoaded(true); return; }
+        if (lastSyncedIv.current !== null && JSON.stringify(ivRefForPoll.current) !== lastSyncedIv.current) { setIvLoaded(true); return; }
         lastSyncedIv.current = rawValue;
         setInterventions(JSON.parse(rawValue));
         setIvLoaded(true);
@@ -8748,7 +8751,7 @@ export default function App({ currentUser, onLogout }) {
         if (!data || !data.fields) { if (lastSyncedClients.current === null) lastSyncedClients.current = "[]"; setClientsLoaded(true); return; }
         const rawValue = (data.fields.value && data.fields.value.stringValue) || "[]";
         if (rawValue === lastSyncedClients.current) { setClientsLoaded(true); return; }
-        if (JSON.stringify(clientsRefForPoll.current) !== lastSyncedClients.current) { setClientsLoaded(true); return; }
+        if (lastSyncedClients.current !== null && JSON.stringify(clientsRefForPoll.current) !== lastSyncedClients.current) { setClientsLoaded(true); return; }
         lastSyncedClients.current = rawValue;
         setClientsRegistry(JSON.parse(rawValue));
         setClientsLoaded(true);
@@ -8795,7 +8798,7 @@ export default function App({ currentUser, onLogout }) {
         if (!data || !data.fields) { if (lastSyncedCarac.current === null) lastSyncedCarac.current = "{}"; setCaracLoaded(true); return; }
         const rawValue = (data.fields.value && data.fields.value.stringValue) || "{}";
         if (rawValue === lastSyncedCarac.current) { setCaracLoaded(true); return; }
-        if (JSON.stringify(caracRefForPoll.current) !== lastSyncedCarac.current) { setCaracLoaded(true); return; }
+        if (lastSyncedCarac.current !== null && JSON.stringify(caracRefForPoll.current) !== lastSyncedCarac.current) { setCaracLoaded(true); return; }
         lastSyncedCarac.current = rawValue;
         setCaracteristiquesLibrary(JSON.parse(rawValue));
         setCaracLoaded(true);
