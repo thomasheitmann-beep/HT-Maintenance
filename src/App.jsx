@@ -7147,7 +7147,7 @@ function genererSchemaOnduleur(eq) {
     const transfoAmont = eq.identification?.transformateurAmont || "";
     const avecTransfoR1 = transfoAmont.includes("réseau 1") || transfoAmont === "Avec transformateur amont";
     const avecTransfoR2 = transfoAmont.includes("réseau 2");
-    const reseauxPontes = (eq.identification?.alimentationReseaux || "").includes("pontés");
+    const reseauxPontes = (eq.identification?.alimentationReseaux || "").startsWith("1 réseau");
     const avecTransfoSortie = eq.identification?.transformateurSortie === "Avec transformateur de sortie";
     const avecChargeur = eq.identification?.presenceChargeur !== "Non présent"; // présent par défaut
     const TRANSFO_H = 60; // espace vertical réservé à un symbole transformateur amont
@@ -7175,9 +7175,9 @@ function genererSchemaOnduleur(eq) {
     let y = 16;
     label("R1", cxM, y, SCHEMA_TRAIT, "14px Arial, sans-serif");
     if (avecBypass) label("R2", cxR2, y, SCHEMA_TRAIT, "14px Arial, sans-serif");
-    if (reseauxPontes && avecBypass) {
-      // Réseaux normal et secours pontés au bornier : une seule source réelle, matérialisée par un
-      // pontage (trait horizontal) entre R1 et R2 juste sous les libellés.
+    if (reseauxPontes && avecBypass && !avecTransfoR1 && !avecTransfoR2) {
+      // Réseaux normal et secours pontés au bornier, sans transformateur : une seule source réelle,
+      // matérialisée par un pontage juste sous les libellés R1/R2.
       line(cxM, y + 10, cxR2, y + 10);
       label("(pontés — source unique)", (cxM + cxR2) / 2, y + 22, "#8B96A3", "9.5px Arial, sans-serif");
     }
@@ -7190,11 +7190,26 @@ function genererSchemaOnduleur(eq) {
     if (avecTransfoR1) {
       drawIconTransformateur(ctx, cxM - tfW / 2, y, tfW, tfH);
       label("Transfo. amont", cxM + tfW / 2 + 40, y + tfH / 2, "#5B6B7D", "10px Arial, sans-serif");
-      line(cxM, y + tfH, cxM, y + tfH + 16); y += tfH + 16;
     }
     if (avecTransfoR2 && avecBypass) {
       drawIconTransformateur(ctx, cxR2 - tfW / 2, y, tfW, tfH);
       label("Transfo. amont", cxR2 + tfW / 2 + 40, y + tfH / 2, "#5B6B7D", "10px Arial, sans-serif");
+    }
+    if (avecTransfoR1 || avecTransfoR2) {
+      const yApresTransfo = y + tfH;
+      if (reseauxPontes && avecBypass) {
+        // Pontage côté secondaire (après transformation) — c'est là que les deux réseaux sont
+        // effectivement réunis en une seule source, pas avant transformation.
+        const yPontage = yApresTransfo + 14;
+        if (avecTransfoR1) line(cxM, yApresTransfo, cxM, yPontage); else line(cxM, y, cxM, yPontage);
+        if (avecTransfoR2) line(cxR2, yApresTransfo, cxR2, yPontage); else line(cxR2, y, cxR2, yPontage);
+        line(cxM, yPontage, cxR2, yPontage);
+        label("(pontés — source unique)", (cxM + cxR2) / 2, yPontage + 12, "#8B96A3", "9.5px Arial, sans-serif");
+        y = yPontage + 16;
+      } else {
+        y = yApresTransfo + 16;
+      }
+      line(cxM, y - 16, cxM, y);
     }
 
     // Réseau normal — relié directement au redresseur (plus d'interrupteur intermédiaire)
