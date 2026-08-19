@@ -142,6 +142,7 @@ const LISTE_PUISSANCE_ONDULEUR_SIMPLIFIE = ["0.5", "0.7", "1", "1.5", "2", "3", 
 const LISTE_REGIME_SORTIE_UPS = ["3+N", "3", "1"];
 const LISTE_TECHNO_BATTERIE = ["PE", "PO", "GEL", "Cd-Ni"];
 const LISTE_NB_BRANCHES = ["1", "2", "3", "4", "5", "6"];
+const LISTE_REGIME_C_BATTERIE = ["C5", "C8", "C10", "C15", "C20"];
 const LISTE_MACHINE_ETAT = ["Propre", "À nettoyer", "Nettoyé"];
 const LISTE_ENVIRONNEMENT_UPS = ["Propre", "Dépoussiérée", "Nécessite une dépollution industrielle"];
 const LISTE_TRANSFORMATEUR_AMONT = ["Sans transformateur amont", "Avec transformateur amont", "Avec transformateur amont réseau 1", "Avec transformateur amont réseau 2", "Avec transformateurs amont réseau 1 et réseau 2"];
@@ -851,17 +852,12 @@ function champsMono(unit, label) {
 function puissanceFpItem(mono) {
   if (mono) {
     return [
-      F("p1", "P actif", "kW"), F("s1", "S apparent", "kVA"),
-      { key: "cosphi1", label: "Cos φ (calculé)", unit: null, compute: (f) => { const p = numOf(f.p1), s = numOf(f.s1); return (p === null || s === null || !s) ? "" : Math.round((p / s) * 100) / 100; } },
+      F("fp1", "Facteur de puissance (cos φ)", null),
       F("nature1", "Nature", null, ["Inductif", "Capacitif", "Résistif"]),
     ];
   }
   return [
-    F("p1", "P actif L1", "kW"), F("p2", "P actif L2", "kW"), F("p3", "P actif L3", "kW"),
-    F("s1", "S apparent L1", "kVA"), F("s2", "S apparent L2", "kVA"), F("s3", "S apparent L3", "kVA"),
-    { key: "cosphi1", label: "Cos φ L1 (calculé)", unit: null, compute: (f) => { const p = numOf(f.p1), s = numOf(f.s1); return (p === null || s === null || !s) ? "" : Math.round((p / s) * 100) / 100; } },
-    { key: "cosphi2", label: "Cos φ L2 (calculé)", unit: null, compute: (f) => { const p = numOf(f.p2), s = numOf(f.s2); return (p === null || s === null || !s) ? "" : Math.round((p / s) * 100) / 100; } },
-    { key: "cosphi3", label: "Cos φ L3 (calculé)", unit: null, compute: (f) => { const p = numOf(f.p3), s = numOf(f.s3); return (p === null || s === null || !s) ? "" : Math.round((p / s) * 100) / 100; } },
+    F("fp1", "Facteur de puissance L1 (cos φ)", null), F("fp2", "Facteur de puissance L2 (cos φ)", null), F("fp3", "Facteur de puissance L3 (cos φ)", null),
     F("nature1", "Nature L1", null, ["Inductif", "Capacitif", "Résistif"]),
     F("nature2", "Nature L2", null, ["Inductif", "Capacitif", "Résistif"]),
     F("nature3", "Nature L3", null, ["Inductif", "Capacitif", "Résistif"]),
@@ -889,6 +885,7 @@ function buildOnduleurSchema({ normalMono = false, secoursMono = false, utilisat
           { key: "marque", label: "Marque", options: LISTE_MARQUE_ELEMENT_BATTERIE }, { key: "technologie", label: "Technologie", options: LISTE_TECHNO_BATTERIE },
           { key: "typeBloc", label: "Type de bloc" }, { key: "tensionNominale", label: "Tension du bloc batterie (V)" },
           { key: "capacite", label: "Capacité par batterie (Ah)" },
+          { key: "regimeC", label: "Régime (autonomie nominale)", options: LISTE_REGIME_C_BATTERIE },
           { key: "nombreBranches", label: "Nombre de branches", options: LISTE_NB_BRANCHES }, { key: "nombreBlocsParBranche", label: "Nombre de blocs par branche" },
           { key: "anneeMiseEnService", label: "Année de mise en service" },
         ]),
@@ -1015,6 +1012,7 @@ function buildRedresseurSchema({ reseauMono = false } = {}) {
           { key: "marque", label: "Marque", options: LISTE_MARQUE_ELEMENT_BATTERIE }, { key: "technologie", label: "Technologie", options: LISTE_TECHNO_BATTERIE },
           { key: "typeBloc", label: "Type de bloc" }, { key: "tensionNominale", label: "Tension du bloc batterie (V)" },
           { key: "capacite", label: "Capacité par batterie (Ah)" },
+          { key: "regimeC", label: "Régime (autonomie nominale)", options: LISTE_REGIME_C_BATTERIE },
           { key: "nombreBranches", label: "Nombre de branches", options: LISTE_NB_BRANCHES }, { key: "nombreBlocsParBranche", label: "Nombre de blocs par branche" },
           { key: "anneeMiseEnService", label: "Année de mise en service" },
         ]),
@@ -3861,20 +3859,49 @@ function calcTauxCharge(eq) {
   }
   const puissanceNominale = numOf(eq.identification?.puissanceKVA);
   if (!puissanceNominale) return null;
-  const f = eq.controles.mesures_utilisation?.puissance_fp_utilisation?.fields || {};
-  const parPhase = puissanceNominale / 3;
-  const calc = (s) => { const v = numOf(s); return v === null ? null : Math.round((v / parPhase) * 100 * 10) / 10; };
-  const t1 = calc(f.s1), t2 = calc(f.s2), t3 = calc(f.s3);
-  if (t1 === null && t2 === null && t3 === null) return null;
-  return { t1, t2, t3 };
+  // S mesuré désormais calculé automatiquement (U × I × √3) plutôt que saisi manuellement — le taux
+  // de charge reste bien "S mesuré ÷ S nominale", juste avec un S mesuré fiabilisé.
+  const sCalcule = calcPuissanceApparente(eq, "mesures_utilisation", "utilisation");
+  if (sCalcule === null) return null;
+  const taux = Math.round((sCalcule / puissanceNominale) * 100 * 10) / 10;
+  return { t1: taux, t2: taux, t3: taux };
 }
-function calcPuissanceApparente(eq, sectionKey) {
-  const u = numOf(eq.controles[sectionKey]?.[`tension_${sectionKey === "mesures_reseau_normal" ? "normal" : "secours"}`]?.fields?.moyenne);
-  const i = numOf(eq.controles[sectionKey]?.[`courant_${sectionKey === "mesures_reseau_normal" ? "normal" : "secours"}`]?.fields?.moyenne);
-  if (u === null || i === null) return null;
-  return Math.round(((u * i * Math.sqrt(3)) / 1000) * 100) / 100;
+// Puissance apparente calculée à partir de la tension et du courant déjà mesurés dans la même
+// section (au lieu d'une saisie manuelle) : S = U composée × I × √3 en triphasé, S = U simple × I
+// en monophasé.
+function calcPuissanceApparente(eq, sectionKey, suffix) {
+  const sec = eq.controles[sectionKey];
+  if (!sec) return null;
+  const courant = sec[`courant_${suffix}`]?.fields;
+  if (!courant) return null;
+  const i = numOf(courant.moyenne !== undefined ? courant.moyenne : courant.l1);
+  if (i === null) return null;
+  const composee = sec[`tension_${suffix}`]?.fields;
+  if (composee && numOf(composee.moyenne) !== null) {
+    return Math.round(((numOf(composee.moyenne) * i * Math.sqrt(3)) / 1000) * 100) / 100;
+  }
+  const simple = sec[`tension_simple_${suffix}`]?.fields;
+  if (simple && numOf(simple.l1) !== null) {
+    return Math.round(((numOf(simple.l1) * i) / 1000) * 100) / 100;
+  }
+  return null;
 }
-function calcPuissanceApparenteNormale(eq) { return calcPuissanceApparente(eq, "mesures_reseau_normal"); }
+function calcPuissanceApparenteNormale(eq) { return calcPuissanceApparente(eq, "mesures_reseau_normal", "normal"); }
+// Puissance active calculée : P = S × cos φ, à partir de la puissance apparente ci-dessus et du
+// facteur de puissance saisi (par phase en triphasé, unique en monophasé).
+function calcPuissanceActive(eq, sectionKey, suffix, mono) {
+  const s = calcPuissanceApparente(eq, sectionKey, suffix);
+  if (s === null) return null;
+  const fp = eq.controles[sectionKey]?.[`puissance_fp_${suffix}`]?.fields || {};
+  if (mono) {
+    const cos = numOf(fp.fp1);
+    return cos === null ? null : Math.round(s * cos * 100) / 100;
+  }
+  const cosVals = [numOf(fp.fp1), numOf(fp.fp2), numOf(fp.fp3)].filter((v) => v !== null);
+  if (!cosVals.length) return null;
+  const cosMoyen = cosVals.reduce((a, b) => a + b, 0) / cosVals.length;
+  return Math.round(s * cosMoyen * 100) / 100;
+}
 // Tensions batterie théoriques (nominale / égalisation / seuil de fin de décharge), calculées à
 // partir de la technologie, de la tension nominale par élément et du nombre de blocs par branche
 // — reprend les coefficients du fichier Excel (1,2 V/élt et seuil 1,1 V/élt pour le Cd-Ni ; 2 V/élt
@@ -3883,6 +3910,20 @@ function calcPuissanceApparenteNormale(eq) { return calcPuissanceApparente(eq, "
 // cellules de 2 V (norme plomb-acide) ; pour le Cd-Ni, cellule de référence 1,2 V. Le nombre de
 // cellules par bloc se déduit donc de la tension du bloc, puis se multiplie par le nombre de blocs
 // par branche pour obtenir le nombre total d'éléments (cellules) sur lequel portent les calculs.
+// Durée de décharge théorique et courant de recharge indicatif, à partir de la capacité (Ah) et du
+// régime C déclarés (ex. C10 = capacité définie pour une décharge nominale sur 10h). Valeurs
+// indicatives basées sur le régime déclaré — les préconisations exactes du fabricant priment.
+function calcDechargeRechargeBatterie(eq) {
+  const capacite = numOf(eq.controles?.batterie_id?.batterie_caracteristiques?.fields?.capacite);
+  const regimeC = eq.controles?.batterie_id?.batterie_caracteristiques?.fields?.regimeC;
+  if (!capacite || !regimeC) return null;
+  const heures = numOf(regimeC.replace("C", ""));
+  if (!heures) return null;
+  return {
+    dureeDechargeTheorique: heures, // en heures, au régime nominal déclaré
+    courantRechargeIndicatif: Math.round((capacite / heures) * 100) / 100, // A, estimation indicative
+  };
+}
 function calcTensionsBatterieTheoriques(eq) {
   const c = eq.controles.batterie_id?.batterie_caracteristiques?.fields || {};
   const technologie = c.technologie;
@@ -4180,13 +4221,15 @@ function HistoriqueTransformateur({ eq, allSites }) {
     </Card>
   );
 }
-function PuissanceApparenteCalculee({ eq, sectionKey }) {
-  const s = calcPuissanceApparente(eq, sectionKey);
+function PuissanceApparenteCalculee({ eq, sectionKey, suffix, mono }) {
+  const s = calcPuissanceApparente(eq, sectionKey, suffix);
+  const p = calcPuissanceActive(eq, sectionKey, suffix, mono);
   if (s === null) return null;
   return (
     <Card style={{ marginBottom: 14 }}>
-      <div style={{ fontSize: 12.5, color: "#5B6B7D" }}>
-        Puissance apparente calculée (S = U × I × √3) : <b style={{ color: "#1A1F26" }}>{s} kVA</b>
+      <div style={{ fontSize: 12.5, color: "#5B6B7D", display: "flex", flexDirection: "column", gap: 4 }}>
+        <div>Puissance apparente calculée (S = U × I{mono ? "" : " × √3"}) : <b style={{ color: "#1A1F26" }}>{s} kVA</b></div>
+        {p !== null && <div>Puissance active calculée (P = S × cos φ) : <b style={{ color: "#1A1F26" }}>{p} kW</b></div>}
       </div>
     </Card>
   );
@@ -4195,6 +4238,7 @@ function TensionsBatterieTheoriques({ eq }) {
   const t = calcTensionsBatterieTheoriques(eq);
   if (!t) return null;
   const vCellule = calcTensionParCellule(eq);
+  const dr = calcDechargeRechargeBatterie(eq);
   return (
     <Card style={{ marginBottom: 14 }}>
       <SectionTitle>Valeurs théoriques calculées</SectionTitle>
@@ -4205,7 +4249,10 @@ function TensionsBatterieTheoriques({ eq }) {
         <span style={{ color: "#5B6B7D" }}>Tension nominale : <b style={{ color: "#1A1F26" }}>{t.nominale} V</b></span>
         <span style={{ color: "#5B6B7D" }}>Seuil de fin de décharge (critique) : <b style={{ color: "#1A1F26" }}>{t.finDecharge} V</b></span>
         {vCellule !== null && <span style={{ color: "#5B6B7D" }}>Tension par cellule (floating) : <b style={{ color: "#1A1F26" }}>{vCellule} V</b></span>}
+        {dr && <span style={{ color: "#5B6B7D" }}>Durée de décharge théorique (au régime nominal) : <b style={{ color: "#1A1F26" }}>{dr.dureeDechargeTheorique} h</b></span>}
+        {dr && <span style={{ color: "#5B6B7D" }}>Courant de recharge indicatif : <b style={{ color: "#1A1F26" }}>{dr.courantRechargeIndicatif} A</b></span>}
       </div>
+      {dr && <div style={{ fontSize: 10, color: "#8B96A3", marginTop: 6, fontStyle: "italic" }}>Valeurs indicatives basées sur le régime déclaré — se référer aux préconisations du fabricant pour la recharge.</div>}
     </Card>
   );
 }
@@ -4658,6 +4705,21 @@ function collectAnomalies(eq) {
       if (c.etat && RANK_OF[c.etat] > 0) lines.push(`${c.label || "(action ajoutée)"} : ${c.etat}`);
     });
   });
+  // Éléments de batterie : pas de champ "état" propre (motif "tolérance sur mesure" plutôt que
+  // conformité déclarée), donc invisible pour la boucle générique ci-dessus — vérifié séparément.
+  const elementsBatt = eq.controles.elements_dynamique || [];
+  if (elementsBatt.length) {
+    const cfg = eq.controles.releve_config || { toleranceBasse: 3, toleranceHaute: 3 };
+    const valeurs = elementsBatt.map((e) => numOf(e.fields.tension)).filter((v) => v !== null);
+    if (valeurs.length) {
+      const moyenne = Math.round((valeurs.reduce((a, b) => a + b, 0) / valeurs.length) * 1000) / 1000;
+      elementsBatt.forEach((e) => {
+        if (elementBatterieStatus(e.fields.tension, moyenne, cfg.toleranceBasse, cfg.toleranceHaute) === "bad") {
+          lines.push(`Élément de batterie « ${e.label} » : tension hors tolérance (${e.fields.tension} V, moyenne branche ${moyenne} V)`);
+        }
+      });
+    }
+  }
   return lines;
 }
 
@@ -4959,7 +5021,7 @@ function EquipementCard({ eq, update, remove, removable = true, onDuplicate, loc
                     onChangeCustom={(id, patch) => changeCustomAction(sec.key, id, patch)}
                     onRemoveCustom={(id) => removeCustomAction(sec.key, id)}
                   />
-                  <PuissanceApparenteCalculee eq={eq} sectionKey={sec.key} />
+                  <PuissanceApparenteCalculee eq={eq} sectionKey={sec.key} suffix={sec.key === "mesures_reseau_normal" ? "normal" : "secours"} mono={sec.key === "mesures_reseau_normal" ? eq.controles?.regimes_reseaux?.normal === "Monophasé" : eq.controles?.regimes_reseaux?.secours === "Monophasé"} />
                   {eq.type === "Redresseur chargeur" && sec.key === "mesures_reseau_normal" && (
                     <Card style={{ marginBottom: 14 }}>
                       <SectionTitle>Photo par phase — réseau d'entrée (tension + courant)</SectionTitle>
@@ -5013,6 +5075,7 @@ function EquipementCard({ eq, update, remove, removable = true, onDuplicate, loc
                     onChangeCustom={(id, patch) => changeCustomAction(sec.key, id, patch)}
                     onRemoveCustom={(id) => removeCustomAction(sec.key, id)}
                   />
+                  <PuissanceApparenteCalculee eq={eq} sectionKey={sec.key} suffix="utilisation" mono={eq.controles?.regimes_reseaux?.utilisation === "Monophasé"} />
                   <TauxChargeCalcule eq={eq} />
                   <HistoriqueTauxCharge eq={eq} allSites={allSites} />
                   <Card style={{ marginBottom: 14 }}>
@@ -7604,14 +7667,24 @@ function docxEquipementElements(eq, locaux, allSites) {
         const imgElts = docxImage(graphElts, 460, 140);
         if (imgElts) elements.push(new DOCX.Paragraph({ spacing: { after: 40 }, children: [imgElts] }));
       }
-      const rows3 = entries.filter((e) => e.fields.tension).map((e) => {
-        const st = elementBatterieStatus(e.fields.tension, moyenne, cfg.toleranceBasse, cfg.toleranceHaute);
-        const etat = st === "bad" ? "Défaillant" : "Conforme";
-        const detail = [`${e.fields.tension} V`, cfg.avecResistance && e.fields.resistance && `${e.fields.resistance} mΩ`].filter(Boolean).join(" · ");
-        return [e.label, detail, "", etat];
-      });
-      const t3 = docxControlTable(rows3);
-      if (t3) elements.push(t3);
+      // Allégé : le graphique donne déjà la vue d'ensemble — le tableau ne détaille que les
+      // éléments hors tolérance, avec un simple compte-rendu chiffré pour le reste.
+      const evalues = entries.filter((e) => e.fields.tension);
+      const defaillants = evalues.filter((e) => elementBatterieStatus(e.fields.tension, moyenne, cfg.toleranceBasse, cfg.toleranceHaute) === "bad");
+      if (evalues.length) {
+        const texteSynthese = defaillants.length === 0
+          ? `${evalues.length} élément(s) contrôlé(s) — tous conformes à la tolérance déclarée.`
+          : `${evalues.length} élément(s) contrôlé(s) — ${defaillants.length} hors tolérance (détail ci-dessous).`;
+        elements.push(new DOCX.Paragraph({ spacing: { after: defaillants.length ? 40 : 60 }, children: [new DOCX.TextRun({ text: texteSynthese, bold: defaillants.length > 0, size: 17, color: defaillants.length ? "C0392B" : DOCX_DARK })] }));
+      }
+      if (defaillants.length) {
+        const rows3 = defaillants.map((e) => {
+          const detail = [`${e.fields.tension} V`, cfg.avecResistance && e.fields.resistance && `${e.fields.resistance} mΩ`].filter(Boolean).join(" · ");
+          return [e.label, detail, "", "Défaillant"];
+        });
+        const t3 = docxControlTable(rows3);
+        if (t3) elements.push(t3);
+      }
       elements.push(docxSpacer());
       return;
     }
@@ -7688,9 +7761,15 @@ function docxEquipementElements(eq, locaux, allSites) {
       elements.push(docxHeading(sec.title));
       const tM = docxTableauMesures(sec.items, eq.controles[sec.key]);
       if (tM) elements.push(tM);
-      const s = calcPuissanceApparente(eq, sec.key);
-      if (s !== null) elements.push(new DOCX.Paragraph({ spacing: { before: 60, after: 40 }, children: [new DOCX.TextRun({ text: `Puissance apparente calculée (S = U × I × √3) : ${s} kVA`, bold: true, size: 17, color: DOCX_DARK })] }));
-      else elements.push(docxSpacer(40));
+      const suffixRes = sec.key === "mesures_reseau_normal" ? "normal" : "secours";
+      const monoRes = eq.controles?.regimes_reseaux?.[suffixRes] === "Monophasé";
+      const s = calcPuissanceApparente(eq, sec.key, suffixRes);
+      const pCalc = calcPuissanceActive(eq, sec.key, suffixRes, monoRes);
+      if (s !== null) {
+        elements.push(new DOCX.Paragraph({ spacing: { before: 60, after: 20 }, children: [new DOCX.TextRun({ text: `Puissance apparente calculée (S = U × I${monoRes ? "" : " × √3"}) : ${s} kVA`, bold: true, size: 17, color: DOCX_DARK })] }));
+        if (pCalc !== null) elements.push(new DOCX.Paragraph({ spacing: { before: 0, after: 40 }, children: [new DOCX.TextRun({ text: `Puissance active calculée (P = S × cos φ) : ${pCalc} kW`, bold: true, size: 17, color: DOCX_DARK })] }));
+        else elements.push(docxSpacer(40));
+      } else elements.push(docxSpacer(40));
       if (eq.type === "Redresseur chargeur" && sec.key === "mesures_reseau_normal") {
         const photosE = eq.controles.photos_reseau_entree || {};
         const addPhotosE = (label, files) => {
@@ -7719,6 +7798,13 @@ function docxEquipementElements(eq, locaux, allSites) {
       elements.push(docxHeading(sec.title));
       const tU = docxTableauMesures(sec.items, eq.controles[sec.key]);
       if (tU) elements.push(tU);
+      const monoUtil = eq.controles?.regimes_reseaux?.utilisation === "Monophasé";
+      const sUtil = calcPuissanceApparente(eq, sec.key, "utilisation");
+      const pUtil = calcPuissanceActive(eq, sec.key, "utilisation", monoUtil);
+      if (sUtil !== null) {
+        elements.push(new DOCX.Paragraph({ spacing: { before: 40, after: 20 }, children: [new DOCX.TextRun({ text: `Puissance apparente calculée (S = U × I${monoUtil ? "" : " × √3"}) : ${sUtil} kVA`, bold: true, size: 17, color: DOCX_DARK })] }));
+        if (pUtil !== null) elements.push(new DOCX.Paragraph({ spacing: { before: 0, after: 20 }, children: [new DOCX.TextRun({ text: `Puissance active calculée (P = S × cos φ) : ${pUtil} kW`, bold: true, size: 17, color: DOCX_DARK })] }));
+      }
       const tc = calcTauxCharge(eq);
       if (tc) {
         elements.push(new DOCX.Paragraph({ spacing: { before: 40, after: 20 }, children: [new DOCX.TextRun({ text: `Taux de charge calculé — L1 : ${tc.t1 ?? "—"}% · L2 : ${tc.t2 ?? "—"}% · L3 : ${tc.t3 ?? "—"}%`, bold: true, size: 17, color: DOCX_DARK })] }));
@@ -7767,7 +7853,11 @@ function docxEquipementElements(eq, locaux, allSites) {
       const th = calcTensionsBatterieTheoriques(eq);
       if (th) {
         const vCellule = calcTensionParCellule(eq);
-        elements.push(new DOCX.Paragraph({ spacing: { before: 60, after: 20 }, children: [new DOCX.TextRun({ text: `Valeurs théoriques calculées — Nominale : ${th.nominale} V · Seuil fin de décharge : ${th.finDecharge} V${vCellule !== null ? ` · Tension par cellule (floating) : ${vCellule} V` : ""}`, bold: true, size: 17, color: DOCX_DARK })] }));
+        const dr = calcDechargeRechargeBatterie(eq);
+        const parts = [`Nominale : ${th.nominale} V`, `Seuil fin de décharge : ${th.finDecharge} V`];
+        if (vCellule !== null) parts.push(`Tension par cellule (floating) : ${vCellule} V`);
+        if (dr) parts.push(`Durée de décharge théorique : ${dr.dureeDechargeTheorique} h`, `Courant de recharge indicatif : ${dr.courantRechargeIndicatif} A`);
+        elements.push(new DOCX.Paragraph({ spacing: { before: 60, after: 20 }, children: [new DOCX.TextRun({ text: `Valeurs théoriques calculées — ${parts.join(" · ")}`, bold: true, size: 17, color: DOCX_DARK })] }));
       }
       const iSortie = calcCourantSortieRedresseur(eq);
       if (iSortie !== null) elements.push(new DOCX.Paragraph({ spacing: { before: 20, after: 60 }, children: [new DOCX.TextRun({ text: `Courant de sortie redresseur (calculé) : ${iSortie} A`, bold: true, size: 17, color: DOCX_DARK })] }));
