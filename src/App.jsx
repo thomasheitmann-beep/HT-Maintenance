@@ -6943,6 +6943,20 @@ function base64ToUint8(dataUrl) {
 // Graphique des tensions par élément de batterie — barres verticales, moyenne en pointillé,
 // éléments hors tolérance en rouge. Utile pour repérer un défaut d'un coup d'œil sur un grand
 // nombre d'éléments, plutôt que de parcourir un tableau.
+// Regroupe les éléments de batterie par branche, à partir du préfixe "Branche N —" apposé par
+// regenererElementsBatterie(). Les éléments sans ce préfixe (ajoutés manuellement) sont regroupés
+// ensemble sous "Autres éléments". S'il n'y a qu'un seul groupe au total, pas de sous-titre par
+// branche à afficher (comportement identique à avant pour les installations mono-branche).
+function grouperElementsParBranche(entries) {
+  const groupes = new Map();
+  entries.forEach((e) => {
+    const match = /^(Branche \d+)/.exec(e.label || "");
+    const cle = match ? match[1] : "Autres éléments";
+    if (!groupes.has(cle)) groupes.set(cle, []);
+    groupes.get(cle).push(e);
+  });
+  return Array.from(groupes.entries()).map(([label, items]) => ({ label, items }));
+}
 function genererGraphiqueElementsBatterie(entries, moyenne, toleranceBasse, toleranceHaute) {
   if (typeof document === "undefined" || !document.createElement || !entries.length) return null;
   try {
@@ -7659,32 +7673,39 @@ function docxEquipementElements(eq, locaux, allSites) {
       const cfg = eq.controles.releve_config || { mode: "Floating", toleranceBasse: 3, toleranceHaute: 3 };
       if (cfg.avecResistance) elements.push(docxNormeNote("Résistance interne par élément : IEEE 1188 (VRLA) / IEEE 450 — indicateur complémentaire à la tension, souvent plus précoce pour détecter une dégradation."));
       const entries = eq.controles.elements_dynamique || [];
-      const valeurs = entries.map((e) => numOf(e.fields.tension)).filter((v) => v !== null);
-      const moyenne = valeurs.length ? Math.round((valeurs.reduce((a, b) => a + b, 0) / valeurs.length) * 1000) / 1000 : null;
-      elements.push(new DOCX.Paragraph({ spacing: { after: 60 }, children: [new DOCX.TextRun({ text: `Mode : ${cfg.mode}  ·  Tolérance : -${cfg.toleranceBasse}% / +${cfg.toleranceHaute}%${moyenne !== null ? `  ·  Moyenne : ${moyenne} V` : ""}`, size: 16, color: "666666", italics: true })] }));
-      const graphElts = genererGraphiqueElementsBatterie(entries, moyenne, cfg.toleranceBasse, cfg.toleranceHaute);
-      if (graphElts) {
-        const imgElts = docxImage(graphElts, 460, 140);
-        if (imgElts) elements.push(new DOCX.Paragraph({ spacing: { after: 40 }, children: [imgElts] }));
-      }
-      // Allégé : le graphique donne déjà la vue d'ensemble — le tableau ne détaille que les
-      // éléments hors tolérance, avec un simple compte-rendu chiffré pour le reste.
-      const evalues = entries.filter((e) => e.fields.tension);
-      const defaillants = evalues.filter((e) => elementBatterieStatus(e.fields.tension, moyenne, cfg.toleranceBasse, cfg.toleranceHaute) === "bad");
-      if (evalues.length) {
-        const texteSynthese = defaillants.length === 0
-          ? `${evalues.length} élément(s) contrôlé(s) — tous conformes à la tolérance déclarée.`
-          : `${evalues.length} élément(s) contrôlé(s) — ${defaillants.length} hors tolérance (détail ci-dessous).`;
-        elements.push(new DOCX.Paragraph({ spacing: { after: defaillants.length ? 40 : 60 }, children: [new DOCX.TextRun({ text: texteSynthese, bold: defaillants.length > 0, size: 17, color: defaillants.length ? "C0392B" : DOCX_DARK })] }));
-      }
-      if (defaillants.length) {
-        const rows3 = defaillants.map((e) => {
-          const detail = [`${e.fields.tension} V`, cfg.avecResistance && e.fields.resistance && `${e.fields.resistance} mΩ`].filter(Boolean).join(" · ");
-          return [e.label, detail, "", "Défaillant"];
-        });
-        const t3 = docxControlTable(rows3);
-        if (t3) elements.push(t3);
-      }
+      elements.push(new DOCX.Paragraph({ spacing: { after: 60 }, children: [new DOCX.TextRun({ text: `Mode : ${cfg.mode}  ·  Tolérance : -${cfg.toleranceBasse}% / +${cfg.toleranceHaute}%`, size: 16, color: "666666", italics: true })] }));
+      const groupes = grouperElementsParBranche(entries);
+      const plusieursBranches = groupes.length > 1;
+      groupes.forEach((groupe) => {
+        const valeursB = groupe.items.map((e) => numOf(e.fields.tension)).filter((v) => v !== null);
+        const moyenneB = valeursB.length ? Math.round((valeursB.reduce((a, b) => a + b, 0) / valeursB.length) * 1000) / 1000 : null;
+        if (plusieursBranches) {
+          elements.push(new DOCX.Paragraph({ spacing: { before: 60, after: 20 }, children: [new DOCX.TextRun({ text: `${groupe.label}${moyenneB !== null ? ` — Moyenne : ${moyenneB} V` : ""}`, bold: true, size: 17, color: DOCX_DARK })] }));
+        }
+        const graphElts = genererGraphiqueElementsBatterie(groupe.items, moyenneB, cfg.toleranceBasse, cfg.toleranceHaute);
+        if (graphElts) {
+          const imgElts = docxImage(graphElts, 460, 140);
+          if (imgElts) elements.push(new DOCX.Paragraph({ spacing: { after: 40 }, children: [imgElts] }));
+        }
+        // Allégé : le graphique donne déjà la vue d'ensemble — le tableau ne détaille que les
+        // éléments hors tolérance, avec un simple compte-rendu chiffré pour le reste.
+        const evalues = groupe.items.filter((e) => e.fields.tension);
+        const defaillants = evalues.filter((e) => elementBatterieStatus(e.fields.tension, moyenneB, cfg.toleranceBasse, cfg.toleranceHaute) === "bad");
+        if (evalues.length) {
+          const texteSynthese = defaillants.length === 0
+            ? `${evalues.length} élément(s) contrôlé(s) — tous conformes à la tolérance déclarée.`
+            : `${evalues.length} élément(s) contrôlé(s) — ${defaillants.length} hors tolérance (détail ci-dessous).`;
+          elements.push(new DOCX.Paragraph({ spacing: { after: defaillants.length ? 40 : 60 }, children: [new DOCX.TextRun({ text: texteSynthese, bold: defaillants.length > 0, size: 17, color: defaillants.length ? "C0392B" : DOCX_DARK })] }));
+        }
+        if (defaillants.length) {
+          const rows3 = defaillants.map((e) => {
+            const detail = [`${e.fields.tension} V`, cfg.avecResistance && e.fields.resistance && `${e.fields.resistance} mΩ`].filter(Boolean).join(" · ");
+            return [e.label, detail, "", "Défaillant"];
+          });
+          const t3 = docxControlTable(rows3);
+          if (t3) elements.push(t3);
+        }
+      });
       elements.push(docxSpacer());
       return;
     }
