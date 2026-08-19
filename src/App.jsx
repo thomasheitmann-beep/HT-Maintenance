@@ -8488,6 +8488,7 @@ export default function App({ currentUser, onLogout }) {
   // immédiatement (contrairement à une closure capturée au moment de la création de l'effet).
   const sitesRefForPoll = useRef([]);
   useEffect(() => { sitesRefForPoll.current = sites; }, [sites]);
+  const aDejaChargeDesSites = useRef(false); // mémorise si un chargement (lecture OU écriture) a déjà ramené/envoyé des sites non vides — voir le filet de sécurité dans l'effet d'écriture plus bas
   const [loaded, setLoaded] = useState(false);
   const [selectedId, setSelectedId] = useState(null);
   const [reprendreSiteOpen, setReprendreSiteOpen] = useState(false);
@@ -8582,6 +8583,7 @@ export default function App({ currentUser, onLogout }) {
         }));
         parsed.forEach((s) => { s.equipements = (s.equipements || []).map(repairEquipementControles); });
         lastSyncedSites.current = rawValue;
+        if (parsed.length > 0) aDejaChargeDesSites.current = true;
         setSites(parsed);
         setLoaded(true);
       } catch (e) {
@@ -8666,6 +8668,16 @@ export default function App({ currentUser, onLogout }) {
     const serialized = JSON.stringify(sites);
     if (serialized === lastSyncedSites.current) return;
     if (writeInFlight.current) return;
+    // Filet de sécurité supplémentaire (indépendant du correctif de chargement) : si des sites non
+    // vides ont déjà été chargés depuis le serveur dans cette session, on refuse d'écrire une liste
+    // vide automatiquement — un futur bug de chargement ne pourra plus jamais écraser les données
+    // réelles de cette façon. Une suppression volontaire de TOUS les sites nécessite de recharger
+    // la page pour confirmer (cas extrêmement rare, sans commune mesure avec le risque inverse).
+    if (sites.length === 0 && aDejaChargeDesSites.current) {
+      console.error("[Sécurité] Écriture bloquée : la liste de sites est vide alors que des sites avaient déjà été chargés — probable bug plutôt qu'une suppression volontaire. Rechargez la page pour confirmer si c'est intentionnel.");
+      return;
+    }
+    if (sites.length > 0) aDejaChargeDesSites.current = true;
     lastSyncedSites.current = serialized;
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(async () => {
