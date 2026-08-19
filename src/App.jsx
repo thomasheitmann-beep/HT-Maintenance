@@ -7173,14 +7173,15 @@ function genererSchemaOnduleur(eq) {
     const GAP_LIGNE = 26, LABEL_MARGIN = 14;
 
     let y = 16;
-    let yPontageFinal = null; // position où R2 rejoint le pontage — utilisé plus bas pour prolonger le trait sans coupure
+    let yR2Depart = null; // position depuis laquelle R2 continue sans coupure vers le commutateur
+    const avecAnnotationPontage = (eq.identification?.alimentationReseaux || "").includes("pontés");
     label("R1", cxM, y, SCHEMA_TRAIT, "14px Arial, sans-serif");
     // Pontés = une seule source réelle : pas de repère "R2" ni de trait indépendant en haut, pour
     // ne jamais donner l'impression que R2 remonte vers une entrée séparée. Tout part de R1.
     if (avecBypass && !reseauxPontes) label("R2", cxR2, y, SCHEMA_TRAIT, "14px Arial, sans-serif");
     y += 26;
     line(cxM, y, cxM, y + GAP_LIGNE);
-    if (avecBypass && !reseauxPontes) line(cxR2, y, cxR2, y + GAP_LIGNE);
+    if (avecBypass && !reseauxPontes) { line(cxR2, y, cxR2, y + GAP_LIGNE); yR2Depart = y + GAP_LIGNE; }
     y += GAP_LIGNE;
 
     // Transformateur d'isolement amont sur R1, si déclaré en identification
@@ -7192,6 +7193,7 @@ function genererSchemaOnduleur(eq) {
     if (avecTransfoR2 && avecBypass && !reseauxPontes) {
       drawIconTransformateur(ctx, cxR2 - tfW / 2, y, tfW, tfH);
       label("Transfo. amont", cxR2 + tfW / 2 + 40, y + tfH / 2, "#5B6B7D", "10px Arial, sans-serif");
+      yR2Depart = y + tfH; // continue sans coupure sous son transformateur
     }
     if (reseauxPontes && avecBypass) {
       // Pontage : dérive depuis le trajet de R1 (après son transformateur s'il existe), jamais
@@ -7201,14 +7203,14 @@ function genererSchemaOnduleur(eq) {
       const yPontage = yDepart + 14;
       line(cxM, yDepart, cxM, yPontage);
       line(cxM, yPontage, cxR2, yPontage);
-      label("(pontés — source unique)", (cxM + cxR2) / 2, yPontage + 12, "#8B96A3", "9.5px Arial, sans-serif");
+      if (avecAnnotationPontage) label("(pontés — source unique)", (cxM + cxR2) / 2, yPontage + 12, "#8B96A3", "9.5px Arial, sans-serif");
       if (avecTransfoR2) {
         line(cxR2, yPontage, cxR2, yPontage + 10);
         drawIconTransformateur(ctx, cxR2 - tfW / 2, yPontage + 10, tfW, tfH);
         label("Transfo. R2", cxR2 + tfW / 2 + 40, yPontage + 10 + tfH / 2, "#5B6B7D", "10px Arial, sans-serif");
-        yPontageFinal = yPontage + 10 + tfH;
+        yR2Depart = yPontage + 10 + tfH;
       } else {
-        yPontageFinal = yPontage;
+        yR2Depart = yPontage;
       }
       y = (avecTransfoR1 ? yDepart : yPontage) + 16;
       line(cxM, y - 16, cxM, y);
@@ -7258,11 +7260,11 @@ function genererSchemaOnduleur(eq) {
     label("R0", cxM - redW / 2 - 20, yOnduleurBas + bh / 2 + 10, SCHEMA_TRAIT, "11px Arial, sans-serif");
 
     if (avecBypass) {
-      // Le réseau secours rejoint directement le commutateur statique, sans longer tout le schéma —
-      // sauf si pontés : dans ce cas, le trait doit être continu depuis le pontage jusqu'au
-      // commutateur, sans coupure (puisque c'est électriquement la même source).
-      if (reseauxPontes && yPontageFinal !== null) {
-        line(cxR2, yPontageFinal, cxR2, yApresOnduleur);
+      // Le réseau secours rejoint directement le commutateur statique — le trait doit être continu
+      // depuis son point de départ (pontage ou simple trait initial), sans coupure.
+      if (yR2Depart !== null) {
+        if (!reseauxPontes) label(`Réseau secours ${regime("secours")}`, cxR2, yR2Depart - 4);
+        line(cxR2, yR2Depart, cxR2, yApresOnduleur);
       } else {
         label(`Réseau secours ${regime("secours")}`, cxR2, yRedresseurBas - 4);
         line(cxR2, yRedresseurBas + 10, cxR2, yApresOnduleur);
@@ -8371,6 +8373,10 @@ async function firestoreRestSet(docPath, valueJson, updatedAt, updatedBy, idToke
 export default function App({ currentUser, onLogout }) {
   useEffect(() => { CURRENT_USER_FOR_STORAGE = currentUser; }, [currentUser]);
   const [sites, setSites] = useState([]);
+  // Miroir synchrone de `sites`, lu par le poll et la migration photo — une ref est à jour
+  // immédiatement (contrairement à une closure capturée au moment de la création de l'effet).
+  const sitesRefForPoll = useRef([]);
+  useEffect(() => { sitesRefForPoll.current = sites; }, [sites]);
   const [loaded, setLoaded] = useState(false);
   const [selectedId, setSelectedId] = useState(null);
   const [reprendreSiteOpen, setReprendreSiteOpen] = useState(false);
@@ -8386,6 +8392,8 @@ export default function App({ currentUser, onLogout }) {
 
   const [view, setView] = useState("sites"); // "sites" | "interventions" | "calendrier"
   const [interventions, setInterventions] = useState([]);
+  const ivRefForPoll = useRef([]);
+  useEffect(() => { ivRefForPoll.current = interventions; }, [interventions]);
   const [ivLoaded, setIvLoaded] = useState(false);
   const [selectedIvId, setSelectedIvId] = useState(null);
   const [printIv, setPrintIv] = useState(null);
@@ -8396,6 +8404,8 @@ export default function App({ currentUser, onLogout }) {
   // Registre des clients — permet d'enregistrer un client (nom + e-mail) à l'avance, sans avoir à
   // créer un site complet ; partagé entre techniciens comme sites/interventions.
   const [clientsRegistry, setClientsRegistry] = useState([]);
+  const clientsRefForPoll = useRef([]);
+  useEffect(() => { clientsRefForPoll.current = clientsRegistry; }, [clientsRegistry]);
   const [clientsLoaded, setClientsLoaded] = useState(false);
   const clientsSaveTimer = useRef(null);
   const lastSyncedClients = useRef(null);
@@ -8406,6 +8416,8 @@ export default function App({ currentUser, onLogout }) {
   // valeur tapée dans un champ à suggestions rejoint automatiquement les propositions futures pour
   // ce même champ, sur ce même type d'équipement. Partagée entre techniciens comme les clients.
   const [caracteristiquesLibrary, setCaracteristiquesLibrary] = useState({});
+  const caracRefForPoll = useRef({});
+  useEffect(() => { caracRefForPoll.current = caracteristiquesLibrary; }, [caracteristiquesLibrary]);
   const [caracLoaded, setCaracLoaded] = useState(false);
   const caracSaveTimer = useRef(null);
   const lastSyncedCarac = useRef(null);
@@ -8436,6 +8448,12 @@ export default function App({ currentUser, onLogout }) {
         const rawValue = (data.fields.value && data.fields.value.stringValue) || "[]";
         if (rawValue === lastSyncedSites.current) { setLoaded(true); return; }
         const parsed = JSON.parse(rawValue);
+        // Filet de sécurité supplémentaire : si l'état local diffère déjà de la dernière version
+        // connue comme synchronisée, c'est qu'une saisie est en attente d'enregistrement (le délai
+        // de 500ms avant écriture n'a pas encore expiré) — ne surtout pas l'écraser avec une version
+        // serveur plus ancienne, sous peine de faire disparaître ou "sauter" ce qui vient d'être tapé.
+        const localActuel = JSON.stringify(sitesRefForPoll.current);
+        if (localActuel !== lastSyncedSites.current) { setLoaded(true); return; }
         const REGIMES_PAR_ANCIEN_TYPE = {
           "Onduleur 3/3": { normal: "Triphasé", secours: "Triphasé", utilisation: "Triphasé", onduleur: "Triphasé" },
           "Onduleur 3/1": { normal: "Triphasé", secours: "Monophasé", utilisation: "Monophasé", onduleur: "Monophasé" },
@@ -8465,8 +8483,6 @@ export default function App({ currentUser, onLogout }) {
   // Migration automatique des anciennes photos stockées en base64 (avant le passage à Firebase
   // Storage) : les remplace progressivement par des URL courtes, par petits lots pour ne pas tout
   // bloquer d'un coup. Tourne en tâche de fond tant qu'il en reste.
-  const sitesRefForMigration = useRef(sites);
-  useEffect(() => { sitesRefForMigration.current = sites; }, [sites]);
   useEffect(() => {
     if (!loaded || !currentUser) return;
     let cancelled = false;
@@ -8476,7 +8492,7 @@ export default function App({ currentUser, onLogout }) {
       migrating = true;
       try {
         const idToken = await currentUser.getIdToken();
-        const next = JSON.parse(JSON.stringify(sitesRefForMigration.current));
+        const next = JSON.parse(JSON.stringify(sitesRefForPoll.current));
         const pending = [];
         (function walk(node) {
           if (Array.isArray(node)) { node.forEach(walk); return; }
@@ -8573,6 +8589,8 @@ export default function App({ currentUser, onLogout }) {
         if (!data || !data.fields) { if (lastSyncedIv.current === null) lastSyncedIv.current = "[]"; setIvLoaded(true); return; }
         const rawValue = (data.fields.value && data.fields.value.stringValue) || "[]";
         if (rawValue === lastSyncedIv.current) { setIvLoaded(true); return; }
+        // Même protection que pour les sites : ne pas écraser une saisie en attente d'enregistrement.
+        if (JSON.stringify(ivRefForPoll.current) !== lastSyncedIv.current) { setIvLoaded(true); return; }
         lastSyncedIv.current = rawValue;
         setInterventions(JSON.parse(rawValue));
         setIvLoaded(true);
@@ -8619,6 +8637,7 @@ export default function App({ currentUser, onLogout }) {
         if (!data || !data.fields) { if (lastSyncedClients.current === null) lastSyncedClients.current = "[]"; setClientsLoaded(true); return; }
         const rawValue = (data.fields.value && data.fields.value.stringValue) || "[]";
         if (rawValue === lastSyncedClients.current) { setClientsLoaded(true); return; }
+        if (JSON.stringify(clientsRefForPoll.current) !== lastSyncedClients.current) { setClientsLoaded(true); return; }
         lastSyncedClients.current = rawValue;
         setClientsRegistry(JSON.parse(rawValue));
         setClientsLoaded(true);
@@ -8665,6 +8684,7 @@ export default function App({ currentUser, onLogout }) {
         if (!data || !data.fields) { if (lastSyncedCarac.current === null) lastSyncedCarac.current = "{}"; setCaracLoaded(true); return; }
         const rawValue = (data.fields.value && data.fields.value.stringValue) || "{}";
         if (rawValue === lastSyncedCarac.current) { setCaracLoaded(true); return; }
+        if (JSON.stringify(caracRefForPoll.current) !== lastSyncedCarac.current) { setCaracLoaded(true); return; }
         lastSyncedCarac.current = rawValue;
         setCaracteristiquesLibrary(JSON.parse(rawValue));
         setCaracLoaded(true);
