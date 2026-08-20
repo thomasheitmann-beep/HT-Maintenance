@@ -2122,10 +2122,12 @@ function GererClientsModal({ registry, setRegistry, allSites, onClose }) {
   const [email, setEmail] = useState("");
   const fileInputRef = useRef(null);
   const [importMsg, setImportMsg] = useState("");
+  const [externeData, setExterneData] = useState(null);
+  useEffect(() => { fetchClientsData().then(setExterneData); }, []);
   const dejaSurSite = useMemo(() => new Set((allSites || []).map((s) => (s.client || "").trim().toLowerCase()).filter(Boolean)), [allSites]);
-  // Liste fusionnée pour l'export : le registre (nom + e-mail saisis) complété par les clients
-  // détectés sur les sites existants mais jamais explicitement enregistrés ici — l'export doit
-  // couvrir tous les clients connus, pas seulement ceux ajoutés manuellement.
+  // Liste fusionnée pour l'export : le registre (nom + e-mail saisis), les clients détectés sur les
+  // sites existants mais jamais explicitement enregistrés ici, ET la base externe (organisations +
+  // contacts) — l'export doit couvrir tous les clients connus, pas seulement ceux ajoutés à la main.
   const clientsPourExport = useMemo(() => {
     const vus = new Set(registry.map((c) => c.nom.trim().toLowerCase()));
     const depuisSites = [];
@@ -2136,8 +2138,17 @@ function GererClientsModal({ registry, setRegistry, allSites, onClose }) {
       vus.add(key);
       depuisSites.push({ id: "site_" + key, nom: s.client, email: s.emailEnvoi || "" });
     });
-    return [...registry, ...depuisSites];
-  }, [registry, allSites]);
+    const depuisExterne = [];
+    (externeData || []).forEach((o) => {
+      if (!o.organisation) return;
+      const key = o.organisation.trim().toLowerCase();
+      if (vus.has(key)) return;
+      vus.add(key);
+      const premierEmail = (o.contacts || []).find((c) => c.email)?.email || "";
+      depuisExterne.push({ id: "externe_" + key, nom: o.organisation, email: premierEmail, adresse: o.adresse || "" });
+    });
+    return [...registry, ...depuisSites, ...depuisExterne];
+  }, [registry, allSites, externeData]);
   const ajouter = () => {
     if (!nom.trim()) return;
     const key = nom.trim().toLowerCase();
@@ -2152,9 +2163,9 @@ function GererClientsModal({ registry, setRegistry, allSites, onClose }) {
     try {
       const mod = await import("xlsx");
       const XLSX = mod.utils ? mod : mod.default; // interop CJS/ESM : selon le bundler, les exports peuvent se retrouver sous .default
-      const rows = clientsPourExport.map((c) => ({ ID: c.id, Nom: c.nom, "E-mail": c.email || "" }));
+      const rows = clientsPourExport.map((c) => ({ ID: c.id, Nom: c.nom, "E-mail": c.email || "", Adresse: c.adresse || "" }));
       const ws = XLSX.utils.json_to_sheet(rows);
-      ws["!cols"] = [{ wch: 22 }, { wch: 32 }, { wch: 32 }];
+      ws["!cols"] = [{ wch: 22 }, { wch: 32 }, { wch: 32 }, { wch: 40 }];
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, "Clients");
       XLSX.writeFile(wb, `Clients_HT-Maintenance_${todayISO()}.xlsx`);
