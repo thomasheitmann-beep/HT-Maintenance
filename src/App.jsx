@@ -852,12 +852,12 @@ function champsMono(unit, label) {
 function puissanceFpItem(mono) {
   if (mono) {
     return [
-      F("fp1", "Facteur de puissance (cos φ)", null),
+      F("fp1", "FP", null),
       F("nature1", "Nature", null, ["Inductif", "Capacitif", "Résistif"]),
     ];
   }
   return [
-    F("fp1", "Facteur de puissance L1 (cos φ)", null), F("fp2", "Facteur de puissance L2 (cos φ)", null), F("fp3", "Facteur de puissance L3 (cos φ)", null),
+    F("fp1", "FP L1", null), F("fp2", "FP L2", null), F("fp3", "FP L3", null),
     F("nature1", "Nature L1", null, ["Inductif", "Capacitif", "Résistif"]),
     F("nature2", "Nature L2", null, ["Inductif", "Capacitif", "Résistif"]),
     F("nature3", "Nature L3", null, ["Inductif", "Capacitif", "Résistif"]),
@@ -1892,6 +1892,7 @@ function emptySite() {
     id: uid(),
     nom: "",
     client: "",
+    adresse: "",
     local: "",
     emailEnvoi: "",
     locaux: [emptyLocal("Local principal")],
@@ -2219,7 +2220,7 @@ function GererClientsModal({ registry, setRegistry, allSites, onClose }) {
     </div>
   );
 }
-function ClientAutocomplete({ clientValue, onChangeClient, onChangeEmail, allSites, clientsRegistry }) {
+function ClientAutocomplete({ clientValue, onChangeClient, onChangeEmail, onChangeAdresse, allSites, clientsRegistry }) {
   const [data, setData] = useState(null);
   const [open, setOpen] = useState(false);
   const [contactsOrg, setContactsOrg] = useState(null);
@@ -2252,6 +2253,7 @@ function ClientAutocomplete({ clientValue, onChangeClient, onChangeEmail, allSit
     setOpen(false);
     if (org.contacts.length === 1) { onChangeEmail(org.contacts[0].email); setContactsOrg(null); }
     else if (org.contacts.length > 1) setContactsOrg(org);
+    if (org.adresse && onChangeAdresse) onChangeAdresse(org.adresse);
   };
   return (
     <div style={{ position: "relative" }}>
@@ -4327,7 +4329,7 @@ function PuissanceApparenteCalculee({ eq, sectionKey, suffix, mono }) {
     <Card style={{ marginBottom: 14 }}>
       <div style={{ fontSize: 12.5, color: "#5B6B7D", display: "flex", flexDirection: "column", gap: 4 }}>
         <div>Puissance apparente calculée (S = U × I{mono ? "" : " × √3"}) : <b style={{ color: "#1A1F26" }}>{s} kVA</b></div>
-        {p !== null && <div>Puissance active calculée (P = S × cos φ) : <b style={{ color: "#1A1F26" }}>{p} kW</b></div>}
+        {p !== null && <div>Puissance active calculée (P = S × FP) : <b style={{ color: "#1A1F26" }}>{p} kW</b></div>}
       </div>
     </Card>
   );
@@ -4837,6 +4839,20 @@ function EquipementCard({ eq, update, remove, removable = true, onDuplicate, loc
   const titleField = schema.identification[0];
   const subtitleField = schema.identification.find((f) => f.key.toLowerCase().includes("numeroserie")) || schema.identification[1];
 
+  // Fusion options statiques + bibliothèque apprise, calculée une seule fois par changement réel
+  // (pas à chaque frappe) — évite de refaire un Set + un tableau pour chaque champ à chaque
+  // caractère tapé, ce qui devenait sensible sur mobile à mesure que la bibliothèque grossit.
+  const bibliothequePourType = caracteristiquesLibrary[eq.type];
+  const optionsFusionnees = useMemo(() => {
+    const map = {};
+    schema.identification.forEach((f) => {
+      if (!f.options) return;
+      const apprises = (bibliothequePourType && bibliothequePourType[f.key]) || [];
+      map[f.key] = apprises.length ? Array.from(new Set([...f.options, ...apprises])) : f.options;
+    });
+    return map;
+  }, [schema, bibliothequePourType]);
+
   return (
     <Card>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer" }} onClick={() => setOpen((o) => !o)}>
@@ -4889,7 +4905,7 @@ function EquipementCard({ eq, update, remove, removable = true, onDuplicate, loc
               <SectionTitle>Identification</SectionTitle>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 14 }}>
                 {schema.identification.map((f) => {
-                  const opts = typeof f.options === "function" ? f.options(eq.identification) : f.options;
+                  const opts = f.options;
                   if (f.key === "rapportTPProtection" && eq.type !== "Comptage HTA") {
                     const comptageAvecTP = allEquipements.find((e) => e.type === "Comptage HTA" && e.identification.rapportTPProtection && e.id !== eq.id);
                     return (
@@ -4937,8 +4953,7 @@ function EquipementCard({ eq, update, remove, removable = true, onDuplicate, loc
                       </Field>
                     );
                   }
-                  const apprises = (caracteristiquesLibrary[eq.type] && caracteristiquesLibrary[eq.type][f.key]) || [];
-                  const optsAvecBibliotheque = opts ? Array.from(new Set([...opts, ...apprises])) : null;
+                  const optsAvecBibliotheque = optionsFusionnees[f.key] || null;
                   return (
                   <Field key={f.key} label={f.label}>
                     {optsAvecBibliotheque ? (
@@ -6087,6 +6102,7 @@ function SiteDetail({ site, allSites, update, onBack, onDelete, onPrint, onPrint
                 clientValue={site.client}
                 onChangeClient={(v) => update((d) => ({ ...d, client: v }))}
                 onChangeEmail={(v) => update((d) => ({ ...d, emailEnvoi: v }))}
+                onChangeAdresse={(v) => update((d) => ({ ...d, adresse: v }))}
                 allSites={allSites}
                 clientsRegistry={clientsRegistry}
               />
@@ -6094,6 +6110,7 @@ function SiteDetail({ site, allSites, update, onBack, onDelete, onPrint, onPrint
             <Field label="E-mail d'envoi du rapport"><TextInput type="email" value={site.emailEnvoi || ""} onChange={(e) => update((d) => ({ ...d, emailEnvoi: e.target.value }))} placeholder="contact@client.fr" /></Field>
             <Field label="Nom du site"><SiteNomAutocomplete nomValue={site.nom} onChangeNom={(v) => update((d) => ({ ...d, nom: v }))} allSites={allSites} /></Field>
             <Field label="Local"><TextInput value={site.local} onChange={(e) => update((d) => ({ ...d, local: e.target.value }))} placeholder="Local / emplacement" /></Field>
+            <Field label="Adresse du site"><TextInput value={site.adresse || ""} onChange={(e) => update((d) => ({ ...d, adresse: e.target.value }))} placeholder="Rue, code postal, ville" /></Field>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
             <StatusBadge label={rankToLabel(rank)} />
@@ -8059,7 +8076,7 @@ function docxEquipementElements(eq, locaux, allSites) {
       const pCalc = calcPuissanceActive(eq, sec.key, suffixRes, monoRes);
       if (s !== null) {
         elements.push(new DOCX.Paragraph({ spacing: { before: 60, after: 20 }, children: [new DOCX.TextRun({ text: `Puissance apparente calculée (S = U × I${monoRes ? "" : " × √3"}) : ${s} kVA`, bold: true, size: 17, color: DOCX_DARK })] }));
-        if (pCalc !== null) elements.push(new DOCX.Paragraph({ spacing: { before: 0, after: 40 }, children: [new DOCX.TextRun({ text: `Puissance active calculée (P = S × cos φ) : ${pCalc} kW`, bold: true, size: 17, color: DOCX_DARK })] }));
+        if (pCalc !== null) elements.push(new DOCX.Paragraph({ spacing: { before: 0, after: 40 }, children: [new DOCX.TextRun({ text: `Puissance active calculée (P = S × FP) : ${pCalc} kW`, bold: true, size: 17, color: DOCX_DARK })] }));
         else elements.push(docxSpacer(40));
       } else elements.push(docxSpacer(40));
       if (eq.type === "Redresseur chargeur" && sec.key === "mesures_reseau_normal") {
@@ -8095,7 +8112,7 @@ function docxEquipementElements(eq, locaux, allSites) {
       const pUtil = calcPuissanceActive(eq, sec.key, "utilisation", monoUtil);
       if (sUtil !== null) {
         elements.push(new DOCX.Paragraph({ spacing: { before: 40, after: 20 }, children: [new DOCX.TextRun({ text: `Puissance apparente calculée (S = U × I${monoUtil ? "" : " × √3"}) : ${sUtil} kVA`, bold: true, size: 17, color: DOCX_DARK })] }));
-        if (pUtil !== null) elements.push(new DOCX.Paragraph({ spacing: { before: 0, after: 20 }, children: [new DOCX.TextRun({ text: `Puissance active calculée (P = S × cos φ) : ${pUtil} kW`, bold: true, size: 17, color: DOCX_DARK })] }));
+        if (pUtil !== null) elements.push(new DOCX.Paragraph({ spacing: { before: 0, after: 20 }, children: [new DOCX.TextRun({ text: `Puissance active calculée (P = S × FP) : ${pUtil} kW`, bold: true, size: 17, color: DOCX_DARK })] }));
       }
       const tc = calcTauxCharge(eq);
       if (tc) {
@@ -8504,6 +8521,9 @@ function docxCoverPage(site) {
     new DOCX.Paragraph({ spacing: { before: 260, after: 0 }, alignment: DOCX.AlignmentType.CENTER, children: [
       new DOCX.TextRun({ text: site.client || "", color: "5B6B7D", size: 28 }),
     ]}),
+    site.adresse ? new DOCX.Paragraph({ spacing: { before: 60, after: 0 }, alignment: DOCX.AlignmentType.CENTER, children: [
+      new DOCX.TextRun({ text: site.adresse, color: "8B96A3", size: 22 }),
+    ]}) : new DOCX.Paragraph({}),
     site.local ? new DOCX.Paragraph({ spacing: { before: 60, after: 0 }, alignment: DOCX.AlignmentType.CENTER, children: [
       new DOCX.TextRun({ text: "Local : " + site.local, color: "8B96A3", size: 22 }),
     ]}) : new DOCX.Paragraph({}),
@@ -8545,6 +8565,7 @@ async function generateSiteDocx(site, allSites) {
   ].filter((j) => j.date);
   const journeesTexte = toutesJournees.map((j) => `${j.date}${j.heureArrivee || j.heureFin ? ` (${j.heureArrivee || "?"} – ${j.heureFin || "?"})` : ""}`).join(" · ");
   const rapportRows = [
+    ...(site.adresse ? [["Adresse du site", site.adresse]] : []),
     ["Date(s) d'intervention", journeesTexte || site.rapport.date],
     ["Intervenant(s)", tousIntervenants],
     ["Nombre d'équipements", String(site.equipements.length)], ["Prochaine maintenance recommandée avant", site.rapport.prochaineMaintenance],
