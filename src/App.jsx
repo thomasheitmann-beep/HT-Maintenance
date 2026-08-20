@@ -10,7 +10,7 @@ import {
   Plus, Search, AlertTriangle, CheckCircle2, AlertOctagon,
   Trash2, ArrowLeft, Building2, Clock, ChevronRight, ChevronDown,
   MapPin, ShieldCheck, FileText, Settings2, Printer, ImagePlus,
-  Mail, PenLine, RotateCcw, ClipboardList, X, MinusCircle, Download, Upload, Copy, RefreshCw,
+  Mail, PenLine, RotateCcw, ClipboardList, X, MinusCircle, Download, Upload, Copy, RefreshCw, Users,
 } from "lucide-react";
 
 /* =========================================================================
@@ -3086,7 +3086,101 @@ function SectionBlock({ title, items, values, onChangeItem, idPrefix, custom, on
 /* =========================================================================
    Vue d'ensemble (liste des sites)
    ========================================================================= */
-function Overview({ sites, onOpen, onNew }) {
+// Semaine du technicien : événements (sites + interventions) de la semaine en cours, groupés par
+// jour, pour un coup d'œil rapide sans passer par le calendrier complet.
+function SemaineTechnicien({ sites, interventions, onOpenSite, onOpenIntervention }) {
+  const jours = useMemo(() => {
+    const events = buildCalendarEvents(sites, interventions);
+    const auj = new Date(); auj.setHours(0, 0, 0, 0);
+    const jourSemaine = (auj.getDay() + 6) % 7; // 0 = lundi
+    const lundi = new Date(auj); lundi.setDate(auj.getDate() - jourSemaine);
+    return Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(lundi); d.setDate(lundi.getDate() + i);
+      const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      return { dateISO: iso, date: d, estAujourdhui: d.getTime() === auj.getTime(), events: events.filter((e) => e.dateISO === iso) };
+    });
+  }, [sites, interventions]);
+  const JOURS_COURTS = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"];
+
+  return (
+    <Card style={{ marginBottom: 16 }}>
+      <SectionTitle>Ma semaine</SectionTitle>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 8, marginTop: 10 }}>
+        {jours.map((j, i) => (
+          <div key={j.dateISO} style={{
+            border: j.estAujourdhui ? `1.5px solid ${BRAND.amber}` : "1px solid #D8DEE5", borderRadius: 10, padding: "8px 10px",
+            background: j.estAujourdhui ? "rgba(255,193,7,0.06)" : "#FFFFFF", minHeight: 70,
+          }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: j.estAujourdhui ? BRAND.amber : "#8B96A3", marginBottom: 6 }}>
+              {JOURS_COURTS[i]} {j.date.getDate()}
+            </div>
+            {j.events.length === 0 ? (
+              <div style={{ fontSize: 10.5, color: "#C4CBD3" }}>—</div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                {j.events.map((ev) => <EventChip key={ev.id} ev={ev} onClick={() => (ev.kind === "site" ? onOpenSite(ev.refId) : onOpenIntervention(ev.refId))} />)}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </Card>
+  );
+}
+
+// Rappel des interventions non clôturées — priorité aux plus anciennes, pour ne pas en oublier.
+function RappelInterventionsNonCloturees({ interventions, onOpen }) {
+  const nonCloturees = useMemo(() => {
+    return interventions.filter((iv) => !estInterventionCloturee(iv)).sort((a, b) => new Date(a.date) - new Date(b.date));
+  }, [interventions]);
+  if (nonCloturees.length === 0) return null;
+  return (
+    <Card style={{ marginBottom: 16, borderColor: "rgba(251,146,60,0.4)" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+        <AlertTriangle size={16} color="#FB923C" />
+        <SectionTitle>Interventions non clôturées ({nonCloturees.length})</SectionTitle>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        {nonCloturees.slice(0, 6).map((iv) => (
+          <div key={iv.id} onClick={() => onOpen(iv.id)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 10px", background: "#F7F8FA", border: "1px solid #D8DEE5", borderRadius: 8, cursor: "pointer" }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 12.5, fontWeight: 700, color: "#1A1F26", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{iv.client || "Client non renseigné"}</div>
+              <div style={{ fontSize: 11, color: "#5B6B7D" }}>{iv.numeroRI} · {iv.date}</div>
+            </div>
+            <ChevronRight size={14} color="#9AA5B1" />
+          </div>
+        ))}
+        {nonCloturees.length > 6 && <div style={{ fontSize: 11, color: "#8B96A3", textAlign: "center", marginTop: 2 }}>+ {nonCloturees.length - 6} autre(s)</div>}
+      </div>
+    </Card>
+  );
+}
+
+// Historique des sites, triés par date de dernière visite — accès rapide aux plus récents.
+function HistoriqueSites({ sites, onOpen }) {
+  const recents = useMemo(() => {
+    return [...sites].filter((s) => s.rapport?.date).sort((a, b) => new Date(b.rapport.date) - new Date(a.rapport.date)).slice(0, 6);
+  }, [sites]);
+  if (recents.length === 0) return null;
+  return (
+    <Card style={{ marginBottom: 16 }}>
+      <SectionTitle>Historique récent</SectionTitle>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 10 }}>
+        {recents.map((s) => (
+          <div key={s.id} onClick={() => onOpen(s.id)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 10px", background: "#F7F8FA", border: "1px solid #D8DEE5", borderRadius: 8, cursor: "pointer" }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 12.5, fontWeight: 700, color: "#1A1F26", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.nom || "Site sans nom"}</div>
+              <div style={{ fontSize: 11, color: "#5B6B7D" }}>{s.client} · {s.rapport.date}</div>
+            </div>
+            <StatusBadge label={rankToLabel(overallRank(s))} size="sm" />
+          </div>
+        ))}
+      </div>
+    </Card>
+  );
+}
+
+function Overview({ sites, interventions = [], onOpen, onNew, onOpenIntervention }) {
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("Tous");
   const [sortKey, setSortKey] = useState("prochaine");
@@ -3121,6 +3215,10 @@ function Overview({ sites, onOpen, onNew }) {
 
   return (
     <div>
+      <SemaineTechnicien sites={sites} interventions={interventions} onOpenSite={onOpen} onOpenIntervention={onOpenIntervention} />
+      <RappelInterventionsNonCloturees interventions={interventions} onOpen={onOpenIntervention} />
+      <HistoriqueSites sites={sites} onOpen={onOpen} />
+
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 20 }}>
         <KpiCard icon={Building2} label="Sites suivis" value={kpis.total} />
         <KpiCard icon={Clock} label="Maintenance sous 30 j" value={kpis.urgent} accent="#FFC107" />
@@ -6374,6 +6472,127 @@ function InterventionEditor({ iv, update, onBack, onDelete, onPrint }) {
   );
 }
 
+// Planification à l'avance : site (pré-remplissage + historique équipements), technicien assigné,
+// date future — crée l'intervention avec le statut "Planifiée", sans ouvrir l'éditeur (pour
+// enchaîner sur d'autres planifications depuis la même fenêtre).
+function PlanifierInterventionPicker({ sites, onCancel, onConfirm }) {
+  const [siteId, setSiteId] = useState("");
+  const site = sites.find((s) => s.id === siteId) || null;
+  const [equipIds, setEquipIds] = useState([]);
+  const [dateISO, setDateISO] = useState(() => { const d = new Date(); d.setDate(d.getDate() + 7); return d.toISOString().slice(0, 10); });
+  const [technicien, setTechnicien] = useState("");
+  const equipOptions = site ? site.equipements.map((e) => ({ id: e.id, label: `${e.type}${e.identification.repere ? " — " + e.identification.repere : ""}`, eq: e })) : [];
+  const toggle = (id) => setEquipIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
+  const toutSelectionne = equipOptions.length > 0 && equipIds.length === equipOptions.length;
+  const [dernier, setDernier] = useState(null);
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(4,9,16,0.72)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "32px 16px", overflowY: "auto", zIndex: 50 }} onClick={(e) => e.target === e.currentTarget && onCancel()}>
+      <div style={{ background: "#FFFFFF", border: "1px solid #D8DEE5", borderRadius: 16, width: "100%", maxWidth: 480 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "18px 24px", borderBottom: "1px solid #D8DEE5" }}>
+          <h2 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: "#1A1F26" }}>Planifier une intervention</h2>
+          <button onClick={onCancel} style={{ background: "none", border: "none", cursor: "pointer", color: "#5B6B7D" }}><X size={18} /></button>
+        </div>
+        <div style={{ padding: 24 }}>
+          <IvField label="Site">
+            <Select value={siteId} onChange={(e) => { setSiteId(e.target.value); setEquipIds([]); }}>
+              <option value="">— Choisir un site —</option>
+              {sites.map((s) => <option key={s.id} value={s.id}>{s.nom || "Site sans nom"} — {s.client}</option>)}
+            </Select>
+          </IvField>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginTop: 14 }}>
+            <IvField label="Date prévue">
+              <TextInput type="date" value={dateISO} onChange={(e) => setDateISO(e.target.value)} />
+            </IvField>
+            <IvField label="Technicien assigné">
+              <Combo value={technicien} onChange={setTechnicien} options={LISTE_INTERVENANTS} listId="planif-tech" placeholder="Nom du technicien" />
+            </IvField>
+          </div>
+          {site && equipOptions.length > 0 && (
+            <div style={{ marginTop: 14 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                <span style={{ fontSize: 12, fontWeight: 700, color: "#5B6B7D" }}>Équipements (historique du site, optionnel)</span>
+                <span onClick={() => setEquipIds(toutSelectionne ? [] : equipOptions.map((o) => o.id))} style={{ fontSize: 11.5, color: "#0A5DA8", cursor: "pointer" }}>
+                  {toutSelectionne ? "Tout désélectionner" : "Tout sélectionner"}
+                </span>
+              </div>
+              <div style={{ maxHeight: 220, overflowY: "auto", border: "1px solid #E2E6EB", borderRadius: 8 }}>
+                {equipOptions.map((o) => (
+                  <label key={o.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", borderBottom: "1px solid #F0F2F5", cursor: "pointer", fontSize: 12.5, color: "#3E4A5C" }}>
+                    <input type="checkbox" checked={equipIds.includes(o.id)} onChange={() => toggle(o.id)} style={{ accentColor: BRAND.blue }} />
+                    {o.label}
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
+          {dernier && <div style={{ marginTop: 12, fontSize: 12, color: "#0F8A5F" }}>✓ Intervention planifiée pour le {dernier} — vous pouvez enchaîner sur une autre.</div>}
+        </div>
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, padding: "16px 24px", borderTop: "1px solid #D8DEE5" }}>
+          <button onClick={onCancel} style={btnGhost()}>Fermer</button>
+          <button
+            disabled={!site || !dateISO}
+            onClick={() => { onConfirm(site, equipIds, dateISO, technicien); setDernier(dateISO); setSiteId(""); setEquipIds([]); setTechnicien(""); }}
+            style={{ ...btnPrimary(), opacity: (!site || !dateISO) ? 0.5 : 1, cursor: (!site || !dateISO) ? "not-allowed" : "pointer" }}
+          >
+            Planifier
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+// Sélection des équipements à reprendre depuis un site existant (nouvelle visite) — cases à cocher,
+// tout coché par défaut pour retrouver le comportement d'avant en un clic si rien n'est décoché.
+function ReprendreSiteEquipmentPicker({ site, onCancel, onConfirm }) {
+  const [equipIds, setEquipIds] = useState(() => site.equipements.map((e) => e.id));
+  const toggle = (id) => setEquipIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
+  const toutSelectionne = site.equipements.length > 0 && equipIds.length === site.equipements.length;
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(4,9,16,0.72)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "32px 16px", overflowY: "auto", zIndex: 50 }} onClick={(e) => e.target === e.currentTarget && onCancel()}>
+      <div style={{ background: "#FFFFFF", border: "1px solid #D8DEE5", borderRadius: 16, width: "100%", maxWidth: 480 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "18px 24px", borderBottom: "1px solid #D8DEE5" }}>
+          <div>
+            <h2 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: "#1A1F26" }}>Reprendre « {site.nom || "Site sans nom"} »</h2>
+            <div style={{ fontSize: 11.5, color: "#8B96A3", marginTop: 2 }}>Choisissez les équipements à reprendre pour cette nouvelle visite</div>
+          </div>
+          <button onClick={onCancel} style={{ background: "none", border: "none", cursor: "pointer", color: "#5B6B7D" }}><X size={18} /></button>
+        </div>
+        <div style={{ padding: 24 }}>
+          {site.equipements.length === 0 ? (
+            <div style={{ fontSize: 12.5, color: "#8B96A3" }}>Ce site n'a aucun équipement enregistré.</div>
+          ) : (
+            <>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                <span style={{ fontSize: 12, fontWeight: 700, color: "#5B6B7D" }}>Équipements ({site.equipements.length})</span>
+                <span onClick={() => setEquipIds(toutSelectionne ? [] : site.equipements.map((e) => e.id))} style={{ fontSize: 11.5, color: "#0A5DA8", cursor: "pointer" }}>
+                  {toutSelectionne ? "Tout désélectionner" : "Tout sélectionner"}
+                </span>
+              </div>
+              <div style={{ maxHeight: 320, overflowY: "auto", border: "1px solid #E2E6EB", borderRadius: 8 }}>
+                {site.equipements.map((eq) => (
+                  <label key={eq.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", borderBottom: "1px solid #F0F2F5", cursor: "pointer", fontSize: 12.5, color: "#3E4A5C" }}>
+                    <input type="checkbox" checked={equipIds.includes(eq.id)} onChange={() => toggle(eq.id)} style={{ accentColor: BRAND.blue }} />
+                    {eq.type}{eq.identification.repere ? " — " + eq.identification.repere : ""}
+                  </label>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, padding: "16px 24px", borderTop: "1px solid #D8DEE5" }}>
+          <button onClick={onCancel} style={btnGhost()}>Annuler</button>
+          <button onClick={() => onConfirm(equipIds)} style={btnPrimary()}>
+            Créer avec {equipIds.length} équipement{equipIds.length > 1 ? "s" : ""}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 function InterventionPrefillPicker({ sites, onCancel, onConfirm }) {
   const [siteId, setSiteId] = useState("");
   const site = sites.find((s) => s.id === siteId) || null;
@@ -6431,10 +6650,15 @@ function InterventionPrefillPicker({ sites, onCancel, onConfirm }) {
   );
 }
 
-function InterventionsOverview({ interventions, sites, onOpen, onCreate }) {
+// Une intervention est clôturée si le technicien l'a marquée manuellement comme telle, ou si elle
+// est signée par le client ET le technicien. Partagée entre l'aperçu des interventions et le
+// rappel sur la page d'accueil.
+function estInterventionCloturee(iv) { return iv.statut === "Clôturée" || !!(iv.validation && iv.validation.signatureClient && iv.validation.signatureHT); }
+function InterventionsOverview({ interventions, sites, onOpen, onCreate, onPlanifier }) {
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [planifierOpen, setPlanifierOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const [groupeParClient, setGroupeParClient] = useState(false);
+  const [groupeMode, setGroupeMode] = useState("date"); // "date" | "client" | "technicien"
 
   const filtered = useMemo(() => {
     if (!query.trim()) return interventions;
@@ -6444,19 +6668,21 @@ function InterventionsOverview({ interventions, sites, onOpen, onCreate }) {
 
   const sorted = useMemo(() => [...filtered].sort((a, b) => new Date(b.date) - new Date(a.date)), [filtered]);
 
-  // Une intervention est clôturée si le technicien l'a marquée manuellement comme telle, ou si elle
-  // est signée par le client ET le technicien.
-  const estCloturee = (iv) => iv.statut === "Clôturée" || !!(iv.validation && iv.validation.signatureClient && iv.validation.signatureHT);
+  const estCloturee = estInterventionCloturee;
+  const estPlanifiee = (iv) => iv.statut === "Planifiée" && !estCloturee(iv);
 
   const groupes = useMemo(() => {
-    const parClient = new Map();
+    if (groupeMode === "date") return [];
+    const parCle = new Map();
     sorted.forEach((iv) => {
-      const key = (iv.client || "Client non renseigné").trim() || "Client non renseigné";
-      if (!parClient.has(key)) parClient.set(key, []);
-      parClient.get(key).push(iv);
+      let key;
+      if (groupeMode === "technicien") key = (iv.technicien || "Non assigné").trim() || "Non assigné";
+      else key = (iv.client || "Client non renseigné").trim() || "Client non renseigné";
+      if (!parCle.has(key)) parCle.set(key, []);
+      parCle.get(key).push(iv);
     });
-    return Array.from(parClient.entries()).sort((a, b) => a[0].localeCompare(b[0]));
-  }, [sorted]);
+    return Array.from(parCle.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+  }, [sorted, groupeMode]);
 
   const IvRow = ({ iv }) => (
     <div key={iv.id} onClick={() => onOpen(iv.id)} className="iv-row"
@@ -6466,10 +6692,11 @@ function InterventionsOverview({ interventions, sites, onOpen, onCreate }) {
       <div className="iv-row-meta hide-mobile" style={{ flex: "0 0 100px", fontSize: 11.5, color: "#5B6B7D", fontWeight: 700 }}>{iv.numeroRI}</div>
       <div className="iv-row-main" style={{ flex: "1 1 220px", minWidth: 0 }}>
         <div style={{ fontSize: 13.5, fontWeight: 700, color: "#1A1F26", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: 6 }}>
-          {!groupeParClient && (iv.client || "Client non renseigné")}
+          {groupeMode !== "client" && (iv.client || "Client non renseigné")}
+          {estPlanifiee(iv) && <span title="Planifiée, pas encore commencée" style={{ fontSize: 10, color: "#0A5DA8", background: "rgba(10,93,168,0.1)", padding: "2px 6px", borderRadius: 4, fontWeight: 700 }}>PLANIFIÉE</span>}
           {estCloturee(iv) && <span title="Clôturée (signée client + technicien)" style={{ fontSize: 10, color: "#0F8A5F", background: "rgba(15,138,95,0.1)", padding: "2px 6px", borderRadius: 4, fontWeight: 700 }}>CLÔTURÉE</span>}
         </div>
-        <div style={{ fontSize: 12, color: "#5B6B7D" }}>{iv.numeroRI} · {iv.site || "—"}</div>
+        <div style={{ fontSize: 12, color: "#5B6B7D" }}>{iv.numeroRI} · {iv.site || "—"}{groupeMode === "technicien" ? "" : iv.technicien ? " · " + iv.technicien : ""}</div>
       </div>
       <div className="iv-row-meta" style={{ flex: "0 0 100px", fontSize: 12, color: "#3E4A5C" }}>{iv.date}</div>
       <div className="iv-row-meta" style={{ flex: "0 0 120px" }}><StatusBadge label={iv.conclusion} /></div>
@@ -6484,10 +6711,13 @@ function InterventionsOverview({ interventions, sites, onOpen, onCreate }) {
           <Search size={15} style={{ position: "absolute", left: 11, top: 10, color: "#8B96A3" }} />
           <TextInput placeholder="Rechercher N° RI, client, site, technicien…" value={query} onChange={(e) => setQuery(e.target.value)} style={{ paddingLeft: 32 }} />
         </div>
-        <button onClick={() => setGroupeParClient((g) => !g)} style={btnGhost(groupeParClient ? BRAND.blue : undefined)}>
-          <Building2 size={14} /> {groupeParClient ? "Grouper par date" : "Grouper par client"}
-        </button>
+        <Select value={groupeMode} onChange={(e) => setGroupeMode(e.target.value)} style={{ width: 180 }}>
+          <option value="date">Trier par date</option>
+          <option value="client">Grouper par client</option>
+          <option value="technicien">Grouper par technicien</option>
+        </Select>
         <button onClick={() => onCreate(null, null)} style={btnGhost("#FFC107")}><Plus size={14} /> Rapport vierge</button>
+        <button onClick={() => setPlanifierOpen(true)} style={btnGhost(BRAND.blue)}><Clock size={14} /> Planifier à l'avance</button>
         <button onClick={() => setPickerOpen(true)} style={btnPrimary()}><Plus size={15} /> Pré-remplir depuis un site</button>
       </div>
 
@@ -6499,12 +6729,12 @@ function InterventionsOverview({ interventions, sites, onOpen, onCreate }) {
           </div>
           <div style={{ fontSize: 12.5, color: "#8B96A3" }}>Créez votre premier rapport à transmettre au client.</div>
         </div>
-      ) : groupeParClient ? (
+      ) : groupeMode !== "date" ? (
         <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
-          {groupes.map(([client, ivs]) => (
-            <div key={client}>
+          {groupes.map(([cle, ivs]) => (
+            <div key={cle}>
               <div style={{ fontSize: 12.5, fontWeight: 700, color: "#5B6B7D", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.4, display: "flex", alignItems: "center", gap: 8 }}>
-                {client} <span style={{ fontWeight: 400, color: "#8B96A3", textTransform: "none" }}>({ivs.length} intervention{ivs.length > 1 ? "s" : ""})</span>
+                {cle} <span style={{ fontWeight: 400, color: "#8B96A3", textTransform: "none" }}>({ivs.length} intervention{ivs.length > 1 ? "s" : ""})</span>
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                 {ivs.map((iv) => <IvRow key={iv.id} iv={iv} />)}
@@ -6516,6 +6746,14 @@ function InterventionsOverview({ interventions, sites, onOpen, onCreate }) {
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {sorted.map((iv) => <IvRow key={iv.id} iv={iv} />)}
         </div>
+      )}
+
+      {planifierOpen && (
+        <PlanifierInterventionPicker
+          sites={sites}
+          onCancel={() => setPlanifierOpen(false)}
+          onConfirm={(site, equipIds, dateISO, technicien) => onPlanifier(site, equipIds, dateISO, technicien)}
+        />
       )}
 
       {pickerOpen && (
@@ -6544,12 +6782,12 @@ function buildCalendarEvents(sites, interventions) {
   const events = [];
   sites.forEach((s) => {
     if (s.rapport && s.rapport.date) {
-      events.push({ id: "site-" + s.id, dateISO: s.rapport.date, kind: "site", label: s.nom || "Site sans nom", sub: s.client, statusLabel: rankToLabel(overallRank(s)), refId: s.id });
+      events.push({ id: "site-" + s.id, dateISO: s.rapport.date, kind: "site", label: s.nom || "Site sans nom", sub: s.client, statusLabel: rankToLabel(overallRank(s)), refId: s.id, technicien: s.rapport.intervenant || "" });
     }
   });
   interventions.forEach((iv) => {
     if (iv.date) {
-      events.push({ id: "iv-" + iv.id, dateISO: iv.date, kind: "intervention", label: iv.client || "Client non renseigné", sub: iv.numeroRI, statusLabel: iv.conclusion, refId: iv.id });
+      events.push({ id: "iv-" + iv.id, dateISO: iv.date, kind: "intervention", label: iv.client || "Client non renseigné", sub: iv.numeroRI, statusLabel: iv.conclusion, refId: iv.id, technicien: iv.technicien || "" });
     }
   });
   return events;
@@ -6609,7 +6847,20 @@ function CalendarView({ sites, interventions, onOpenSite, onOpenIntervention, on
   const [ref, setRef] = useState(new Date());
   const [selectedDay, setSelectedDay] = useState(null);
   const todayIso = todayISO();
-  const events = useMemo(() => buildCalendarEvents(sites, interventions), [sites, interventions]);
+  const allEvents = useMemo(() => buildCalendarEvents(sites, interventions), [sites, interventions]);
+  const techniciensDisponibles = useMemo(() => {
+    const set = new Set();
+    allEvents.forEach((e) => { if (e.technicien) set.add(e.technicien); });
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [allEvents]);
+  // Vide = tous les techniciens affichés (comportement d'origine) ; sinon, filtre à la sélection.
+  const [techniciensFiltre, setTechniciensFiltre] = useState([]);
+  const [filtreOuvert, setFiltreOuvert] = useState(false);
+  const toggleTechnicien = (t) => setTechniciensFiltre((prev) => prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t]);
+  const events = useMemo(() => {
+    if (techniciensFiltre.length === 0) return allEvents;
+    return allEvents.filter((e) => techniciensFiltre.includes(e.technicien));
+  }, [allEvents, techniciensFiltre]);
   const byDate = useMemo(() => {
     const m = {};
     events.forEach((e) => { (m[e.dateISO] = m[e.dateISO] || []).push(e); });
@@ -6654,7 +6905,27 @@ function CalendarView({ sites, interventions, onOpenSite, onOpenIntervention, on
           <button onClick={() => shift(1)} style={{ ...btnGhost(), transform: "scaleX(-1)" }}><ArrowLeft size={14} /></button>
           <button onClick={() => { setRef(new Date()); setSelectedDay(todayIso); }} style={btnGhost()}>Aujourd'hui</button>
         </div>
-        <div style={{ display: "flex", gap: 6 }}>
+        <div style={{ display: "flex", gap: 6, alignItems: "center", position: "relative" }}>
+          {techniciensDisponibles.length > 0 && (
+            <>
+              <button onClick={() => setFiltreOuvert((o) => !o)} style={btnGhost(techniciensFiltre.length > 0 ? BRAND.blue : undefined)}>
+                <Users size={14} /> {techniciensFiltre.length === 0 ? "Tous les techniciens" : `${techniciensFiltre.length} technicien${techniciensFiltre.length > 1 ? "s" : ""}`}
+              </button>
+              {filtreOuvert && (
+                <div style={{ position: "absolute", right: 0, top: "110%", background: "#F7F8FA", border: "1px solid #D8DEE5", borderRadius: 10, overflow: "hidden", zIndex: 50, minWidth: 220, maxHeight: 280, overflowY: "auto", boxShadow: "0 12px 30px rgba(0,0,0,0.4)" }}>
+                  <div onClick={() => setTechniciensFiltre([])} style={{ padding: "9px 14px", fontSize: 12, fontWeight: 700, color: techniciensFiltre.length === 0 ? BRAND.blue : "#3E4A5C", cursor: "pointer", borderBottom: "1px solid #E2E6EB" }}>
+                    Tous les techniciens
+                  </div>
+                  {techniciensDisponibles.map((t) => (
+                    <label key={t} style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 14px", fontSize: 12, color: "#3E4A5C", cursor: "pointer", borderBottom: "1px solid #E2E6EB" }}>
+                      <input type="checkbox" checked={techniciensFiltre.includes(t)} onChange={() => toggleTechnicien(t)} style={{ accentColor: BRAND.blue }} />
+                      {t}
+                    </label>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
           {modeBtn("day", "Jour")}
           {modeBtn("week", "Semaine")}
           {modeBtn("month", "Mois")}
@@ -8492,6 +8763,7 @@ export default function App({ currentUser, onLogout }) {
   const [loaded, setLoaded] = useState(false);
   const [selectedId, setSelectedId] = useState(null);
   const [reprendreSiteOpen, setReprendreSiteOpen] = useState(false);
+  const [siteAReprendrePicker, setSiteAReprendrePicker] = useState(null); // site choisi, en attente de sélection des équipements
   const [saveError, setSaveError] = useState(false);
   const [printSite, setPrintSite] = useState(null);
   const [printAnnexeSite, setPrintAnnexeSite] = useState(null);
@@ -8505,6 +8777,7 @@ export default function App({ currentUser, onLogout }) {
   const [view, setView] = useState("sites"); // "sites" | "interventions" | "calendrier"
   const [interventions, setInterventions] = useState([]);
   const ivRefForPoll = useRef([]);
+  const aDejaChargeDesIv = useRef(false);
   useEffect(() => { ivRefForPoll.current = interventions; }, [interventions]);
   const [ivLoaded, setIvLoaded] = useState(false);
   const [selectedIvId, setSelectedIvId] = useState(null);
@@ -8517,6 +8790,7 @@ export default function App({ currentUser, onLogout }) {
   // créer un site complet ; partagé entre techniciens comme sites/interventions.
   const [clientsRegistry, setClientsRegistry] = useState([]);
   const clientsRefForPoll = useRef([]);
+  const aDejaChargeDesClients = useRef(false);
   useEffect(() => { clientsRefForPoll.current = clientsRegistry; }, [clientsRegistry]);
   const [clientsLoaded, setClientsLoaded] = useState(false);
   const clientsSaveTimer = useRef(null);
@@ -8529,6 +8803,7 @@ export default function App({ currentUser, onLogout }) {
   // ce même champ, sur ce même type d'équipement. Partagée entre techniciens comme les clients.
   const [caracteristiquesLibrary, setCaracteristiquesLibrary] = useState({});
   const caracRefForPoll = useRef({});
+  const aDejaChargeDesCarac = useRef(false);
   useEffect(() => { caracRefForPoll.current = caracteristiquesLibrary; }, [caracteristiquesLibrary]);
   const [caracLoaded, setCaracLoaded] = useState(false);
   const caracSaveTimer = useRef(null);
@@ -8718,7 +8993,9 @@ export default function App({ currentUser, onLogout }) {
         // Même protection que pour les sites : ne pas écraser une saisie en attente d'enregistrement.
         if (lastSyncedIv.current !== null && JSON.stringify(ivRefForPoll.current) !== lastSyncedIv.current) { setIvLoaded(true); return; }
         lastSyncedIv.current = rawValue;
-        setInterventions(JSON.parse(rawValue));
+        const parsedIv = JSON.parse(rawValue);
+        if (parsedIv.length > 0) aDejaChargeDesIv.current = true;
+        setInterventions(parsedIv);
         setIvLoaded(true);
       } catch (e) {
         setIvLoaded(true);
@@ -8734,6 +9011,11 @@ export default function App({ currentUser, onLogout }) {
     const serialized = JSON.stringify(interventions);
     if (serialized === lastSyncedIv.current) return;
     if (ivWriteInFlight.current) return;
+    if (interventions.length === 0 && aDejaChargeDesIv.current) {
+      console.error("[Sécurité] Écriture bloquée : liste d'interventions vide alors que des interventions avaient déjà été chargées.");
+      return;
+    }
+    if (interventions.length > 0) aDejaChargeDesIv.current = true;
     lastSyncedIv.current = serialized;
     if (ivSaveTimer.current) clearTimeout(ivSaveTimer.current);
     ivSaveTimer.current = setTimeout(async () => {
@@ -8765,7 +9047,9 @@ export default function App({ currentUser, onLogout }) {
         if (rawValue === lastSyncedClients.current) { setClientsLoaded(true); return; }
         if (lastSyncedClients.current !== null && JSON.stringify(clientsRefForPoll.current) !== lastSyncedClients.current) { setClientsLoaded(true); return; }
         lastSyncedClients.current = rawValue;
-        setClientsRegistry(JSON.parse(rawValue));
+        const parsedClients = JSON.parse(rawValue);
+        if (parsedClients.length > 0) aDejaChargeDesClients.current = true;
+        setClientsRegistry(parsedClients);
         setClientsLoaded(true);
       } catch (e) {
         setClientsLoaded(true);
@@ -8781,6 +9065,11 @@ export default function App({ currentUser, onLogout }) {
     const serialized = JSON.stringify(clientsRegistry);
     if (serialized === lastSyncedClients.current) return;
     if (clientsWriteInFlight.current) return;
+    if (clientsRegistry.length === 0 && aDejaChargeDesClients.current) {
+      console.error("[Sécurité] Écriture bloquée : liste de clients vide alors que des clients avaient déjà été chargés.");
+      return;
+    }
+    if (clientsRegistry.length > 0) aDejaChargeDesClients.current = true;
     lastSyncedClients.current = serialized;
     if (clientsSaveTimer.current) clearTimeout(clientsSaveTimer.current);
     clientsSaveTimer.current = setTimeout(async () => {
@@ -8812,7 +9101,9 @@ export default function App({ currentUser, onLogout }) {
         if (rawValue === lastSyncedCarac.current) { setCaracLoaded(true); return; }
         if (lastSyncedCarac.current !== null && JSON.stringify(caracRefForPoll.current) !== lastSyncedCarac.current) { setCaracLoaded(true); return; }
         lastSyncedCarac.current = rawValue;
-        setCaracteristiquesLibrary(JSON.parse(rawValue));
+        const parsedCarac = JSON.parse(rawValue);
+        if (Object.keys(parsedCarac).length > 0) aDejaChargeDesCarac.current = true;
+        setCaracteristiquesLibrary(parsedCarac);
         setCaracLoaded(true);
       } catch (e) {
         setCaracLoaded(true);
@@ -8828,6 +9119,11 @@ export default function App({ currentUser, onLogout }) {
     const serialized = JSON.stringify(caracteristiquesLibrary);
     if (serialized === lastSyncedCarac.current) return;
     if (caracWriteInFlight.current) return;
+    if (Object.keys(caracteristiquesLibrary).length === 0 && aDejaChargeDesCarac.current) {
+      console.error("[Sécurité] Écriture bloquée : bibliothèque de caractéristiques vide alors qu'elle avait déjà été chargée.");
+      return;
+    }
+    if (Object.keys(caracteristiquesLibrary).length > 0) aDejaChargeDesCarac.current = true;
     lastSyncedCarac.current = serialized;
     if (caracSaveTimer.current) clearTimeout(caracSaveTimer.current);
     caracSaveTimer.current = setTimeout(async () => {
@@ -8901,7 +9197,7 @@ export default function App({ currentUser, onLogout }) {
   // Reprend un site déjà existant (visite précédente) : conserve nom, client, locaux, et reprend
   // chaque équipement (caractéristiques gardées, mesures remises à vierge) — pratique pour repartir
   // sur une nouvelle visite annuelle sans tout ressaisir.
-  function reprendreSite(source) {
+  function reprendreSite(source, equipementIds) {
     const fresh = emptySite();
     fresh.nom = source.nom;
     fresh.client = source.client;
@@ -8910,7 +9206,8 @@ export default function App({ currentUser, onLogout }) {
     fresh.locaux = (source.locaux || []).map((l) => ({ ...l, id: uid() }));
     const localIdMap = {};
     (source.locaux || []).forEach((l, i) => { localIdMap[l.id] = fresh.locaux[i] ? fresh.locaux[i].id : ""; });
-    fresh.equipements = (source.equipements || []).map((eq) => {
+    const equipementsSource = equipementIds ? (source.equipements || []).filter((eq) => equipementIds.includes(eq.id)) : (source.equipements || []);
+    fresh.equipements = equipementsSource.map((eq) => {
       const copy = dupliquerEquipementPourNouvelleVisite(eq);
       copy.localId = localIdMap[eq.localId] || (fresh.locaux[0] ? fresh.locaux[0].id : "");
       return copy;
@@ -8918,6 +9215,7 @@ export default function App({ currentUser, onLogout }) {
     setSites((prev) => [fresh, ...prev]);
     setSelectedId(fresh.id);
     setReprendreSiteOpen(false);
+    setSiteAReprendrePicker(null);
   }
   function addSiteForDate(dateISO) {
     const s = emptySite();
@@ -8937,6 +9235,18 @@ export default function App({ currentUser, onLogout }) {
     setInterventions((prev) => [iv, ...prev]);
     setSelectedId(null);
     setSelectedIvId(iv.id);
+  }
+  // Planification à l'avance : reprend les infos connues du site (comme une pré-remplissage
+  // classique), mais fixe la date choisie et le technicien assigné, avec le statut "Planifiée" —
+  // et reste sur la liste au lieu d'ouvrir l'éditeur, pour enchaîner sur d'autres planifications.
+  function planifierIntervention(site, equipIds, dateISO, technicien) {
+    const numeroRI = nextNumeroRI(interventions);
+    const eqList = site ? site.equipements.filter((e) => equipIds.includes(e.id)) : [];
+    const iv = site ? prefillInterventionFromSite(site, eqList, numeroRI) : emptyIntervention(numeroRI);
+    iv.date = dateISO;
+    iv.technicien = technicien || "";
+    iv.statut = "Planifiée";
+    setInterventions((prev) => [iv, ...prev]);
   }
   function addInterventionForDate(dateISO) {
     const iv = emptyIntervention(nextNumeroRI(interventions));
@@ -9058,7 +9368,7 @@ export default function App({ currentUser, onLogout }) {
                   {reprendreSiteOpen && sites.length > 0 && (
                     <div style={{ position: "absolute", right: 0, top: "110%", background: "#F7F8FA", border: "1px solid #D8DEE5", borderRadius: 10, overflow: "hidden", zIndex: 50, minWidth: 260, maxHeight: 320, overflowY: "auto", boxShadow: "0 12px 30px rgba(0,0,0,0.4)" }}>
                       {sites.map((s) => (
-                        <div key={s.id} onClick={() => reprendreSite(s)} style={{ padding: "9px 14px", fontSize: 12, color: "#3E4A5C", cursor: "pointer", borderBottom: "1px solid #E2E6EB" }}
+                        <div key={s.id} onClick={() => { setSiteAReprendrePicker(s); setReprendreSiteOpen(false); }} style={{ padding: "9px 14px", fontSize: 12, color: "#3E4A5C", cursor: "pointer", borderBottom: "1px solid #E2E6EB" }}
                           onMouseEnter={(e) => (e.currentTarget.style.background = "#E2E6EB")} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
                           <div style={{ fontWeight: 700 }}>{s.nom || s.local || "Site sans nom"}</div>
                           <div style={{ fontSize: 10.5, color: "#8B96A3" }}>{s.client || "Client non renseigné"} · {s.rapport?.date || "date inconnue"}</div>
@@ -9068,6 +9378,13 @@ export default function App({ currentUser, onLogout }) {
                   )}
                   <button onClick={addSite} style={btnPrimary()}><Plus size={16} /> Nouvelle intervention</button>
                 </div>
+              )}
+              {siteAReprendrePicker && (
+                <ReprendreSiteEquipmentPicker
+                  site={siteAReprendrePicker}
+                  onCancel={() => setSiteAReprendrePicker(null)}
+                  onConfirm={(equipIds) => reprendreSite(siteAReprendrePicker, equipIds)}
+                />
               )}
             </div>
           </div>
@@ -9116,9 +9433,9 @@ export default function App({ currentUser, onLogout }) {
           ) : selectedIv ? (
             <InterventionEditor iv={selectedIv} update={(updater) => updateIntervention(selectedIv.id, updater)} onBack={() => setSelectedIvId(null)} onDelete={deleteIntervention} onPrint={requestPrintIv} />
           ) : view === "sites" ? (
-            !loaded ? <div style={{ textAlign: "center", padding: 60, color: "#8B96A3", fontSize: 13 }}>Chargement…</div> : <Overview sites={sites} onOpen={setSelectedId} onNew={addSite} />
+            !loaded ? <div style={{ textAlign: "center", padding: 60, color: "#8B96A3", fontSize: 13 }}>Chargement…</div> : <Overview sites={sites} interventions={interventions} onOpen={setSelectedId} onNew={addSite} onOpenIntervention={setSelectedIvId} />
           ) : view === "interventions" ? (
-            !ivLoaded ? <div style={{ textAlign: "center", padding: 60, color: "#8B96A3", fontSize: 13 }}>Chargement…</div> : <InterventionsOverview interventions={interventions} sites={sites} onOpen={setSelectedIvId} onCreate={createIntervention} />
+            !ivLoaded ? <div style={{ textAlign: "center", padding: 60, color: "#8B96A3", fontSize: 13 }}>Chargement…</div> : <InterventionsOverview interventions={interventions} sites={sites} onOpen={setSelectedIvId} onCreate={createIntervention} onPlanifier={planifierIntervention} />
           ) : (
             !loaded || !ivLoaded ? <div style={{ textAlign: "center", padding: 60, color: "#8B96A3", fontSize: 13 }}>Chargement…</div> : (
               <CalendarView sites={sites} interventions={interventions} onOpenSite={setSelectedId} onOpenIntervention={setSelectedIvId} onCreateForDate={addSiteForDate} onCreateInterventionForDate={addInterventionForDate} />
