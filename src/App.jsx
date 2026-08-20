@@ -1905,7 +1905,7 @@ function emptySite() {
     nom: "",
     client: "",
     adresse: "",
-    telephoneClient: "",
+    contactClient: { prenom: "", nom: "", email: "", fixe: "", portable: "" },
     contactSite: { prenom: "", nom: "", email: "", fixe: "", portable: "" },
     local: "",
     emailEnvoi: "",
@@ -2303,7 +2303,7 @@ function GererContactsModal({ registry, setRegistry, onClose }) {
     </div>
   );
 }
-function ClientAutocomplete({ clientValue, onChangeClient, onChangeEmail, onChangeAdresse, onChangeTelephone, allSites, clientsRegistry }) {
+function ClientAutocomplete({ clientValue, onChangeClient, onChangeEmail, onChangeAdresse, onChangeContactClient, allSites, clientsRegistry }) {
   const [data, setData] = useState(null);
   const [open, setOpen] = useState(false);
   const [contactsOrg, setContactsOrg] = useState(null);
@@ -2334,13 +2334,15 @@ function ClientAutocomplete({ clientValue, onChangeClient, onChangeEmail, onChan
   const pickOrg = (org) => {
     onChangeClient(org.organisation);
     setOpen(false);
-    if (org.contacts.length === 1) { onChangeEmail(org.contacts[0].email); setContactsOrg(null); }
-    else if (org.contacts.length > 1) setContactsOrg(org);
-    if (org.adresse && onChangeAdresse) onChangeAdresse(org.adresse);
-    if (onChangeTelephone) {
-      const premierAvecTel = (org.contacts || []).find((c) => c.fixe || c.portable);
-      if (premierAvecTel) onChangeTelephone(premierAvecTel.portable || premierAvecTel.fixe);
+    if (org.contacts.length === 1) {
+      const c = org.contacts[0];
+      onChangeEmail(c.email);
+      if (onChangeContactClient) onChangeContactClient({ prenom: c.prenom || "", nom: c.nom || c.nomComplet || "", email: c.email || "", fixe: c.fixe || "", portable: c.portable || "" });
+      setContactsOrg(null);
+    } else if (org.contacts.length > 1) {
+      setContactsOrg(org);
     }
+    if (org.adresse && onChangeAdresse) onChangeAdresse(org.adresse);
   };
   return (
     <div style={{ position: "relative" }}>
@@ -2368,7 +2370,11 @@ function ClientAutocomplete({ clientValue, onChangeClient, onChangeEmail, onChan
         <div style={{ marginTop: 6, padding: 8, background: "#F4F6F8", borderRadius: 8, fontSize: 11.5 }}>
           <div style={{ color: "#5B6B7D", marginBottom: 4, fontWeight: 700 }}>Choisir le contact pour l'envoi :</div>
           {contactsOrg.contacts.map((c) => (
-            <div key={c.email} onClick={() => { onChangeEmail(c.email); setContactsOrg(null); }} style={{ padding: "4px 6px", cursor: "pointer", color: "#3E4A5C" }}>
+            <div key={c.email || c.nom} onClick={() => {
+              onChangeEmail(c.email);
+              if (onChangeContactClient) onChangeContactClient({ prenom: c.prenom || "", nom: c.nom || c.nomComplet || "", email: c.email || "", fixe: c.fixe || "", portable: c.portable || "" });
+              setContactsOrg(null);
+            }} style={{ padding: "4px 6px", cursor: "pointer", color: "#3E4A5C" }}>
               {c.nom} — {c.email}{c.fonction ? ` (${c.fonction})` : ""}
             </div>
           ))}
@@ -2383,7 +2389,10 @@ function ClientAutocomplete({ clientValue, onChangeClient, onChangeEmail, onChan
 // Sélection d'un contact site — suggestions issues du registre de contacts partagé et de la base
 // externe, filtrées en priorité sur les contacts de l'organisation cliente déjà renseignée (mais
 // pas limitées à elle, un contact peut être saisi même sans client connu).
-function ContactSiteAutocomplete({ contact, onChangeContact, clientNom, contactsRegistry }) {
+// Sélection d'une fiche contact (client ou site) — propose directement la liste des contacts connus
+// pour le client/site déjà sélectionné (registre partagé + base externe), en plus de la saisie
+// libre avec suggestions au clic.
+function ContactPersonneAutocomplete({ contact, onChangeContact, clientNom, contactsRegistry }) {
   const [data, setData] = useState(null);
   const [open, setOpen] = useState(false);
   const [champ, setChamp] = useState(""); // champ texte actif (nom tapé)
@@ -2400,6 +2409,13 @@ function ContactSiteAutocomplete({ contact, onChangeContact, clientNom, contacts
     return liste;
   }, [contactsRegistry, data, clientNom]);
 
+  // Liste directement proposée pour le client déjà sélectionné, sans avoir à taper quoi que ce soit.
+  const contactsDuClient = useMemo(() => {
+    if (!clientNom) return [];
+    const q = clientNom.trim().toLowerCase();
+    return tousContacts.filter((c) => (c.organisation || "").trim().toLowerCase() === q).slice(0, 8);
+  }, [tousContacts, clientNom]);
+
   const suggestions = useMemo(() => {
     if (!champ || champ.length < 2) return [];
     const q = champ.toLowerCase();
@@ -2413,30 +2429,42 @@ function ContactSiteAutocomplete({ contact, onChangeContact, clientNom, contacts
   const setField = (k, v) => onChangeContact({ ...contact, [k]: v });
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10 }}>
-      <div style={{ position: "relative" }}>
-        <TextInput
-          value={contact.prenom || ""}
-          onChange={(e) => { setField("prenom", e.target.value); setChamp(e.target.value + " " + (contact.nom || "")); setOpen(true); }}
-          onFocus={() => setOpen(true)}
-          onBlur={() => setTimeout(() => setOpen(false), 150)}
-          placeholder="Prénom"
-        />
-        {open && suggestions.length > 0 && (
-          <div style={{ position: "absolute", left: 0, right: 0, top: "100%", background: "#F7F8FA", border: "1px solid #D8DEE5", borderRadius: 8, marginTop: 2, zIndex: 60, maxHeight: 240, overflowY: "auto", boxShadow: "0 8px 24px rgba(0,0,0,0.35)", minWidth: 260 }}>
-            {suggestions.map((c, i) => (
-              <div key={i} onMouseDown={() => pick(c)} style={{ padding: "8px 12px", fontSize: 12, color: "#3E4A5C", cursor: "pointer", borderBottom: "1px solid #E2E6EB" }}>
-                <div style={{ fontWeight: 700 }}>{c.prenom} {c.nom}</div>
-                <div style={{ fontSize: 10.5, color: "#8B96A3" }}>{[c.organisation, c.email].filter(Boolean).join(" · ")}</div>
-              </div>
-            ))}
-          </div>
-        )}
+    <div>
+      {contactsDuClient.length > 0 && (
+        <div style={{ marginBottom: 8, display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
+          <span style={{ fontSize: 10.5, color: "#8B96A3" }}>Contacts connus pour {clientNom} :</span>
+          {contactsDuClient.map((c, i) => (
+            <span key={i} onClick={() => pick(c)} style={{ fontSize: 11, padding: "3px 9px", borderRadius: 12, background: "rgba(10,93,168,0.08)", color: BRAND.blue, cursor: "pointer", whiteSpace: "nowrap" }}>
+              {c.prenom} {c.nom}
+            </span>
+          ))}
+        </div>
+      )}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10 }}>
+        <div style={{ position: "relative" }}>
+          <TextInput
+            value={contact.prenom || ""}
+            onChange={(e) => { setField("prenom", e.target.value); setChamp(e.target.value + " " + (contact.nom || "")); setOpen(true); }}
+            onFocus={() => setOpen(true)}
+            onBlur={() => setTimeout(() => setOpen(false), 150)}
+            placeholder="Prénom"
+          />
+          {open && suggestions.length > 0 && (
+            <div style={{ position: "absolute", left: 0, right: 0, top: "100%", background: "#F7F8FA", border: "1px solid #D8DEE5", borderRadius: 8, marginTop: 2, zIndex: 60, maxHeight: 240, overflowY: "auto", boxShadow: "0 8px 24px rgba(0,0,0,0.35)", minWidth: 260 }}>
+              {suggestions.map((c, i) => (
+                <div key={i} onMouseDown={() => pick(c)} style={{ padding: "8px 12px", fontSize: 12, color: "#3E4A5C", cursor: "pointer", borderBottom: "1px solid #E2E6EB" }}>
+                  <div style={{ fontWeight: 700 }}>{c.prenom} {c.nom}</div>
+                  <div style={{ fontSize: 10.5, color: "#8B96A3" }}>{[c.organisation, c.email].filter(Boolean).join(" · ")}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        <TextInput value={contact.nom || ""} onChange={(e) => { setField("nom", e.target.value); setChamp((contact.prenom || "") + " " + e.target.value); setOpen(true); }} placeholder="Nom" />
+        <TextInput type="email" value={contact.email || ""} onChange={(e) => setField("email", e.target.value)} placeholder="E-mail" />
+        <TextInput value={contact.fixe || ""} onChange={(e) => setField("fixe", e.target.value)} placeholder="Téléphone fixe" />
+        <TextInput value={contact.portable || ""} onChange={(e) => setField("portable", e.target.value)} placeholder="Téléphone portable" />
       </div>
-      <TextInput value={contact.nom || ""} onChange={(e) => { setField("nom", e.target.value); setChamp((contact.prenom || "") + " " + e.target.value); setOpen(true); }} placeholder="Nom" />
-      <TextInput type="email" value={contact.email || ""} onChange={(e) => setField("email", e.target.value)} placeholder="E-mail" />
-      <TextInput value={contact.fixe || ""} onChange={(e) => setField("fixe", e.target.value)} placeholder="Téléphone fixe" />
-      <TextInput value={contact.portable || ""} onChange={(e) => setField("portable", e.target.value)} placeholder="Téléphone portable" />
     </div>
   );
 }
@@ -6290,7 +6318,7 @@ function SiteDetail({ site, allSites, update, onBack, onDelete, onPrint, onPrint
                 onChangeClient={(v) => update((d) => ({ ...d, client: v }))}
                 onChangeEmail={(v) => update((d) => ({ ...d, emailEnvoi: v }))}
                 onChangeAdresse={(v) => update((d) => ({ ...d, adresse: v }))}
-                onChangeTelephone={(v) => update((d) => ({ ...d, telephoneClient: v }))}
+                onChangeContactClient={(c) => update((d) => ({ ...d, contactClient: c }))}
                 allSites={allSites}
                 clientsRegistry={clientsRegistry}
               />
@@ -6308,11 +6336,20 @@ function SiteDetail({ site, allSites, update, onBack, onDelete, onPrint, onPrint
             </Field>
             <Field label="Local"><TextInput value={site.local} onChange={(e) => update((d) => ({ ...d, local: e.target.value }))} placeholder="Local / emplacement" /></Field>
             <Field label="Adresse du site"><TextInput value={site.adresse || ""} onChange={(e) => update((d) => ({ ...d, adresse: e.target.value }))} placeholder="Rue, code postal, ville" /></Field>
-            <Field label="Téléphone client"><TextInput value={site.telephoneClient || ""} onChange={(e) => update((d) => ({ ...d, telephoneClient: e.target.value }))} placeholder="+33 ..." /></Field>
           </div>
           <div style={{ marginTop: 4 }}>
+            <Field label="Contact client">
+              <ContactPersonneAutocomplete
+                contact={site.contactClient || { prenom: "", nom: "", email: "", fixe: "", portable: "" }}
+                onChangeContact={(c) => update((d) => ({ ...d, contactClient: c }))}
+                clientNom={site.client}
+                contactsRegistry={contactsRegistry}
+              />
+            </Field>
+          </div>
+          <div style={{ marginTop: 14 }}>
             <Field label="Contact site">
-              <ContactSiteAutocomplete
+              <ContactPersonneAutocomplete
                 contact={site.contactSite || { prenom: "", nom: "", email: "", fixe: "", portable: "" }}
                 onChangeContact={(c) => update((d) => ({ ...d, contactSite: c }))}
                 clientNom={site.client}
@@ -8776,15 +8813,23 @@ async function generateSiteDocx(site, allSites) {
     ...(site.rapport.journeesSupplementaires || []),
   ].filter((j) => j.date);
   const journeesTexte = toutesJournees.map((j) => `${j.date}${j.heureArrivee || j.heureFin ? ` (${j.heureArrivee || "?"} – ${j.heureFin || "?"})` : ""}`).join(" · ");
-  const contactSiteTexte = site.contactSite ? [
-    [site.contactSite.prenom, site.contactSite.nom].filter(Boolean).join(" "),
-    site.contactSite.email,
-    site.contactSite.portable && `Portable : ${site.contactSite.portable}`,
-    site.contactSite.fixe && `Fixe : ${site.contactSite.fixe}`,
+  const formatContact = (c) => c ? [
+    [c.prenom, c.nom].filter(Boolean).join(" "),
+    c.email,
+    c.portable && `Portable : ${c.portable}`,
+    c.fixe && `Fixe : ${c.fixe}`,
   ].filter(Boolean).join(" · ") : "";
+  const contactSiteTexte = formatContact(site.contactSite);
+  // Le contact client n'est affiché que s'il diffère du contact site — évite de répéter la même
+  // personne deux fois quand c'est le même interlocuteur pour les deux rôles.
+  const memePersonne = site.contactClient && site.contactSite &&
+    (site.contactClient.email || "").trim().toLowerCase() === (site.contactSite.email || "").trim().toLowerCase() &&
+    (site.contactClient.nom || "").trim().toLowerCase() === (site.contactSite.nom || "").trim().toLowerCase() &&
+    (site.contactClient.email || site.contactClient.nom); // ne compte pas deux fiches vides comme "identiques"
+  const contactClientTexte = memePersonne ? "" : formatContact(site.contactClient);
   const rapportRows = [
     ...(site.adresse ? [["Adresse du site", site.adresse]] : []),
-    ...(site.telephoneClient ? [["Téléphone client", site.telephoneClient]] : []),
+    ...(contactClientTexte ? [["Contact client", contactClientTexte]] : []),
     ...(contactSiteTexte ? [["Contact site", contactSiteTexte]] : []),
     ["Date(s) d'intervention", journeesTexte || site.rapport.date],
     ["Intervenant(s)", tousIntervenants],
