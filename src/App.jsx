@@ -849,6 +849,19 @@ function calcToleranceRapportTransfo(rapportTheorique) {
 function champsMono(unit, label) {
   return [F("l1", label || "Valeur", unit)];
 }
+// FP seul, sans "Nature" — pour le réseau normal, où seule la valeur du facteur de puissance
+// mesuré à l'écran a un sens (l'onduleur ne donne pas d'indication de nature inductif/capacitif).
+function fpSeulItem(mono) {
+  if (mono) return [F("fp1", "FP", null)];
+  return [F("fp1", "FP L1", null), F("fp2", "FP L2", null), F("fp3", "FP L3", null)];
+}
+// Cos φ fondamental — grandeur réellement mesurée à l'écran (déphasage tension/courant sur le
+// fondamental, hors harmoniques) ; le FP réel (P/S) en est dérivé via le taux de distorsion
+// courant déjà relevé dans la même section.
+function cosPhiFondamentalItem(mono) {
+  if (mono) return [F("fp1", "Cos φ fondamental", null)];
+  return [F("fp1", "Cos φ fondamental L1", null), F("fp2", "Cos φ fondamental L2", null), F("fp3", "Cos φ fondamental L3", null)];
+}
 function puissanceFpItem(mono) {
   if (mono) {
     return [
@@ -873,6 +886,7 @@ function buildOnduleurSchema({ normalMono = false, secoursMono = false, utilisat
     identification: [
       { key: "repere", label: "Repère / Nom de l'équipement" },
       { key: "marque", label: "Marque", options: LISTE_MARQUE_ONDULEUR }, { key: "modele", label: "Modèle", options: LISTE_MODELE_ONDULEUR_OPTIONS },
+      { key: "numeroSerie", label: "Numéro de série" },
       { key: "configuration", label: "Configuration", options: LISTE_CONFIG_UPS },
       { key: "puissanceKVA", label: "Puissance (kVA)", numeric: true }, { key: "puissanceKW", label: "Puissance (kW)", numeric: true },
       { key: "tensionEntreeSortie", label: "Tension entrée / sortie", options: LISTE_TENSION_ENTREE_SORTIE },
@@ -936,7 +950,7 @@ function buildOnduleurSchema({ normalMono = false, secoursMono = false, utilisat
         C("courant_normal", "Courant", tensionCourantItem(normalMono, "A", "Courant")),
         ...(normalMono ? [] : [C("courant_neutre_normal", "Courant dans le neutre", [F("in", "IN", "A")])]),
         C("thdi_normal", "Taux de distorsion courant", normalMono ? champsMono("%", "ThdI") : champsTriphase("%", "ThdI", 1, "moyenne")),
-        C("puissance_fp_normal", "Puissance et facteur de puissance", puissanceFpItem(normalMono)),
+        C("puissance_fp_normal", "FP", fpSeulItem(normalMono)),
       ]},
       { key: "mesures_reseau_secours", title: "Mesures — Réseau secours", items: [
         C("tension_simple_secours", "Tension simple", tensionCourantItem(secoursMono, "V", "Tension")),
@@ -944,9 +958,6 @@ function buildOnduleurSchema({ normalMono = false, secoursMono = false, utilisat
         C("thdv_secours", "Taux de distorsion tension", secoursMono ? champsMono("%", "THdV") : champsTriphase("%", "THdV", 1, "max")),
         C("frequence_secours", "Fréquence", [F("hz", "Valeur", "Hz")]),
         C("regime_neutre_secours", "Régime de neutre", [F("valeur", "Valeur", null, LISTE_REGIME_NEUTRE)]),
-        C("courant_secours", "Courant", tensionCourantItem(secoursMono, "A", "Courant")),
-        ...(secoursMono ? [] : [C("courant_neutre_secours", "Courant dans le neutre", [F("in", "IN", "A")])]),
-        C("thdi_secours", "Taux de distorsion courant", secoursMono ? champsMono("%", "ThdI") : champsTriphase("%", "ThdI", 1, "moyenne")),
         C("tension_terre_neutre_secours", "Tension terre / neutre", [F("v", "Valeur", "V")]),
       ]},
       { key: "mesures_utilisation", title: "Mesures — Utilisation (sortie)", items: [
@@ -955,7 +966,8 @@ function buildOnduleurSchema({ normalMono = false, secoursMono = false, utilisat
         C("thdv_utilisation", "Taux de distorsion tension", utilisationMono ? champsMono("%", "THdV") : champsTriphase("%", "THdV", 1, "max")),
         C("courant_utilisation", "Courant", tensionCourantItem(utilisationMono, "A", "Courant")),
         ...(utilisationMono ? [] : [C("courant_neutre_utilisation", "Courant dans le neutre", [F("in", "IN", "A")])]),
-        C("puissance_fp_utilisation", "Puissance et facteur de puissance", puissanceFpItem(utilisationMono)),
+        C("thdi_utilisation", "Taux de distorsion courant", utilisationMono ? champsMono("%", "ThdI") : champsTriphase("%", "ThdI", 1, "moyenne")),
+        C("puissance_fp_utilisation", "Cos φ fondamental (FP calculé)", cosPhiFondamentalItem(utilisationMono)),
         C("dv_sortie_secours", "ΔV sortie / secours", utilisationMono ? champsMono("V", "ΔV") : champsTriphase("V", "ΔV", 1, "moyenne")),
         C("regime_neutre_utilisation", "Régime de neutre", [F("valeur", "Valeur", null, LISTE_REGIME_NEUTRE)]),
         C("tension_terre_neutre_utilisation", "Tension terre / neutre", [F("v", "Valeur", "V")]),
@@ -1993,7 +2005,7 @@ function prefillInterventionFromSite(site, eqOrList, numeroRI) {
       id: uid(),
       type: eq.type || "",
       constructeur: idf.marque || (site.locaux || []).find((l) => l.id === eq.localId)?.marque || "",
-      modele: idf.typeCellule || idf.typeTransformateur || idf.typeDisjoncteur || "",
+      modele: idf.modele || idf.typeCellule || idf.typeTransformateur || idf.typeDisjoncteur || "",
       numeroSerie: idf.numeroSerie || idf.numeroSerieDisjoncteur || idf.numeroSerieContacteur || idf.numeroSerieRelais || "",
       localisation: (site.locaux || []).find((l) => l.id === eq.localId)?.nom || site.local || "",
       reference: idf.repere || "",
@@ -3989,15 +4001,26 @@ function calcPuissanceApparente(eq, sectionKey, suffix) {
 function calcPuissanceApparenteNormale(eq) { return calcPuissanceApparente(eq, "mesures_reseau_normal", "normal"); }
 // Puissance active calculée : P = S × cos φ, à partir de la puissance apparente ci-dessus et du
 // facteur de puissance saisi (par phase en triphasé, unique en monophasé).
+// FP réel (P/S) dérivé du cos φ fondamental mesuré et du taux de distorsion courant — le
+// déphasage fondamental seul surestime le FP réel dès qu'il y a des harmoniques.
+function calcFPDepuisCosPhiFondamental(cosPhiFond, thdiPercent) {
+  const cos = numOf(cosPhiFond);
+  if (cos === null) return null;
+  const thdi = numOf(thdiPercent) || 0;
+  return cos / Math.sqrt(1 + Math.pow(thdi / 100, 2));
+}
 function calcPuissanceActive(eq, sectionKey, suffix, mono) {
   const s = calcPuissanceApparente(eq, sectionKey, suffix);
   if (s === null) return null;
   const fp = eq.controles[sectionKey]?.[`puissance_fp_${suffix}`]?.fields || {};
+  const thdi = eq.controles[sectionKey]?.[`thdi_${suffix}`]?.fields;
+  const thdiVal = thdi ? (thdi.moyenne !== undefined ? thdi.moyenne : thdi.l1) : null;
+  const fpReel = (cosBrut) => suffix === "utilisation" ? calcFPDepuisCosPhiFondamental(cosBrut, thdiVal) : numOf(cosBrut);
   if (mono) {
-    const cos = numOf(fp.fp1);
+    const cos = fpReel(fp.fp1);
     return cos === null ? null : Math.round(s * cos * 100) / 100;
   }
-  const cosVals = [numOf(fp.fp1), numOf(fp.fp2), numOf(fp.fp3)].filter((v) => v !== null);
+  const cosVals = [fpReel(fp.fp1), fpReel(fp.fp2), fpReel(fp.fp3)].filter((v) => v !== null);
   if (!cosVals.length) return null;
   const cosMoyen = cosVals.reduce((a, b) => a + b, 0) / cosVals.length;
   return Math.round(s * cosMoyen * 100) / 100;
@@ -4325,10 +4348,15 @@ function PuissanceApparenteCalculee({ eq, sectionKey, suffix, mono }) {
   const s = calcPuissanceApparente(eq, sectionKey, suffix);
   const p = calcPuissanceActive(eq, sectionKey, suffix, mono);
   if (s === null) return null;
+  let fpAffiche = null;
+  if (suffix === "utilisation" && p !== null) {
+    fpAffiche = Math.round((p / s) * 1000) / 1000;
+  }
   return (
     <Card style={{ marginBottom: 14 }}>
       <div style={{ fontSize: 12.5, color: "#5B6B7D", display: "flex", flexDirection: "column", gap: 4 }}>
         <div>Puissance apparente calculée (S = U × I{mono ? "" : " × √3"}) : <b style={{ color: "#1A1F26" }}>{s} kVA</b></div>
+        {fpAffiche !== null && <div>FP calculé (à partir du cos φ fondamental et du taux de distorsion courant) : <b style={{ color: "#1A1F26" }}>{fpAffiche}</b></div>}
         {p !== null && <div>Puissance active calculée (P = S × FP) : <b style={{ color: "#1A1F26" }}>{p} kW</b></div>}
       </div>
     </Card>
@@ -8112,7 +8140,11 @@ function docxEquipementElements(eq, locaux, allSites) {
       const pUtil = calcPuissanceActive(eq, sec.key, "utilisation", monoUtil);
       if (sUtil !== null) {
         elements.push(new DOCX.Paragraph({ spacing: { before: 40, after: 20 }, children: [new DOCX.TextRun({ text: `Puissance apparente calculée (S = U × I${monoUtil ? "" : " × √3"}) : ${sUtil} kVA`, bold: true, size: 17, color: DOCX_DARK })] }));
-        if (pUtil !== null) elements.push(new DOCX.Paragraph({ spacing: { before: 0, after: 20 }, children: [new DOCX.TextRun({ text: `Puissance active calculée (P = S × FP) : ${pUtil} kW`, bold: true, size: 17, color: DOCX_DARK })] }));
+        if (pUtil !== null) {
+          const fpUtilAffiche = Math.round((pUtil / sUtil) * 1000) / 1000;
+          elements.push(new DOCX.Paragraph({ spacing: { before: 0, after: 20 }, children: [new DOCX.TextRun({ text: `FP calculé (cos φ fondamental et taux de distorsion courant) : ${fpUtilAffiche}`, bold: true, size: 17, color: DOCX_DARK })] }));
+          elements.push(new DOCX.Paragraph({ spacing: { before: 0, after: 20 }, children: [new DOCX.TextRun({ text: `Puissance active calculée (P = S × FP) : ${pUtil} kW`, bold: true, size: 17, color: DOCX_DARK })] }));
+        }
       }
       const tc = calcTauxCharge(eq);
       if (tc) {
