@@ -2117,19 +2117,22 @@ function fetchClientsData() {
 // Panneau de gestion des clients — permet d'enregistrer un client (nom + e-mail) à l'avance, sans
 // passer par la création d'un site complet, de modifier un client existant (ex. e-mail périmé),
 // et d'exporter/importer la liste en Excel pour des modifications en masse.
-function GererClientsModal({ registry, setRegistry, allSites, onClose }) {
+// Modal unifié : gère à la fois les organisations (clients) et les personnes (contacts), avec un
+// seul export Excel complet couvrant tout — sites, clients, contacts — sur des feuilles séparées.
+function GererClientsEtContactsModal({ clientsRegistry, setClientsRegistry, contactsRegistry, setContactsRegistry, allSites, onClose }) {
+  const [onglet, setOnglet] = useState("organisations"); // "organisations" | "contacts"
   const [nom, setNom] = useState("");
   const [email, setEmail] = useState("");
+  const [formContact, setFormContact] = useState({ prenom: "", nom: "", organisation: "", adresse: "", email: "", fixe: "", portable: "" });
+  const setFC = (k, v) => setFormContact((f) => ({ ...f, [k]: v }));
   const fileInputRef = useRef(null);
   const [importMsg, setImportMsg] = useState("");
   const [externeData, setExterneData] = useState(null);
   useEffect(() => { fetchClientsData().then(setExterneData); }, []);
   const dejaSurSite = useMemo(() => new Set((allSites || []).map((s) => (s.client || "").trim().toLowerCase()).filter(Boolean)), [allSites]);
-  // Liste fusionnée pour l'export : le registre (nom + e-mail saisis), les clients détectés sur les
-  // sites existants mais jamais explicitement enregistrés ici, ET la base externe (organisations +
-  // contacts) — l'export doit couvrir tous les clients connus, pas seulement ceux ajoutés à la main.
+
   const clientsPourExport = useMemo(() => {
-    const vus = new Set(registry.map((c) => c.nom.trim().toLowerCase()));
+    const vus = new Set(clientsRegistry.map((c) => c.nom.trim().toLowerCase()));
     const depuisSites = [];
     (allSites || []).forEach((s) => {
       if (!s.client) return;
@@ -2147,30 +2150,65 @@ function GererClientsModal({ registry, setRegistry, allSites, onClose }) {
       const premierEmail = (o.contacts || []).find((c) => c.email)?.email || "";
       depuisExterne.push({ id: "externe_" + key, nom: o.organisation, email: premierEmail, adresse: o.adresse || "" });
     });
-    return [...registry, ...depuisSites, ...depuisExterne];
-  }, [registry, allSites, externeData]);
-  const ajouter = () => {
+    return [...clientsRegistry, ...depuisSites, ...depuisExterne];
+  }, [clientsRegistry, allSites, externeData]);
+
+  const ajouterClient = () => {
     if (!nom.trim()) return;
     const key = nom.trim().toLowerCase();
-    if (registry.some((c) => c.nom.trim().toLowerCase() === key)) return; // déjà présent
-    setRegistry([...registry, { id: uid(), nom: nom.trim(), email: email.trim() }]);
+    if (clientsRegistry.some((c) => c.nom.trim().toLowerCase() === key)) return;
+    setClientsRegistry([...clientsRegistry, { id: uid(), nom: nom.trim(), email: email.trim() }]);
     setNom(""); setEmail("");
   };
-  const supprimer = (id) => setRegistry(registry.filter((c) => c.id !== id));
-  const modifier = (id, patch) => setRegistry(registry.map((c) => (c.id === id ? { ...c, ...patch } : c)));
+  const supprimerClient = (id) => setClientsRegistry(clientsRegistry.filter((c) => c.id !== id));
+  const modifierClient = (id, patch) => setClientsRegistry(clientsRegistry.map((c) => (c.id === id ? { ...c, ...patch } : c)));
 
-  const exporterExcel = async () => {
+  const ajouterContact = () => {
+    if (!formContact.nom.trim() && !formContact.prenom.trim()) return;
+    setContactsRegistry([...contactsRegistry, { id: uid(), ...formContact }]);
+    setFormContact({ prenom: "", nom: "", organisation: "", adresse: "", email: "", fixe: "", portable: "" });
+  };
+  const supprimerContact = (id) => setContactsRegistry(contactsRegistry.filter((c) => c.id !== id));
+  const modifierContact = (id, patch) => setContactsRegistry(contactsRegistry.map((c) => (c.id === id ? { ...c, ...patch } : c)));
+
+  // Export unique et complet : trois feuilles (Sites, Clients, Contacts) dans un seul fichier —
+  // couvre nom du site/client, adresse, e-mail et téléphones, sans avoir à jongler entre plusieurs
+  // exports séparés.
+  const exporterTout = async () => {
     try {
       const mod = await import("xlsx");
-      const XLSX = mod.utils ? mod : mod.default; // interop CJS/ESM : selon le bundler, les exports peuvent se retrouver sous .default
-      const rows = clientsPourExport.map((c) => ({ ID: c.id, Nom: c.nom, "E-mail": c.email || "", Adresse: c.adresse || "" }));
-      const ws = XLSX.utils.json_to_sheet(rows);
-      ws["!cols"] = [{ wch: 22 }, { wch: 32 }, { wch: 32 }, { wch: 40 }];
+      const XLSX = mod.utils ? mod : mod.default;
       const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, "Clients");
-      XLSX.writeFile(wb, `Clients_HT-Maintenance_${todayISO()}.xlsx`);
+
+      const rowsSites = (allSites || []).map((s) => ({
+        "Nom du site": s.nom || "", Client: s.client || "", Adresse: s.adresse || "",
+        "Contact client": [s.contactClient?.prenom, s.contactClient?.nom].filter(Boolean).join(" "),
+        "E-mail contact client": s.contactClient?.email || "",
+        "Tél. fixe contact client": s.contactClient?.fixe || "", "Tél. portable contact client": s.contactClient?.portable || "",
+        "Contact site": [s.contactSite?.prenom, s.contactSite?.nom].filter(Boolean).join(" "),
+        "E-mail contact site": s.contactSite?.email || "",
+        "Tél. fixe contact site": s.contactSite?.fixe || "", "Tél. portable contact site": s.contactSite?.portable || "",
+      }));
+      const wsSites = XLSX.utils.json_to_sheet(rowsSites);
+      wsSites["!cols"] = Array(9).fill({ wch: 24 });
+      XLSX.utils.book_append_sheet(wb, wsSites, "Sites");
+
+      const rowsClients = clientsPourExport.map((c) => ({ ID: c.id, Nom: c.nom, "E-mail": c.email || "", Adresse: c.adresse || "" }));
+      const wsClients = XLSX.utils.json_to_sheet(rowsClients);
+      wsClients["!cols"] = [{ wch: 22 }, { wch: 32 }, { wch: 32 }, { wch: 40 }];
+      XLSX.utils.book_append_sheet(wb, wsClients, "Clients");
+
+      const rowsContacts = contactsRegistry.map((c) => ({
+        Prénom: c.prenom || "", Nom: c.nom || "", Organisation: c.organisation || "", Adresse: c.adresse || "",
+        "E-mail": c.email || "", "Téléphone fixe": c.fixe || "", "Téléphone portable": c.portable || "",
+      }));
+      const wsContacts = XLSX.utils.json_to_sheet(rowsContacts);
+      wsContacts["!cols"] = Array(7).fill({ wch: 24 });
+      XLSX.utils.book_append_sheet(wb, wsContacts, "Contacts");
+
+      XLSX.writeFile(wb, `HT-Maintenance_Sites-Clients-Contacts_${todayISO()}.xlsx`);
     } catch (e) {
-      console.error("[Export Excel clients] Erreur :", e);
+      console.error("[Export Excel complet] Erreur :", e);
       setImportMsg("Échec de l'export — " + (e?.message || "erreur inconnue"));
     }
   };
@@ -2181,10 +2219,10 @@ function GererClientsModal({ registry, setRegistry, allSites, onClose }) {
       const XLSX = mod.utils ? mod : mod.default;
       const buf = await file.arrayBuffer();
       const wb = XLSX.read(buf, { type: "array" });
-      const ws = wb.Sheets[wb.SheetNames[0]];
-      const rows = XLSX.utils.sheet_to_json(ws);
+      const wsClients = wb.Sheets["Clients"] || wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(wsClients);
       let maj = 0, crees = 0;
-      const next = [...registry];
+      const next = [...clientsRegistry];
       rows.forEach((r) => {
         const rid = r.ID || r.id;
         const rnom = (r.Nom || r.nom || "").toString().trim();
@@ -2196,108 +2234,106 @@ function GererClientsModal({ registry, setRegistry, allSites, onClose }) {
         if (idx !== -1) { next[idx] = { ...next[idx], nom: rnom, email: remail }; maj++; }
         else { next.push({ id: uid(), nom: rnom, email: remail }); crees++; }
       });
-      setRegistry(next);
-      setImportMsg(`Import terminé — ${maj} client(s) mis à jour, ${crees} créé(s).`);
+      setClientsRegistry(next);
+      setImportMsg(`Import terminé (feuille Clients) — ${maj} mis à jour, ${crees} créé(s).`);
     } catch (e) {
-      console.error("[Import Excel clients] Erreur :", e);
+      console.error("[Import Excel] Erreur :", e);
       setImportMsg("Échec de l'import — " + (e?.message || "vérifiez que le fichier est bien un .xlsx valide."));
     }
   };
 
+  const ongletBtn = (key, label) => (
+    <button
+      onClick={() => setOnglet(key)}
+      style={{
+        padding: "7px 14px", borderRadius: 8, border: onglet === key ? `1px solid ${BRAND.blue}55` : "1px solid #D8DEE5",
+        background: onglet === key ? "rgba(10,93,168,0.1)" : "transparent", color: onglet === key ? BRAND.blue : "#5B6B7D",
+        fontSize: 12.5, fontWeight: 600, cursor: "pointer",
+      }}
+    >
+      {label}
+    </button>
+  );
+
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(4,9,16,0.72)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200, padding: 16 }} onClick={(e) => e.target === e.currentTarget && onClose()}>
-      <Card style={{ width: "100%", maxWidth: 620, maxHeight: "85vh", overflowY: "auto" }}>
+      <Card style={{ width: "100%", maxWidth: 760, maxHeight: "85vh", overflowY: "auto" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-          <div style={{ fontSize: 15, fontWeight: 700, color: "#1A1F26" }}>Gérer les clients</div>
+          <div style={{ fontSize: 15, fontWeight: 700, color: "#1A1F26" }}>Gérer les clients et contacts</div>
           <button onClick={onClose} style={btnGhost()}><X size={14} /></button>
         </div>
-        <div style={{ fontSize: 11.5, color: "#8B96A3", marginBottom: 14 }}>
-          Enregistrez un client à l'avance, modifiez-en un existant (ex. e-mail périmé), ou exportez la liste en Excel pour des modifications en masse — réimportez ensuite le fichier modifié.
-        </div>
-        <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
-          <button onClick={exporterExcel} style={btnGhost(BRAND.blue)} disabled={clientsPourExport.length === 0} title={clientsPourExport.length === 0 ? "Aucun client connu pour l'instant (ni enregistré, ni sur un site)" : ""}><Download size={14} /> Exporter en Excel</button>
-          <button onClick={() => fileInputRef.current?.click()} style={btnGhost(BRAND.blue)}><Upload size={14} /> Importer depuis Excel</button>
+
+        <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+          <button onClick={exporterTout} style={btnGhost(BRAND.blue)} title="Un seul fichier avec 3 feuilles : Sites, Clients, Contacts">
+            <Download size={14} /> Exporter tout en Excel (sites + clients + contacts)
+          </button>
+          <button onClick={() => fileInputRef.current?.click()} style={btnGhost(BRAND.blue)}><Upload size={14} /> Importer (feuille Clients)</button>
           <input ref={fileInputRef} type="file" accept=".xlsx,.xls" style={{ display: "none" }} onChange={(e) => { if (e.target.files?.[0]) importerExcel(e.target.files[0]); e.target.value = ""; }} />
         </div>
         {importMsg && <div style={{ fontSize: 11.5, color: importMsg.startsWith("Échec") ? "#C0392B" : "#0F8A5F", marginBottom: 12 }}>{importMsg}</div>}
 
-        <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
-          <TextInput value={nom} onChange={(e) => setNom(e.target.value)} placeholder="Nom du client" style={{ flex: "1 1 180px" }} />
-          <TextInput value={email} onChange={(e) => setEmail(e.target.value)} placeholder="E-mail (optionnel)" type="email" style={{ flex: "1 1 180px" }} />
-          <button onClick={ajouter} style={btnGhost(BRAND.blue)} disabled={!nom.trim()}><Plus size={14} /> Ajouter</button>
+        <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+          {ongletBtn("organisations", "Organisations (clients)")}
+          {ongletBtn("contacts", "Contacts (personnes)")}
         </div>
-        <div style={{ fontSize: 11.5, fontWeight: 700, color: "#5B6B7D", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.4 }}>
-          Clients enregistrés ({registry.length})
-        </div>
-        {registry.length === 0 ? (
-          <div style={{ fontSize: 12, color: "#8B96A3" }}>Aucun client enregistré à l'avance pour l'instant.</div>
-        ) : (
-          registry.map((c) => (
-            <div key={c.id} style={{ display: "flex", gap: 8, alignItems: "center", padding: "8px 0", borderBottom: "1px solid #E2E6EB", flexWrap: "wrap" }}>
-              <TextInput value={c.nom} onChange={(e) => modifier(c.id, { nom: e.target.value })} style={{ flex: "1 1 160px", fontSize: 12.5 }} />
-              <TextInput value={c.email || ""} onChange={(e) => modifier(c.id, { email: e.target.value })} placeholder="sans e-mail" type="email" style={{ flex: "1 1 160px", fontSize: 12.5 }} />
-              {dejaSurSite.has(c.nom.trim().toLowerCase()) && <span style={{ fontSize: 10, color: "#0F8A5F", whiteSpace: "nowrap" }}>a déjà un site</span>}
-              <button onClick={() => supprimer(c.id)} style={{ background: "none", border: "none", color: "#C0392B", cursor: "pointer", padding: 4 }} title="Retirer"><Trash2 size={14} /></button>
+
+        {onglet === "organisations" ? (
+          <>
+            <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
+              <TextInput value={nom} onChange={(e) => setNom(e.target.value)} placeholder="Nom du client" style={{ flex: "1 1 180px" }} />
+              <TextInput value={email} onChange={(e) => setEmail(e.target.value)} placeholder="E-mail (optionnel)" type="email" style={{ flex: "1 1 180px" }} />
+              <button onClick={ajouterClient} style={btnGhost(BRAND.blue)} disabled={!nom.trim()}><Plus size={14} /> Ajouter</button>
             </div>
-          ))
-        )}
-      </Card>
-    </div>
-  );
-}
-// Registre des contacts (personnes) — fiche complète : prénom, nom, organisation (lien vers le
-// client), adresse, e-mail, téléphone fixe et portable. Distinct du registre clients (qui ne gère
-// que des organisations), et synchronisé de la même façon entre techniciens.
-function GererContactsModal({ registry, setRegistry, onClose }) {
-  const [form, setForm] = useState({ prenom: "", nom: "", organisation: "", adresse: "", email: "", fixe: "", portable: "" });
-  const setF = (k, v) => setForm((f) => ({ ...f, [k]: v }));
-  const ajouter = () => {
-    if (!form.nom.trim() && !form.prenom.trim()) return;
-    setRegistry([...registry, { id: uid(), ...form }]);
-    setForm({ prenom: "", nom: "", organisation: "", adresse: "", email: "", fixe: "", portable: "" });
-  };
-  const supprimer = (id) => setRegistry(registry.filter((c) => c.id !== id));
-  const modifier = (id, patch) => setRegistry(registry.map((c) => (c.id === id ? { ...c, ...patch } : c)));
-
-  return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(4,9,16,0.72)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200, padding: 16 }} onClick={(e) => e.target === e.currentTarget && onClose()}>
-      <Card style={{ width: "100%", maxWidth: 720, maxHeight: "85vh", overflowY: "auto" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-          <div style={{ fontSize: 15, fontWeight: 700, color: "#1A1F26" }}>Gérer les contacts</div>
-          <button onClick={onClose} style={btnGhost()}><X size={14} /></button>
-        </div>
-        <div style={{ fontSize: 11.5, color: "#8B96A3", marginBottom: 14 }}>
-          Fiches contact (personnes) réutilisables comme « Contact site » — indépendantes des organisations enregistrées dans « Gérer les clients », mais reliées par le champ Organisation.
-        </div>
-
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 8, marginBottom: 12 }}>
-          <TextInput value={form.prenom} onChange={(e) => setF("prenom", e.target.value)} placeholder="Prénom" />
-          <TextInput value={form.nom} onChange={(e) => setF("nom", e.target.value)} placeholder="Nom" />
-          <TextInput value={form.organisation} onChange={(e) => setF("organisation", e.target.value)} placeholder="Organisation" />
-          <TextInput value={form.adresse} onChange={(e) => setF("adresse", e.target.value)} placeholder="Adresse" />
-          <TextInput value={form.email} onChange={(e) => setF("email", e.target.value)} placeholder="E-mail" type="email" />
-          <TextInput value={form.fixe} onChange={(e) => setF("fixe", e.target.value)} placeholder="Téléphone fixe" />
-          <TextInput value={form.portable} onChange={(e) => setF("portable", e.target.value)} placeholder="Téléphone portable" />
-          <button onClick={ajouter} style={btnGhost(BRAND.blue)} disabled={!form.nom.trim() && !form.prenom.trim()}><Plus size={14} /> Ajouter</button>
-        </div>
-
-        <div style={{ fontSize: 11.5, fontWeight: 700, color: "#5B6B7D", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.4 }}>
-          Contacts enregistrés ({registry.length})
-        </div>
-        {registry.length === 0 ? (
-          <div style={{ fontSize: 12, color: "#8B96A3" }}>Aucun contact enregistré pour l'instant.</div>
-        ) : (
-          registry.map((c) => (
-            <div key={c.id} style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 6, alignItems: "center", padding: "8px 0", borderBottom: "1px solid #E2E6EB" }}>
-              <TextInput value={c.prenom || ""} onChange={(e) => modifier(c.id, { prenom: e.target.value })} placeholder="Prénom" style={{ fontSize: 12 }} />
-              <TextInput value={c.nom || ""} onChange={(e) => modifier(c.id, { nom: e.target.value })} placeholder="Nom" style={{ fontSize: 12 }} />
-              <TextInput value={c.organisation || ""} onChange={(e) => modifier(c.id, { organisation: e.target.value })} placeholder="Organisation" style={{ fontSize: 12 }} />
-              <TextInput value={c.email || ""} onChange={(e) => modifier(c.id, { email: e.target.value })} placeholder="E-mail" type="email" style={{ fontSize: 12 }} />
-              <TextInput value={c.fixe || ""} onChange={(e) => modifier(c.id, { fixe: e.target.value })} placeholder="Fixe" style={{ fontSize: 12 }} />
-              <TextInput value={c.portable || ""} onChange={(e) => modifier(c.id, { portable: e.target.value })} placeholder="Portable" style={{ fontSize: 12 }} />
-              <button onClick={() => supprimer(c.id)} style={{ background: "none", border: "none", color: "#C0392B", cursor: "pointer", padding: 4, justifySelf: "start" }} title="Retirer"><Trash2 size={14} /></button>
+            <div style={{ fontSize: 11.5, fontWeight: 700, color: "#5B6B7D", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.4 }}>
+              Clients enregistrés ({clientsRegistry.length})
             </div>
-          ))
+            {clientsRegistry.length === 0 ? (
+              <div style={{ fontSize: 12, color: "#8B96A3" }}>Aucun client enregistré à l'avance pour l'instant.</div>
+            ) : (
+              clientsRegistry.map((c) => (
+                <div key={c.id} style={{ display: "flex", gap: 8, alignItems: "center", padding: "8px 0", borderBottom: "1px solid #E2E6EB", flexWrap: "wrap" }}>
+                  <TextInput value={c.nom} onChange={(e) => modifierClient(c.id, { nom: e.target.value })} style={{ flex: "1 1 160px", fontSize: 12.5 }} />
+                  <TextInput value={c.email || ""} onChange={(e) => modifierClient(c.id, { email: e.target.value })} placeholder="sans e-mail" type="email" style={{ flex: "1 1 160px", fontSize: 12.5 }} />
+                  {dejaSurSite.has(c.nom.trim().toLowerCase()) && <span style={{ fontSize: 10, color: "#0F8A5F", whiteSpace: "nowrap" }}>a déjà un site</span>}
+                  <button onClick={() => supprimerClient(c.id)} style={{ background: "none", border: "none", color: "#C0392B", cursor: "pointer", padding: 4 }} title="Retirer"><Trash2 size={14} /></button>
+                </div>
+              ))
+            )}
+          </>
+        ) : (
+          <>
+            <div style={{ fontSize: 11.5, color: "#8B96A3", marginBottom: 14 }}>
+              Fiches contact (personnes) réutilisables comme « Contact client » ou « Contact site » — reliées aux organisations par le champ Organisation.
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 8, marginBottom: 12 }}>
+              <TextInput value={formContact.prenom} onChange={(e) => setFC("prenom", e.target.value)} placeholder="Prénom" />
+              <TextInput value={formContact.nom} onChange={(e) => setFC("nom", e.target.value)} placeholder="Nom" />
+              <TextInput value={formContact.organisation} onChange={(e) => setFC("organisation", e.target.value)} placeholder="Organisation" />
+              <TextInput value={formContact.adresse} onChange={(e) => setFC("adresse", e.target.value)} placeholder="Adresse" />
+              <TextInput value={formContact.email} onChange={(e) => setFC("email", e.target.value)} placeholder="E-mail" type="email" />
+              <TextInput value={formContact.fixe} onChange={(e) => setFC("fixe", e.target.value)} placeholder="Téléphone fixe" />
+              <TextInput value={formContact.portable} onChange={(e) => setFC("portable", e.target.value)} placeholder="Téléphone portable" />
+              <button onClick={ajouterContact} style={btnGhost(BRAND.blue)} disabled={!formContact.nom.trim() && !formContact.prenom.trim()}><Plus size={14} /> Ajouter</button>
+            </div>
+            <div style={{ fontSize: 11.5, fontWeight: 700, color: "#5B6B7D", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.4 }}>
+              Contacts enregistrés ({contactsRegistry.length})
+            </div>
+            {contactsRegistry.length === 0 ? (
+              <div style={{ fontSize: 12, color: "#8B96A3" }}>Aucun contact enregistré pour l'instant.</div>
+            ) : (
+              contactsRegistry.map((c) => (
+                <div key={c.id} style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 6, alignItems: "center", padding: "8px 0", borderBottom: "1px solid #E2E6EB" }}>
+                  <TextInput value={c.prenom || ""} onChange={(e) => modifierContact(c.id, { prenom: e.target.value })} placeholder="Prénom" style={{ fontSize: 12 }} />
+                  <TextInput value={c.nom || ""} onChange={(e) => modifierContact(c.id, { nom: e.target.value })} placeholder="Nom" style={{ fontSize: 12 }} />
+                  <TextInput value={c.organisation || ""} onChange={(e) => modifierContact(c.id, { organisation: e.target.value })} placeholder="Organisation" style={{ fontSize: 12 }} />
+                  <TextInput value={c.email || ""} onChange={(e) => modifierContact(c.id, { email: e.target.value })} placeholder="E-mail" type="email" style={{ fontSize: 12 }} />
+                  <TextInput value={c.fixe || ""} onChange={(e) => modifierContact(c.id, { fixe: e.target.value })} placeholder="Fixe" style={{ fontSize: 12 }} />
+                  <TextInput value={c.portable || ""} onChange={(e) => modifierContact(c.id, { portable: e.target.value })} placeholder="Portable" style={{ fontSize: 12 }} />
+                  <button onClick={() => supprimerContact(c.id)} style={{ background: "none", border: "none", color: "#C0392B", cursor: "pointer", padding: 4, justifySelf: "start" }} title="Retirer"><Trash2 size={14} /></button>
+                </div>
+              ))
+            )}
+          </>
         )}
       </Card>
     </div>
@@ -9109,7 +9145,6 @@ export default function App({ currentUser, onLogout }) {
   const contactsSaveTimer = useRef(null);
   const lastSyncedContacts = useRef(null);
   const contactsWriteInFlight = useRef(false);
-  const [gererContactsOpen, setGererContactsOpen] = useState(false);
 
   // Bibliothèque des caractéristiques (marque, modèle, type...) déjà saisies par équipement — toute
   // valeur tapée dans un champ à suggestions rejoint automatiquement les propositions futures pour
@@ -9724,11 +9759,8 @@ export default function App({ currentUser, onLogout }) {
               )}
               {!selected && !selectedIv && view === "sites" && (
                 <div style={{ position: "relative", display: "flex", gap: 8 }}>
-                  <button onClick={() => setGererClientsOpen(true)} style={btnGhost(BRAND.blue)} title="Enregistrer un client (nom + e-mail) à l'avance, sans créer de site">
-                    <Building2 size={14} /> <span className="hide-mobile">Gérer les clients</span>
-                  </button>
-                  <button onClick={() => setGererContactsOpen(true)} style={btnGhost(BRAND.blue)} title="Gérer les fiches contact (personnes) réutilisables comme contact site">
-                    <Users size={14} /> <span className="hide-mobile">Gérer les contacts</span>
+                  <button onClick={() => setGererClientsOpen(true)} style={btnGhost(BRAND.blue)} title="Gérer les clients (organisations) et les contacts (personnes), avec export complet">
+                    <Users size={14} /> <span className="hide-mobile">Gérer les clients et contacts</span>
                   </button>
                   <button onClick={() => setReprendreSiteOpen((o) => !o)} disabled={sites.length === 0}
                     style={{ ...btnGhost(BRAND.blue), opacity: sites.length === 0 ? 0.4 : 1, cursor: sites.length === 0 ? "not-allowed" : "pointer" }}
@@ -9815,10 +9847,11 @@ export default function App({ currentUser, onLogout }) {
       </div>
 
       {gererClientsOpen && (
-        <GererClientsModal registry={clientsRegistry} setRegistry={setClientsRegistry} allSites={sites} onClose={() => setGererClientsOpen(false)} />
-      )}
-      {gererContactsOpen && (
-        <GererContactsModal registry={contactsRegistry} setRegistry={setContactsRegistry} onClose={() => setGererContactsOpen(false)} />
+        <GererClientsEtContactsModal
+          clientsRegistry={clientsRegistry} setClientsRegistry={setClientsRegistry}
+          contactsRegistry={contactsRegistry} setContactsRegistry={setContactsRegistry}
+          allSites={sites} onClose={() => setGererClientsOpen(false)}
+        />
       )}
 
       {exportConfirm && (
