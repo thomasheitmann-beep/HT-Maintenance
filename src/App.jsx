@@ -855,12 +855,38 @@ function fpSeulItem(mono) {
   if (mono) return [F("fp1", "FP", null)];
   return [F("fp1", "FP L1", null), F("fp2", "FP L2", null), F("fp3", "FP L3", null)];
 }
-// Cos φ fondamental — grandeur réellement mesurée à l'écran (déphasage tension/courant sur le
-// fondamental, hors harmoniques) ; le FP réel (P/S) en est dérivé via le taux de distorsion
-// courant déjà relevé dans la même section.
+// Relevé complet de puissance en utilisation : P et S sont relevés directement à l'écran de
+// l'onduleur (saisie manuelle), Q est calculé (Q = √(S²-P²)), et le cos φ fondamental + sa nature
+// (inductif/capacitif/résistif) sont relevés séparément — c'est le déphasage sur le fondamental,
+// une grandeur différente de P/S/Q qui elles tiennent compte des harmoniques.
+function qCalculeField(idx, mono) {
+  return {
+    key: `q${idx}`, label: mono ? "Q calculé" : `Q calculé L${idx}`, unit: "kVAR",
+    compute: (f) => {
+      const p = numOf(f[`p${idx}`]), s = numOf(f[`s${idx}`]);
+      if (p === null || s === null) return "";
+      const q2 = s * s - p * p;
+      return Math.round((q2 < 0 ? 0 : Math.sqrt(q2)) * 100) / 100;
+    },
+  };
+}
 function cosPhiFondamentalItem(mono) {
-  if (mono) return [F("fp1", "Cos φ fondamental", null)];
-  return [F("fp1", "Cos φ fondamental L1", null), F("fp2", "Cos φ fondamental L2", null), F("fp3", "Cos φ fondamental L3", null)];
+  if (mono) {
+    return [
+      F("p1", "P relevé", "kW"), F("s1", "S relevé", "kVA"), qCalculeField(1, true),
+      F("fp1", "Cos φ fondamental", null),
+      F("nature1", "Nature", null, ["Inductif", "Capacitif", "Résistif"]),
+    ];
+  }
+  return [
+    F("p1", "P relevé L1", "kW"), F("p2", "P relevé L2", "kW"), F("p3", "P relevé L3", "kW"),
+    F("s1", "S relevé L1", "kVA"), F("s2", "S relevé L2", "kVA"), F("s3", "S relevé L3", "kVA"),
+    qCalculeField(1, false), qCalculeField(2, false), qCalculeField(3, false),
+    F("fp1", "Cos φ fondamental L1", null), F("fp2", "Cos φ fondamental L2", null), F("fp3", "Cos φ fondamental L3", null),
+    F("nature1", "Nature L1", null, ["Inductif", "Capacitif", "Résistif"]),
+    F("nature2", "Nature L2", null, ["Inductif", "Capacitif", "Résistif"]),
+    F("nature3", "Nature L3", null, ["Inductif", "Capacitif", "Résistif"]),
+  ];
 }
 function puissanceFpItem(mono) {
   if (mono) {
@@ -967,7 +993,7 @@ function buildOnduleurSchema({ normalMono = false, secoursMono = false, utilisat
         C("courant_utilisation", "Courant", tensionCourantItem(utilisationMono, "A", "Courant")),
         ...(utilisationMono ? [] : [C("courant_neutre_utilisation", "Courant dans le neutre", [F("in", "IN", "A")])]),
         C("thdi_utilisation", "Taux de distorsion courant", utilisationMono ? champsMono("%", "ThdI") : champsTriphase("%", "ThdI", 1, "moyenne")),
-        C("puissance_fp_utilisation", "Cos φ fondamental (FP calculé)", cosPhiFondamentalItem(utilisationMono)),
+        C("puissance_fp_utilisation", "Puissance (P, S relevés — Q calculé) et cos φ fondamental", cosPhiFondamentalItem(utilisationMono)),
         C("dv_sortie_secours", "ΔV sortie / secours", utilisationMono ? champsMono("V", "ΔV") : champsTriphase("V", "ΔV", 1, "moyenne")),
         C("regime_neutre_utilisation", "Régime de neutre", [F("valeur", "Valeur", null, LISTE_REGIME_NEUTRE)]),
         C("tension_terre_neutre_utilisation", "Tension terre / neutre", [F("v", "Valeur", "V")]),
@@ -2733,6 +2759,34 @@ function compressImageToBlob(file, maxDim = 1100, quality = 0.68) {
   });
 }
 
+// Convertit la première page d'un PDF en image (Blob JPEG), pour qu'un document importé en PDF
+// (ex. courbe de décharge exportée depuis Numbers/Excel) s'affiche réellement dans le rapport Word
+// au lieu d'une simple mention textuelle "Pièce jointe (PDF)". Nécessite la dépendance pdfjs-dist
+// (npm install pdfjs-dist) ; le worker est chargé via l'import Vite ?url pour rester en phase avec
+// la version installée, sans dépendre d'un CDN externe.
+async function pdfFirstPageToBlob(file, maxDim = 1400, quality = 0.82) {
+  const pdfjsLib = await import("pdfjs-dist");
+  const workerUrl = (await import("pdfjs-dist/build/pdf.worker.min.mjs?url")).default;
+  pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
+  const buf = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+  const page = await pdf.getPage(1);
+  const baseViewport = page.getViewport({ scale: 1 });
+  const scale = Math.min(3, maxDim / Math.max(baseViewport.width, baseViewport.height));
+  const viewport = page.getViewport({ scale: Math.max(scale, 1) });
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.ceil(viewport.width);
+  canvas.height = Math.ceil(viewport.height);
+  const ctx = canvas.getContext("2d");
+  // Fond blanc explicite : un PDF peut avoir un fond transparent, ce qui donnerait un JPEG noir.
+  ctx.fillStyle = "#FFFFFF";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  await page.render({ canvasContext: ctx, viewport }).promise;
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error("conversion PDF impossible"))), "image/jpeg", quality);
+  });
+}
+
 // Galerie de pièces jointes générique : photo / capture d'écran (compressée) ou document PDF (stocké tel quel).
 function FileGallery({ files, onChange, idPrefix }) {
   const inputRef = useRef(null);
@@ -2750,11 +2804,26 @@ function FileGallery({ files, onChange, idPrefix }) {
     for (const file of picked) {
       try {
         const isPdf = file.type === "application/pdf";
-        let dataUrl;
+        let dataUrl, pdfUrl = null, conversionReussie = false;
         if (isPdf) {
-          // Les PDF restent en base64 : rares et généralement petits comparés aux photos —
-          // pas prioritaire pour la migration Storage.
-          dataUrl = await readFileAsDataUrl(file);
+          // Converti en image (1ère page) pour un affichage réel dans le rapport Word, au lieu
+          // d'une simple mention textuelle. Le PDF d'origine reste accessible séparément.
+          try {
+            const imgBlob = await pdfFirstPageToBlob(file);
+            if (CURRENT_USER_FOR_STORAGE) {
+              const idToken = await CURRENT_USER_FOR_STORAGE.getIdToken();
+              dataUrl = await firebaseStorageUpload(`photos/${uid()}.jpg`, imgBlob, idToken);
+              pdfUrl = await firebaseStorageUpload(`documents/${uid()}.pdf`, file, idToken);
+            } else {
+              dataUrl = await new Promise((resolve) => { const r = new FileReader(); r.onload = (e) => resolve(e.target.result); r.readAsDataURL(imgBlob); });
+            }
+            conversionReussie = true;
+          } catch (convErr) {
+            // Conversion impossible (ex. dépendance pdfjs-dist non installée) — repli sur l'ancien
+            // comportement (mention textuelle) plutôt que de perdre le fichier.
+            console.error("[PDF→image] Conversion impossible, repli sur mention textuelle :", convErr);
+            dataUrl = await readFileAsDataUrl(file);
+          }
         } else if (CURRENT_USER_FOR_STORAGE) {
           const blob = await compressImageToBlob(file);
           const idToken = await CURRENT_USER_FOR_STORAGE.getIdToken();
@@ -2762,7 +2831,7 @@ function FileGallery({ files, onChange, idPrefix }) {
         } else {
           dataUrl = await compressImage(file); // repli si utilisateur non encore disponible
         }
-        added.push({ id: uid(), dataUrl, name: file.name, isPdf, caption: "" });
+        added.push({ id: uid(), dataUrl, pdfUrl, name: file.name, isPdf: isPdf && !conversionReussie, convertiDepuisPdf: conversionReussie, caption: "" });
       } catch (e) {
         // fichier ignoré si illisible
       }
@@ -2846,6 +2915,14 @@ function FileGallery({ files, onChange, idPrefix }) {
                   </a>
                 ) : (
                   <img src={f.dataUrl} alt="" style={{ width: "100%", height: 96, objectFit: "cover", borderRadius: 8, border: "1px solid #D8DEE5", display: "block" }} />
+                )}
+                {f.convertiDepuisPdf && (
+                  <a href={f.pdfUrl || f.dataUrl} target="_blank" rel="noreferrer" title="PDF d'origine — page 1 convertie en image ci-dessus" style={{
+                    position: "absolute", bottom: 4, left: 4, background: "rgba(10,15,25,0.85)", borderRadius: 5, padding: "2px 6px",
+                    fontSize: 9.5, color: "#FFFFFF", textDecoration: "none", display: "flex", alignItems: "center", gap: 3,
+                  }}>
+                    <FileText size={10} /> PDF
+                  </a>
                 )}
                 <button
                   onClick={() => onChange(list.filter((x) => x.id !== f.id))}
@@ -7434,13 +7511,32 @@ function docxTableauMesures(items, controlesSection) {
   items.forEach((item) => {
     const value = controlesSection[item.key] || { fields: {} };
     const f = value.fields || {};
+    const computeField = (k) => { const fd = (item.fields || []).find((x) => x.key === k && x.compute); return fd ? fd.compute(f) : ""; };
+    let matched = false;
     if (f.p1 !== undefined || f.s1 !== undefined) {
-      const cosField = (k) => { const fd = (item.fields || []).find((x) => x.key === k && x.compute); return fd ? fd.compute(f) : ""; };
-      rows.push(["P actif (kW)", f.p1, f.p2, f.p3, moyenneOf(f.p1, f.p2, f.p3)]);
-      rows.push(["S apparent (kVA)", f.s1, f.s2, f.s3, moyenneOf(f.s1, f.s2, f.s3)]);
-      rows.push(["Cos φ (calculé)", cosField("cosphi1"), cosField("cosphi2"), cosField("cosphi3"), moyenneOf(cosField("cosphi1"), cosField("cosphi2"), cosField("cosphi3"))]);
-      return;
+      rows.push(["P relevé (kW)", f.p1, f.p2, f.p3, moyenneOf(f.p1, f.p2, f.p3)]);
+      rows.push(["S relevé (kVA)", f.s1, f.s2, f.s3, moyenneOf(f.s1, f.s2, f.s3)]);
+      if ((item.fields || []).some((x) => x.key === "q1")) {
+        rows.push(["Q calculé (kVAR)", computeField("q1"), computeField("q2"), computeField("q3"), moyenneOf(computeField("q1"), computeField("q2"), computeField("q3"))]);
+      }
+      if (f.cosphi1 !== undefined) {
+        rows.push(["Cos φ (calculé)", computeField("cosphi1"), computeField("cosphi2"), computeField("cosphi3"), moyenneOf(computeField("cosphi1"), computeField("cosphi2"), computeField("cosphi3"))]);
+      }
+      matched = true;
     }
+    // FP seul ou cos φ fondamental : indépendant de P/S, présent seul (réseau normal) ou aux côtés
+    // de P/S (utilisation) — doit dans les deux cas afficher une valeur par phase, pas tout regroupé
+    // dans la colonne moyenne.
+    if (f.fp1 !== undefined) {
+      const estFondamental = (item.fields || []).some((x) => x.key === "fp1" && /fondamental/i.test(x.label || ""));
+      rows.push([estFondamental ? "Cos φ fondamental" : "FP", f.fp1, f.fp2, f.fp3, moyenneOf(f.fp1, f.fp2, f.fp3)]);
+      matched = true;
+    }
+    if (f.nature1 !== undefined) {
+      rows.push(["Nature", f.nature1, f.nature2, f.nature3, ""]);
+      matched = true;
+    }
+    if (matched) return;
     if (f.l1 !== undefined && f.l2 !== undefined && f.l3 !== undefined) {
       let calc = "";
       (item.fields || []).forEach((ff) => {
@@ -8794,14 +8890,20 @@ async function generateAnnexePhotosDocx(site) {
   return DOCX.Packer.toBlob(doc);
 }
 function docxCoverPage(site) {
-  const logoImg = docxImage(LOGO_DARK, 150, 115);
+  // Cadre carré ajusté aux proportions réelles du logo (260×200, soit ratio 1.3) — l'image est
+  // dimensionnée pour remplir le carré sans le déborder ni laisser d'espace vide superflu.
+  const LOGO_RATIO = 260 / 200;
+  const logoBoxSide = 2000; // DXA, ~1.39" — carré
+  const logoW = 130, logoH = Math.round(logoW / LOGO_RATIO);
+  const logoImg = docxImage(LOGO_DARK, logoW, logoH);
   const dateGeneration = new Date().toLocaleDateString("fr-FR");
   const logoWithWhiteBg = logoImg ? new DOCX.Table({
-    width: { size: 3200, type: DOCX.WidthType.DXA }, columnWidths: [3200],
+    width: { size: logoBoxSide, type: DOCX.WidthType.DXA }, columnWidths: [logoBoxSide],
     alignment: DOCX.AlignmentType.CENTER,
-    rows: [new DOCX.TableRow({ children: [new DOCX.TableCell({
-      width: { size: 3200, type: DOCX.WidthType.DXA }, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_WHITE },
-      margins: { top: 200, bottom: 200, left: 200, right: 200 },
+    rows: [new DOCX.TableRow({ height: { value: logoBoxSide, rule: DOCX.HeightRule.EXACT }, children: [new DOCX.TableCell({
+      width: { size: logoBoxSide, type: DOCX.WidthType.DXA }, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_WHITE },
+      verticalAlign: DOCX.VerticalAlign.CENTER,
+      margins: { top: 0, bottom: 0, left: 0, right: 0 },
       children: [new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, children: [logoImg] })],
     })] })],
   }) : null;
@@ -8810,32 +8912,44 @@ function docxCoverPage(site) {
       width: { size: 12240, type: DOCX.WidthType.DXA }, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_AMBER },
       children: [new DOCX.Paragraph({ spacing: { before: 0, after: 0 }, children: [new DOCX.TextRun({ text: " ", size: 4 })] })],
     })] })] }),
-    new DOCX.Paragraph({ spacing: { before: 2200, after: 0 }, children: [] }),
+    new DOCX.Paragraph({ spacing: { before: 1400, after: 0 }, children: [] }),
     ...(logoWithWhiteBg ? [logoWithWhiteBg] : [new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, children: [] })]),
     new DOCX.Paragraph({ spacing: { before: 500, after: 0 }, alignment: DOCX.AlignmentType.CENTER, children: [
       new DOCX.TextRun({ text: "RAPPORT DE MAINTENANCE PRÉVENTIVE HT / BT / CONVERSION D'ÉNERGIE", bold: true, color: "8B96A3", size: 20 }),
     ]}),
-    new DOCX.Paragraph({ spacing: { before: 500, after: 0 }, alignment: DOCX.AlignmentType.CENTER, children: [
-      new DOCX.TextRun({ text: site.nom || "Site", bold: true, color: DOCX_DARK, size: 56 }),
+    // Bloc "Site" — repère explicite, bien distingué du bloc "Client" qui suit.
+    new DOCX.Paragraph({ spacing: { before: 440, after: 0 }, alignment: DOCX.AlignmentType.CENTER, children: [
+      new DOCX.TextRun({ text: "SITE", bold: true, color: DOCX_AMBER, size: 16 }),
     ]}),
-    new DOCX.Paragraph({ spacing: { before: 260, after: 0 }, alignment: DOCX.AlignmentType.CENTER, children: [
-      new DOCX.TextRun({ text: site.client || "", color: "5B6B7D", size: 28 }),
+    new DOCX.Paragraph({ spacing: { before: 60, after: 0 }, alignment: DOCX.AlignmentType.CENTER, children: [
+      new DOCX.TextRun({ text: site.nom || "Site", bold: true, color: DOCX_DARK, size: 52 }),
+    ]}),
+    // Séparateur visuel léger entre site et client, pour éviter toute confusion entre les deux.
+    new DOCX.Paragraph({ spacing: { before: 220, after: 0 }, alignment: DOCX.AlignmentType.CENTER, border: { top: { color: "D8DEE5", space: 4, style: DOCX.BorderStyle.SINGLE, size: 2 } }, children: [] }),
+    // Bloc "Client" — repère explicite, style distinct (couleur/poids) du bloc "Site" ci-dessus.
+    new DOCX.Paragraph({ spacing: { before: 220, after: 0 }, alignment: DOCX.AlignmentType.CENTER, children: [
+      new DOCX.TextRun({ text: "CLIENT", bold: true, color: "8B96A3", size: 15 }),
+    ]}),
+    new DOCX.Paragraph({ spacing: { before: 60, after: 0 }, alignment: DOCX.AlignmentType.CENTER, children: [
+      new DOCX.TextRun({ text: site.client || "", bold: true, color: "3E4A5C", size: 26 }),
     ]}),
     site.adresse ? new DOCX.Paragraph({ spacing: { before: 60, after: 0 }, alignment: DOCX.AlignmentType.CENTER, children: [
-      new DOCX.TextRun({ text: site.adresse, color: "8B96A3", size: 22 }),
+      new DOCX.TextRun({ text: site.adresse, color: "8B96A3", size: 20 }),
     ]}) : new DOCX.Paragraph({}),
     site.local ? new DOCX.Paragraph({ spacing: { before: 60, after: 0 }, alignment: DOCX.AlignmentType.CENTER, children: [
-      new DOCX.TextRun({ text: "Local : " + site.local, color: "8B96A3", size: 22 }),
+      new DOCX.TextRun({ text: "Local : " + site.local, color: "8B96A3", size: 20 }),
     ]}) : new DOCX.Paragraph({}),
-    new DOCX.Paragraph({ spacing: { before: 900, after: 0 }, alignment: DOCX.AlignmentType.CENTER, border: { top: { color: "D8DEE5", space: 8, style: DOCX.BorderStyle.SINGLE, size: 4 } }, children: [] }),
-    new DOCX.Paragraph({ spacing: { before: 300, after: 0 }, alignment: DOCX.AlignmentType.CENTER, children: [
-      new DOCX.TextRun({ text: "Rapport généré le " + dateGeneration, color: "8B96A3", size: 20, italics: true }),
+    new DOCX.Paragraph({ spacing: { before: 500, after: 0 }, alignment: DOCX.AlignmentType.CENTER, children: [
+      new DOCX.TextRun({ text: "Rapport généré le " + dateGeneration, color: "8B96A3", size: 18, italics: true }),
     ]}),
-    new DOCX.Paragraph({ spacing: { before: 2000, after: 0 }, alignment: DOCX.AlignmentType.CENTER, children: [
-      new DOCX.TextRun({ text: "HT MAINTENANCE", bold: true, color: DOCX_BLUE, size: 24 }),
+    // Le bandeau HT Maintenance est repoussé en bas de page réelle (grand espacement avant, aucun
+    // après), plutôt que de flotter au milieu d'une page largement vide.
+    new DOCX.Paragraph({ spacing: { before: 5200, after: 0 }, alignment: DOCX.AlignmentType.CENTER, border: { top: { color: "D8DEE5", space: 8, style: DOCX.BorderStyle.SINGLE, size: 4 } }, children: [] }),
+    new DOCX.Paragraph({ spacing: { before: 160, after: 0 }, alignment: DOCX.AlignmentType.CENTER, children: [
+      new DOCX.TextRun({ text: "HT MAINTENANCE", bold: true, color: DOCX_BLUE, size: 22 }),
     ]}),
     new DOCX.Paragraph({ spacing: { before: 40, after: 0 }, alignment: DOCX.AlignmentType.CENTER, children: [
-      new DOCX.TextRun({ text: "Maintenance électrique HTA / BT", color: "8B96A3", size: 18 }),
+      new DOCX.TextRun({ text: "Maintenance électrique HTA / BT", color: "8B96A3", size: 16 }),
     ]}),
     new DOCX.Paragraph({ children: [new DOCX.PageBreak()] }),
   ];
