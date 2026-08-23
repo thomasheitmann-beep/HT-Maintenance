@@ -2315,12 +2315,12 @@ function ClientAutocomplete({ clientValue, onChangeClient, onChangeEmail, onChan
     (clientsRegistry || []).forEach((c) => {
       if (!c.nom) return;
       const key = c.nom.trim().toLowerCase();
-      parEmail.set(key, { organisation: c.nom, contacts: c.email ? [{ nom: c.nom, email: c.email, fonction: "" }] : [], interne: true });
+      parEmail.set(key, { organisation: c.nom, contacts: c.email ? [{ email: c.email, fonction: "", estFictif: true }] : [], interne: true });
     });
     (allSites || []).forEach((s) => {
       if (!s.client) return;
       const key = s.client.trim().toLowerCase();
-      if (!parEmail.has(key)) parEmail.set(key, { organisation: s.client, contacts: s.emailEnvoi ? [{ nom: s.client, email: s.emailEnvoi, fonction: "" }] : [], interne: true });
+      if (!parEmail.has(key)) parEmail.set(key, { organisation: s.client, contacts: s.emailEnvoi ? [{ email: s.emailEnvoi, fonction: "", estFictif: true }] : [], interne: true });
     });
     return Array.from(parEmail.values());
   }, [allSites, clientsRegistry]);
@@ -2337,7 +2337,9 @@ function ClientAutocomplete({ clientValue, onChangeClient, onChangeEmail, onChan
     if (org.contacts.length === 1) {
       const c = org.contacts[0];
       onChangeEmail(c.email);
-      if (onChangeContactClient) onChangeContactClient({ prenom: c.prenom || "", nom: c.nom || c.nomComplet || "", email: c.email || "", fixe: c.fixe || "", portable: c.portable || "" });
+      // Un contact "fictif" (nom d'entreprise recopié faute de vraie personne connue) ne doit
+      // remplir que l'e-mail — jamais le nom, pour ne pas faire croire à un contact nommé.
+      if (onChangeContactClient && !c.estFictif) onChangeContactClient({ prenom: c.prenom || "", nom: c.nom || c.nomComplet || "", email: c.email || "", fixe: c.fixe || "", portable: c.portable || "" });
       setContactsOrg(null);
     } else if (org.contacts.length > 1) {
       setContactsOrg(org);
@@ -2392,7 +2394,7 @@ function ClientAutocomplete({ clientValue, onChangeClient, onChangeEmail, onChan
 // Sélection d'une fiche contact (client ou site) — propose directement la liste des contacts connus
 // pour le client/site déjà sélectionné (registre partagé + base externe), en plus de la saisie
 // libre avec suggestions au clic.
-function ContactPersonneAutocomplete({ contact, onChangeContact, clientNom, contactsRegistry }) {
+function ContactPersonneAutocomplete({ contact, onChangeContact, clientNom, siteNom, contactsRegistry, copierDepuis, copierLabel }) {
   const [data, setData] = useState(null);
   const [open, setOpen] = useState(false);
   const [champ, setChamp] = useState(""); // champ texte actif (nom tapé)
@@ -2402,19 +2404,20 @@ function ContactPersonneAutocomplete({ contact, onChangeContact, clientNom, cont
     const liste = [];
     (contactsRegistry || []).forEach((c) => liste.push({ ...c, source: "interne" }));
     if (data) {
-      const orgMatch = clientNom ? data.find((o) => o.organisation.trim().toLowerCase() === clientNom.trim().toLowerCase()) : null;
-      const pool = orgMatch ? orgMatch.contacts : (data || []).flatMap((o) => o.contacts.map((c) => ({ ...c, organisation: o.organisation })));
-      pool.forEach((c) => liste.push({ prenom: c.prenom, nom: c.nom, email: c.email, fixe: c.fixe, portable: c.portable, organisation: c.organisation || clientNom, source: "externe" }));
+      const noms = [clientNom, siteNom].filter(Boolean).map((n) => n.trim().toLowerCase());
+      const orgsMatch = noms.length ? data.filter((o) => noms.includes(o.organisation.trim().toLowerCase())) : [];
+      const pool = orgsMatch.length ? orgsMatch.flatMap((o) => o.contacts.map((c) => ({ ...c, organisation: o.organisation }))) : (data || []).flatMap((o) => o.contacts.map((c) => ({ ...c, organisation: o.organisation })));
+      pool.forEach((c) => liste.push({ prenom: c.prenom, nom: c.nom, email: c.email, fixe: c.fixe, portable: c.portable, organisation: c.organisation, source: "externe" }));
     }
     return liste;
-  }, [contactsRegistry, data, clientNom]);
+  }, [contactsRegistry, data, clientNom, siteNom]);
 
-  // Liste directement proposée pour le client déjà sélectionné, sans avoir à taper quoi que ce soit.
+  // Liste directement proposée pour le client ET/OU le site déjà renseignés, sans avoir à taper.
   const contactsDuClient = useMemo(() => {
-    if (!clientNom) return [];
-    const q = clientNom.trim().toLowerCase();
-    return tousContacts.filter((c) => (c.organisation || "").trim().toLowerCase() === q).slice(0, 8);
-  }, [tousContacts, clientNom]);
+    const noms = [clientNom, siteNom].filter(Boolean).map((n) => n.trim().toLowerCase());
+    if (!noms.length) return [];
+    return tousContacts.filter((c) => noms.includes((c.organisation || "").trim().toLowerCase())).slice(0, 8);
+  }, [tousContacts, clientNom, siteNom]);
 
   const suggestions = useMemo(() => {
     if (!champ || champ.length < 2) return [];
@@ -2430,14 +2433,19 @@ function ContactPersonneAutocomplete({ contact, onChangeContact, clientNom, cont
 
   return (
     <div>
-      {contactsDuClient.length > 0 && (
+      {(contactsDuClient.length > 0 || (copierDepuis && (copierDepuis.prenom || copierDepuis.nom || copierDepuis.email))) && (
         <div style={{ marginBottom: 8, display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
-          <span style={{ fontSize: 10.5, color: "#8B96A3" }}>Contacts connus pour {clientNom} :</span>
+          {contactsDuClient.length > 0 && <span style={{ fontSize: 10.5, color: "#8B96A3" }}>Contacts connus pour {[clientNom, siteNom].filter(Boolean).join(" / ")} :</span>}
           {contactsDuClient.map((c, i) => (
             <span key={i} onClick={() => pick(c)} style={{ fontSize: 11, padding: "3px 9px", borderRadius: 12, background: "rgba(10,93,168,0.08)", color: BRAND.blue, cursor: "pointer", whiteSpace: "nowrap" }}>
               {c.prenom} {c.nom}
             </span>
           ))}
+          {copierDepuis && (copierDepuis.prenom || copierDepuis.nom || copierDepuis.email) && (
+            <span onClick={() => pick(copierDepuis)} style={{ fontSize: 11, padding: "3px 9px", borderRadius: 12, background: "rgba(15,138,95,0.1)", color: "#0F8A5F", cursor: "pointer", whiteSpace: "nowrap" }}>
+              ↳ {copierLabel || "Copier"} ({[copierDepuis.prenom, copierDepuis.nom].filter(Boolean).join(" ") || copierDepuis.email})
+            </span>
+          )}
         </div>
       )}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10 }}>
@@ -5062,11 +5070,15 @@ function EquipementCard({ eq, update, remove, removable = true, onDuplicate, loc
     const map = {};
     schema.identification.forEach((f) => {
       if (!f.options) return;
+      // Certains champs (ex. "Modèle" filtré selon la marque choisie) définissent leurs options
+      // comme une fonction plutôt qu'un tableau fixe — il faut la résoudre avant toute fusion.
+      const optsResolues = typeof f.options === "function" ? f.options(eq.identification) : f.options;
+      if (!optsResolues) return;
       const apprises = (bibliothequePourType && bibliothequePourType[f.key]) || [];
-      map[f.key] = apprises.length ? Array.from(new Set([...f.options, ...apprises])) : f.options;
+      map[f.key] = apprises.length ? Array.from(new Set([...optsResolues, ...apprises])) : optsResolues;
     });
     return map;
-  }, [schema, bibliothequePourType]);
+  }, [schema, bibliothequePourType, eq.identification]);
 
   return (
     <Card>
@@ -5120,7 +5132,6 @@ function EquipementCard({ eq, update, remove, removable = true, onDuplicate, loc
               <SectionTitle>Identification</SectionTitle>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 14 }}>
                 {schema.identification.map((f) => {
-                  const opts = f.options;
                   if (f.key === "rapportTPProtection" && eq.type !== "Comptage HTA") {
                     const comptageAvecTP = allEquipements.find((e) => e.type === "Comptage HTA" && e.identification.rapportTPProtection && e.id !== eq.id);
                     return (
@@ -6343,6 +6354,7 @@ function SiteDetail({ site, allSites, update, onBack, onDelete, onPrint, onPrint
                 contact={site.contactClient || { prenom: "", nom: "", email: "", fixe: "", portable: "" }}
                 onChangeContact={(c) => update((d) => ({ ...d, contactClient: c }))}
                 clientNom={site.client}
+                siteNom={site.nom}
                 contactsRegistry={contactsRegistry}
               />
             </Field>
@@ -6353,7 +6365,10 @@ function SiteDetail({ site, allSites, update, onBack, onDelete, onPrint, onPrint
                 contact={site.contactSite || { prenom: "", nom: "", email: "", fixe: "", portable: "" }}
                 onChangeContact={(c) => update((d) => ({ ...d, contactSite: c }))}
                 clientNom={site.client}
+                siteNom={site.nom}
                 contactsRegistry={contactsRegistry}
+                copierDepuis={site.contactClient}
+                copierLabel="Copier depuis Contact client"
               />
             </Field>
           </div>
