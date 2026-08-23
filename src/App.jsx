@@ -2791,6 +2791,7 @@ async function pdfFirstPageToBlob(file, maxDim = 1400, quality = 0.82) {
 function FileGallery({ files, onChange, idPrefix }) {
   const inputRef = useRef(null);
   const [busy, setBusy] = useState(false);
+  const [erreur, setErreur] = useState("");
   const list = files || [];
   // Toujours lire la liste la plus récente au moment de l'écriture (pas celle capturée à l'ouverture
   // de handleFiles) — évite qu'un deuxième ajout rapide n'écrase le premier avant sa fin.
@@ -2799,8 +2800,10 @@ function FileGallery({ files, onChange, idPrefix }) {
 
   async function handleFiles(fileList) {
     setBusy(true);
+    setErreur("");
     const picked = Array.from(fileList);
     const added = [];
+    let echecs = 0;
     for (const file of picked) {
       try {
         const isPdf = file.type === "application/pdf";
@@ -2833,9 +2836,11 @@ function FileGallery({ files, onChange, idPrefix }) {
         }
         added.push({ id: uid(), dataUrl, pdfUrl, name: file.name, isPdf: isPdf && !conversionReussie, convertiDepuisPdf: conversionReussie, caption: "" });
       } catch (e) {
-        // fichier ignoré si illisible
+        echecs++;
+        console.error("[FileGallery] Fichier ignoré :", file?.name, e);
       }
     }
+    if (echecs > 0) setErreur(`${echecs} fichier(s) n'ont pas pu être ajoutés (format non pris en charge ou illisible).`);
     onChange([...listRef.current, ...added]);
     setBusy(false);
   }
@@ -2843,14 +2848,21 @@ function FileGallery({ files, onChange, idPrefix }) {
   function handlePasteEvent(e) {
     const items = e.clipboardData && e.clipboardData.items;
     if (!items) return;
-    const imageFiles = [];
+    // macOS expose souvent plusieurs représentations de la même capture d'écran à la fois (PNG ET
+    // TIFF) — TIFF n'est pas décodable par le navigateur (échec silencieux ensuite). On ne garde
+    // que la meilleure représentation disponible par image copiée, en priorisant PNG puis JPEG.
+    const FORMATS_DECODABLES = ["image/png", "image/jpeg", "image/jpg", "image/webp", "image/gif"];
+    let meilleur = null;
     for (const item of items) {
-      if (item.type && item.type.startsWith("image/")) {
-        const file = item.getAsFile();
-        if (file) imageFiles.push(file);
-      }
+      if (!item.type || !item.type.startsWith("image/")) continue;
+      const rang = FORMATS_DECODABLES.indexOf(item.type);
+      if (rang === -1) continue; // format non décodable (ex. TIFF) — ignoré plutôt que de risquer un échec silencieux
+      if (!meilleur || rang < meilleur.rang) meilleur = { item, rang };
     }
-    if (imageFiles.length) { e.preventDefault(); handleFiles(imageFiles); }
+    if (meilleur) {
+      const file = meilleur.item.getAsFile();
+      if (file) { e.preventDefault(); handleFiles([file]); }
+    }
   }
 
   async function pasteFromClipboard() {
@@ -2896,6 +2908,7 @@ function FileGallery({ files, onChange, idPrefix }) {
           }}
         />
       </div>
+      {erreur && <div style={{ fontSize: 11, color: "#C0392B", marginBottom: 10 }}>{erreur}</div>}
       {list.length === 0 ? (
         <div style={{ textAlign: "center", padding: 22, color: "#8B96A3", fontSize: 12.5, border: "1px dashed #D8DEE5", borderRadius: 10 }}>
           Aucune pièce jointe — cliquez ici puis faites Cmd/Ctrl+V pour coller une image, ou utilisez les boutons ci-dessus
