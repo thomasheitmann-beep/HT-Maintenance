@@ -296,7 +296,14 @@ const UNITE_ISOLEMENT = ["GΩ", "MΩ", "Ω"];
 
 const L1L2L3 = (unit) => [F("l1", "L1", unit), F("l2", "L2", unit), F("l3", "L3", unit)];
 
-const numOf = (v) => { const n = parseFloat(v); return isNaN(n) ? null : n; };
+// Convertit la virgule décimale française en point avant analyse — sans ça, parseFloat interprète
+// "0,94" comme 0 (s'arrête à la virgule) et ",93" comme NaN, ce qui cassait silencieusement tout
+// calcul (moyennes, puissances, taux de charge...) dès qu'un nombre était saisi avec une virgule.
+const numOf = (v) => {
+  if (v === null || v === undefined || v === "") return null;
+  const n = parseFloat(String(v).trim().replace(",", "."));
+  return isNaN(n) ? null : n;
+};
 // Détermine si une valeur mesurée respecte une tolérance (min et/ou max) : "ok" (vert),
 // "bad" (rouge), ou null si pas assez de données pour se prononcer (reste neutre).
 function toleranceState(value, min, max) {
@@ -4294,9 +4301,23 @@ function calcTauxCharge(eq) {
   }
   const puissanceNominale = numOf(eq.identification?.puissanceKVA);
   if (!puissanceNominale) return null;
-  // S mesuré calculé automatiquement (U × I × √3) en priorité — mais si tension/courant ne sont pas
-  // renseignés (technicien n'ayant relevé que P/S directement à l'écran), on se rabat sur le S
-  // relevé manuellement, pour ne jamais laisser le taux de charge disparaître sans raison.
+  const mono = eq.controles?.regimes_reseaux?.utilisation === "Monophasé";
+  const sec = eq.controles.mesures_utilisation || {};
+  const courant = sec.courant_utilisation?.fields || {};
+  const uMoyenne = moyenneDepuisChamps(sec.tension_utilisation?.fields) ?? numOf(sec.tension_simple_utilisation?.fields?.l1);
+  // Taux de charge réellement par phase : courant mesuré sur chaque phase, comparé au courant
+  // nominal déduit de la puissance nominale et de la tension mesurée (I nominal = S / (U × √3) en
+  // triphasé) — au lieu d'une seule valeur globale S/S nominale répétée artificiellement sur L1/L2/L3.
+  if (uMoyenne !== null && uMoyenne > 0) {
+    const iNominal = mono ? (puissanceNominale * 1000) / uMoyenne : (puissanceNominale * 1000) / (uMoyenne * Math.sqrt(3));
+    if (iNominal > 0) {
+      const calc = (i) => { const v = numOf(i); return v === null ? null : Math.round((v / iNominal) * 100 * 10) / 10; };
+      const t1 = calc(courant.l1), t2 = calc(courant.l2), t3 = calc(courant.l3);
+      if (t1 !== null || t2 !== null || t3 !== null) return { t1, t2, t3 };
+    }
+  }
+  // Repli (pas de tension/courant disponibles) : S global mesuré ou relevé ÷ puissance nominale,
+  // seule option possible sans détail par phase dans ce cas — valeur unique répétée sur L1/L2/L3.
   let sCalcule = calcPuissanceApparente(eq, "mesures_utilisation", "utilisation");
   if (sCalcule === null) {
     const fp = eq.controles.mesures_utilisation?.puissance_fp_utilisation?.fields || {};
@@ -8281,6 +8302,30 @@ function docxImage(dataUrl, w, h) {
   try { return new DOCX.ImageRun({ data: bytes, type, transformation: { width: w || 160, height: h || 120 } }); } catch (e) { return null; }
 }
 
+// Photos tension/courant par phase (L1/L2/L3) posées côte à côte dans un tableau 3 colonnes plutôt
+// qu'empilées verticalement — même contenu, mais beaucoup moins de hauteur de page consommée.
+// Chaque photo au format portrait (plus haute que large), plus adapté à ce type de cliché.
+function docxPhotosParPhase(prefixeLabel, photosParPhase) {
+  const largeur = 155, hauteur = 200;
+  const cellules = ["l1", "l2", "l3"].map((ph, i) => {
+    const files = (photosParPhase && photosParPhase[ph]) || [];
+    const contenu = [
+      new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, spacing: { after: 40 }, children: [new DOCX.TextRun({ text: `${prefixeLabel} — L${i + 1}`, bold: true, size: 15, color: "666666" })] }),
+    ];
+    files.forEach((p) => {
+      const img = docxImage(p.dataUrl, largeur, hauteur);
+      if (img) contenu.push(new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, spacing: { after: 30 }, children: [img] }));
+    });
+    return new DOCX.TableCell({
+      width: { size: 3300, type: DOCX.WidthType.DXA }, margins: { top: 60, bottom: 60, left: 60, right: 60 },
+      children: contenu,
+    });
+  });
+  const aUneImage = ["l1", "l2", "l3"].some((ph) => (photosParPhase && photosParPhase[ph] && photosParPhase[ph].length));
+  if (!aUneImage) return null;
+  return new DOCX.Table({ width: { size: 9900, type: DOCX.WidthType.DXA }, columnWidths: [3300, 3300, 3300], rows: [new DOCX.TableRow({ children: cellules })] });
+}
+
 function docxEquipementElements(eq, locaux, allSites) {
   // Filet de sécurité : quelle que soit l'origine des données (ancien format, migration, edge case),
   // on s'assure que la structure de contrôles est complète avant de générer le rapport — évite un
@@ -8504,18 +8549,8 @@ function docxEquipementElements(eq, locaux, allSites) {
         else elements.push(docxSpacer(40));
       } else elements.push(docxSpacer(40));
       if (eq.type === "Redresseur chargeur" && sec.key === "mesures_reseau_normal") {
-        const photosE = eq.controles.photos_reseau_entree || {};
-        const addPhotosE = (label, files) => {
-          if (!(files || []).length) return;
-          elements.push(new DOCX.Paragraph({ spacing: { before: 40, after: 20 }, children: [new DOCX.TextRun({ text: label, bold: true, size: 16, color: "666666" })] }));
-          files.forEach((p) => {
-            const img = docxImage(p.dataUrl, 160, 120);
-            if (img) elements.push(new DOCX.Paragraph({ spacing: { after: 20 }, children: [img] }));
-          });
-        };
-        addPhotosE("Photo — L1 réseau d'entrée (tension + courant)", photosE.l1);
-        addPhotosE("Photo — L2 réseau d'entrée (tension + courant)", photosE.l2);
-        addPhotosE("Photo — L3 réseau d'entrée (tension + courant)", photosE.l3);
+        const tablePhotosE = docxPhotosParPhase("Réseau d'entrée", eq.controles.photos_reseau_entree);
+        if (tablePhotosE) { elements.push(docxSpacer(20)); elements.push(tablePhotosE); }
       }
       elements.push(docxSpacer());
       return;
@@ -8562,19 +8597,8 @@ function docxEquipementElements(eq, locaux, allSites) {
           }
         }
       }
-      elements.push(docxSpacer(60));
-      const addPhotos = (label, files) => {
-        if (!(files || []).length) return;
-        elements.push(new DOCX.Paragraph({ spacing: { before: 40, after: 20 }, children: [new DOCX.TextRun({ text: label, bold: true, size: 16, color: "666666" })] }));
-        files.forEach((p) => {
-          const img = docxImage(p.dataUrl, 160, 120);
-          if (img) elements.push(new DOCX.Paragraph({ spacing: { after: 20 }, children: [img] }));
-        });
-      };
-      const photosU = eq.controles.photos_utilisation || {};
-      addPhotos("Photo — L1 (tension + courant)", photosU.l1);
-      addPhotos("Photo — L2 (tension + courant)", photosU.l2);
-      addPhotos("Photo — L3 (tension + courant)", photosU.l3);
+      const tablePhotosU = docxPhotosParPhase("Utilisation", eq.controles.photos_utilisation);
+      if (tablePhotosU) { elements.push(docxSpacer(20)); elements.push(tablePhotosU); }
       elements.push(docxSpacer());
       return;
     }
