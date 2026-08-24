@@ -2205,32 +2205,31 @@ function GererClientsEtContactsModal({ clientsRegistry, setClientsRegistry, cont
       const mod = await import("xlsx");
       const XLSX = mod.utils ? mod : mod.default;
       const wb = XLSX.utils.book_new();
+      const rows = [];
 
-      const rowsSites = (allSites || []).map((s) => ({
-        "Nom du site": s.nom || "", Client: s.client || "", Adresse: s.adresse || "",
-        "Contact client": [s.contactClient?.prenom, s.contactClient?.nom].filter(Boolean).join(" "),
-        "E-mail contact client": s.contactClient?.email || "",
-        "Tél. fixe contact client": s.contactClient?.fixe || "", "Tél. portable contact client": s.contactClient?.portable || "",
-        "Contact site": [s.contactSite?.prenom, s.contactSite?.nom].filter(Boolean).join(" "),
-        "E-mail contact site": s.contactSite?.email || "",
-        "Tél. fixe contact site": s.contactSite?.fixe || "", "Tél. portable contact site": s.contactSite?.portable || "",
-      }));
-      const wsSites = XLSX.utils.json_to_sheet(rowsSites);
-      wsSites["!cols"] = Array(9).fill({ wch: 24 });
-      XLSX.utils.book_append_sheet(wb, wsSites, "Sites");
+      // Une ligne par site (adresse du site), puis une ligne par contact rattaché à ce site (client
+      // et/ou site) — mêmes colonnes que pour les clients et contacts du registre, pour que tout
+      // tienne dans un seul tableau exploitable (tri/filtre) plutôt que des feuilles séparées.
+      (allSites || []).forEach((s) => {
+        if (!s.nom && !s.client) return;
+        rows.push({ Type: "Site", "Nom du site": s.nom || "", "Client / Organisation": s.client || "", Prénom: "", Nom: "", Adresse: s.adresse || "", "E-mail": "", "Téléphone fixe": "", "Téléphone portable": "", Rôle: "" });
+        if (s.contactClient && (s.contactClient.prenom || s.contactClient.nom || s.contactClient.email)) {
+          rows.push({ Type: "Contact", "Nom du site": s.nom || "", "Client / Organisation": s.client || "", Prénom: s.contactClient.prenom || "", Nom: s.contactClient.nom || "", Adresse: "", "E-mail": s.contactClient.email || "", "Téléphone fixe": s.contactClient.fixe || "", "Téléphone portable": s.contactClient.portable || "", Rôle: "Contact client" });
+        }
+        if (s.contactSite && (s.contactSite.prenom || s.contactSite.nom || s.contactSite.email)) {
+          rows.push({ Type: "Contact", "Nom du site": s.nom || "", "Client / Organisation": s.client || "", Prénom: s.contactSite.prenom || "", Nom: s.contactSite.nom || "", Adresse: "", "E-mail": s.contactSite.email || "", "Téléphone fixe": s.contactSite.fixe || "", "Téléphone portable": s.contactSite.portable || "", Rôle: "Contact site" });
+        }
+      });
+      clientsPourExport.forEach((c) => {
+        rows.push({ Type: "Client", "Nom du site": "", "Client / Organisation": c.nom, Prénom: "", Nom: "", Adresse: c.adresse || "", "E-mail": c.email || "", "Téléphone fixe": "", "Téléphone portable": "", Rôle: "" });
+      });
+      contactsRegistry.forEach((c) => {
+        rows.push({ Type: "Contact", "Nom du site": "", "Client / Organisation": c.organisation || "", Prénom: c.prenom || "", Nom: c.nom || "", Adresse: c.adresse || "", "E-mail": c.email || "", "Téléphone fixe": c.fixe || "", "Téléphone portable": c.portable || "", Rôle: "Registre" });
+      });
 
-      const rowsClients = clientsPourExport.map((c) => ({ ID: c.id, Nom: c.nom, "E-mail": c.email || "", Adresse: c.adresse || "" }));
-      const wsClients = XLSX.utils.json_to_sheet(rowsClients);
-      wsClients["!cols"] = [{ wch: 22 }, { wch: 32 }, { wch: 32 }, { wch: 40 }];
-      XLSX.utils.book_append_sheet(wb, wsClients, "Clients");
-
-      const rowsContacts = contactsRegistry.map((c) => ({
-        Prénom: c.prenom || "", Nom: c.nom || "", Organisation: c.organisation || "", Adresse: c.adresse || "",
-        "E-mail": c.email || "", "Téléphone fixe": c.fixe || "", "Téléphone portable": c.portable || "",
-      }));
-      const wsContacts = XLSX.utils.json_to_sheet(rowsContacts);
-      wsContacts["!cols"] = Array(7).fill({ wch: 24 });
-      XLSX.utils.book_append_sheet(wb, wsContacts, "Contacts");
+      const ws = XLSX.utils.json_to_sheet(rows);
+      ws["!cols"] = [{ wch: 10 }, { wch: 22 }, { wch: 24 }, { wch: 16 }, { wch: 16 }, { wch: 34 }, { wch: 28 }, { wch: 16 }, { wch: 16 }, { wch: 14 }];
+      XLSX.utils.book_append_sheet(wb, ws, "Sites-Clients-Contacts");
 
       XLSX.writeFile(wb, `HT-Maintenance_Sites-Clients-Contacts_${todayISO()}.xlsx`);
     } catch (e) {
@@ -2290,7 +2289,7 @@ function GererClientsEtContactsModal({ clientsRegistry, setClientsRegistry, cont
         </div>
 
         <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
-          <button onClick={exporterTout} style={btnGhost(BRAND.blue)} title="Un seul fichier avec 3 feuilles : Sites, Clients, Contacts">
+          <button onClick={exporterTout} style={btnGhost(BRAND.blue)} title="Un seul tableau regroupant sites, clients et contacts, avec une colonne Type pour les distinguer">
             <Download size={14} /> Exporter tout en Excel (sites + clients + contacts)
           </button>
           <button onClick={() => fileInputRef.current?.click()} style={btnGhost(BRAND.blue)}><Upload size={14} /> Importer (feuille Clients)</button>
@@ -2566,7 +2565,10 @@ function SiteNomAutocomplete({ nomValue, onChangeNom, onChangeClient, onChangeAd
       const key = o.organisation.trim().toLowerCase();
       if (vus.has(key)) return;
       vus.add(key);
-      liste.push({ nom: o.organisation, client: o.organisation, adresse: o.adresse || null });
+      // Pas d'adresse ici : celle de la base externe est l'adresse enregistrée du client/organisation
+      // (souvent son siège administratif), pas forcément celle du site physique — l'appliquer ici
+      // créait une confusion entre adresse du site et adresse du contact/client.
+      liste.push({ nom: o.organisation, client: o.organisation, adresse: null });
     });
     return liste;
   }, [allSites, clientsRegistry, clientsData]);
@@ -4292,9 +4294,15 @@ function calcTauxCharge(eq) {
   }
   const puissanceNominale = numOf(eq.identification?.puissanceKVA);
   if (!puissanceNominale) return null;
-  // S mesuré désormais calculé automatiquement (U × I × √3) plutôt que saisi manuellement — le taux
-  // de charge reste bien "S mesuré ÷ S nominale", juste avec un S mesuré fiabilisé.
-  const sCalcule = calcPuissanceApparente(eq, "mesures_utilisation", "utilisation");
+  // S mesuré calculé automatiquement (U × I × √3) en priorité — mais si tension/courant ne sont pas
+  // renseignés (technicien n'ayant relevé que P/S directement à l'écran), on se rabat sur le S
+  // relevé manuellement, pour ne jamais laisser le taux de charge disparaître sans raison.
+  let sCalcule = calcPuissanceApparente(eq, "mesures_utilisation", "utilisation");
+  if (sCalcule === null) {
+    const fp = eq.controles.mesures_utilisation?.puissance_fp_utilisation?.fields || {};
+    const sVals = [numOf(fp.s1), numOf(fp.s2), numOf(fp.s3)].filter((v) => v !== null);
+    if (sVals.length) sCalcule = sVals.reduce((a, b) => a + b, 0) / sVals.length;
+  }
   if (sCalcule === null) return null;
   const taux = Math.round((sCalcule / puissanceNominale) * 100 * 10) / 10;
   return { t1: taux, t2: taux, t3: taux };
@@ -4302,16 +4310,26 @@ function calcTauxCharge(eq) {
 // Puissance apparente calculée à partir de la tension et du courant déjà mesurés dans la même
 // section (au lieu d'une saisie manuelle) : S = U composée × I × √3 en triphasé, S = U simple × I
 // en monophasé.
+// Moyenne calculée directement depuis L1/L2/L3 — le champ "moyenne" affiché à l'écran est une
+// valeur calculée à l'affichage (compute), jamais réellement enregistrée dans les données ; il ne
+// faut donc jamais la lire directement depuis les champs stockés, sous peine de toujours obtenir
+// undefined et de faire échouer silencieusement tout calcul qui en dépend.
+function moyenneDepuisChamps(f) {
+  if (!f) return null;
+  const vals = [numOf(f.l1), numOf(f.l2), numOf(f.l3)].filter((v) => v !== null);
+  return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
+}
 function calcPuissanceApparente(eq, sectionKey, suffix) {
   const sec = eq.controles[sectionKey];
   if (!sec) return null;
   const courant = sec[`courant_${suffix}`]?.fields;
   if (!courant) return null;
-  const i = numOf(courant.moyenne !== undefined ? courant.moyenne : courant.l1);
+  const i = moyenneDepuisChamps(courant) ?? numOf(courant.l1);
   if (i === null) return null;
   const composee = sec[`tension_${suffix}`]?.fields;
-  if (composee && numOf(composee.moyenne) !== null) {
-    return Math.round(((numOf(composee.moyenne) * i * Math.sqrt(3)) / 1000) * 100) / 100;
+  const uComposee = moyenneDepuisChamps(composee);
+  if (uComposee !== null) {
+    return Math.round(((uComposee * i * Math.sqrt(3)) / 1000) * 100) / 100;
   }
   const simple = sec[`tension_simple_${suffix}`]?.fields;
   if (simple && numOf(simple.l1) !== null) {
@@ -4335,7 +4353,7 @@ function calcPuissanceActive(eq, sectionKey, suffix, mono) {
   if (s === null) return null;
   const fp = eq.controles[sectionKey]?.[`puissance_fp_${suffix}`]?.fields || {};
   const thdi = eq.controles[sectionKey]?.[`thdi_${suffix}`]?.fields;
-  const thdiVal = thdi ? (thdi.moyenne !== undefined ? thdi.moyenne : thdi.l1) : null;
+  const thdiVal = moyenneDepuisChamps(thdi) ?? (thdi ? numOf(thdi.l1) : null);
   const fpReel = (cosBrut) => suffix === "utilisation" ? calcFPDepuisCosPhiFondamental(cosBrut, thdiVal) : numOf(cosBrut);
   if (mono) {
     const cos = fpReel(fp.fp1);
@@ -5208,17 +5226,17 @@ function EquipementCard({ eq, update, remove, removable = true, onDuplicate, loc
 
   return (
     <Card>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer" }} onClick={() => setOpen((o) => !o)}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <ChevronDown size={15} color="#8B96A3" style={{ transform: open ? "rotate(0deg)" : "rotate(-90deg)", transition: "transform .15s" }} />
-          <span style={{ fontSize: 14, fontWeight: 700, color: "#1A1F26" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", rowGap: 8, cursor: "pointer" }} onClick={() => setOpen((o) => !o)}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0, flex: "1 1 auto" }}>
+          <ChevronDown size={15} color="#8B96A3" style={{ flexShrink: 0, transform: open ? "rotate(0deg)" : "rotate(-90deg)", transition: "transform .15s" }} />
+          <span style={{ fontSize: 14, fontWeight: 700, color: "#1A1F26", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>
             {titleField ? eq.identification[titleField.key] || eq.type : eq.type}
             {titleField && subtitleField && eq.identification[subtitleField.key] && (
               <span style={{ color: "#5B6B7D", fontWeight: 400 }}> · {eq.identification[subtitleField.key]}</span>
             )}
           </span>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
           <div style={{ display: "flex", alignItems: "center", gap: 4 }} title="Position de cet équipement dans le rapport — modifiez pour intercaler avec d'autres types">
             <span style={{ fontSize: 10, color: "#8B96A3", fontWeight: 700 }}>Ordre</span>
             <input
