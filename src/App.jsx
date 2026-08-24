@@ -2412,7 +2412,9 @@ function ClientAutocomplete({ clientValue, onChangeClient, onChangeEmail, onChan
     } else if (org.contacts.length > 1) {
       setContactsOrg(org);
     }
-    if (org.adresse && onChangeAdresse) onChangeAdresse(org.adresse);
+    // Pas d'auto-remplissage de l'adresse du site ici : l'adresse enregistrée du client est celle
+    // de son siège/service administratif, pas forcément celle du site physique concerné — les
+    // confondre a créé de la confusion. L'adresse du site reste toujours saisie manuellement.
   };
   return (
     <div style={{ position: "relative" }}>
