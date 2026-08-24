@@ -7474,7 +7474,7 @@ const DOCX_BLUE = "0A5DA8", DOCX_DARK = "1A1F26", DOCX_SILVER = "C0C6CE", DOCX_A
 // Largeur standard de tous les tableaux du rapport (homogénéité visuelle) + marges internes
 // des cellules (un peu plus aérées que le rendu compact précédent).
 const TABLE_WIDTH = 9600;
-const CELL_MARGINS = { top: 90, bottom: 90, left: 110, right: 110 };
+const CELL_MARGINS = { top: 130, bottom: 130, left: 130, right: 120 };
 const DOCX_GREEN = "0F8A5F", DOCX_ORANGE = "B5730A", DOCX_RED = "C0392B", DOCX_WHITE = "FFFFFF", DOCX_LIGHT = "F4F6F8";
 
 function docxEtatColor(label) {
@@ -7486,7 +7486,7 @@ function docxEtatColor(label) {
 }
 function docxHeading(text) {
   return new DOCX.Paragraph({
-    spacing: { before: 260, after: 120 },
+    spacing: { before: 380, after: 180 },
     border: { bottom: { color: DOCX_BLUE, space: 4, style: DOCX.BorderStyle.SINGLE, size: 12 } },
     children: [new DOCX.TextRun({ text: "  ", color: DOCX_AMBER }), new DOCX.TextRun({ text: (text || "").toUpperCase(), bold: true, color: DOCX_DARK, size: 22 })],
   });
@@ -7508,8 +7508,8 @@ function docxFieldTable(rows) {
   return new DOCX.Table({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: [3400, 6200], rows: filtered.map(([l, v]) => docxFieldRow(l, v)) });
 }
 function docxControlRow(label, detail, action, etat) {
-  const children = [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: label, size: 18, color: DOCX_DARK })] })];
-  if (detail) children.push(new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: detail, size: 16, color: "666666", italics: true })] }));
+  const children = [new DOCX.Paragraph({ spacing: { after: (detail || action) ? 40 : 0 }, children: [new DOCX.TextRun({ text: label, size: 18, color: DOCX_DARK })] })];
+  if (detail) children.push(new DOCX.Paragraph({ spacing: { after: action ? 40 : 0 }, children: [new DOCX.TextRun({ text: detail, size: 16, color: "666666", italics: true })] }));
   if (action) children.push(new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: "Action : " + action, size: 16, color: "666666" })] }));
   return new DOCX.TableRow({ children: [
     new DOCX.TableCell({ width: { size: 7600, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, children }),
@@ -7662,7 +7662,7 @@ function docxEquipHeader(name, bookmarkId) {
     children: [new DOCX.Paragraph({ spacing: { before: 80, after: 80 }, children: [bookmarkId ? new DOCX.Bookmark({ id: bookmarkId, children: [title] }) : title] })],
   })] })] });
 }
-function docxSpacer(h) { return new DOCX.Paragraph({ spacing: { after: h || 120 }, children: [] }); }
+function docxSpacer(h) { return new DOCX.Paragraph({ spacing: { after: h || 200 }, children: [] }); }
 function base64ToUint8(dataUrl) {
   try {
     const base64 = dataUrl.split(",")[1];
