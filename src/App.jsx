@@ -8049,9 +8049,10 @@ function genererSchemaOnduleur(eq) {
 
     if (avecBypass) {
       // Le réseau secours rejoint directement le commutateur statique — le trait doit être continu
-      // depuis son point de départ (pontage ou simple trait initial), sans coupure.
+      // depuis son point de départ (pontage ou simple trait initial), sans coupure. Le libellé est
+      // placé sous le transformateur (s'il existe), avec un petit espace, jamais collé dessus.
       if (yR2Depart !== null) {
-        if (!reseauxPontes) label(`Réseau secours ${regime("secours")}`, cxR2, yR2Depart - 4);
+        if (!reseauxPontes) label(`Réseau secours ${regime("secours")}`, cxR2, yR2Depart + 12);
         line(cxR2, yR2Depart, cxR2, yApresOnduleur);
       } else {
         label(`Réseau secours ${regime("secours")}`, cxR2, yRedresseurBas - 4);
