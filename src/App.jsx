@@ -1194,9 +1194,13 @@ function buildInverseurSchema({ source1Mono = false, source2Mono = false, utilis
         C("tension_simple_utilisation", "Tension simple", tensionCourantItem(utilisationMono, "V", "Tension")),
         ...(utilisationMono ? [] : [C("tension_utilisation", "Tension composée", tensionCourantItem(false, "V", "Tension"))]),
         C("thdv_utilisation", "Taux de distorsion tension", utilisationMono ? champsMono("%", "THdV") : champsTriphase("%", "THdV", 1, "max")),
-        C("courant_utilisation", "Courant efficace", tensionCourantItem(utilisationMono, "A", "Courant")),
+        C("courant_utilisation", "Courant", tensionCourantItem(utilisationMono, "A", "Courant")),
+        ...(utilisationMono ? [] : [C("courant_neutre_utilisation", "Courant dans le neutre", [F("in", "IN", "A")])]),
         C("thdi_utilisation", "Taux de distorsion courant", utilisationMono ? champsMono("%", "ThdI") : champsTriphase("%", "ThdI", 1, "moyenne")),
-        C("puissance_fp_utilisation", "Puissance et facteur de puissance", puissanceFpItem(utilisationMono)),
+        C("puissance_fp_utilisation", "Puissance (P, S relevés — Q calculé) et cos φ fondamental", cosPhiFondamentalItem(utilisationMono)),
+        C("regime_neutre_utilisation", "Régime de neutre", [F("valeur", "Valeur", null, LISTE_REGIME_NEUTRE)]),
+        C("tension_terre_neutre_utilisation", "Tension terre / neutre", [F("v", "Valeur", "V")]),
+        C("frequence_utilisation", "Fréquence", [F("hz", "Valeur", "Hz")]),
       ]},
       { key: "thermographie_ups", title: "Thermographie", items: [
         C("controle_thermo_ups", "Contrôle thermographique", [F("temperature", "Température relevée", "°C"), F("charge", "Charge au moment du contrôle", "%")]),
@@ -9086,6 +9090,18 @@ async function generateSiteDocx(site, allSites) {
   if (rapportTable) children.push(rapportTable);
   if (site.rapport.syntheseRemarques) children.push(new DOCX.Paragraph({ spacing: { before: 80, after: 80 }, children: [new DOCX.TextRun({ text: "Synthèse des remarques et préconisations : ", bold: true, size: 18 }), new DOCX.TextRun({ text: site.rapport.syntheseRemarques, size: 18 })] }));
   else children.push(docxSpacer());
+  // Photos générales du site (ajoutées depuis l'onglet Rapport) — absentes du rapport principal
+  // jusqu'ici, elles n'étaient reprises que dans le document séparé "Annexe photos".
+  const photosSiteRapport = (site.rapport && site.rapport.photos) || [];
+  if (photosSiteRapport.length) {
+    children.push(new DOCX.Paragraph({ spacing: { before: 40, after: 80 }, children: [new DOCX.TextRun({ text: "Photos générales du site", bold: true, size: 18, color: DOCX_DARK })] }));
+    photosSiteRapport.forEach((p) => {
+      const img = docxImage(p.dataUrl, 260, 195);
+      if (!img) return;
+      if (p.caption) children.push(new DOCX.Paragraph({ spacing: { before: 40, after: 4 }, children: [new DOCX.TextRun({ text: p.caption, italics: true, size: 15, color: "666666" })] }));
+      children.push(new DOCX.Paragraph({ spacing: { after: 60 }, children: [img] }));
+    });
+  }
 
   if (locauxTable) { children.push(docxHeading("Locaux")); children.push(locauxTable); children.push(docxSpacer()); }
 
