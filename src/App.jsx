@@ -349,6 +349,12 @@ const SECURITE_CELLULE = [
   C("interverrouillage", "Contrôle de l'interverrouillage de sécurité"),
   C("fiche_manoeuvre", "Présence et exactitude de la fiche de manœuvre"),
 ];
+// Mesure d'isolement simple (HTA-Terre + Entre phases), partagée entre les cellules HTA pour
+// lesquelles elle est optionnelle (pas systématiquement réalisée, contrairement au jeu de barre).
+const MESURE_ISOLEMENT_CELLULE = [
+  C("hta_terre", "HTA - Terre", [F("v", "Tension", null, TENSION_ISOLEMENT), F("valeur", "Valeur"), F("unite", "Unité", null, UNITE_ISOLEMENT)]),
+  C("entre_phases", "Entre phases", [F("v", "Tension", null, TENSION_ISOLEMENT), F("valeur", "Valeur"), F("unite", "Unité", null, UNITE_ISOLEMENT)]),
+];
 const ORGANES_FIELDS = [{ key: "reference", label: "Référence" }, { key: "tension", label: "Tension", options: LISTE_TENSION_ORGANES }, { key: "type", label: "Type", options: LISTE_TYPE_ORGANES }];
 const LISTE_TYPE_ORGANE_DYNAMIQUE = ["Bobine à manque", "Bobine Mitop", "Déclencheur voltmétrique", "Moteur", "Bobine de fermeture", "Bobine d'ouverture", "Bouton poussoir", "Contact auxiliaire"];
 const LISTE_TC_FONCTION = ["Protection", "Mesure", "Protection / Mesure", "Homopolaire (terre)"];
@@ -1297,10 +1303,7 @@ function buildInterrupteurHTASchema({ avecRelais = false } = {}) {
         { key: "parametrage_relais", title: "Paramétrage du relais de protection", items: [] },
         { key: "controles_relais", title: "Contrôles du relais de protection", items: [CIRCUIT_MESURES_COMMANDE] },
       ] : []),
-      { key: "mesure_isolement", title: "Mesure d'isolement", items: [
-        C("hta_terre", "HTA - Terre", [F("v", "Tension", null, TENSION_ISOLEMENT), F("valeur", "Valeur"), F("unite", "Unité", null, UNITE_ISOLEMENT)]),
-        C("entre_phases", "Entre phases", [F("v", "Tension", null, TENSION_ISOLEMENT), F("valeur", "Valeur"), F("unite", "Unité", null, UNITE_ISOLEMENT)]),
-      ]},
+      { key: "mesure_isolement", title: "Mesure d'isolement (optionnelle)", items: MESURE_ISOLEMENT_CELLULE },
     ],
   };
 }
@@ -1334,10 +1337,7 @@ function buildInterrupteurFusibleHTASchema({ avecRelais = false } = {}) {
         { key: "parametrage_relais", title: "Paramétrage du relais de protection", items: [] },
         { key: "controles_relais", title: "Contrôles du relais de protection", items: [CIRCUIT_MESURES_COMMANDE] },
       ] : []),
-      { key: "mesure_isolement", title: "Mesure d'isolement", items: [
-        C("hta_terre", "HTA - Terre", [F("v", "Tension", null, TENSION_ISOLEMENT), F("valeur", "Valeur"), F("unite", "Unité", null, UNITE_ISOLEMENT)]),
-        C("entre_phases", "Entre phases", [F("v", "Tension", null, TENSION_ISOLEMENT), F("valeur", "Valeur"), F("unite", "Unité", null, UNITE_ISOLEMENT)]),
-      ]},
+      { key: "mesure_isolement", title: "Mesure d'isolement (optionnelle)", items: MESURE_ISOLEMENT_CELLULE },
     ],
   };
 }
@@ -1360,6 +1360,7 @@ const SCHEMAS = {
         C("etalonnage_compteur", "Contrôle de l'étalonnage du compteur", [F("date_verification", "Date de vérification métrologique")]),
       ]},
       { key: "securite", title: "Contrôles de sécurité", items: SECURITE_CELLULE },
+      { key: "mesure_isolement", title: "Mesure d'isolement (optionnelle)", items: MESURE_ISOLEMENT_CELLULE },
     ],
   },
   "Interrupteur Fusible HTA": buildInterrupteurFusibleHTASchema({}),
@@ -1390,6 +1391,7 @@ const SCHEMAS = {
       { key: "parametrage_relais", title: "Paramétrage du relais de protection", items: [] },
       { key: "controles_disjoncteur", title: "Contrôles du disjoncteur", items: CONTROLES_DISJONCTEUR },
       { key: "controles_relais", title: "Contrôles du relais de protection", items: [CIRCUIT_MESURES_COMMANDE] },
+      { key: "mesure_isolement", title: "Mesure d'isolement (optionnelle)", items: MESURE_ISOLEMENT_CELLULE },
     ],
   },
   "Contacteur HTA": {
@@ -1419,6 +1421,7 @@ const SCHEMAS = {
       { key: "parametrage_relais", title: "Paramétrage du relais de protection", items: [] },
       { key: "controles_disjoncteur", title: "Contrôles du contacteur", items: CONTROLES_DISJONCTEUR },
       { key: "controles_relais", title: "Contrôles du relais de protection", items: [CIRCUIT_MESURES_COMMANDE] },
+      { key: "mesure_isolement", title: "Mesure d'isolement (optionnelle)", items: MESURE_ISOLEMENT_CELLULE },
     ],
   },
   "Disjoncteur BT": {
@@ -2167,6 +2170,33 @@ function GererClientsEtContactsModal({ clientsRegistry, setClientsRegistry, cont
   const [externeData, setExterneData] = useState(null);
   useEffect(() => { fetchClientsData().then(setExterneData); }, []);
   const dejaSurSite = useMemo(() => new Set((allSites || []).map((s) => (s.client || "").trim().toLowerCase()).filter(Boolean)), [allSites]);
+  const [rechercheContact, setRechercheContact] = useState("");
+  // Recherche combinée : votre registre (modifiable) ET la base externe (5959 contacts, lecture
+  // seule) — pour ne plus jamais avoir l'impression que "les contacts" se limitent à ceux ajoutés
+  // à la main. Limité à 40 résultats pour rester fluide.
+  const resultatsExternes = useMemo(() => {
+    if (!rechercheContact.trim() || rechercheContact.trim().length < 2 || !externeData) return [];
+    const q = rechercheContact.trim().toLowerCase();
+    const out = [];
+    for (const o of externeData) {
+      for (const c of o.contacts || []) {
+        const nomComplet = `${c.prenom || ""} ${c.nom || ""}`.toLowerCase();
+        if (nomComplet.includes(q) || o.organisation.toLowerCase().includes(q) || (c.email || "").toLowerCase().includes(q)) {
+          out.push({ ...c, organisation: o.organisation, adresse: o.adresse || "" });
+          if (out.length >= 40) return out;
+        }
+      }
+    }
+    return out;
+  }, [rechercheContact, externeData]);
+  const contactsRegistreFiltres = useMemo(() => {
+    if (!rechercheContact.trim()) return contactsRegistry;
+    const q = rechercheContact.trim().toLowerCase();
+    return contactsRegistry.filter((c) => `${c.prenom || ""} ${c.nom || ""} ${c.organisation || ""} ${c.email || ""}`.toLowerCase().includes(q));
+  }, [contactsRegistry, rechercheContact]);
+  const copierVersRegistre = (c) => {
+    setContactsRegistry([...contactsRegistry, { id: uid(), prenom: c.prenom || "", nom: c.nom || "", organisation: c.organisation || "", adresse: c.adresse || "", email: c.email || "", fixe: c.fixe || "", portable: c.portable || "" }]);
+  };
 
   const clientsPourExport = useMemo(() => {
     const vus = new Set(clientsRegistry.map((c) => c.nom.trim().toLowerCase()));
@@ -2223,23 +2253,37 @@ function GererClientsEtContactsModal({ clientsRegistry, setClientsRegistry, cont
       // tienne dans un seul tableau exploitable (tri/filtre) plutôt que des feuilles séparées.
       (allSites || []).forEach((s) => {
         if (!s.nom && !s.client) return;
-        rows.push({ Type: "Site", "Nom du site": s.nom || "", "Client / Organisation": s.client || "", Prénom: "", Nom: "", Adresse: s.adresse || "", "E-mail": "", "Téléphone fixe": "", "Téléphone portable": "", Rôle: "" });
+        rows.push({ Type: "Site", "Nom du site": s.nom || "", "Client / Organisation": s.client || "", Prénom: "", Nom: "", Adresse: s.adresse || "", "E-mail": "", "Téléphone fixe": "", "Téléphone portable": "", Rôle: "", Fonction: "" });
         if (s.contactClient && (s.contactClient.prenom || s.contactClient.nom || s.contactClient.email)) {
-          rows.push({ Type: "Contact", "Nom du site": s.nom || "", "Client / Organisation": s.client || "", Prénom: s.contactClient.prenom || "", Nom: s.contactClient.nom || "", Adresse: "", "E-mail": s.contactClient.email || "", "Téléphone fixe": s.contactClient.fixe || "", "Téléphone portable": s.contactClient.portable || "", Rôle: "Contact client" });
+          rows.push({ Type: "Contact", "Nom du site": s.nom || "", "Client / Organisation": s.client || "", Prénom: s.contactClient.prenom || "", Nom: s.contactClient.nom || "", Adresse: "", "E-mail": s.contactClient.email || "", "Téléphone fixe": s.contactClient.fixe || "", "Téléphone portable": s.contactClient.portable || "", Rôle: "Contact client", Fonction: "" });
         }
         if (s.contactSite && (s.contactSite.prenom || s.contactSite.nom || s.contactSite.email)) {
-          rows.push({ Type: "Contact", "Nom du site": s.nom || "", "Client / Organisation": s.client || "", Prénom: s.contactSite.prenom || "", Nom: s.contactSite.nom || "", Adresse: "", "E-mail": s.contactSite.email || "", "Téléphone fixe": s.contactSite.fixe || "", "Téléphone portable": s.contactSite.portable || "", Rôle: "Contact site" });
+          rows.push({ Type: "Contact", "Nom du site": s.nom || "", "Client / Organisation": s.client || "", Prénom: s.contactSite.prenom || "", Nom: s.contactSite.nom || "", Adresse: "", "E-mail": s.contactSite.email || "", "Téléphone fixe": s.contactSite.fixe || "", "Téléphone portable": s.contactSite.portable || "", Rôle: "Contact site", Fonction: "" });
         }
       });
       clientsPourExport.forEach((c) => {
-        rows.push({ Type: "Client", "Nom du site": "", "Client / Organisation": c.nom, Prénom: "", Nom: "", Adresse: c.adresse || "", "E-mail": c.email || "", "Téléphone fixe": "", "Téléphone portable": "", Rôle: "" });
+        rows.push({ Type: "Client", "Nom du site": "", "Client / Organisation": c.nom, Prénom: "", Nom: "", Adresse: c.adresse || "", "E-mail": c.email || "", "Téléphone fixe": "", "Téléphone portable": "", Rôle: "", Fonction: "" });
       });
       contactsRegistry.forEach((c) => {
-        rows.push({ Type: "Contact", "Nom du site": "", "Client / Organisation": c.organisation || "", Prénom: c.prenom || "", Nom: c.nom || "", Adresse: c.adresse || "", "E-mail": c.email || "", "Téléphone fixe": c.fixe || "", "Téléphone portable": c.portable || "", Rôle: "Registre" });
+        rows.push({ Type: "Contact", "Nom du site": "", "Client / Organisation": c.organisation || "", Prénom: c.prenom || "", Nom: c.nom || "", Adresse: c.adresse || "", "E-mail": c.email || "", "Téléphone fixe": c.fixe || "", "Téléphone portable": c.portable || "", Rôle: "Registre", Fonction: "" });
+      });
+      // Les 5959 contacts de la base externe (organisations + personnes) — sans eux, l'export ne
+      // montrait que les quelques contacts ajoutés à la main, la grande majorité des lignes restant
+      // vides sur les colonnes Prénom/Nom/Adresse.
+      (externeData || []).forEach((o) => {
+        (o.contacts || []).forEach((c) => {
+          if (!c.prenom && !c.nom && !c.email) return;
+          rows.push({
+            Type: "Contact", "Nom du site": "", "Client / Organisation": o.organisation,
+            Prénom: c.prenom || "", Nom: c.nom || "", Adresse: o.adresse || "",
+            "E-mail": c.email || "", "Téléphone fixe": c.fixe || "", "Téléphone portable": c.portable || "",
+            Rôle: "Base externe", Fonction: c.fonction || "",
+          });
+        });
       });
 
       const ws = XLSX.utils.json_to_sheet(rows);
-      ws["!cols"] = [{ wch: 10 }, { wch: 22 }, { wch: 24 }, { wch: 16 }, { wch: 16 }, { wch: 34 }, { wch: 28 }, { wch: 16 }, { wch: 16 }, { wch: 14 }];
+      ws["!cols"] = [{ wch: 10 }, { wch: 22 }, { wch: 24 }, { wch: 16 }, { wch: 16 }, { wch: 34 }, { wch: 28 }, { wch: 16 }, { wch: 16 }, { wch: 14 }, { wch: 24 }];
       XLSX.utils.book_append_sheet(wb, ws, "Sites-Clients-Contacts");
 
       XLSX.writeFile(wb, `HT-Maintenance_Sites-Clients-Contacts_${todayISO()}.xlsx`);
@@ -2339,8 +2383,30 @@ function GererClientsEtContactsModal({ clientsRegistry, setClientsRegistry, cont
         ) : (
           <>
             <div style={{ fontSize: 11.5, color: "#8B96A3", marginBottom: 14 }}>
-              Fiches contact (personnes) réutilisables comme « Contact client » ou « Contact site » — reliées aux organisations par le champ Organisation.
+              Fiches contact (personnes) réutilisables comme « Contact client » ou « Contact site » — reliées aux organisations par le champ Organisation. Combine votre registre modifiable et la base externe (5959 contacts).
             </div>
+            <div style={{ position: "relative", marginBottom: 14 }}>
+              <Search size={15} style={{ position: "absolute", left: 11, top: 10, color: "#8B96A3" }} />
+              <TextInput placeholder="Rechercher un contact (nom, organisation, e-mail)…" value={rechercheContact} onChange={(e) => setRechercheContact(e.target.value)} style={{ paddingLeft: 32 }} />
+            </div>
+
+            {rechercheContact.trim().length >= 2 && resultatsExternes.length > 0 && (
+              <div style={{ marginBottom: 18 }}>
+                <div style={{ fontSize: 11.5, fontWeight: 700, color: "#5B6B7D", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.4 }}>
+                  Base externe ({resultatsExternes.length}{resultatsExternes.length === 40 ? "+" : ""})
+                </div>
+                {resultatsExternes.map((c, i) => (
+                  <div key={i} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "8px 0", borderBottom: "1px solid #E2E6EB" }}>
+                    <div style={{ minWidth: 0, fontSize: 12.5 }}>
+                      <div style={{ fontWeight: 700, color: "#1A1F26" }}>{c.prenom} {c.nom}</div>
+                      <div style={{ fontSize: 11, color: "#8B96A3" }}>{[c.organisation, c.fonction, c.email].filter(Boolean).join(" · ")}</div>
+                    </div>
+                    <button onClick={() => copierVersRegistre(c)} style={{ ...btnGhost(BRAND.blue), flexShrink: 0, fontSize: 11, padding: "5px 9px" }} title="Copier vers votre registre modifiable"><Plus size={12} /> Ajouter</button>
+                  </div>
+                ))}
+              </div>
+            )}
+
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 8, marginBottom: 12 }}>
               <TextInput value={formContact.prenom} onChange={(e) => setFC("prenom", e.target.value)} placeholder="Prénom" />
               <TextInput value={formContact.nom} onChange={(e) => setFC("nom", e.target.value)} placeholder="Nom" />
@@ -2352,12 +2418,12 @@ function GererClientsEtContactsModal({ clientsRegistry, setClientsRegistry, cont
               <button onClick={ajouterContact} style={btnGhost(BRAND.blue)} disabled={!formContact.nom.trim() && !formContact.prenom.trim()}><Plus size={14} /> Ajouter</button>
             </div>
             <div style={{ fontSize: 11.5, fontWeight: 700, color: "#5B6B7D", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.4 }}>
-              Contacts enregistrés ({contactsRegistry.length})
+              Votre registre ({contactsRegistreFiltres.length}{rechercheContact.trim() ? ` / ${contactsRegistry.length}` : ""})
             </div>
-            {contactsRegistry.length === 0 ? (
-              <div style={{ fontSize: 12, color: "#8B96A3" }}>Aucun contact enregistré pour l'instant.</div>
+            {contactsRegistreFiltres.length === 0 ? (
+              <div style={{ fontSize: 12, color: "#8B96A3" }}>{rechercheContact.trim() ? "Aucun contact de votre registre ne correspond." : "Aucun contact enregistré pour l'instant."}</div>
             ) : (
-              contactsRegistry.map((c) => (
+              contactsRegistreFiltres.map((c) => (
                 <div key={c.id} style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 6, alignItems: "center", padding: "8px 0", borderBottom: "1px solid #E2E6EB" }}>
                   <TextInput value={c.prenom || ""} onChange={(e) => modifierContact(c.id, { prenom: e.target.value })} placeholder="Prénom" style={{ fontSize: 12 }} />
                   <TextInput value={c.nom || ""} onChange={(e) => modifierContact(c.id, { nom: e.target.value })} placeholder="Nom" style={{ fontSize: 12 }} />
@@ -3334,6 +3400,7 @@ function ControlRow({ item, value, onChange, idPrefix }) {
                   listId={`${idPrefix}-${item.key}-${f.key}`}
                   style={{ width: 130, padding: "5px 7px", fontSize: 12 }}
                 />
+                {f.unit && <span>{f.unit}</span>}
               </label>
             ) : (
               <label key={f.key} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#8B96A3" }}>
@@ -3882,10 +3949,11 @@ function MiniSelect({ label, options, value, onChange }) {
     </MiniField>
   );
 }
-function MiniCombo({ label, options, value, onChange, listId }) {
+function MiniCombo({ label, options, value, onChange, listId, unit }) {
   return (
     <MiniField label={label}>
       <Combo value={value} onChange={onChange} options={options} listId={listId} style={{ width: 90, padding: "5px 7px", fontSize: 12 }} />
+      {unit && <span style={{ fontSize: 11, color: "#8B96A3", marginLeft: 4 }}>{unit}</span>}
     </MiniField>
   );
 }
@@ -3920,7 +3988,10 @@ function AnalyseHuilePanel({ eq, update, idPrefix }) {
                     <label key={f.key} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#5B6B7D" }}>
                       {f.label}
                       {f.options ? (
-                        <Combo value={v.fields[f.key]} onChange={(val) => setField(item.key, f.key, val)} options={f.options} listId={`${idPrefix}-${item.key}-${f.key}`} style={{ width: 130, padding: "5px 7px", fontSize: 12 }} />
+                        <>
+                          <Combo value={v.fields[f.key]} onChange={(val) => setField(item.key, f.key, val)} options={f.options} listId={`${idPrefix}-${item.key}-${f.key}`} style={{ width: 130, padding: "5px 7px", fontSize: 12 }} />
+                          {f.unit && <span>{f.unit}</span>}
+                        </>
                       ) : f.unit ? (
                         <NumberWithUnit value={v.fields[f.key]} unit={v.fields[f.key + "Unite"] || f.unit} onValueChange={(val) => setField(item.key, f.key, val)} onUnitChange={(u) => setField(item.key, f.key + "Unite", u)} />
                       ) : (
@@ -4213,7 +4284,7 @@ function DynamicListPanel({ title, entries, onChange, typeOptions, fieldDefs, wi
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                   {(typeof fieldDefs === "function" ? fieldDefs(e.fields) : fieldDefs).map((f) =>
                     f.options ? (
-                      <MiniCombo key={f.key} label={f.label} options={f.options} value={e.fields[f.key]} onChange={(v) => setField(e.id, f.key, v)} listId={`${idPrefix}-${e.id}-${f.key}`} />
+                      <MiniCombo key={f.key} label={f.label} options={f.options} value={e.fields[f.key]} onChange={(v) => setField(e.id, f.key, v)} listId={`${idPrefix}-${e.id}-${f.key}`} unit={f.unit} />
                     ) : (
                       <MiniInput key={f.key} label={f.label} unit={f.unit} value={e.fields[f.key]} onChange={(v) => setField(e.id, f.key, v)} />
                     )
