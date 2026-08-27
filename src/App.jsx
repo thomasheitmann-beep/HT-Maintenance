@@ -4743,7 +4743,12 @@ function moyenneL1L2L3(fields) {
   return Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 100) / 100;
 }
 function HistoriqueTauxCharge({ eq, allSites }) {
-  const historique = useMemo(() => getHistoriqueEquipement(allSites, eq), [allSites, eq]);
+  // Dépend de l'identifiant stable (pas de l'objet eq entier, qui change de référence à chaque
+  // frappe sur N'IMPORTE QUEL champ du site) — sinon ce calcul, qui parcourt tous les sites et
+  // équipements, se refait inutilement à chaque caractère tapé, causant des saccades qui empirent
+  // avec le nombre de sites/équipements accumulés.
+  const idStable = eq.lignageId || eq.id;
+  const historique = useMemo(() => getHistoriqueEquipement(allSites, eq), [allSites, idStable]);
   if (historique.length < 2) return null;
   return (
     <Card style={{ marginBottom: 14 }}>
@@ -4764,11 +4769,14 @@ function HistoriqueTauxCharge({ eq, allSites }) {
 // Historique (3 dernières années) de la résistance des enroulements et des mesures d'isolement,
 // pour repérer une dérive du transformateur avant qu'elle ne devienne critique.
 function HistoriqueTransformateur({ eq, allSites }) {
-  const histoResPrim = useMemo(() => getHistoriqueChamp(allSites, eq, (e) => moyenneL1L2L3(e.controles?.rapport_transformation?.resistance_enroulements_primaire?.fields)), [allSites, eq]);
-  const histoResSec = useMemo(() => getHistoriqueChamp(allSites, eq, (e) => moyenneL1L2L3(e.controles?.rapport_transformation?.resistance_enroulements_secondaire?.fields)), [allSites, eq]);
-  const histoIsolHT = useMemo(() => getHistoriqueChamp(allSites, eq, (e) => numOf(e.controles?.mesure_isolement?.hta_terre?.fields?.valeur)), [allSites, eq]);
-  const histoIsolBT = useMemo(() => getHistoriqueChamp(allSites, eq, (e) => numOf(e.controles?.mesure_isolement?.bt_terre?.fields?.valeur)), [allSites, eq]);
-  const histoIsolHTBT = useMemo(() => getHistoriqueChamp(allSites, eq, (e) => numOf(e.controles?.mesure_isolement?.hta_bt?.fields?.valeur)), [allSites, eq]);
+  // Même correctif que HistoriqueTauxCharge : dépendance sur un identifiant stable, pas l'objet eq
+  // entier, pour ne pas refaire ces 5 parcours de tous les sites/équipements à chaque frappe.
+  const idStable = eq.lignageId || eq.id;
+  const histoResPrim = useMemo(() => getHistoriqueChamp(allSites, eq, (e) => moyenneL1L2L3(e.controles?.rapport_transformation?.resistance_enroulements_primaire?.fields)), [allSites, idStable]);
+  const histoResSec = useMemo(() => getHistoriqueChamp(allSites, eq, (e) => moyenneL1L2L3(e.controles?.rapport_transformation?.resistance_enroulements_secondaire?.fields)), [allSites, idStable]);
+  const histoIsolHT = useMemo(() => getHistoriqueChamp(allSites, eq, (e) => numOf(e.controles?.mesure_isolement?.hta_terre?.fields?.valeur)), [allSites, idStable]);
+  const histoIsolBT = useMemo(() => getHistoriqueChamp(allSites, eq, (e) => numOf(e.controles?.mesure_isolement?.bt_terre?.fields?.valeur)), [allSites, idStable]);
+  const histoIsolHTBT = useMemo(() => getHistoriqueChamp(allSites, eq, (e) => numOf(e.controles?.mesure_isolement?.hta_bt?.fields?.valeur)), [allSites, idStable]);
   const series = [
     { label: "Résistance enroulement primaire", unite: "mΩ", points: histoResPrim },
     { label: "Résistance enroulement secondaire", unite: "mΩ", points: histoResSec },
