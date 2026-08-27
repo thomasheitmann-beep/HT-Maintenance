@@ -1947,6 +1947,7 @@ function emptySite() {
     adresse: "",
     contactClient: { prenom: "", nom: "", email: "", fixe: "", portable: "" },
     contactSite: { prenom: "", nom: "", email: "", fixe: "", portable: "" },
+    notesInternes: "", // usage technicien uniquement — jamais repris dans un rapport Word
     local: "",
     emailEnvoi: "",
     locaux: [emptyLocal("Local principal")],
@@ -6645,6 +6646,17 @@ function SiteDetail({ site, allSites, update, onBack, onDelete, onPrint, onPrint
                 contactsRegistry={contactsRegistry}
                 copierDepuis={site.contactClient}
                 copierLabel="Copier depuis Contact client"
+              />
+            </Field>
+          </div>
+          <div style={{ marginTop: 14 }}>
+            <Field label={<>Notes internes <span style={{ fontWeight: 400, color: "#8B96A3", textTransform: "none", letterSpacing: 0 }}>— usage technicien uniquement, jamais visible du client ni dans le rapport Word</span></>}>
+              <textarea
+                value={site.notesInternes || ""}
+                onChange={(e) => update((d) => ({ ...d, notesInternes: e.target.value }))}
+                placeholder="Codes d'accès, consignes particulières, historique informel, points de vigilance…"
+                rows={3}
+                style={{ ...inputStyle, resize: "vertical", fontFamily: "inherit" }}
               />
             </Field>
           </div>
