@@ -2242,6 +2242,13 @@ function GererClientsEtContactsModal({ clientsRegistry, setClientsRegistry, cont
   // couvre nom du site/client, adresse, e-mail et téléphones, sans avoir à jongler entre plusieurs
   // exports séparés.
   const exporterTout = async () => {
+    // Sécurité : si la base externe (5959 contacts, l'immense majorité des numéros de téléphone
+    // disponibles) n'a pas fini de charger, mieux vaut prévenir plutôt que produire un export
+    // silencieusement incomplet.
+    if (externeData === null) {
+      setImportMsg("La base de contacts externe est encore en cours de chargement — réessayez dans quelques secondes.");
+      return;
+    }
     try {
       const mod = await import("xlsx");
       const XLSX = mod.utils ? mod : mod.default;
@@ -2283,6 +2290,16 @@ function GererClientsEtContactsModal({ clientsRegistry, setClientsRegistry, cont
       });
 
       const ws = XLSX.utils.json_to_sheet(rows);
+      // Force les colonnes téléphone en texte explicite : un numéro commençant par "+" peut sinon
+      // être interprété par Excel comme le début d'une formule et s'afficher vide ou en erreur.
+      const colTelFixe = 7, colTelPortable = 8; // 0-indexé : Type,Site,Client,Prénom,Nom,Adresse,E-mail,Fixe,Portable...
+      const range = XLSX.utils.decode_range(ws["!ref"]);
+      for (let r = range.s.r + 1; r <= range.e.r; r++) {
+        [colTelFixe, colTelPortable].forEach((c) => {
+          const addr = XLSX.utils.encode_cell({ r, c });
+          if (ws[addr] && ws[addr].v) { ws[addr].t = "s"; ws[addr].z = "@"; }
+        });
+      }
       ws["!cols"] = [{ wch: 10 }, { wch: 22 }, { wch: 24 }, { wch: 16 }, { wch: 16 }, { wch: 34 }, { wch: 28 }, { wch: 16 }, { wch: 16 }, { wch: 14 }, { wch: 24 }];
       XLSX.utils.book_append_sheet(wb, ws, "Sites-Clients-Contacts");
 
