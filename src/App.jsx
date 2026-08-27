@@ -2215,7 +2215,9 @@ function GererClientsEtContactsModal({ clientsRegistry, setClientsRegistry, cont
       if (vus.has(key)) return;
       vus.add(key);
       const premierEmail = (o.contacts || []).find((c) => c.email)?.email || "";
-      depuisExterne.push({ id: "externe_" + key, nom: o.organisation, email: premierEmail, adresse: o.adresse || "" });
+      const telFixe = (o.contacts || []).find((c) => c.fixe)?.fixe || "";
+      const telPortable = (o.contacts || []).find((c) => c.portable)?.portable || "";
+      depuisExterne.push({ id: "externe_" + key, nom: o.organisation, email: premierEmail, adresse: o.adresse || "", telFixe, telPortable });
     });
     return [...clientsRegistry, ...depuisSites, ...depuisExterne];
   }, [clientsRegistry, allSites, externeData]);
@@ -2269,7 +2271,7 @@ function GererClientsEtContactsModal({ clientsRegistry, setClientsRegistry, cont
         }
       });
       clientsPourExport.forEach((c) => {
-        rows.push({ Type: "Client", "Nom du site": "", "Client / Organisation": c.nom, Prénom: "", Nom: "", Adresse: c.adresse || "", "E-mail": c.email || "", "Téléphone fixe": "", "Téléphone portable": "", Rôle: "", Fonction: "" });
+        rows.push({ Type: "Client", "Nom du site": "", "Client / Organisation": c.nom, Prénom: "", Nom: "", Adresse: c.adresse || "", "E-mail": c.email || "", "Téléphone fixe": c.telFixe || "", "Téléphone portable": c.telPortable || "", Rôle: "", Fonction: "" });
       });
       contactsRegistry.forEach((c) => {
         rows.push({ Type: "Contact", "Nom du site": "", "Client / Organisation": c.organisation || "", Prénom: c.prenom || "", Nom: c.nom || "", Adresse: c.adresse || "", "E-mail": c.email || "", "Téléphone fixe": c.fixe || "", "Téléphone portable": c.portable || "", Rôle: "Registre", Fonction: "" });
