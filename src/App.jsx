@@ -5313,7 +5313,7 @@ function collectAnomalies(eq) {
   return lines;
 }
 
-function EquipementCard({ eq, update, remove, removable = true, onDuplicate, locaux = [], allEquipements = [], allSites = [], caracteristiquesLibrary = {}, apprendreCaracteristique }) {
+const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, removable = true, onDuplicate, locaux = [], allEquipements = [], allSites = [], caracteristiquesLibrary = {}, apprendreCaracteristique }) {
   const [open, setOpen] = useState(true);
   const schema = getSchema(eq);
   const setIdentification = (k, v) => update(repairEquipementControles({ ...eq, identification: { ...eq.identification, [k]: v } }));
@@ -6030,7 +6030,14 @@ function EquipementCard({ eq, update, remove, removable = true, onDuplicate, loc
       )}
     </Card>
   );
-}
+}, (prev, next) => {
+  // Ignore volontairement update/remove/onDuplicate (nouvelles fermetures à chaque rendu du
+  // parent, mais fonctionnellement équivalentes) et allEquipements/allSites (changent de référence
+  // à chaque modification n'importe où, sans que ça concerne la plupart des fiches) — ne compare
+  // que ce qui détermine vraiment si CETTE fiche doit se redessiner. Évite que taper dans un
+  // équipement ne redessine inutilement tous les autres équipements du site.
+  return prev.eq === next.eq && prev.locaux === next.locaux && prev.caracteristiquesLibrary === next.caracteristiquesLibrary && prev.removable === next.removable;
+});
 
 function EquipementTypeTab({ type, site, allSites, update, caracteristiquesLibrary, apprendreCaracteristique }) {
   const items = equipementsTries(site.equipements.filter((e) => e.type === type));
