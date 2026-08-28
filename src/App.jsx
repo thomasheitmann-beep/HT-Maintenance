@@ -55,6 +55,18 @@ const LISTE_TYPE_POSTE = ["Intérieur", "Extérieur", "Aérien", "Souterrain", "
 // Combine les régimes de neutre HTA (isolé/compensé/résistant) et les schémas de liaison à la
 // terre BT (TT/TN/IT) : l'un ou l'autre s'applique selon que le site est HTA, BT, ou les deux.
 const LISTE_REGIME_NEUTRE = ["Neutre isolé (HTA)", "Neutre compensé / résonnant (HTA)", "Neutre résistant (HTA)", "TT (BT)", "TN-S (BT)", "TN-C (BT)", "TN-C-S (BT)", "IT (BT)"];
+// Description courte de chaque régime, affichée en aide contextuelle près du champ dans la fiche
+// du local — pour rappeler concrètement ce que chaque sigle signifie sans avoir à le rechercher.
+const REGIME_NEUTRE_DESCRIPTIONS = {
+  "Neutre isolé (HTA)": "Neutre non relié à la terre (ou via une forte impédance) — un premier défaut à la terre ne provoque pas de coupure, mais doit être détecté et éliminé rapidement.",
+  "Neutre compensé / résonnant (HTA)": "Neutre mis à la terre via une bobine de compensation (bobine de Petersen) accordée sur la capacité du réseau — limite fortement le courant de défaut à la terre.",
+  "Neutre résistant (HTA)": "Neutre mis à la terre via une résistance, qui limite le courant de défaut à une valeur définie tout en permettant sa détection.",
+  "TT (BT)": "Neutre relié à la terre côté source ; masses des installations reliées à une prise de terre locale, indépendante — protection par disjoncteur différentiel obligatoire.",
+  "TN-S (BT)": "Neutre relié à la terre côté source ; masses reliées au neutre via un conducteur de protection (PE) distinct du neutre (N) sur tout le circuit.",
+  "TN-C (BT)": "Neutre relié à la terre côté source ; fonctions neutre et protection assurées par un seul conducteur commun (PEN) sur tout le circuit.",
+  "TN-C-S (BT)": "Combine TN-C en amont (conducteur PEN commun) et TN-S en aval (neutre N et protection PE séparés) — la séparation PEN→N+PE ne doit jamais être inversée.",
+  "IT (BT)": "Neutre isolé de la terre (ou via forte impédance) ; masses reliées à la terre — un premier défaut n'entraîne pas de coupure, surveillé par un contrôleur permanent d'isolement (CPI).",
+};
 const REMARQUE_STANDARD_EQUIPEMENT = "Équipement contrôlé, en bon état de fonctionnement. Aucune anomalie relevée lors de cette intervention.";
 const REMARQUE_STANDARD_INSTALLATION = "Installation en bon état général. Aucune anomalie majeure relevée lors de cette intervention.";
 const LISTE_MARQUES = ["ABB", "AREVA", "ALSTOM", "ALSTHOM", "BBC", "CALOR EMAG", "CEM GARDY", "DELLE", "EATON", "EIB", "FELTEN et GUILLAUME", "MAGRINI GALILEO", "MERLIN GERIN", "ORMAZABAL", "POMMIER", "SCHNEIDER ELECTRIC", "SIEMENS"];
@@ -64,8 +76,113 @@ const LISTE_TENSION_ORGANES = ["24", "48", "60", "110", "220", "380"];
 const LISTE_TYPE_ORGANES = ["VCC", "VCA", "VCC/VCA"];
 const LISTE_FABRICANT_FUSIBLE = ["Schneider", "ABB", "SIBA", "Ferraz Limitor", "MERSEN FERRAZ LIMITOR", "Schneider (MG)", "FERRAZ", "AREVA", "Alstom"];
 const LISTE_TYPE_FUSIBLE = ["CEF", "FDW", "SHAWMUT", "SOLFUSE", "LIMITOR", "HHD"];
-const LISTE_IN_FUSIBLE = ["4", "10", "16", "20", "25", "32", "40", "50", "63", "80", "100", "125", "160", "200"];
-const LISTE_UN_FUSIBLE = ["12", "24", "36"];
+// Gammes produit réelles par fabricant (vérifiées auprès des catalogues constructeur) — pour les
+// fabricants sans gamme spécifique confirmée, on retombe sur la liste de types générique ci-dessus
+// plutôt que d'inventer un nom de gamme non vérifié.
+const MARQUE_MODELE_FUSIBLE = {
+  "Schneider": ["Fusarc CF", "Soléfuse", "Tépéfuse", "MGK"],
+  "Schneider (MG)": ["Fusarc CF", "Soléfuse", "Tépéfuse", "MGK"],
+  "Ferraz Limitor": ["Limitor FR", "Limitor PT", "Limitor PTS", "Limitor P"],
+  "MERSEN FERRAZ LIMITOR": ["Limitor FR", "Limitor PT", "Limitor PTS", "Limitor P"],
+  "FERRAZ": ["Limitor FR", "Limitor PT", "Limitor PTS", "Limitor P"],
+  "SIBA": ["HHD-B", "HHD-FR", "HHD-G", "HHD-BSSK", "HHD-BM", "HHD-BVT"],
+};
+const LISTE_MODELE_FUSIBLE_OPTIONS = optionsParChamp("fabricant", MARQUE_MODELE_FUSIBLE, LISTE_TYPE_FUSIBLE);
+// Références ET résistances à froid exactes Schneider Electric (catalogue officiel AC0479FR, 2020)
+// — organisées par gamme puis tension assignée (kV) puis courant assigné (A). La résistance à
+// froid (mΩ, tolérance constructeur ± 10 % à 20 °C) sert de référence réelle pour valider la
+// mesure terrain, plutôt qu'une tolérance dérivée de la mesure elle-même (qui serait toujours
+// "conforme" par construction). Couvre les combinaisons les plus courantes du catalogue.
+const REFERENCE_FUSIBLE_CONSTRUCTEUR = {
+  "Fusarc CF": {
+    "7.2": {
+      "4": ["51311006M0", 796.0], "6.3": ["51006500M0", 186.4], "10": ["51006501M0", 110.5], "16": ["51006502M0", 68.5],
+      "20": ["51006503M0", 53.5], "25": ["51006504M0", 36.5], "31.5": ["51006505M0", 26.1], "40": ["51006506M0", 18.1],
+      "50": ["51006507M0", 12.5], "63": ["51006508M0", 9.9], "80": ["51006509M0", 7.4], "100": ["51006510M0", 6.2],
+    },
+    "12": {
+      "4": ["51311007M0", 1177.0], "6.3": ["51006511M0", 283.4], "10": ["51006512M0", 165.5], "16": ["51006513M0", 106.0],
+      "20": ["51006514M0", 82.0], "25": ["51006515M0", 56.0], "31.5": ["51006516M0", 40.0], "40": ["51006517M0", 28.0],
+      "50": ["51006518M0", 18.5], "63": ["51006519M0", 14.8], "80": ["51006520M0", 11.1], "100": ["51006521M0", 8.9],
+    },
+    "17.5": {
+      "4": ["51311008M0", 1487.0], "6.3": ["51006527M0", 369.3], "10": ["51006522M0", 212.2], "16": ["51006523M0", 132.0],
+      "20": ["51006529M0", 103.0], "25": ["51006524M0", 71.0], "31.5": ["51006525M0", 51.0], "40": ["51006526M0", 35.0],
+      "50": ["51006534M0", 23.4], "63": ["51006535M0", 19.4], "80": ["51006536M0", 13.5], "100": ["51006537M0", 11.0],
+    },
+    "24": {
+      "6.3": ["51108815M0", 455.0], "10": ["51108816M0", 257.3], "16": ["51108817M0", 158.0], "20": ["51108818M0", 123.0],
+      "25": ["51108819M0", 88.0], "31.5": ["51108820M0", 61.0], "40": ["51108821M0", 45.0], "50": ["51108822M0", 33.6], "63": ["51108823M0", 22.6],
+    },
+    "36": {
+      "4": ["51311010M0", 2209.0], "6.3": ["51006549M0", 714.0], "10": ["51006550M0", 392.2], "16": ["51006551M0", 252.0],
+      "20": ["51006552M0", 197.0], "25": ["51006553M0", 133.0], "31.5": ["51006554M0", 103.0], "40": ["51006555M0", 70.0],
+      "50": ["51006556M0", 47.0], "63": ["51006557M0", 35.0],
+    },
+  },
+  "Soléfuse": {
+    "7.2": { "6.3": ["757328 BC", 192.7], "16": ["757328 BE", 59.3], "31.5": ["757328 BH", 24.5], "43": ["757328 BJ", 16.15], "63": ["757328 BK", 11.3], "125": ["757328 BN", 4.8] },
+    "24": { "6.3": ["757328 EC", 454.3], "10": ["757328 ED", 241.9], "16": ["757328 EE", 117.3], "25": ["757328 EG", 69.1], "31.5": ["757328 EH", 45.77], "43": ["757328 EJ", 33.6], "50": ["757328 EL", 37], "63": ["757328 EK", 19.9] },
+    "36": { "6.3": ["757328 FC", 762.6], "10": ["757328 FD", 252.9], "16": ["757328 FE", 207.8], "20": ["757328 FF", 133.2], "25": ["757328 FG", 124], "31.5": ["757328 FH", 93] },
+  },
+  "MGK": {
+    "7.2": { "100": ["757314", 6.4], "125": ["757315", 4.6], "160": ["757316", 2.4], "200": ["757317", 1.53], "250": ["757318", 0.98] },
+  },
+  // Mersen Limitor — PT/PTS/P vérifiées avec résistance R20 (feuille "Catalogue complet" fournie
+  // par l'utilisateur, sourcée sur fiches techniques officielles Mersen). FR : référence seule, la
+  // source précise elle-même que les valeurs R20 de cette série n'ont pas pu être vérifiées.
+  "Limitor PT": {
+    "24": {
+      "1": ["45DB240V1PT", 2100], "2": ["45DB240V2PT", 800], "4": ["45DB240V4PT", 550], "6.3": ["45DB240V6,3PT", 300],
+      "10": ["45DB240V10PT", 220], "16": ["45DB240V16PT", 197], "20": ["45DB240V20PT", 134], "25": ["45DB240V25PT", 96],
+      "31.5": ["45DB240V32PT", 79], "40": ["45DB240V40PT", 45], "50": ["45DB240V50PT", 35], "63": ["45DB240V63PT", 25],
+      "80": ["45DB240V80PT", 20.5], "100": ["45DB240V100PT", 18], "125": ["45DB240V125PT", 11],
+    },
+  },
+  "Limitor PTS": {
+    "36": {
+      "10": ["45DB360V10PTS", 529], "16": ["45DB360V16PTS", 190], "20": ["45DB360V20PTS", 153], "25": ["45DB360V25PTS", 118],
+      "31.5": ["45DB360V32PTS", 82], "40": ["45DB360V40PTS", 63], "50": ["45DB360V50PTS", 40], "63": ["45DB360V63PTS", 31.9], "80": ["45DB360V80PTS", 24.2],
+    },
+  },
+  "Limitor P": {
+    "36": { "2": ["45DB360V2P", 950], "4": ["45DB360V4P", 900] },
+  },
+  "Limitor FR": {
+    "7.2": {
+      "4": ["FR72V4", null], "6.3": ["FR72V6,3", null], "16": ["FR72V16", null], "32": ["FR72V32", null], "43": ["FR72V43", null], "63": ["FR72V63", null],
+    },
+    "12": {
+      "6.3": ["FR120V6,3", null], "16": ["FR120V16", null], "32": ["FR120V32", null], "43": ["FR120V43", null], "63": ["FR120V63", null],
+    },
+    "24": {
+      "6.3": ["FR240V6,3", null], "10": ["FRECO240V10", null], "16": ["FRECO240V16", null], "20": ["FRECO240V20", null],
+      "25": ["FRECO240V25", null], "31.5": ["FRECO240V31,5", null], "43": ["FRECO240V43", null], "50": ["FRECO240V50", null], "63": ["FRECO240V63", null],
+    },
+  },
+};
+// Propose la référence exacte quand marque Schneider + modèle + tension + calibre correspondent à
+// une entrée connue du catalogue — sinon ne propose rien plutôt que d'inventer une référence.
+function referenceFusibleConnue(modele, un, in_) {
+  const gamme = REFERENCE_FUSIBLE_CONSTRUCTEUR[modele];
+  if (!gamme) return null;
+  const parTension = gamme[String(un).trim()];
+  if (!parTension) return null;
+  const entree = parTension[String(in_).trim()];
+  return entree ? entree[0] : null;
+}
+// Résistance à froid de référence constructeur (mΩ, ± 10 % à 20 °C) — sert à calculer une tolérance
+// réelle, indépendante de la valeur mesurée sur site.
+function resistanceFroidConnue(modele, un, in_) {
+  const gamme = REFERENCE_FUSIBLE_CONSTRUCTEUR[modele];
+  if (!gamme) return null;
+  const parTension = gamme[String(un).trim()];
+  if (!parTension) return null;
+  const entree = parTension[String(in_).trim()];
+  return entree ? entree[1] : null;
+}
+const LISTE_IN_FUSIBLE = ["4", "6.3", "10", "16", "20", "25", "31.5", "40", "50", "63", "80", "100", "125", "160", "200", "250"];
+const LISTE_UN_FUSIBLE = ["3.6", "7.2", "12", "17.5", "24", "36"];
 const LISTE_DUREE_VIE_FUSIBLE = ["10", "15", "20", "25", "30"];
 const LISTE_ANNEES_MES = Array.from({ length: 41 }, (_, i) => String(new Date().getFullYear() - i));
 const LISTE_COURBE_RELAIS = ["Constant", "Inverse Normale CEI", "Très Inverse CEI", "Extrèment Inverse CEI", "Inverse Temps Long CEI"];
@@ -316,6 +433,7 @@ function toleranceState(value, min, max) {
 
 const FUSIBLE_FIELDS = [
   F("fabricant", "Fabricant", null, LISTE_FABRICANT_FUSIBLE),
+  F("modele", "Modèle", null, LISTE_MODELE_FUSIBLE_OPTIONS),
   F("type", "Type", null, LISTE_TYPE_FUSIBLE),
   F("reference", "Référence"),
   F("in", "In", "A", LISTE_IN_FUSIBLE),
@@ -323,7 +441,7 @@ const FUSIBLE_FIELDS = [
   F("anneeMiseEnService", "Année de mise en service", null, LISTE_ANNEES_MES),
   F("dureeVieConstructeur", "Durée de vie constructeur", "ans", LISTE_DUREE_VIE_FUSIBLE, "10"),
   {
-    key: "avertissementAge", label: "Âge / Avertissement",
+    key: "avertissementAge", label: "Âge / Avertissement", longText: true,
     compute: (f) => {
       const annee = numOf(f.anneeMiseEnService), duree = numOf(f.dureeVieConstructeur) ?? 10;
       if (annee === null) return "";
@@ -333,8 +451,26 @@ const FUSIBLE_FIELDS = [
   },
   ...L1L2L3("µΩ"),
   F("valeur", "R mesurée à 20°C", "mΩ"),
-  { key: "tol_min", label: "Tolérance min", unit: "mΩ", unitFrom: "valeur", compute: (f) => { const v = numOf(f.valeur); return v === null ? "" : Math.floor(v * 0.9); } },
-  { key: "tol_max", label: "Tolérance max", unit: "mΩ", unitFrom: "valeur", compute: (f) => { const v = numOf(f.valeur); return v === null ? "" : Math.ceil(v * 1.1); } },
+  {
+    key: "tol_min", label: "Tolérance min", unit: "mΩ", unitFrom: "valeur",
+    compute: (f) => {
+      // Priorité à la résistance de référence constructeur (catalogue vérifié) quand connue — une
+      // tolérance dérivée de la valeur mesurée elle-même serait toujours "conforme" par définition.
+      const rRef = resistanceFroidConnue(f.modele, f.un, f.in);
+      if (rRef !== null) return Math.round(rRef * 0.9 * 100) / 100;
+      const v = numOf(f.valeur);
+      return v === null ? "" : Math.floor(v * 0.9);
+    },
+  },
+  {
+    key: "tol_max", label: "Tolérance max", unit: "mΩ", unitFrom: "valeur",
+    compute: (f) => {
+      const rRef = resistanceFroidConnue(f.modele, f.un, f.in);
+      if (rRef !== null) return Math.round(rRef * 1.1 * 100) / 100;
+      const v = numOf(f.valeur);
+      return v === null ? "" : Math.ceil(v * 1.1);
+    },
+  },
 ];
 const TC_FIELDS = [F("type", "Type"), F("couplage", "Couplage"), F("puissance", "Puissance", "VA"), F("classe", "Classe")];
 
@@ -1344,7 +1480,7 @@ function buildInterrupteurFusibleHTASchema({ avecRelais = false } = {}) {
 const SCHEMAS = {
   "Interrupteur HTA": buildInterrupteurHTASchema({}),
   "Comptage HTA": {
-    identification: [{ key: "repere", label: "Repère / Nom de l'équipement" }, { key: "marque", label: "Marque", options: LISTE_MARQUE_CELLULE_HTA }, { key: "modele", label: "Modèle", options: LISTE_MODELE_CELLULE_HTA_OPTIONS }, { key: "typeCellule", label: "Type de cellule", options: LISTE_TYPE_CELLULE["Comptage HTA"] }, { key: "numeroSerie", label: "Numéro de série" }, { key: "marqueTP", label: "Marque du TP" }, { key: "referenceTP", label: "Référence du TP" }, { key: "rapportTPProtection", label: "Rapport TP de protection", options: LISTE_RAPPORT_TP }, { key: "classeTP", label: "Classe de précision (TP)", options: LISTE_CLASSE_TP }],
+    identification: [{ key: "repere", label: "Repère / Nom de l'équipement" }, { key: "marque", label: "Marque", options: LISTE_MARQUE_CELLULE_HTA }, { key: "modele", label: "Modèle", options: LISTE_MODELE_CELLULE_HTA_OPTIONS }, { key: "typeCellule", label: "Type de cellule", options: LISTE_TYPE_CELLULE["Comptage HTA"] }, { key: "numeroSerie", label: "Numéro de série" }],
     sections: [
       { key: "mecaniques", title: "Contrôles mécaniques", items: MECA_CELLULE },
       { key: "electriques", title: "Contrôles électriques", items: [
@@ -3399,7 +3535,24 @@ function ControlRow({ item, value, onChange, idPrefix }) {
         <span style={{ fontSize: 12.5, color: "#3E4A5C", flex: "1 1 240px" }}>{item.label}</span>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
           {(item.fields || []).map((f) =>
-            f.compute ? (
+            f.compute && f.longText ? (
+              (() => {
+                const texte = f.compute(fields);
+                if (!texte) return null;
+                const estAvertissement = texte.startsWith("⚠");
+                return (
+                  <div key={f.key} style={{ width: "100%", marginTop: 4 }}>
+                    <div style={{ fontSize: 10.5, color: "#8B96A3", marginBottom: 3 }}>{f.label}</div>
+                    <div style={{
+                      padding: "9px 12px", borderRadius: 8, fontSize: 12.5, fontWeight: 600, lineHeight: 1.5,
+                      background: estAvertissement ? "#FDF3E3" : "#EEF2F6", color: estAvertissement ? "#8A5A0A" : "#0A5DA8",
+                    }}>
+                      {texte}
+                    </div>
+                  </div>
+                );
+              })()
+            ) : f.compute ? (
               <label key={f.key} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#8B96A3" }}>
                 {f.label}
                 <span style={{ ...inputStyle, width: 66, padding: "5px 7px", fontSize: 12, background: "#EEF2F6", color: "#0A5DA8", fontWeight: 700, display: "inline-block", textAlign: "center" }}>
@@ -3416,11 +3569,32 @@ function ControlRow({ item, value, onChange, idPrefix }) {
                 <Combo
                   value={fields[f.key]}
                   onChange={(v) => setField(f.key, v)}
-                  options={f.options}
+                  options={typeof f.options === "function" ? f.options(fields) || [] : f.options}
                   listId={`${idPrefix}-${item.key}-${f.key}`}
                   style={{ width: 130, padding: "5px 7px", fontSize: 12 }}
                 />
                 {f.unit && <span>{f.unit}</span>}
+              </label>
+            ) : f.key === "reference" ? (
+              <label key={f.key} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#8B96A3" }}>
+                {f.label}
+                <input
+                  type="text"
+                  value={fields[f.key] ?? ""}
+                  onChange={(e) => setField(f.key, e.target.value)}
+                  style={{ ...inputStyle, width: 110, padding: "5px 7px", fontSize: 12 }}
+                />
+                {(() => {
+                  // Référence exacte connue (catalogue Schneider vérifié) — proposée seulement quand
+                  // marque/modèle/tension/calibre correspondent, jamais inventée pour les autres cas.
+                  const refConnue = referenceFusibleConnue(fields.modele, fields.un, fields.in);
+                  if (!refConnue || fields.reference === refConnue) return null;
+                  return (
+                    <span onClick={() => setField("reference", refConnue)} style={{ fontSize: 10, color: "#0A5DA8", cursor: "pointer", whiteSpace: "nowrap" }}>
+                      ↳ {refConnue} (catalogue {fields.modele})
+                    </span>
+                  );
+                })()}
               </label>
             ) : (
               <label key={f.key} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#8B96A3" }}>
@@ -3874,6 +4048,9 @@ function RapportTab({ site, update }) {
               </Field>
               <Field label="Régime de neutre">
                 <Combo value={l.regimeNeutre} onChange={(v) => setLocalField(l.id, "regimeNeutre", v)} options={LISTE_REGIME_NEUTRE} listId={`${l.id}-regimeneutre`} placeholder="HTA et/ou BT" />
+                {l.regimeNeutre && REGIME_NEUTRE_DESCRIPTIONS[l.regimeNeutre] && (
+                  <div style={{ fontSize: 11, color: "#8B96A3", marginTop: 6, lineHeight: 1.4 }}>{REGIME_NEUTRE_DESCRIPTIONS[l.regimeNeutre]}</div>
+                )}
               </Field>
             </div>
           </Card>
@@ -3891,28 +4068,26 @@ function RapportTab({ site, update }) {
           <Select value={r.environnementEtat} onChange={(e) => set("environnementEtat", e.target.value)} style={{ marginBottom: 8 }}>
             {LISTE_ETAT_INSTALLATION.map((o) => <option key={o} value={o}>{o}</option>)}
           </Select>
-          <TextArea value={r.environnementRemarque} onChange={(e) => set("environnementRemarque", e.target.value)} placeholder="Remarque" />
+          <TextArea value={r.environnementRemarque} onChange={(e) => set("environnementRemarque", e.target.value)} placeholder="Remarque" style={{ minHeight: 100 }} />
         </Field>
         <Field label="Fonctionnement de l'installation">
           <Select value={r.fonctionnementEtat} onChange={(e) => set("fonctionnementEtat", e.target.value)} style={{ marginBottom: 8 }}>
             {LISTE_ETAT_INSTALLATION.map((o) => <option key={o} value={o}>{o}</option>)}
           </Select>
-          <TextArea value={r.fonctionnementRemarque} onChange={(e) => set("fonctionnementRemarque", e.target.value)} placeholder="Remarque" />
+          <TextArea value={r.fonctionnementRemarque} onChange={(e) => set("fonctionnementRemarque", e.target.value)} placeholder="Remarque" style={{ minHeight: 100 }} />
         </Field>
       </div>
 
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10, marginBottom: 6 }}>
-        <label style={{ fontSize: 11, fontWeight: 600, color: "#5B6B7D", letterSpacing: 0.5, textTransform: "uppercase" }}>Synthèse des remarques et préconisations</label>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <button onClick={compilerRemarques} style={btnGhost(BRAND.blue)} title="Reprend les remarques saisies sur chaque équipement">
-            <RotateCcw size={13} /> Compiler les remarques des équipements
-          </button>
-          <button onClick={() => set("syntheseRemarques", REMARQUE_STANDARD_INSTALLATION)} style={btnGhost("#0F8A5F")} title="Insère une remarque type pour une installation conforme">
-            <CheckCircle2 size={13} /> Remarque standard (conforme)
-          </button>
-        </div>
+      <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#5B6B7D", letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 10 }}>Synthèse des remarques et préconisations</label>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+        <button onClick={compilerRemarques} style={{ ...btnGhost(BRAND.blue), flex: "1 1 220px", justifyContent: "center" }} title="Reprend les remarques saisies sur chaque équipement">
+          <RotateCcw size={13} /> Compiler les remarques des équipements
+        </button>
+        <button onClick={() => set("syntheseRemarques", REMARQUE_STANDARD_INSTALLATION)} style={{ ...btnGhost("#0F8A5F"), flex: "1 1 220px", justifyContent: "center" }} title="Insère une remarque type pour une installation conforme">
+          <CheckCircle2 size={13} /> Remarque standard (conforme)
+        </button>
       </div>
-      <TextArea value={r.syntheseRemarques} onChange={(e) => set("syntheseRemarques", e.target.value)} style={{ minHeight: 100 }} />
+      <TextArea value={r.syntheseRemarques} onChange={(e) => set("syntheseRemarques", e.target.value)} style={{ minHeight: 220, fontSize: 15, lineHeight: 1.6 }} />
     </Card>
     <div style={{ marginTop: 14 }}>
       <PhotoGallery photos={r.photos} onChange={(p) => set("photos", p)} idPrefix={`${site.id}-rapport`} />
@@ -4009,7 +4184,7 @@ function AnalyseHuilePanel({ eq, update, idPrefix }) {
                       {f.label}
                       {f.options ? (
                         <>
-                          <Combo value={v.fields[f.key]} onChange={(val) => setField(item.key, f.key, val)} options={f.options} listId={`${idPrefix}-${item.key}-${f.key}`} style={{ width: 130, padding: "5px 7px", fontSize: 12 }} />
+                          <Combo value={v.fields[f.key]} onChange={(val) => setField(item.key, f.key, val)} options={typeof f.options === "function" ? f.options(v.fields) || [] : f.options} listId={`${idPrefix}-${item.key}-${f.key}`} style={{ width: 130, padding: "5px 7px", fontSize: 12 }} />
                           {f.unit && <span>{f.unit}</span>}
                         </>
                       ) : f.unit ? (
@@ -4304,7 +4479,7 @@ function DynamicListPanel({ title, entries, onChange, typeOptions, fieldDefs, wi
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                   {(typeof fieldDefs === "function" ? fieldDefs(e.fields) : fieldDefs).map((f) =>
                     f.options ? (
-                      <MiniCombo key={f.key} label={f.label} options={f.options} value={e.fields[f.key]} onChange={(v) => setField(e.id, f.key, v)} listId={`${idPrefix}-${e.id}-${f.key}`} unit={f.unit} />
+                      <MiniCombo key={f.key} label={f.label} options={typeof f.options === "function" ? f.options(e.fields) || [] : f.options} value={e.fields[f.key]} onChange={(v) => setField(e.id, f.key, v)} listId={`${idPrefix}-${e.id}-${f.key}`} unit={f.unit} />
                     ) : (
                       <MiniInput key={f.key} label={f.label} unit={f.unit} value={e.fields[f.key]} onChange={(v) => setField(e.id, f.key, v)} />
                     )
@@ -5013,7 +5188,7 @@ function ParametrageRelaisPanel({ eq, update, idPrefix }) {
                   <MiniSelect label="État" options={LISTE_ETAT_SEUIL} value={s.fields.etat} onChange={(v) => setSeuilField(s.id, "etat", v)} />
                   {(ANSI_REGLAGE_FIELDS[ansiFamily(s.label)] || ANSI_REGLAGE_FIELDS_DEFAUT).map((f) =>
                     f.options ? (
-                      <MiniSelect key={f.key} label={f.label} options={f.options} value={s.fields[f.key]} onChange={(v) => setSeuilField(s.id, f.key, v)} />
+                      <MiniSelect key={f.key} label={f.label} options={typeof f.options === "function" ? f.options(s.fields) || [] : f.options} value={s.fields[f.key]} onChange={(v) => setSeuilField(s.id, f.key, v)} />
                     ) : (
                       <MiniInput key={f.key} label={f.label} unit={f.unit} value={s.fields[f.key]} onChange={(v) => setSeuilField(s.id, f.key, v)} />
                     )
@@ -5403,16 +5578,19 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 14 }}>
                 {schema.identification.map((f) => {
                   if (f.key === "rapportTPProtection" && eq.type !== "Comptage HTA") {
-                    const comptageAvecTP = allEquipements.find((e) => e.type === "Comptage HTA" && e.identification.rapportTPProtection && e.id !== eq.id);
+                    // Le rapport TP n'est plus dupliqué dans l'identification de Comptage HTA — il ne
+                    // vit que dans son contrôle détaillé désormais, d'où la lecture depuis controles.tp.
+                    const comptageAvecTP = allEquipements.find((e) => e.type === "Comptage HTA" && e.controles?.tp?.fields?.rapport && e.id !== eq.id);
+                    const rapportComptage = comptageAvecTP?.controles?.tp?.fields?.rapport;
                     return (
                       <Field key={f.key} label={f.label}>
                         <TextInput value={eq.identification[f.key] || ""} onChange={(e2) => setIdentification(f.key, e2.target.value)} placeholder="ex. 20000/100" />
-                        {comptageAvecTP && eq.identification[f.key] !== comptageAvecTP.identification.rapportTPProtection && (
+                        {rapportComptage && eq.identification[f.key] !== rapportComptage && (
                           <div
-                            onClick={() => setIdentification(f.key, comptageAvecTP.identification.rapportTPProtection)}
+                            onClick={() => setIdentification(f.key, rapportComptage)}
                             style={{ fontSize: 10.5, color: "#0A5DA8", marginTop: 4, cursor: "pointer" }}
                           >
-                            Reprendre {comptageAvecTP.identification.rapportTPProtection} depuis la cellule Comptage HTA ({comptageAvecTP.identification.repere || "sans repère"})
+                            Reprendre {rapportComptage} depuis la cellule Comptage HTA ({comptageAvecTP.identification.repere || "sans repère"})
                           </div>
                         )}
                       </Field>
@@ -5992,14 +6170,14 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
           })}
 
           <Card>
-            <div style={{ display: "grid", gridTemplateColumns: "200px 1fr", gap: 14, alignItems: "start" }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 18, width: "100%" }}>
               <Field label="Synthèse de l'état — à l'issue de la maintenance">
-                <Select value={eq.etatFinal} onChange={(e) => update({ ...eq, etatFinal: e.target.value })}>
+                <Select value={eq.etatFinal} onChange={(e) => update({ ...eq, etatFinal: e.target.value })} style={{ maxWidth: 320 }}>
                   {EQUIP_STATUSES.map((s) => <option key={s} value={s}>{agree(s, equipGender(eq.type), false)}</option>)}
                 </Select>
               </Field>
-              <div>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8, marginBottom: 6 }}>
+              <div style={{ width: "100%" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
                   <label style={{ fontSize: 11, fontWeight: 600, color: "#5B6B7D", letterSpacing: 0.5, textTransform: "uppercase" }}>Remarques et préconisations</label>
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                     <button
@@ -6021,7 +6199,7 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
                     </button>
                   </div>
                 </div>
-                <TextArea value={eq.remarques} onChange={(e) => update({ ...eq, remarques: e.target.value })} />
+                <TextArea value={eq.remarques} onChange={(e) => update({ ...eq, remarques: e.target.value })} rows={10} style={{ width: "100%", minHeight: 240, fontSize: 15, lineHeight: 1.6, boxSizing: "border-box" }} />
               </div>
             </div>
           </Card>
