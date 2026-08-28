@@ -1578,7 +1578,7 @@ function buildInterrupteurHTASchema({ avecRelais = false } = {}) {
       { key: "repere", label: "Repère / Nom de l'équipement" }, { key: "marque", label: "Marque", options: LISTE_MARQUE_CELLULE_HTA }, { key: "modele", label: "Modèle", options: LISTE_MODELE_CELLULE_HTA_OPTIONS },
       { key: "typeCellule", label: "Type de cellule", options: LISTE_TYPE_CELLULE["Interrupteur HTA"] }, { key: "numeroSerie", label: "Numéro de série" },
       { key: "presenceRelais", label: "Présence d'un relais de protection", options: ["Non", "Oui"] },
-      ...(avecRelais ? [{ key: "marqueTP", label: "Marque du TP" }, { key: "referenceTP", label: "Référence du TP" }, { key: "rapportTPProtection", label: "Rapport TP de protection", options: LISTE_RAPPORT_TP }, { key: "classeTP", label: "Classe de précision (TP)", options: LISTE_CLASSE_TP }] : []),
+      ...(avecRelais ? [{ key: "rapportTPProtection", label: "Rapport TP de protection", options: LISTE_RAPPORT_TP }] : []),
     ],
     sections: [
       { key: "mecaniques", title: "Contrôles mécaniques", items: [
@@ -1611,7 +1611,7 @@ function buildInterrupteurFusibleHTASchema({ avecRelais = false } = {}) {
       { key: "repere", label: "Repère / Nom de l'équipement" }, { key: "marque", label: "Marque", options: LISTE_MARQUE_CELLULE_HTA }, { key: "modele", label: "Modèle", options: LISTE_MODELE_CELLULE_HTA_OPTIONS },
       { key: "typeCellule", label: "Type de cellule", options: LISTE_TYPE_CELLULE["Interrupteur Fusible HTA"] }, { key: "numeroSerie", label: "Numéro de série" },
       { key: "presenceRelais", label: "Présence d'un relais de protection", options: ["Non", "Oui"] },
-      ...(avecRelais ? [{ key: "marqueTP", label: "Marque du TP" }, { key: "referenceTP", label: "Référence du TP" }, { key: "rapportTPProtection", label: "Rapport TP de protection", options: LISTE_RAPPORT_TP }, { key: "classeTP", label: "Classe de précision (TP)", options: LISTE_CLASSE_TP }] : []),
+      ...(avecRelais ? [{ key: "rapportTPProtection", label: "Rapport TP de protection", options: LISTE_RAPPORT_TP }] : []),
     ],
     sections: [
       { key: "mecaniques", title: "Contrôles mécaniques", items: [
@@ -1669,7 +1669,7 @@ const SCHEMAS = {
       { key: "typeCellule", label: "Type de cellule", options: LISTE_TYPE_CELLULE["Disjoncteur HTA"] }, { key: "numeroSerie", label: "Numéro de série" },
       { key: "referenceDisjoncteur", label: "Référence du disjoncteur", options: LISTE_REF_DISJONCTEUR }, { key: "numeroSerieDisjoncteur", label: "Numéro de série (disjoncteur)" },
       { key: "marqueRelais", label: "Marque du relais de protection", options: LISTE_MARQUE_RELAIS_HTA }, { key: "referenceRelais", label: "Référence du relais", options: LISTE_REFERENCE_RELAIS_HTA_OPTIONS }, { key: "numeroSerieRelais", label: "Numéro de série (relais)" },
-      { key: "marqueTP", label: "Marque du TP" }, { key: "referenceTP", label: "Référence du TP" }, { key: "rapportTPProtection", label: "Rapport TP de protection", options: LISTE_RAPPORT_TP }, { key: "classeTP", label: "Classe de précision (TP)", options: LISTE_CLASSE_TP },
+      { key: "rapportTPProtection", label: "Rapport TP de protection", options: LISTE_RAPPORT_TP },
     ],
     sections: [
       { key: "mecaniques", title: "Contrôles mécaniques", items: MECA_CELLULE },
@@ -1699,7 +1699,7 @@ const SCHEMAS = {
       { key: "typeCellule", label: "Type de cellule", options: LISTE_TYPE_CELLULE_CONTACTEUR_OPTIONS }, { key: "numeroSerie", label: "Numéro de série" },
       { key: "referenceContacteur", label: "Référence du contacteur", options: LISTE_REF_DISJONCTEUR }, { key: "numeroSerieContacteur", label: "Numéro de série (contacteur)" },
       { key: "marqueRelais", label: "Marque du relais de protection", options: LISTE_MARQUE_RELAIS_HTA }, { key: "referenceRelais", label: "Référence du relais", options: LISTE_REFERENCE_RELAIS_HTA_OPTIONS }, { key: "numeroSerieRelais", label: "Numéro de série (relais)" },
-      { key: "marqueTP", label: "Marque du TP" }, { key: "referenceTP", label: "Référence du TP" }, { key: "rapportTPProtection", label: "Rapport TP de protection", options: LISTE_RAPPORT_TP }, { key: "classeTP", label: "Classe de précision (TP)", options: LISTE_CLASSE_TP },
+      { key: "rapportTPProtection", label: "Rapport TP de protection", options: LISTE_RAPPORT_TP },
     ],
     sections: [
       { key: "mecaniques", title: "Contrôles mécaniques", items: MECA_CELLULE },
@@ -5754,10 +5754,13 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 14 }}>
                 {schema.identification.map((f) => {
                   if (f.key === "rapportTPProtection" && eq.type !== "Comptage HTA") {
-                    // Le rapport TP n'est plus dupliqué dans l'identification de Comptage HTA — il ne
-                    // vit que dans son contrôle détaillé désormais, d'où la lecture depuis controles.tp.
-                    const comptageAvecTP = allEquipements.find((e) => e.type === "Comptage HTA" && e.controles?.tp?.fields?.rapport && e.id !== eq.id);
-                    const rapportComptage = comptageAvecTP?.controles?.tp?.fields?.rapport;
+                    // Le rapport TP se lit en priorité depuis le contrôle détaillé de Comptage HTA
+                    // (emplacement actuel) — avec repli sur l'ancien champ d'identification pour les
+                    // équipements Comptage HTA créés avant la suppression du doublon, dont la donnée
+                    // peut être restée à l'ancien emplacement (champ retiré du formulaire, mais pas
+                    // effacé des données existantes).
+                    const comptageAvecTP = allEquipements.find((e) => e.type === "Comptage HTA" && (e.controles?.tp?.fields?.rapport || e.identification?.rapportTPProtection) && e.id !== eq.id);
+                    const rapportComptage = comptageAvecTP?.controles?.tp?.fields?.rapport || comptageAvecTP?.identification?.rapportTPProtection;
                     return (
                       <Field key={f.key} label={f.label}>
                         <TextInput value={eq.identification[f.key] || ""} onChange={(e2) => setIdentification(f.key, e2.target.value)} placeholder="ex. 20000/100" />
