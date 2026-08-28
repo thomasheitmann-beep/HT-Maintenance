@@ -322,16 +322,6 @@ const REFERENCE_FUSIBLE_CONSTRUCTEUR = {
     },
   },
 };
-// Propose la référence exacte quand marque Schneider + modèle + tension + calibre correspondent à
-// une entrée connue du catalogue — sinon ne propose rien plutôt que d'inventer une référence.
-function referenceFusibleConnue(modele, un, in_) {
-  const gamme = REFERENCE_FUSIBLE_CONSTRUCTEUR[modele];
-  if (!gamme) return null;
-  const parTension = gamme[String(un).trim()];
-  if (!parTension) return null;
-  const entree = parTension[String(in_).trim()];
-  return entree ? entree[0] : null;
-}
 // Résistance à froid de référence constructeur (mΩ, ± 10 % à 20 °C) — sert à calculer une tolérance
 // réelle, indépendante de la valeur mesurée sur site.
 function resistanceFroidConnue(modele, un, in_) {
@@ -341,6 +331,17 @@ function resistanceFroidConnue(modele, un, in_) {
   if (!parTension) return null;
   const entree = parTension[String(in_).trim()];
   return entree ? entree[1] : null;
+}
+// Toutes les références connues pour un modèle + tension donnés, triées par calibre croissant —
+// alimente la liste déroulante du champ Référence, plutôt qu'une simple suggestion au coup par coup.
+function referencesConnuesPourModeleTension(modele, un) {
+  const gamme = REFERENCE_FUSIBLE_CONSTRUCTEUR[modele];
+  if (!gamme) return [];
+  const parTension = gamme[String(un).trim()];
+  if (!parTension) return [];
+  return Object.entries(parTension)
+    .map(([in_, [ref, r]]) => ({ in: in_, reference: ref, resistance: r }))
+    .sort((a, b) => numOf(a.in) - numOf(b.in));
 }
 const LISTE_IN_FUSIBLE = ["4", "6.3", "10", "16", "20", "25", "31.5", "40", "50", "63", "80", "100", "125", "160", "200", "250"];
 const LISTE_UN_FUSIBLE = ["3.6", "7.2", "12", "17.5", "24", "36"];
@@ -595,7 +596,6 @@ function toleranceState(value, min, max) {
 const FUSIBLE_FIELDS = [
   F("fabricant", "Fabricant", null, LISTE_FABRICANT_FUSIBLE),
   F("modele", "Modèle", null, LISTE_MODELE_FUSIBLE_OPTIONS),
-  F("type", "Type", null, LISTE_TYPE_FUSIBLE),
   F("reference", "Référence"),
   F("in", "In", "A", LISTE_IN_FUSIBLE),
   F("un", "Un", "kV", LISTE_UN_FUSIBLE),
@@ -3737,26 +3737,41 @@ function ControlRow({ item, value, onChange, idPrefix }) {
                 {f.unit && <span>{f.unit}</span>}
               </label>
             ) : f.key === "reference" ? (
-              <label key={f.key} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#8B96A3" }}>
-                {f.label}
-                <input
-                  type="text"
-                  value={fields[f.key] ?? ""}
-                  onChange={(e) => setField(f.key, e.target.value)}
-                  style={{ ...inputStyle, width: 110, padding: "5px 7px", fontSize: 12 }}
-                />
-                {(() => {
-                  // Référence exacte connue (catalogue Schneider vérifié) — proposée seulement quand
-                  // marque/modèle/tension/calibre correspondent, jamais inventée pour les autres cas.
-                  const refConnue = referenceFusibleConnue(fields.modele, fields.un, fields.in);
-                  if (!refConnue || fields.reference === refConnue) return null;
+              (() => {
+                // Liste déroulante des références connues (catalogue constructeur vérifié) pour le
+                // modèle et la tension déjà choisis — sélectionner une référence renseigne aussi le
+                // calibre automatiquement. Retombe sur une saisie libre si rien n'est répertorié.
+                const refsConnues = referencesConnuesPourModeleTension(fields.modele, fields.un);
+                if (refsConnues.length > 0) {
                   return (
-                    <span onClick={() => setField("reference", refConnue)} style={{ fontSize: 10, color: "#0A5DA8", cursor: "pointer", whiteSpace: "nowrap" }}>
-                      ↳ {refConnue} (catalogue {fields.modele})
-                    </span>
+                    <label key={f.key} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#8B96A3" }}>
+                      {f.label}
+                      <select
+                        value={refsConnues.some((r) => r.reference === fields.reference) ? fields.reference : ""}
+                        onChange={(e) => {
+                          const choisie = refsConnues.find((r) => r.reference === e.target.value);
+                          if (choisie) { setField("reference", choisie.reference); setField("in", choisie.in); }
+                        }}
+                        style={{ ...inputStyle, width: 190, padding: "5px 7px", fontSize: 12 }}
+                      >
+                        <option value="">— choisir —</option>
+                        {refsConnues.map((r) => <option key={r.reference} value={r.reference}>{r.in}A — {r.reference}</option>)}
+                      </select>
+                    </label>
                   );
-                })()}
-              </label>
+                }
+                return (
+                  <label key={f.key} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#8B96A3" }}>
+                    {f.label}
+                    <input
+                      type="text"
+                      value={fields[f.key] ?? ""}
+                      onChange={(e) => setField(f.key, e.target.value)}
+                      style={{ ...inputStyle, width: 110, padding: "5px 7px", fontSize: 12 }}
+                    />
+                  </label>
+                );
+              })()
             ) : (
               <label key={f.key} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#8B96A3" }}>
                 {f.label}
