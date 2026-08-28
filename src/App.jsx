@@ -652,7 +652,18 @@ const MESURE_ISOLEMENT_CELLULE = [
   C("hta_terre", "HTA - Terre", [F("v", "Tension", null, TENSION_ISOLEMENT), F("valeur", "Valeur"), F("unite", "Unité", null, UNITE_ISOLEMENT)]),
   C("entre_phases", "Entre phases", [F("v", "Tension", null, TENSION_ISOLEMENT), F("valeur", "Valeur"), F("unite", "Unité", null, UNITE_ISOLEMENT)]),
 ];
-const ORGANES_FIELDS = [{ key: "reference", label: "Référence" }, { key: "tension", label: "Tension", options: LISTE_TENSION_ORGANES }, { key: "type", label: "Type", options: LISTE_TYPE_ORGANES }];
+// Modèles de pièces internes (bobines, moteurs...) par marque — vide pour l'instant : contrairement
+// aux fusibles (marché standardisé, catalogues publics dédiés), ces pièces sont propres à chaque
+// fabricant de cellule/disjoncteur (pièces détachées), sans catalogue de référence public unique.
+// À compléter avec de vraies données constructeur si disponibles (ex. catalogue pièces détachées
+// SM6, UniSec...), plutôt que d'inventer des références.
+const MARQUE_MODELE_ORGANE = {};
+const LISTE_MODELE_ORGANE_OPTIONS = optionsParChamp("marque", MARQUE_MODELE_ORGANE, null);
+const ORGANES_FIELDS = [
+  { key: "marque", label: "Marque", options: LISTE_MARQUE_CELLULE_HTA },
+  { key: "modele", label: "Modèle", options: LISTE_MODELE_ORGANE_OPTIONS },
+  { key: "reference", label: "Référence" }, { key: "tension", label: "Tension", options: LISTE_TENSION_ORGANES }, { key: "type", label: "Type", options: LISTE_TYPE_ORGANES },
+];
 const LISTE_TYPE_ORGANE_DYNAMIQUE = ["Bobine à manque", "Bobine Mitop", "Déclencheur voltmétrique", "Moteur", "Bobine de fermeture", "Bobine d'ouverture", "Bouton poussoir", "Contact auxiliaire"];
 const LISTE_TC_FONCTION = ["Protection", "Mesure", "Protection / Mesure", "Homopolaire (terre)"];
 const LISTE_TC_SECONDAIRE = ["1", "5"];
@@ -711,13 +722,16 @@ function TC_FIELDS_DYNAMIC(fieldsCourants) {
   const classeOptions = fonction === "Protection" ? LISTE_CLASSE_TC_PROTECTION : fonction === "Mesure" ? LISTE_CLASSE_TC_MESURE : LISTE_CLASSE_TC_TOUTES;
   const base = [
     F("fonction", "Fonction", null, LISTE_TC_FONCTION),
-    F("marque", "Marque", null, LISTE_MARQUE_TC), F("modele", "Modèle", null, LISTE_MODELE_TC_OPTIONS),
+    F("marque", "Marque", null, LISTE_MARQUE_TC),
+    ...(estTore ? [] : [F("modele", "Modèle", null, LISTE_MODELE_TC_OPTIONS)]),
     F("type", "Type", null, LISTE_TYPE_TC), F("couplage", "Couplage (bornes)", null, LISTE_COUPLAGE_TC), F("puissance", "Puissance", "VA", LISTE_PUISSANCE_TC),
     F("tensionAssignee", "Tension assignée", "kV", LISTE_TENSION_ASSIGNEE_HTA),
     F("classe", estDouble ? "Classe (protection)" : "Classe", null, classeOptions),
     F("rapportPrimaire", "Rapport primaire", null, estTore ? LISTE_RAPPORT_PRIMAIRE_TORE : LISTE_RAPPORT_PRIMAIRE_TC), F("secondaire", "Secondaire", "A", LISTE_TC_SECONDAIRE),
   ];
-  if (estTore) base.splice(1, 0, F("modeleTore", "Modèle (tore homopolaire)", null, LISTE_MODELE_TORE_HOMOPOLAIRE));
+  // Pour un tore homopolaire, le "modèle" générique lié à la marque n'a pas de sens — seule la
+  // référence du tore (diamètre) compte, d'où un unique champ "Modèle" (plus de doublon de libellé).
+  if (estTore) base.splice(2, 0, F("modeleTore", "Modèle", null, LISTE_MODELE_TORE_HOMOPOLAIRE));
   if (estDouble) {
     base.push(
       F("classe2", "Classe (mesure)", null, LISTE_CLASSE_TC_MESURE),
@@ -3758,7 +3772,10 @@ function ControlRow({ item, value, onChange, idPrefix }) {
                         value={refsConnues.some((r) => r.reference === fields.reference) ? fields.reference : ""}
                         onChange={(e) => {
                           const choisie = refsConnues.find((r) => r.reference === e.target.value);
-                          if (choisie) { setField("reference", choisie.reference); setField("in", choisie.in); }
+                          // Une seule mise à jour combinée (pas deux setField successifs) : setField
+                          // capture "fields" au moment du rendu, donc un second appel écraserait le
+                          // premier en repartant du même état non rafraîchi.
+                          if (choisie) onChange({ ...value, fields: { ...fields, reference: choisie.reference, in: choisie.in } });
                         }}
                         style={{ ...inputStyle, width: 190, padding: "5px 7px", fontSize: 12 }}
                       >
