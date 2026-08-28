@@ -1028,7 +1028,15 @@ const ANSI_REGLAGE_FIELDS_DEFAUT = ANSI_REGLAGE_FIELDS["50"];
 //  - fréquence/angle (Hz, Hz/s, °) : mesure directe, pas de transformation — injection = réglage
 //  - autres grandeurs (%, kW, min…) : pas d'équivalent secondaire simple, aucune aide affichée.
 function ratioTransformation(rapport) {
-  const m = String(rapport || "").match(/^\s*([\d.,]+)\s*\/\s*([\d.,]+)\s*$/);
+  const s = String(rapport || "").trim();
+  // Format à 3 parties "primaire/secondaire/√3" (TP en étoile, secondaire réel = secondaire/√3) —
+  // sans cette gestion spécifique, les rapports du type "20000/100/√3" ne se calculaient jamais.
+  const m3 = s.match(/^([\d.,]+)\s*\/\s*([\d.,]+)\s*\/\s*√?\s*3\s*$/);
+  if (m3) {
+    const primaire = parseFloat(m3[1].replace(",", ".")), secondaireBase = parseFloat(m3[2].replace(",", "."));
+    return primaire && secondaireBase ? (secondaireBase / Math.sqrt(3)) / primaire : null;
+  }
+  const m = s.match(/^\s*([\d.,]+)\s*\/\s*([\d.,]+)\s*$/);
   if (!m) return null;
   const primaire = parseFloat(m[1].replace(",", ".")), secondaire = parseFloat(m[2].replace(",", "."));
   return primaire && secondaire ? secondaire / primaire : null;
@@ -3769,6 +3777,9 @@ function ControlRow({ item, value, onChange, idPrefix }) {
                       onChange={(e) => setField(f.key, e.target.value)}
                       style={{ ...inputStyle, width: 110, padding: "5px 7px", fontSize: 12 }}
                     />
+                    {fields.modele && REFERENCE_FUSIBLE_CONSTRUCTEUR[fields.modele] && !fields.un && (
+                      <span style={{ fontSize: 10, color: "#B5730A", whiteSpace: "nowrap" }}>renseignez Un pour la liste</span>
+                    )}
                   </label>
                 );
               })()
