@@ -1533,6 +1533,13 @@ function buildInverseurSchema({ source1Mono = false, source2Mono = false, utilis
     ],
   };
 }
+// Actions possibles suite au déclenchement d'un relais de protection transformateur — les 4
+// dernières options couvrent les cas où le relais informe sans forcément couper (report à
+// distance, ventilation forcée), en plus des actions de coupure déjà existantes.
+const ACTIONS_RELAIS_TRANSFORMATEUR = [
+  "Sans action du relais", "Mise hors tension", "Mise hors charge", "Mise hors tension et hors charge",
+  "Voyant lumineux", "Alarme", "Report GTC", "Mise en route ventilation", "SANS OBJET",
+];
 function buildTransformateurSchema({ sec = false } = {}) {
   return {
     identification: [
@@ -1567,13 +1574,15 @@ function buildTransformateurSchema({ sec = false } = {}) {
         C("verrouillage_cle", "Vérification du système de verrouillage à clé"),
       ]},
       { key: "relais_protection", title: "Contrôle du relais de protection", items: [
-        C("type_relais", "Type", [F("valeur", "Sélection", null, sec ? ["Sonde PT100", "PTC", "AUTRE"] : ["DGPT2", "DMCR", "BUCHHOLZ", "AUTRE", "MSF 220 VU (ZIEHL)", "MSF 220 K (ZIEHL)", "MSF 220 SE (ZIEHL)", "MSF 220 V (ZIEHL)", "C512 - C513 (ABB)"])]),
+        C("type_relais", "Type", [F("valeur", "Sélection", null, sec
+          ? ["Sonde PT100", "PTC", "Ziehl TR250", "Ziehl TR440", "Ziehl TR600", "Ziehl-Abegg TS1000", "Schneider MB103", "AUTRE"]
+          : ["DGPT2", "DMCR", "BUCHHOLZ", "AUTRE", "MSF 220 VU (ZIEHL)", "MSF 220 K (ZIEHL)", "MSF 220 SE (ZIEHL)", "MSF 220 V (ZIEHL)", "C512 - C513 (ABB)"])]),
         ...(sec ? [] : [
-          C("test_degagements_gazeux", "Test dégagements gazeux", [], ["Sans action du relais", "Mise hors tension", "Mise hors charge", "Mise hors tension et hors charge", "SANS OBJET"]),
-          C("test_pression_excessive", "Test pression excessive", [F("valeur", "Valeur", "Bars")], ["Sans action du relais", "Mise hors tension", "Mise hors charge", "Mise hors tension et hors charge", "SANS OBJET"]),
+          C("test_degagements_gazeux", "Test dégagements gazeux", [], ACTIONS_RELAIS_TRANSFORMATEUR),
+          C("test_pression_excessive", "Test pression excessive", [F("valeur", "Valeur", "Bars")], ACTIONS_RELAIS_TRANSFORMATEUR),
         ]),
-        C("test_defaut_temp_t1", "Test défaut temp T1", [F("valeur", "Valeur", "°C")], ["Sans action du relais", "Mise hors tension", "Mise hors charge", "Mise hors tension et hors charge", "SANS OBJET"]),
-        C("test_defaut_temp_t2", "Test défaut temp T2", [F("valeur", "Valeur", "°C")], ["Sans action du relais", "Mise hors tension", "Mise hors charge", "Mise hors tension et hors charge", "SANS OBJET"]),
+        C("test_defaut_temp_t1", "Test défaut temp T1", [F("valeur", "Valeur", "°C")], ACTIONS_RELAIS_TRANSFORMATEUR),
+        C("test_defaut_temp_t2", "Test défaut temp T2", [F("valeur", "Valeur", "°C")], ACTIONS_RELAIS_TRANSFORMATEUR),
       ]},
       { key: "rapport_transformation", title: "Rapport de transformation", items: [
         C("rapport_par_phase", "Rapport par phase (mesuré)", [F("l1", "L1"), F("l2", "L2"), F("l3", "L3")]),
