@@ -1769,6 +1769,7 @@ const SCHEMAS = {
         C("connexions_puissance", "Contrôle des connexions de puissance"),
         C("nettoyage_general", "Nettoyage général externe et interne"),
         C("contact_puissances", "Contact de puissances"),
+        C("chambres_coupure", "Contrôle des chambres de coupure (à contrôle mécanique)"),
       ]},
       { key: "electriques", title: "Contrôles électriques", items: [
         C("contacts_auxiliaires", "Contacts auxiliaires"),
@@ -1788,7 +1789,7 @@ const SCHEMAS = {
         S("pouvoir_coupure", "Pouvoir de coupure", [F("icu", "Icu", "kA")]),
       ]},
       { key: "tests_disjoncteur", title: "Tests du disjoncteur", items: [
-        C("test_surcharge_longue", "Surcharge longue", [F("test_a", "Test à", "x Ir"), F("tr_max", "Tr max attendu", "x Ir"), F("declenchement", "Déclenchement", "s")]),
+        C("test_surcharge_longue", "Surcharge longue", [F("test_a", "Test à", "x Ir"), F("tr_max", "Tr max attendu", "s"), F("declenchement", "Déclenchement", "s")]),
         C("test_cc_temporise", "Court-circuit temporisé", [F("test_a", "Test à", "x Im"), F("declenchement_t0", "Déclenchement à T=0", "ms"), F("declenchement_treg", "Déclenchement à T réglé", "ms")]),
         C("test_instantane", "Instantané", [F("valise_str", "Valise STR", "mA"), F("declenchement", "Déclenchement", "ms")]),
       ]},
@@ -1842,6 +1843,45 @@ const SCHEMAS = {
         C("tension_interfaciale", "Tension interfaciale", [F("valeur", "Valeur", "mN/m")]),
         C("facteur_dissipation", "Facteur de dissipation (tan δ)", [F("valeur", "Valeur", "%")]),
         C("analyse_gaz_dissous", "Analyse des gaz dissous (DGA)", [F("conclusion", "Conclusion", null, LISTE_CONCLUSION_DGA)]),
+        C("point_eclair", "Point d'éclair", [F("valeur", "Valeur", "°C")]),
+        C("aspect_couleur", "Aspect / Couleur", [F("valeur", "Valeur", null, ["Clair et limpide", "Trouble", "Présence de particules", "Coloration anormale"])]),
+        C("teneur_pcb", "Teneur en PCB (pyralène)", [
+          F("valeur", "Valeur", "ppm"),
+          {
+            key: "statutReglementaire", label: "Statut réglementaire", longText: true,
+            compute: (f) => {
+              const v = numOf(f.valeur);
+              if (v === null) return "";
+              if (v < 50) return "Non PCB (< 50 ppm) — aucune déclaration requise (Décret n°87-59 modifié par le décret n°2001-63).";
+              if (v < 500) return "⚠ PCB (50 à 500 ppm) — déclaration obligatoire en préfecture, étiquetage « contamination en PCB < 500 ppm », élimination à prévoir en fin de vie de l'appareil (Décret n°2001-63 du 18/01/2001).";
+              return "⚠ Appareil PCB (≥ 500 ppm) — décontamination ou élimination obligatoire, déclaration immédiate en préfecture (Décret n°87-59 modifié par le n°2001-63 — échéance réglementaire du 31/12/2010 déjà dépassée).";
+            },
+          },
+        ]),
+        // Dérivés furaniques (2-FAL) — méthode normalisée IEC 61198, indicateur de dégradation du
+        // papier isolant (cellulose). Contrairement au PCB, il n'existe pas de seuil réglementaire
+        // légal : les repères ci-dessous sont des repères d'interprétation courants de la pratique
+        // industrielle (CIGRE / littérature technique), pas une obligation légale.
+        C("teneur_furanes", "Teneur en furanes (dérivés furaniques, 2-FAL)", [
+          F("valeur", "Valeur (2-FAL)", "ppm"),
+          {
+            key: "interpretation", label: "État indicatif du papier isolant (repère non réglementaire)", longText: true,
+            compute: (f) => {
+              const v = numOf(f.valeur);
+              if (v === null) return "";
+              if (v < 0.1) return "Papier isolant en bon état (< 0,1 ppm) — dégradation cellulosique négligeable. Repère indicatif (IEC 61198 pour la méthode de mesure), pas de seuil réglementaire.";
+              if (v < 1) return "Dégradation normale, liée au vieillissement (0,1 à 1 ppm) — surveillance de routine. Repère indicatif, pas de seuil réglementaire.";
+              if (v < 4) return "⚠ Dégradation avancée du papier isolant (1 à 4 ppm) — DP estimé en baisse significative, surveillance rapprochée recommandée. Repère indicatif, pas de seuil réglementaire.";
+              return "⚠ Dégradation très avancée / fin de vie probable du papier isolant (≥ 4 ppm) — risque de fragilisation mécanique de l'isolement, expertise approfondie recommandée. Repère indicatif, pas de seuil réglementaire.";
+            },
+          },
+        ]),
+        C("indice_couleur", "Indice de couleur (ASTM D1500)", [F("valeur", "Valeur", null, ["L 0.5", "L 1.0", "L 1.5", "L 2.0", "L 2.5", "L 3.0", "L 3.5", "L 4.0", "L 4.5", "L 5.0", "L 5.5", "L 6.0", "L 6.5", "L 7.0", "L 8.0"])]),
+        // Comptage de particules — norme ISO 4406:2021, code à 3 chiffres (particules ≥4µm / ≥6µm /
+        // ≥14µm par mL). Pas de seuil d'acceptabilité universel trouvé spécifique à l'huile de
+        // transformateur HTA (norme surtout établie pour les fluides hydrauliques) — relevé simple,
+        // sans interprétation automatique inventée.
+        C("comptage_particules", "Comptage de particules (ISO 4406)", [F("code", "Code ISO 4406 (ex. 18/16/13)")]),
       ]},
     ],
   },
@@ -5600,7 +5640,7 @@ function BRKReglagePanel({ eq, update, custom, onAddCustom, onChangeCustom, onRe
             <MiniSelect label="Im fonction de" options={["Ir", "In"]} value={cc.im_fonction_de || "Ir"} onChange={(v) => setR("cc_temporise", "im_fonction_de", v)} />
             <MiniInput label="K" value={cc.k} onChange={(v) => setR("cc_temporise", "k", v)} />
             <MiniInput label="tsd" unit="ms" value={cc.tsd} onChange={(v) => setR("cc_temporise", "tsd", v)} />
-            <MiniInput label="I²t" value={cc.i2t} onChange={(v) => setR("cc_temporise", "i2t", v)} />
+            <MiniSelect label="I²t" options={["ON", "OFF"]} value={cc.i2t} onChange={(v) => setR("cc_temporise", "i2t", v)} />
             <MiniComputed label="Im (calculé)" unit="A" value={Im || null} />
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "8px 0", borderBottom: "1px solid #E2E6EB" }}>
@@ -5620,7 +5660,7 @@ function BRKReglagePanel({ eq, update, custom, onAddCustom, onChangeCustom, onRe
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "8px 0", borderBottom: "1px solid #E2E6EB" }}>
             <span style={{ fontSize: 12.5, color: "#3E4A5C", flex: "1 1 160px" }}>Surcharge longue</span>
             <MiniInput label="Test à" unit="x Ir" value={tSL.test_a} onChange={(v) => setT("test_surcharge_longue", "test_a", v)} />
-            <MiniInput label="Tr max attendu" unit="x Ir" value={tSL.tr_max} onChange={(v) => setT("test_surcharge_longue", "tr_max", v)} />
+            <MiniInput label="Tr max attendu" unit="s" value={tSL.tr_max} onChange={(v) => setT("test_surcharge_longue", "tr_max", v)} />
             <MiniComputed label="Valise STR" unit="mA" value={valiseSTR_SL} />
             <MiniComputed label="Valise IS" unit="A" value={valiseIS_SL} />
             <MiniInput label="Déclenchement" unit="s" value={tSL.declenchement} onChange={(v) => setT("test_surcharge_longue", "declenchement", v)} />
