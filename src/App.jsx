@@ -3758,9 +3758,22 @@ function ControlRow({ item, value, onChange, idPrefix }) {
   const MESURE_KEYS = ["l1", "l2", "l3", "rd", "n"];
   function fieldValidState(key) {
     if (tolMinField && tolMinField.unitFrom === key) return toleranceState(fields[key], computedMin, computedMax);
+    // L1/L2/L3 mesurent la même grandeur que le champ "unitFrom" (ex. la résistance d'un fusible),
+    // juste par phase plutôt qu'en une seule valeur — elles doivent être comparées à la même
+    // tolérance calculée, pas seulement le champ principal.
+    if (tolMinField && MESURE_KEYS.includes(key)) return toleranceState(fields[key], computedMin, computedMax);
     if (MESURE_KEYS.includes(key) && hasToleranceField) return toleranceState(fields[key], null, toleranceMax);
     return null;
   }
+  // Une mesure hors tolérance doit faire remonter l'état automatiquement — sinon la couleur rouge
+  // du champ n'a pas d'effet concret sur la synthèse/le rapport si le technicien ne pense pas à
+  // changer le menu déroulant lui-même. Ne fait remonter QUE depuis "Conforme" (jamais de
+  // rétrogradation automatique d'un état plus sévère choisi volontairement).
+  const uneMesureHorsTolerance = (item.fields || []).some((f) => fieldValidState(f.key) === "bad");
+  useEffect(() => {
+    if (uneMesureHorsTolerance && value.etat === "Conforme") onChange({ ...value, etat: "Dégradé" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [uneMesureHorsTolerance, value.etat]);
   return (
     <div style={{ padding: "10px 0", borderBottom: "1px solid #E2E6EB" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
@@ -9615,11 +9628,21 @@ async function generateSiteDocx(site, allSites) {
     ["Environnement", [site.rapport.environnementEtat, site.rapport.environnementRemarque].filter(Boolean).join(" — ")],
     ["Fonctionnement de l'installation", [site.rapport.fonctionnementEtat, site.rapport.fonctionnementRemarque].filter(Boolean).join(" — ")],
   ];
-  const locauxRows = (site.locaux || []).map((l) => [
-    l.nom || "Local sans nom",
-    [l.typeDePoste && `Type de poste : ${l.typeDePoste}`, l.regimeNeutre && `Régime de neutre : ${l.regimeNeutre}`, l.marque && `Marque : ${l.marque}`, l.anneeMiseEnService && `Mise en service : ${l.anneeMiseEnService}`].filter(Boolean).join(" · "),
-  ]);
-  const locauxTable = locauxRows.length ? docxFieldTable(locauxRows) : null;
+  const locauxRows = (site.locaux || []).map((l) => ({
+    nom: l.nom || "Local sans nom",
+    resume: [l.typeDePoste && `Type de poste : ${l.typeDePoste}`, l.regimeNeutre && `Régime de neutre : ${l.regimeNeutre}`, l.marque && `Marque : ${l.marque}`, l.anneeMiseEnService && `Mise en service : ${l.anneeMiseEnService}`].filter(Boolean).join(" · "),
+    definition: l.regimeNeutre ? REGIME_NEUTRE_DESCRIPTIONS[l.regimeNeutre] : null,
+  }));
+  const locauxTable = locauxRows.length && locauxRows.some((l) => l.resume) ? new DOCX.Table({
+    width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: [3400, 6200],
+    rows: locauxRows.filter((l) => l.resume).map((l) => new DOCX.TableRow({ children: [
+      new DOCX.TableCell({ width: { size: 3400, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_LIGHT }, children: [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: l.nom, size: 18, color: "555555" })] })] }),
+      new DOCX.TableCell({ width: { size: 6200, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, children: [
+        new DOCX.Paragraph({ spacing: { after: l.definition ? 40 : 0 }, children: [new DOCX.TextRun({ text: l.resume, size: 18, bold: true, color: DOCX_DARK })] }),
+        ...(l.definition ? [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: l.definition, size: 15, italics: true, color: "666666" })] })] : []),
+      ]}),
+    ]})),
+  }) : null;
 
   const children = [...docxCoverPage(site), headerTable, docxSpacer(160)];
   if (syntheseTable) {
