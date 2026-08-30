@@ -67,6 +67,30 @@ const REGIME_NEUTRE_DESCRIPTIONS = {
   "TN-C-S (BT)": "Combine TN-C en amont (conducteur PEN commun) et TN-S en aval (neutre N et protection PE séparés) — la séparation PEN→N+PE ne doit jamais être inversée.",
   "IT (BT)": "Neutre isolé de la terre (ou via forte impédance) ; masses reliées à la terre — un premier défaut n'entraîne pas de coupure, surveillé par un contrôleur permanent d'isolement (CPI).",
 };
+// Codes IP courants sur l'appareillage HTA/BT (cellules, coffrets, armoires) — CEI 60529.
+const LISTE_INDICE_PROTECTION = ["IP2X", "IP3X", "IP4X", "IPXXB", "IPXXC", "IPXXD", "IP20", "IP21", "IP23", "IP30", "IP31", "IP40", "IP44", "IP54", "IP55", "IP65", "IP66", "IP67", "IP68"];
+const IP_DESCRIPTION_1ER_CHIFFRE = {
+  "0": "aucune protection", "1": "protégé contre les corps solides ≥ 50 mm (contact du dos de la main)",
+  "2": "protégé contre les corps solides ≥ 12,5 mm (contact du doigt)", "3": "protégé contre les corps solides ≥ 2,5 mm (outil)",
+  "4": "protégé contre les corps solides ≥ 1 mm (fil)", "5": "protégé contre les poussières (dépôt sans nuire au fonctionnement)",
+  "6": "totalement étanche aux poussières", "X": "protection contre les corps solides non spécifiée",
+};
+const IP_DESCRIPTION_2E_CHIFFRE = {
+  "0": "aucune protection", "1": "protégé contre les chutes d'eau verticales", "2": "protégé contre les chutes d'eau jusqu'à 15° de la verticale",
+  "3": "protégé contre l'aspersion d'eau", "4": "protégé contre les projections d'eau", "5": "protégé contre les jets d'eau",
+  "6": "protégé contre les jets d'eau puissants", "7": "protégé contre l'immersion temporaire (jusqu'à 1 m, 30 min)",
+  "8": "protégé contre l'immersion prolongée", "9": "protégé contre les jets d'eau chaude haute pression (nettoyage)", "X": "protection contre les liquides non spécifiée",
+};
+const IP_DESCRIPTION_LETTRE_ACCES = { "A": "protection contre l'accès au dos de la main", "B": "protection contre l'accès du doigt", "C": "protection contre l'accès d'un outil (Ø 2,5 mm)", "D": "protection contre l'accès d'un fil (Ø 1 mm)" };
+// Décode n'importe quel code IP valide (ex. "IP54", "IP2X", "IPXXB") plutôt qu'une liste figée par
+// code exact — couvre toute combinaison, y compris une saisie libre non présente dans la liste.
+function descriptionIP(code) {
+  const m = String(code || "").trim().toUpperCase().match(/^IP\s*([0-6X])([0-9X])([A-D]?)$/);
+  if (!m) return null;
+  const [, c1, c2, lettre] = m;
+  const parties = [IP_DESCRIPTION_1ER_CHIFFRE[c1] && `1er chiffre (${c1}) : ${IP_DESCRIPTION_1ER_CHIFFRE[c1]}`, IP_DESCRIPTION_2E_CHIFFRE[c2] && `2e chiffre (${c2}) : ${IP_DESCRIPTION_2E_CHIFFRE[c2]}`, lettre && IP_DESCRIPTION_LETTRE_ACCES[lettre] && `lettre additionnelle (${lettre}) : ${IP_DESCRIPTION_LETTRE_ACCES[lettre]}`].filter(Boolean);
+  return parties.length ? parties.join(" · ") : null;
+}
 const REMARQUE_STANDARD_EQUIPEMENT = "Équipement contrôlé, en bon état de fonctionnement. Aucune anomalie relevée lors de cette intervention.";
 const REMARQUE_STANDARD_INSTALLATION = "Installation en bon état général. Aucune anomalie majeure relevée lors de cette intervention.";
 const LISTE_MARQUES = ["ABB", "AREVA", "ALSTOM", "ALSTHOM", "BBC", "CALOR EMAG", "CEM GARDY", "DELLE", "EATON", "EIB", "FELTEN et GUILLAUME", "MAGRINI GALILEO", "MERLIN GERIN", "ORMAZABAL", "POMMIER", "SCHNEIDER ELECTRIC", "SIEMENS"];
@@ -574,6 +598,24 @@ const LISTE_TYPE_MESURE_ISOLEMENT = ["Standard (lecture instantanée)", "PI (Ind
 const UNITE_ISOLEMENT = ["GΩ", "MΩ", "Ω"];
 
 const L1L2L3 = (unit) => [F("l1", "L1", unit), F("l2", "L2", unit), F("l3", "L3", unit)];
+// Tolérance d'écart entre phases pour la résistance d'enroulement — pas de valeur théorique unique
+// à comparer (contrairement au rapport de transformation), donc auto-référencée : ±2 % autour de
+// la moyenne des 3 phases déjà mesurées. Seuil issu de la pratique courante des essais de
+// résistance d'enroulement (transformateurs ≥ 1,6 MVA) — pas une clause IEC unique et universelle,
+// à la différence du ±0,5 % du rapport de transformation (CEI 60076-1).
+function L1L2L3AvecToleranceEcart(unit, pourcentage = 2) {
+  const moyenneEtEcart = (sens) => (f) => {
+    const vals = [numOf(f.l1), numOf(f.l2), numOf(f.l3)].filter((v) => v !== null);
+    if (vals.length < 2) return ""; // pas assez de phases saisies pour un écart significatif
+    const moyenne = vals.reduce((a, b) => a + b, 0) / vals.length;
+    return Math.round(moyenne * (1 + (sens * pourcentage) / 100) * 1000) / 1000;
+  };
+  return [
+    ...L1L2L3(unit),
+    { key: "tol_min", label: `Tolérance min (écart inter-phases ≤ ${pourcentage}%)`, unit, unitFrom: "l1", compute: moyenneEtEcart(-1) },
+    { key: "tol_max", label: `Tolérance max (écart inter-phases ≤ ${pourcentage}%)`, unit, unitFrom: "l1", compute: moyenneEtEcart(1) },
+  ];
+}
 
 // Convertit la virgule décimale française en point avant analyse — sans ça, parseFloat interprète
 // "0,94" comme 0 (s'arrête à la virgule) et ",93" comme NaN, ce qui cassait silencieusement tout
@@ -1540,6 +1582,38 @@ const ACTIONS_RELAIS_TRANSFORMATEUR = [
   "Sans action du relais", "Mise hors tension", "Mise hors charge", "Mise hors tension et hors charge",
   "Voyant lumineux", "Alarme", "Report GTC", "Mise en route ventilation", "SANS OBJET",
 ];
+// Convertit une valeur de résistance d'isolement vers les MΩ, quelle que soit l'unité choisie
+// (Ω/MΩ/GΩ) — indispensable avant de comparer à un seuil, sous peine de comparer des grandeurs
+// incompatibles entre elles.
+function versMegaohms(valeur, unite) {
+  const v = numOf(valeur);
+  if (v === null) return null;
+  if (unite === "GΩ") return v * 1000;
+  if (unite === "Ω") return v / 1_000_000;
+  return v; // MΩ par défaut
+}
+function isolementFields() {
+  return [
+    F("typeMesure", "Type de mesure", null, LISTE_TYPE_MESURE_ISOLEMENT), F("v", "Tension d'injection", null, TENSION_ISOLEMENT),
+    F("valeur", "Valeur"), F("unite", "Unité", null, UNITE_ISOLEMENT),
+    // Seuil indicatif — règle largement citée (guide IEEE sur les machines tournantes, pratique
+    // NETA) : résistance d'isolement minimale ≈ 1 MΩ par kV de tension d'essai. Ce n'est pas une
+    // clause IEC unique et universelle pour les transformateurs (NETA propose des tables plus
+    // précises selon huile/sec et plage de tension) — repère indicatif, pas une obligation légale.
+    {
+      key: "seuilIndicatif", label: "Seuil indicatif (repère non réglementaire — règle 1 MΩ/kV)", longText: true,
+      compute: (f) => {
+        const vInjection = numOf(f.v);
+        const mesureMO = versMegaohms(f.valeur, f.unite);
+        if (vInjection === null || mesureMO === null) return "";
+        const seuilMO = vInjection / 1000; // 1 MΩ par kV de tension d'essai
+        if (mesureMO < seuilMO) return `⚠ ${mesureMO} MΩ mesurés, en dessous du repère indicatif de ${Math.round(seuilMO * 100) / 100} MΩ (règle 1 MΩ/kV pour ${vInjection} V d'essai) — isolement à surveiller. Repère indicatif, pas de seuil réglementaire unique pour les transformateurs.`;
+        return `${mesureMO} MΩ mesurés, au-dessus du repère indicatif de ${Math.round(seuilMO * 100) / 100} MΩ (règle 1 MΩ/kV pour ${vInjection} V d'essai). Repère indicatif, pas de seuil réglementaire unique pour les transformateurs.`;
+      },
+    },
+    F("pi", "PI (10/1min)"), F("dar", "DAR (60/10sec)"),
+  ];
+}
 function buildTransformateurSchema({ sec = false } = {}) {
   return {
     identification: [
@@ -1557,7 +1631,10 @@ function buildTransformateurSchema({ sec = false } = {}) {
       { key: "environnement", title: "Contrôles environnements", items: [
         C("integrite_enveloppe", "Intégrité de l'enveloppe de protection"),
         C("proprete_transfo", "Propreté du transformateur"),
-        C("indice_protection", "Indice de protection", [F("ip", "IP")]),
+        C("indice_protection", "Indice de protection", [
+          F("ip", "IP", null, LISTE_INDICE_PROTECTION),
+          { key: "description", label: "Signification du code sélectionné", longText: true, compute: (f) => descriptionIP(f.ip) || "" },
+        ]),
         C("mises_terre", "Mises à la terre de l'enveloppe de protection", [F("resistance", "Résistance terre-enveloppe")]),
         C("barrettes_commutation", "Barrettes de commutation", [F("plot_reglage", "Plot de réglage entre"), F("valeur_tension", "Valeur de tension", "V")]),
         C("raccordement_cables", "Raccordement des câbles HT et BT"),
@@ -1591,13 +1668,13 @@ function buildTransformateurSchema({ sec = false } = {}) {
         // entre phases, contrairement à l'isolement) — un écart > 2 % entre phases indique une
         // anomalie (connexion desserrée, spire en court-circuit). La température relevée permet de
         // corriger et comparer les valeurs d'une visite à l'autre (résistance du cuivre ≈ +0,4 %/°C).
-        C("resistance_enroulements_primaire", "Résistance des enroulements — Primaire", [...L1L2L3("mΩ"), F("temperature", "Température enroulement", "°C")]),
-        C("resistance_enroulements_secondaire", "Résistance des enroulements — Secondaire", [...L1L2L3("mΩ"), F("temperature", "Température enroulement", "°C")]),
+        C("resistance_enroulements_primaire", "Résistance des enroulements — Primaire", [...L1L2L3AvecToleranceEcart("mΩ"), F("temperature", "Température enroulement", "°C")]),
+        C("resistance_enroulements_secondaire", "Résistance des enroulements — Secondaire", [...L1L2L3AvecToleranceEcart("mΩ"), F("temperature", "Température enroulement", "°C")]),
       ]},
       { key: "mesure_isolement", title: "Mesure d'isolement", items: [
-        C("hta_terre", "HTA - Terre (BT shuntée à la terre)", [F("typeMesure", "Type de mesure", null, LISTE_TYPE_MESURE_ISOLEMENT), F("v", "Tension d'injection", null, TENSION_ISOLEMENT), F("valeur", "Valeur"), F("unite", "Unité", null, UNITE_ISOLEMENT), F("pi", "PI (10/1min)"), F("dar", "DAR (60/10sec)")]),
-        C("bt_terre", "BT - Terre (HTA shuntée à la terre)", [F("typeMesure", "Type de mesure", null, LISTE_TYPE_MESURE_ISOLEMENT), F("v", "Tension d'injection", null, TENSION_ISOLEMENT), F("valeur", "Valeur"), F("unite", "Unité", null, UNITE_ISOLEMENT), F("pi", "PI (10/1min)"), F("dar", "DAR (60/10sec)")]),
-        C("hta_bt", "HTA - BT (enroulements court-circuités entre eux)", [F("typeMesure", "Type de mesure", null, LISTE_TYPE_MESURE_ISOLEMENT), F("v", "Tension d'injection", null, TENSION_ISOLEMENT), F("valeur", "Valeur"), F("unite", "Unité", null, UNITE_ISOLEMENT), F("pi", "PI (10/1min)"), F("dar", "DAR (60/10sec)")]),
+        C("hta_terre", "HTA - Terre (BT shuntée à la terre)", isolementFields()),
+        C("bt_terre", "BT - Terre (HTA shuntée à la terre)", isolementFields()),
+        C("hta_bt", "HTA - BT (enroulements court-circuités entre eux)", isolementFields()),
       ]},
     ],
   };
@@ -2075,7 +2152,9 @@ const SCHEMAS = {
       ]},
       { key: "enveloppe_protection", title: "Enveloppe de protection", items: [
         C("conformite_enveloppe", "Conformité de l'enveloppe de protection", [
-          F("indiceProtection", "Indice de protection (IP)"), F("integriteEnveloppe", "Intégrité de l'enveloppe"),
+          F("indiceProtection", "Indice de protection (IP)", null, LISTE_INDICE_PROTECTION),
+          { key: "descriptionIP", label: "Signification du code sélectionné", longText: true, compute: (f) => descriptionIP(f.indiceProtection) || "" },
+          F("integriteEnveloppe", "Intégrité de l'enveloppe"),
           F("misesTerre", "Mises à la terre de l'enveloppe"), F("distancesMinimales", "Distances minimales de sécurité"),
         ]),
       ]},
@@ -3745,7 +3824,7 @@ function KpiCard({ icon: Icon, label, value, accent }) {
 }
 
 /* ---- ligne de contrôle générique (control / info / setting) ---- */
-function ControlRow({ item, value, onChange, idPrefix }) {
+function ControlRow({ item, value, onChange, idPrefix, toleranceOverride }) {
   if (!value) return null; // donnée incompatible (ancien format) : on ignore plutôt que de planter
   const fields = value.fields || {};
   const setField = (k, v) => onChange({ ...value, fields: { ...fields, [k]: v } });
@@ -3753,15 +3832,15 @@ function ControlRow({ item, value, onChange, idPrefix }) {
   const toleranceMax = hasToleranceField ? numOf(fields.tolerance) : null;
   const tolMinField = (item.fields || []).find((f) => f.key === "tol_min" && f.compute);
   const tolMaxField = (item.fields || []).find((f) => f.key === "tol_max" && f.compute);
-  const computedMin = tolMinField ? numOf(tolMinField.compute(fields)) : null;
-  const computedMax = tolMaxField ? numOf(tolMaxField.compute(fields)) : null;
+  const computedMin = toleranceOverride ? toleranceOverride.min : (tolMinField ? numOf(tolMinField.compute(fields)) : null);
+  const computedMax = toleranceOverride ? toleranceOverride.max : (tolMaxField ? numOf(tolMaxField.compute(fields)) : null);
   const MESURE_KEYS = ["l1", "l2", "l3", "rd", "n"];
   function fieldValidState(key) {
     if (tolMinField && tolMinField.unitFrom === key) return toleranceState(fields[key], computedMin, computedMax);
     // L1/L2/L3 mesurent la même grandeur que le champ "unitFrom" (ex. la résistance d'un fusible),
     // juste par phase plutôt qu'en une seule valeur — elles doivent être comparées à la même
     // tolérance calculée, pas seulement le champ principal.
-    if (tolMinField && MESURE_KEYS.includes(key)) return toleranceState(fields[key], computedMin, computedMax);
+    if ((tolMinField || toleranceOverride) && MESURE_KEYS.includes(key)) return toleranceState(fields[key], computedMin, computedMax);
     if (MESURE_KEYS.includes(key) && hasToleranceField) return toleranceState(fields[key], null, toleranceMax);
     return null;
   }
@@ -3943,13 +4022,13 @@ function CustomActionsList({ custom, onAdd, onChange, onRemove, idPrefix }) {
   );
 }
 
-function SectionBlock({ title, items, values, onChangeItem, idPrefix, custom, onAddCustom, onChangeCustom, onRemoveCustom, extra }) {
+function SectionBlock({ title, items, values, onChangeItem, idPrefix, custom, onAddCustom, onChangeCustom, onRemoveCustom, extra, toleranceOverrides }) {
   return (
     <Card style={{ marginBottom: 14 }}>
       <SectionTitle>{title}</SectionTitle>
       <div>
         {items.map((item) => (
-          <ControlRow key={item.key} item={item} value={values[item.key]} onChange={(v) => onChangeItem(item.key, v)} idPrefix={idPrefix} />
+          <ControlRow key={item.key} item={item} value={values[item.key]} onChange={(v) => onChangeItem(item.key, v)} idPrefix={idPrefix} toleranceOverride={toleranceOverrides && toleranceOverrides[item.key]} />
         ))}
       </div>
       {custom && (
@@ -6269,6 +6348,8 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
               return <ElementsBatteriePanel key={sec.key} eq={eq} update={update} idPrefix={`${eq.id}-elements`} />;
             }
             if (sec.key === "rapport_transformation" && eq.type === "Transformateur") {
+              const rTheo = calcRapportTheoriqueTransfo(eq);
+              const tolRapport = calcToleranceRapportTransfo(rTheo);
               return (
                 <React.Fragment key={sec.key}>
                   <RapportTheoriqueCalcule eq={eq} />
@@ -6282,6 +6363,7 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
                     onAddCustom={() => addCustomAction(sec.key)}
                     onChangeCustom={(id, patch) => changeCustomAction(sec.key, id, patch)}
                     onRemoveCustom={(id) => removeCustomAction(sec.key, id)}
+                    toleranceOverrides={tolRapport ? { rapport_par_phase: tolRapport } : undefined}
                   />
                 </React.Fragment>
               );
