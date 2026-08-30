@@ -1969,6 +1969,8 @@ const SCHEMAS = {
       { key: "qn", label: "Qn (kVAR)", numeric: true }, { key: "triphase", label: "Régime", options: ["Triphasé", "Monophasé"] },
       { key: "nombreGradins", label: "Nombre total de gradins", numeric: true }, { key: "anneeMiseEnService", label: "Année de mise en service", numeric: true },
       { key: "transformateurAssocie", label: "Transformateur associé (repère, pour le calcul de résonance)" },
+      { key: "transfoSnManuel", label: "Sn du transformateur (kVA) — si non suivi dans l'app", numeric: true },
+      { key: "transfoUccManuel", label: "Ucc du transformateur (%) — si non suivi dans l'app", numeric: true },
     ],
     sections: [
       { key: "environnement", title: "Environnement et exploitation", items: [
@@ -2009,7 +2011,12 @@ const SCHEMAS = {
         C("frequence_amont", "Fréquence", [F("hz", "Fréquence", "Hz")]),
         C("tensions_amont", "Tensions", [F("u12", "U12", "V"), F("u23", "U23", "V"), F("u31", "U31", "V"), F("thdv1", "THdV L1", "%"), F("thdv2", "THdV L2", "%"), F("thdv3", "THdV L3", "%")]),
         C("courants_amont", "Courants", [F("i1", "I1", "A"), F("i2", "I2", "A"), F("i3", "I3", "A"), F("thdi1", "ThdI L1", "%"), F("thdi2", "ThdI L2", "%"), F("thdi3", "ThdI L3", "%")]),
-        C("puissances_amont", "Puissances", [F("p", "P", "kW"), F("s", "S", "kVA"), F("q", "Q", "kVAR"), F("cosphi", "Cos Phi"), { key: "tangphi", label: "Tang Phi (calculé)", unit: null, compute: (f) => { const c = numOf(f.cosphi); if (c === null || c <= 0 || c > 1) return ""; return Math.round((Math.sqrt(1 - c * c) / c) * 1000) / 1000; } }]),
+        C("puissances_amont", "Puissances", [
+          F("p", "P", "kW"), F("s", "S", "kVA"),
+          { key: "q", label: "Q (calculé)", unit: "kVAR", compute: (f) => { const p = numOf(f.p), s = numOf(f.s); if (p === null || s === null || s < p) return ""; return Math.round(Math.sqrt(s * s - p * p) * 1000) / 1000; } },
+          { key: "cosphi", label: "Cos Phi (calculé)", unit: null, compute: (f) => { const p = numOf(f.p), s = numOf(f.s); if (p === null || s === null || s <= 0) return ""; return Math.round((p / s) * 1000) / 1000; } },
+          { key: "tangphi", label: "Tang Phi (calculé)", unit: null, compute: (f) => { const p = numOf(f.p), s = numOf(f.s); if (p === null || s === null || p <= 0 || s < p) return ""; return Math.round((Math.sqrt(s * s - p * p) / p) * 1000) / 1000; } },
+        ]),
       ]},
       { key: "mesures_aval", title: "Mesures réseau aval (ou batterie hors service)", items: [
         C("frequence_aval", "Fréquence", [F("hz", "Fréquence", "Hz")]),
@@ -5240,7 +5247,18 @@ function RapportTheoriqueCalcule({ eq }) {
 function calcResonanceHarmonique(eq, allEquipements) {
   const repereTransfo = (eq.identification?.transformateurAssocie || "").trim();
   const qn = numOf(eq.identification?.qn); // kVAR
-  if (!repereTransfo) return { manque: "associez un transformateur (champ « Transformateur associé » dans l'identification)" };
+  const snManuel = numOf(eq.identification?.transfoSnManuel);
+  const uccManuel = numOf(eq.identification?.transfoUccManuel);
+  // Repli sur saisie manuelle (Sn/Ucc directement sur la batterie) si aucun transformateur suivi
+  // dans l'app ne correspond — utile quand le transfo n'est pas un équipement séparé du site.
+  if (!repereTransfo) {
+    if (snManuel && uccManuel) {
+      if (!qn) return { manque: "Qn (kVAR) de la batterie (champ dans l'identification)" };
+      const scc = (snManuel / uccManuel) * 100;
+      return { h0: Math.round(Math.sqrt(scc / qn) * 100) / 100, transfoLabel: "valeurs saisies manuellement", scc: Math.round(scc), snAffiche: snManuel, uccAffiche: uccManuel };
+    }
+    return { manque: "associez un transformateur suivi (champ « Transformateur associé ») ou renseignez Sn/Ucc manuellement" };
+  }
   const transfo = (allEquipements || []).find((e) => e.type === "Transformateur" && (e.identification?.repere || "").trim().toLowerCase() === repereTransfo.toLowerCase());
   if (!transfo) return { manque: `aucun transformateur avec le repère « ${repereTransfo} » trouvé sur ce site — vérifiez l'orthographe ou qu'il a bien été ajouté` };
   const sn = numOf(transfo.identification?.puissance); // kVA
@@ -5252,7 +5270,7 @@ function calcResonanceHarmonique(eq, allEquipements) {
   if (manquants.length) return { manque: `renseignez ${manquants.join(" et ")}` };
   const scc = (sn / ucc) * 100; // kVA — puissance de court-circuit approximée
   const h0 = Math.sqrt(scc / qn);
-  return { h0: Math.round(h0 * 100) / 100, transfo, scc: Math.round(scc) };
+  return { h0: Math.round(h0 * 100) / 100, transfoLabel: transfo.identification?.repere || "transfo associé", scc: Math.round(scc), snAffiche: sn, uccAffiche: ucc };
 }
 function ResonanceHarmoniqueCalculee({ eq, allEquipements }) {
   const r = calcResonanceHarmonique(eq, allEquipements);
@@ -5278,7 +5296,7 @@ function ResonanceHarmoniqueCalculee({ eq, allEquipements }) {
   }
   return (
     <div style={{ background: rangProche ? "#FDF3E3" : "#EEF2F6", borderRadius: 8, padding: "10px 12px", fontSize: 12, color: rangProche ? "#8A5A0A" : "#0A5DA8", margin: "8px 0", lineHeight: 1.5 }}>
-      <strong>Rang de résonance calculé (h₀ = √(Scc/Q)) : {r.h0}</strong> — Scc ≈ {r.scc} kVA (depuis {r.transfo.identification?.repere || "transfo associé"}, Sn={r.transfo.identification?.puissance} kVA, Ucc={r.transfo.identification?.ucc}%), Q={eq.identification?.qn} kVAR.
+      <strong>Rang de résonance calculé (h₀ = √(Scc/Q)) : {r.h0}</strong> — Scc ≈ {r.scc} kVA (depuis {r.transfoLabel}, Sn={r.snAffiche} kVA, Ucc={r.uccAffiche}%), Q={eq.identification?.qn} kVAR.
       {rangProche ? (
         <>
           {" "}⚠ Proche du rang harmonique {rangProche} — risque de résonance partielle (surchauffe des condensateurs, distorsion de tension amplifiée) ; envisager une inductance anti-harmonique en série si des harmoniques de ce rang sont présents sur le réseau.
@@ -5987,6 +6005,27 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
               <SectionTitle>Identification</SectionTitle>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 14 }}>
                 {schema.identification.map((f) => {
+                  if (f.key === "transformateurAssocie" && eq.type === "Batterie de compensation") {
+                    const transfosConnus = allEquipements.filter((e) => e.type === "Transformateur" && e.identification?.repere).map((e) => e.identification.repere);
+                    return (
+                      <Field key={f.key} label={f.label}>
+                        {transfosConnus.length > 0 ? (
+                          <Select value={eq.identification[f.key] || ""} onChange={(e2) => setIdentification(f.key, e2.target.value)}>
+                            <option value="">— aucun / non suivi dans l'app —</option>
+                            {transfosConnus.map((r) => <option key={r} value={r}>{r}</option>)}
+                          </Select>
+                        ) : (
+                          <TextInput value={eq.identification[f.key] || ""} onChange={(e2) => setIdentification(f.key, e2.target.value)} placeholder="Aucun transformateur ajouté sur ce site pour l'instant" />
+                        )}
+                      </Field>
+                    );
+                  }
+                  // Champs de repli manuels (Sn/Ucc) — masqués dès qu'un transformateur suivi est
+                  // choisi ci-dessus, puisqu'ils deviennent alors inutiles (ses propres valeurs sont
+                  // utilisées à la place).
+                  if ((f.key === "transfoSnManuel" || f.key === "transfoUccManuel") && eq.type === "Batterie de compensation" && (eq.identification.transformateurAssocie || "").trim()) {
+                    return null;
+                  }
                   if (f.key === "rapportTPProtection" && eq.type !== "Comptage HTA") {
                     // Le rapport TP se lit en priorité depuis le contrôle détaillé de Comptage HTA
                     // (emplacement actuel) — avec repli sur l'ancien champ d'identification pour les
