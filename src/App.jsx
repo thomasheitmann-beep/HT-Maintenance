@@ -1968,6 +1968,7 @@ const SCHEMAS = {
       { key: "marque", label: "Marque", options: LISTE_MARQUE_BATTERIE }, { key: "typeCompensation", label: "Type de compensation", options: LISTE_TYPE_COMPENSATION },
       { key: "qn", label: "Qn (kVAR)", numeric: true }, { key: "triphase", label: "Régime", options: ["Triphasé", "Monophasé"] },
       { key: "nombreGradins", label: "Nombre total de gradins", numeric: true }, { key: "anneeMiseEnService", label: "Année de mise en service", numeric: true },
+      { key: "transformateurAssocie", label: "Transformateur associé (repère, pour le calcul de résonance)" },
     ],
     sections: [
       { key: "environnement", title: "Environnement et exploitation", items: [
@@ -2004,6 +2005,7 @@ const SCHEMAS = {
         C("alarmes_signalisations_batt", "Alarmes et signalisations"),
       ]},
       { key: "mesures_amont", title: "Mesures réseau amont (batterie en service)", items: [
+        C("gradins_en_service", "Gradins en service lors de la mesure", [F("valeur", "Gradins actifs (ex. 1, 2, 3)")]),
         C("frequence_amont", "Fréquence", [F("hz", "Fréquence", "Hz")]),
         C("tensions_amont", "Tensions", [F("u12", "U12", "V"), F("u23", "U23", "V"), F("u31", "U31", "V"), F("thdv1", "THdV L1", "%"), F("thdv2", "THdV L2", "%"), F("thdv3", "THdV L3", "%")]),
         C("courants_amont", "Courants", [F("i1", "I1", "A"), F("i2", "I2", "A"), F("i3", "I3", "A"), F("thdi1", "ThdI L1", "%"), F("thdi2", "ThdI L2", "%"), F("thdi3", "ThdI L3", "%")]),
@@ -2013,7 +2015,12 @@ const SCHEMAS = {
         C("frequence_aval", "Fréquence", [F("hz", "Fréquence", "Hz")]),
         C("tensions_aval", "Tensions", [F("u12", "U12", "V"), F("u23", "U23", "V"), F("u31", "U31", "V"), F("thdv1", "THdV L1", "%"), F("thdv2", "THdV L2", "%"), F("thdv3", "THdV L3", "%")]),
         C("courants_aval", "Courants", [F("i1", "I1", "A"), F("i2", "I2", "A"), F("i3", "I3", "A"), F("thdi1", "ThdI L1", "%"), F("thdi2", "ThdI L2", "%"), F("thdi3", "ThdI L3", "%")]),
-        C("puissances_aval", "Puissances", [F("p", "P", "kW"), F("s", "S", "kVA"), F("q", "Q", "kVAR"), F("cosphi", "Cos Phi"), { key: "tangphi", label: "Tang Phi (calculé)", unit: null, compute: (f) => { const c = numOf(f.cosphi); if (c === null || c <= 0 || c > 1) return ""; return Math.round((Math.sqrt(1 - c * c) / c) * 1000) / 1000; } }]),
+        C("puissances_aval", "Puissances", [
+          F("p", "P", "kW"), F("s", "S", "kVA"),
+          { key: "q", label: "Q (calculé)", unit: "kVAR", compute: (f) => { const p = numOf(f.p), s = numOf(f.s); if (p === null || s === null || s < p) return ""; return Math.round(Math.sqrt(s * s - p * p) * 1000) / 1000; } },
+          { key: "cosphi", label: "Cos Phi (calculé)", unit: null, compute: (f) => { const p = numOf(f.p), s = numOf(f.s); if (p === null || s === null || s <= 0) return ""; return Math.round((p / s) * 1000) / 1000; } },
+          { key: "tangphi", label: "Tang Phi (calculé)", unit: null, compute: (f) => { const p = numOf(f.p), s = numOf(f.s); if (p === null || s === null || p <= 0 || s < p) return ""; return Math.round((Math.sqrt(s * s - p * p) / p) * 1000) / 1000; } },
+        ]),
       ]},
       { key: "gradins", title: "Gradins", items: [] },
       { key: "usure", title: "Pièces d'usure", items: [
@@ -5225,6 +5232,64 @@ function RapportTheoriqueCalcule({ eq }) {
     </Card>
   );
 }
+// Calcul du rang de résonance harmonique entre la batterie de condensateurs et la réactance du
+// transformateur associé — formule vérifiée h0 = √(Scc / Q), Scc approximée depuis le
+// transformateur (Scc = Sn / Ucc% × 100). Source : Guide de l'Installation Électrique (Schneider
+// Electric), fr.electrical-installation.org. Ne calcule que si un transformateur est bien associé
+// et que ses données (puissance, Ucc) sont renseignées — jamais de valeur inventée sinon.
+function calcResonanceHarmonique(eq, allEquipements) {
+  const repereTransfo = (eq.identification?.transformateurAssocie || "").trim();
+  const qn = numOf(eq.identification?.qn); // kVAR
+  if (!repereTransfo) return { manque: "associez un transformateur (champ « Transformateur associé » dans l'identification)" };
+  const transfo = (allEquipements || []).find((e) => e.type === "Transformateur" && (e.identification?.repere || "").trim().toLowerCase() === repereTransfo.toLowerCase());
+  if (!transfo) return { manque: `aucun transformateur avec le repère « ${repereTransfo} » trouvé sur ce site — vérifiez l'orthographe ou qu'il a bien été ajouté` };
+  const sn = numOf(transfo.identification?.puissance); // kVA
+  const ucc = numOf(transfo.identification?.ucc); // %
+  const manquants = [];
+  if (!sn) manquants.push(`la puissance (kVA) du transformateur ${transfo.identification?.repere}`);
+  if (!ucc) manquants.push(`Ucc (%) du transformateur ${transfo.identification?.repere}`);
+  if (!qn) manquants.push("Qn (kVAR) de la batterie (champ dans l'identification)");
+  if (manquants.length) return { manque: `renseignez ${manquants.join(" et ")}` };
+  const scc = (sn / ucc) * 100; // kVA — puissance de court-circuit approximée
+  const h0 = Math.sqrt(scc / qn);
+  return { h0: Math.round(h0 * 100) / 100, transfo, scc: Math.round(scc) };
+}
+function ResonanceHarmoniqueCalculee({ eq, allEquipements }) {
+  const r = calcResonanceHarmonique(eq, allEquipements);
+  if (!r) return null;
+  if (r.manque) {
+    return (
+      <div style={{ fontSize: 11.5, color: "#8B96A3", fontStyle: "italic", margin: "8px 0" }}>
+        Calcul du rang de résonance indisponible — {r.manque}.
+      </div>
+    );
+  }
+  // Rangs harmoniques les plus couramment présents sur un réseau industriel — une résonance trop
+  // proche de l'un d'eux (± 10 %, marge courante en pratique) est à risque.
+  const rangsRisque = [3, 5, 7, 11, 13];
+  const rangProche = rangsRisque.find((h) => Math.abs(r.h0 - h) / h < 0.1);
+  // Plage de Q à éviter pour ce rang : puisque h0 = √(Scc/Q), un Q plus grand donne un h0 plus
+  // petit (relation inverse) — la zone à risque en Q se déduit directement des bornes ±10% en h0.
+  let plageAeviter = null;
+  if (rangProche) {
+    const qDangerMin = r.scc / Math.pow(rangProche * 1.1, 2);
+    const qDangerMax = r.scc / Math.pow(rangProche * 0.9, 2);
+    plageAeviter = { min: Math.round(qDangerMin), max: Math.round(qDangerMax) };
+  }
+  return (
+    <div style={{ background: rangProche ? "#FDF3E3" : "#EEF2F6", borderRadius: 8, padding: "10px 12px", fontSize: 12, color: rangProche ? "#8A5A0A" : "#0A5DA8", margin: "8px 0", lineHeight: 1.5 }}>
+      <strong>Rang de résonance calculé (h₀ = √(Scc/Q)) : {r.h0}</strong> — Scc ≈ {r.scc} kVA (depuis {r.transfo.identification?.repere || "transfo associé"}, Sn={r.transfo.identification?.puissance} kVA, Ucc={r.transfo.identification?.ucc}%), Q={eq.identification?.qn} kVAR.
+      {rangProche ? (
+        <>
+          {" "}⚠ Proche du rang harmonique {rangProche} — risque de résonance partielle (surchauffe des condensateurs, distorsion de tension amplifiée) ; envisager une inductance anti-harmonique en série si des harmoniques de ce rang sont présents sur le réseau.
+          <br /><strong>Plage de Q à éviter pour ce rang : {plageAeviter.min} à {plageAeviter.max} kVAR</strong> — viser un Q en dessous de {plageAeviter.min} kVAR ou au-dessus de {plageAeviter.max} kVAR pour s'en éloigner (à recalculer si le transformateur ou son Ucc changent).
+        </>
+      ) : (
+        <> Pas de rang harmonique courant (3, 5, 7, 11, 13) à proximité immédiate.</>
+      )}
+    </div>
+  );
+}
 function TauxChargeCalcule({ eq }) {
   const t = calcTauxCharge(eq);
   if (!t) return null;
@@ -6060,6 +6125,24 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
           })()}
 
           {schema.sections.map((sec) => {
+            if (eq.type === "Batterie de compensation" && sec.key === "mesures_amont") {
+              return (
+                <React.Fragment key={sec.key}>
+                  <SectionBlock
+                    title={sec.title}
+                    items={sec.items}
+                    values={eq.controles[sec.key]}
+                    onChangeItem={(itemKey, v) => setControleItem(sec.key, itemKey, v)}
+                    idPrefix={`${eq.id}-${sec.key}`}
+                    custom={eq.controles[sec.key + "__custom"] || []}
+                    onAddCustom={() => addCustomAction(sec.key)}
+                    onChangeCustom={(id, patch) => changeCustomAction(sec.key, id, patch)}
+                    onRemoveCustom={(id) => removeCustomAction(sec.key, id)}
+                  />
+                  <ResonanceHarmoniqueCalculee eq={eq} allEquipements={allEquipements} />
+                </React.Fragment>
+              );
+            }
             if (sec.key === "parametrage_relais" && TYPES_AVEC_RELAIS.includes(eq.type)) {
               return <ParametrageRelaisPanel key={sec.key} eq={eq} update={update} idPrefix={`${eq.id}-${sec.key}`} />;
             }
