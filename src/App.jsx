@@ -3198,6 +3198,13 @@ function unitFamilyFor(u) {
 
 // Champ "liste déroulante + saisie libre" : liste personnalisée (pas de <datalist> natif, mal
 // géré sur iOS où les suggestions restent invisibles/coupées au-dessus du clavier).
+// Largeur d'un champ Action adaptée à son contenu — une largeur fixe de 150px masquait le début du
+// texte dès qu'il dépassait une quinzaine de caractères (ex. "trace de décharge partielle").
+// Bornes min/max pour rester raisonnable sur mobile comme sur desktop.
+function actionInputWidth(texte) {
+  const longueur = (texte || "").length;
+  return Math.max(150, Math.min(340, longueur * 7 + 40));
+}
 function Combo({ value, onChange, options, listId, style, placeholder, numeric, onBlur }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
@@ -3999,7 +4006,7 @@ function ControlRow({ item, value, onChange, idPrefix, toleranceOverride }) {
               options={item.actionOptions || ["SANS OBJET"]}
               listId={`${idPrefix}-${item.key}-action`}
               placeholder="Action"
-              style={{ width: 150, padding: "5px 7px", fontSize: 12 }}
+              style={{ width: actionInputWidth(value.action), padding: "5px 7px", fontSize: 12 }}
             />
           )}
           {value.etat !== undefined && (
@@ -4032,7 +4039,7 @@ function CustomActionsList({ custom, onAdd, onChange, onRemove, idPrefix }) {
                 options={["SANS OBJET"]}
                 listId={`${idPrefix}-custom-${c.id}-action`}
                 placeholder="Action"
-                style={{ width: 150, padding: "5px 7px", fontSize: 12 }}
+                style={{ width: actionInputWidth(c.action), padding: "5px 7px", fontSize: 12 }}
               />
               <Select value={c.etat} onChange={(e) => onChange(c.id, { etat: e.target.value })} style={{ width: 120, padding: "5px 7px", fontSize: 12 }}>
                 {EQUIP_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
@@ -4717,7 +4724,7 @@ function GradinsPanel({ eq, update, idPrefix }) {
                 </div>
 
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                  <input placeholder="Action" value={e.action} onChange={(ev) => setEntry(e.id, { action: ev.target.value })} style={{ ...inputStyle, width: 150, padding: "5px 7px", fontSize: 12 }} />
+                  <input placeholder="Action" value={e.action} onChange={(ev) => setEntry(e.id, { action: ev.target.value })} style={{ ...inputStyle, width: actionInputWidth(e.action), padding: "5px 7px", fontSize: 12 }} />
                   <Select value={e.etat} onChange={(ev) => setEntry(e.id, { etat: ev.target.value })} style={{ width: 120, padding: "5px 7px", fontSize: 12 }}>
                     {EQUIP_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
                   </Select>
@@ -4879,7 +4886,7 @@ function DynamicListPanel({ title, entries, onChange, typeOptions, fieldDefs, wi
                   )}
                   {withActionEtat && (
                     <>
-                      <input placeholder="Action" value={e.action} onChange={(ev) => setEntry(e.id, { action: ev.target.value })} style={{ ...inputStyle, width: 150, padding: "5px 7px", fontSize: 12 }} />
+                      <input placeholder="Action" value={e.action} onChange={(ev) => setEntry(e.id, { action: ev.target.value })} style={{ ...inputStyle, width: actionInputWidth(e.action), padding: "5px 7px", fontSize: 12 }} />
                       <Select value={e.etat} onChange={(ev) => setEntry(e.id, { etat: ev.target.value })} style={{ width: 120, padding: "5px 7px", fontSize: 12 }}>
                         {EQUIP_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
                       </Select>
@@ -5812,7 +5819,7 @@ function DisjoncteurRelaisPanel({ eq, update, custom, onAddCustom, onChangeCusto
                     );
                   })()}
                   {tol && <MiniComputed label="Tolérance attendue" unit={tol.unite} value={`${tol.min} – ${tol.max}`} />}
-                  <input placeholder="Action" value={s.essai.action} onChange={(e) => setEssai(s.id, { action: e.target.value })} style={{ ...inputStyle, width: 150, padding: "5px 7px", fontSize: 12 }} />
+                  <input placeholder="Action" value={s.essai.action} onChange={(e) => setEssai(s.id, { action: e.target.value })} style={{ ...inputStyle, width: actionInputWidth(s.essai.action), padding: "5px 7px", fontSize: 12 }} />
                   <Select value={s.essai.etat} onChange={(e) => setEssai(s.id, { etat: e.target.value })} style={{ width: 120, padding: "5px 7px", fontSize: 12 }}>
                     {EQUIP_STATUSES.map((st) => <option key={st} value={st}>{st}</option>)}
                   </Select>
@@ -5825,7 +5832,7 @@ function DisjoncteurRelaisPanel({ eq, update, custom, onAddCustom, onChangeCusto
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
             <span style={{ fontSize: 12.5, color: "#3E4A5C", flex: "1 1 240px" }}>Contrôle du circuit de mesures et commande</span>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-              <input placeholder="Action" value={circuit.action} onChange={(e) => setCircuit({ action: e.target.value })} style={{ ...inputStyle, width: 150, padding: "5px 7px", fontSize: 12 }} />
+              <input placeholder="Action" value={circuit.action} onChange={(e) => setCircuit({ action: e.target.value })} style={{ ...inputStyle, width: actionInputWidth(circuit.action), padding: "5px 7px", fontSize: 12 }} />
               <Select value={circuit.etat} onChange={(e) => setCircuit({ etat: e.target.value })} style={{ width: 120, padding: "5px 7px", fontSize: 12 }}>
                 {EQUIP_STATUSES.map((st) => <option key={st} value={st}>{st}</option>)}
               </Select>
@@ -5968,6 +5975,33 @@ function detailAnomalieItem(item, v) {
         horsTolerance = true;
       }
     });
+  } else if (fields.tolerance !== undefined || fields.tol_max !== undefined) {
+    // Motif "tolérance saisie manuellement" (résistance de contact, bobine, continuité des
+    // masses...) — la tolérance est un champ que le technicien remplit lui-même, pas une valeur
+    // calculée. Même vérification sur L1/L2/L3/valeur/Rd/N, cohérent avec valeursHorsToleranceGenerique.
+    const max = numOf(fields.tolerance ?? fields.tol_max);
+    const min = fields.tol_min !== undefined ? numOf(fields.tol_min) : null;
+    if (max !== null) {
+      ["l1", "l2", "l3", "valeur", "rd", "n"].forEach((key) => {
+        const mesure = fields[key];
+        if (mesure !== undefined && mesure !== "" && toleranceState(mesure, min, max) === "bad") {
+          parts.push(`${key === "valeur" ? "valeur" : key.toUpperCase()} mesurée ${mesure}, tolérance ${min !== null ? min + "–" : "≤ "}${max}`);
+          horsTolerance = true;
+        }
+      });
+    }
+  } else if (fields.reference !== undefined && numOf(fields.reference)) {
+    // Motif "référence constructeur ± 20%" (temps d'ouverture/fermeture disjoncteur) — pas de
+    // tolérance normative universelle (CEI 62271-100), écart volontairement large pour ne signaler
+    // qu'un écart net par rapport à la valeur constructeur renseignée.
+    const ref = numOf(fields.reference);
+    ["l1", "l2", "l3"].forEach((key) => {
+      const mesure = numOf(fields[key]);
+      if (mesure !== null && Math.abs(mesure - ref) / ref > 0.2) {
+        parts.push(`${key.toUpperCase()} mesuré ${mesure}, écart > 20% par rapport à la référence constructeur (${ref})`);
+        horsTolerance = true;
+      }
+    });
   }
   (item.fields || []).forEach((f) => {
     if (f.compute && f.longText) {
@@ -5988,16 +6022,16 @@ function collectAnomalies(eq) {
     if (isRelais && sec.key === "parametrage_relais") return;
     if (isRelais && sec.key === "controles_relais") {
       (eq.controles.parametrage_relais_seuils || []).filter((s) => s.label).forEach((s) => {
-        if (s.essai.etat && RANK_OF[s.essai.etat] > 0) lines.push(`Essai de déclenchement — ${s.label} : ${s.essai.etat}`);
+        if (s.essai.etat && RANK_OF[s.essai.etat] > 0) lines.push(`Essai de déclenchement — ${s.label} : ${s.essai.etat}${s.essai.action && s.essai.action.trim() ? " — " + s.essai.action.trim() : ""}`);
       });
       const circuit = eq.controles.controles_relais.circuit_mesures_commande;
-      if (circuit && circuit.etat && RANK_OF[circuit.etat] > 0) lines.push(`Contrôle du circuit de mesures et commande : ${circuit.etat}`);
+      if (circuit && circuit.etat && RANK_OF[circuit.etat] > 0) lines.push(`Contrôle du circuit de mesures et commande : ${circuit.etat}${circuit.action && circuit.action.trim() ? " — " + circuit.action.trim() : ""}`);
       return;
     }
     if (eq.type === "Analyse d'huile" && sec.key === "resultats") {
       sec.items.forEach((item) => {
         const v = eq.controles[sec.key][item.key];
-        if (v.fields.realise === "OUI" && v.etat && RANK_OF[v.etat] > 0) lines.push(`${item.label} : ${v.etat}${detailAnomalieItem(item, v).detail}`);
+        if (v.fields.realise === "OUI" && v.etat && RANK_OF[v.etat] > 0) lines.push(`${item.label} : ${v.etat}${detailAnomalieItem(item, v).detail}${v.action && v.action.trim() ? " — " + v.action.trim() : ""}`);
       });
       return;
     }
@@ -6005,17 +6039,21 @@ function collectAnomalies(eq) {
       const v = eq.controles[sec.key][item.key];
       if (!v) return;
       const { detail, avertissements, horsTolerance } = detailAnomalieItem(item, v);
+      // L'action (note libre décrivant ce qui a été constaté, ex. "trace de décharge partielle")
+      // est une information de terrain précieuse — sans elle, la remarque ne dit que "Dégradé" sans
+      // dire pourquoi pour un contrôle sans valeur numérique associée.
+      const actionTexte = v.action && v.action.trim() ? ` — ${v.action.trim()}` : "";
       if (v.etat !== undefined && RANK_OF[v.etat] > 0) {
-        lines.push(`${item.label} : ${v.etat}${detail}`);
+        lines.push(`${item.label} : ${v.etat}${detail}${actionTexte}`);
       } else if (horsTolerance) {
         // Valeur mesurée hors tolérance détectée indépendamment de l'état — ne dépend pas du
         // passage automatique en Dégradé (utile si celui-ci n'a pas encore eu l'occasion de se
         // déclencher, ex. remarque compilée avant réouverture de la fiche).
-        lines.push(`${item.label} : mesure hors tolérance${detail}`);
+        lines.push(`${item.label} : mesure hors tolérance${detail}${actionTexte}`);
       } else if (avertissements.length) {
         // Avertissement présent (ex. durée de vie fusible dépassée) mais état encore "Conforme" —
         // le technicien n'a pas forcément pensé à le changer manuellement ; on le relève quand même.
-        lines.push(`${item.label} : ${avertissements.join(" ; ")}`);
+        lines.push(`${item.label} : ${avertissements.join(" ; ")}${actionTexte}`);
       }
     });
     (eq.controles[sec.key + "__custom"] || []).forEach((c) => {
