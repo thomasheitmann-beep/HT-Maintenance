@@ -6116,6 +6116,22 @@ function collectAnomalies(eq) {
       }
     });
   });
+  // Rapport de transformation (Transformateur) : mesuré vs théorique ±0,5% CEI 60076-1 — la
+  // tolérance est calculée au niveau de l'équipement (tension primaire/secondaire), pas de l'item
+  // lui-même, donc invisible pour la détection générique ci-dessus ; vérifié séparément avec le
+  // détail par phase.
+  if (eq.type === "Transformateur") {
+    const rTheo = calcRapportTheoriqueTransfo(eq);
+    const tolRapport = rTheo !== null ? calcToleranceRapportTransfo(rTheo) : null;
+    const fRapport = eq.controles.rapport_transformation?.rapport_par_phase?.fields;
+    if (tolRapport && fRapport) {
+      [["L1", "l1"], ["L2", "l2"], ["L3", "l3"]].forEach(([label, key]) => {
+        if (toleranceState(fRapport[key], tolRapport.min, tolRapport.max) === "bad") {
+          lines.push(`Rapport de transformation : ${label} hors tolérance (${fRapport[key]}, attendu ${tolRapport.min}–${tolRapport.max}, ±0,5% CEI 60076-1)`);
+        }
+      });
+    }
+  }
   // Disjoncteur BT — Court-circuit temporisé : le temps de déclenchement à T réglé doit être
   // cohérent avec la temporisation tsd effectivement réglée (écart > 20 %, même marge que pour les
   // temps d'ouverture/fermeture faute de seuil normatif universel unique pour cette comparaison).
@@ -6179,14 +6195,16 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
   const titleField = schema.identification[0];
   const subtitleField = schema.identification.find((f) => f.key.toLowerCase().includes("numeroserie")) || schema.identification[1];
 
-  // Un gradin hors tolérance doit faire remonter l'état final automatiquement — même logique que
-  // pour les mesures de fusibles : ne fait remonter QUE depuis "Conforme", jamais de rétrogradation
-  // automatique d'un état plus sévère déjà choisi volontairement par le technicien.
+  // Un gradin ou un rapport de transformation hors tolérance doit faire remonter l'état final
+  // automatiquement — même logique que pour les mesures de fusibles : ne fait remonter QUE depuis
+  // "Conforme", jamais de rétrogradation automatique d'un état plus sévère déjà choisi
+  // volontairement par le technicien.
   const gradinsEnDefaut = gradinsHorsTolerance(eq);
+  const rapportEnDefaut = rapportTransformationHorsTolerance(eq);
   useEffect(() => {
-    if (gradinsEnDefaut && eq.etatFinal === "Conforme") update({ ...eq, etatFinal: "Dégradé" });
+    if ((gradinsEnDefaut || rapportEnDefaut) && eq.etatFinal === "Conforme") update({ ...eq, etatFinal: "Dégradé" });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gradinsEnDefaut, eq.etatFinal]);
+  }, [gradinsEnDefaut, rapportEnDefaut, eq.etatFinal]);
 
   // Fusion options statiques + bibliothèque apprise, calculée une seule fois par changement réel
   // (pas à chaque frappe) — évite de refaire un Set + un tableau pour chaque champ à chaque
