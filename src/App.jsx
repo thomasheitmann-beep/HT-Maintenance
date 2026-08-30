@@ -1597,6 +1597,28 @@ const ACTIONS_RELAIS_TRANSFORMATEUR = [
 // Convertit une valeur de résistance d'isolement vers les MΩ, quelle que soit l'unité choisie
 // (Ω/MΩ/GΩ) — indispensable avant de comparer à un seuil, sous peine de comparer des grandeurs
 // incompatibles entre elles.
+// Tailles de vis/écrou courantes sur les connexions de puissance transformateur.
+const LISTE_TAILLE_VIS = ["M6", "M8", "M10", "M12", "M14", "M16", "M20"];
+// Couple de serrage : les valeurs varient significativement selon le type de connecteur (cuivre,
+// aluminium, cosse à sertir ou méplat), la marque et le modèle — pas de table générique fiable à
+// proposer pour les connexions de puissance (plateau, bornes BT/HT). Seule exception vérifiée :
+// les borniers de terre à vis, où 5/10/15 N·m pour M6/M8/M10 est une valeur couramment documentée
+// (repère uniquement, à vérifier ; ne s'applique pas aux connexions de puissance).
+const COUPLE_TERRE_REFERENCE = { "M6": 5, "M8": 10, "M10": 15 };
+function aideCoupleSerrage(taille, typeConnexion) {
+  if (!taille) return "";
+  if (typeConnexion === "terre" && COUPLE_TERRE_REFERENCE[taille]) {
+    return `Repère indicatif pour un bornier de terre à vis ${taille} : ${COUPLE_TERRE_REFERENCE[taille]} N·m — à vérifier, ne s'applique pas à une connexion de puissance (cosse/méplat).`;
+  }
+  return `Aucune valeur générique fiable pour une connexion de puissance ${taille} — le couple varie selon le connecteur (cuivre/aluminium, cosse ou méplat) et le constructeur. Se référer à la documentation du fabricant ou à l'étiquette de l'appareil.`;
+}
+function coupleSerrageFields(typeConnexion) {
+  return [
+    F("taille", "Taille vis/écrou", null, LISTE_TAILLE_VIS),
+    F("couple", "Couple de serrage mesuré", "N.m"),
+    { key: "aide", label: "Aide technicien", longText: true, compute: (f) => aideCoupleSerrage(f.taille, typeConnexion) },
+  ];
+}
 function versMegaohms(valeur, unite) {
   const v = numOf(valeur);
   if (v === null) return null;
@@ -1648,7 +1670,11 @@ function buildTransformateurSchema({ sec = false } = {}) {
           { key: "description", label: "Signification du code sélectionné", longText: true, compute: (f) => descriptionIP(f.ip) || "" },
         ]),
         C("mises_terre", "Mises à la terre de l'enveloppe de protection", [F("resistance", "Résistance terre-enveloppe")]),
-        C("barrettes_commutation", "Barrettes de commutation", [F("plot_reglage", "Plot de réglage entre"), F("valeur_tension", "Valeur de tension", "V")]),
+        C("barrettes_commutation", "Barrettes de commutation", [
+          F("type_reperage", "Repérage", null, ["Plot", "Position directe (commutateur à vide sans plot)"]),
+          F("plot_reglage", "Plot de réglage entre (si applicable)"),
+          F("valeur_tension", "Valeur de tension / position du commutateur", "V"),
+        ]),
         C("raccordement_cables", "Raccordement des câbles HT et BT"),
         C("distances_refroidissement", "Distances extérieures nécessaires au refroidissement"),
         C("raccordement_sondes", "Raccordement des sondes de température aux relais thermiques"),
@@ -1658,7 +1684,9 @@ function buildTransformateurSchema({ sec = false } = {}) {
       ]},
       { key: "electriques", title: "Contrôles électriques", items: [
         C("indicateurs_capacitifs", "Contrôle des indicateurs capacitifs de présence tension"),
-        C("connexions_bt", "Contrôle des connexions BT"),
+        C("couple_serrage_plateau", "Couple de serrage — Plateau", coupleSerrageFields("puissance")),
+        C("connexions_bt", "Contrôle des connexions BT", coupleSerrageFields("puissance")),
+        C("couple_serrage_borne_ht", "Couple de serrage — Borne HT", coupleSerrageFields("puissance")),
         C("tetes_cables_hta", "Contrôle des têtes de câbles HTA"),
         C("verrouillage_cle", "Vérification du système de verrouillage à clé"),
       ]},
@@ -6088,6 +6116,41 @@ function collectAnomalies(eq) {
       }
     });
   });
+  // Disjoncteur BT — Court-circuit temporisé : le temps de déclenchement à T réglé doit être
+  // cohérent avec la temporisation tsd effectivement réglée (écart > 20 %, même marge que pour les
+  // temps d'ouverture/fermeture faute de seuil normatif universel unique pour cette comparaison).
+  if (eq.type === "Disjoncteur BT") {
+    // Surcharge longue : le déclenchement mesuré ne doit pas dépasser le "Tr max attendu" que le
+    // technicien a lui-même renseigné pour cet essai — comparaison directe, pas de marge
+    // supplémentaire puisque tr_max EST déjà la limite acceptée.
+    const testSL = eq.controles.tests_disjoncteur?.test_surcharge_longue?.fields;
+    if (testSL) {
+      const trMax = numOf(testSL.tr_max);
+      const decl = numOf(testSL.declenchement);
+      if (trMax && decl !== null && decl > trMax) {
+        lines.push(`Surcharge longue : déclenchement mesuré (${decl} s) supérieur au Tr max attendu (${trMax} s)`);
+      }
+    }
+    const reglageCC = eq.controles.reglage_disjoncteur?.cc_temporise?.fields;
+    const testCC = eq.controles.tests_disjoncteur?.test_cc_temporise?.fields;
+    if (reglageCC && testCC) {
+      const tsd = numOf(reglageCC.tsd);
+      const treg = numOf(testCC.declenchement_treg);
+      if (tsd && treg !== null && Math.abs(treg - tsd) / tsd > 0.2) {
+        lines.push(`Court-circuit temporisé : déclenchement mesuré à T réglé (${treg} ms) s'écarte de plus de 20% de la temporisation réglée (tsd = ${tsd} ms)`);
+      }
+    }
+    // Instantané : temps de coupure maximum courant du marché ≈ 50 ms pour I > 1,5×Ii (donnée
+    // constructeur, ex. Schneider ComPacT NSXm — pas une clause IEC 60947-2 universelle unique,
+    // mais un repère largement représentatif pour détecter un déclenchement anormalement lent).
+    const testInst = eq.controles.tests_disjoncteur?.test_instantane?.fields;
+    if (testInst) {
+      const decl = numOf(testInst.declenchement);
+      if (decl !== null && decl > 50) {
+        lines.push(`Instantané : temps de coupure mesuré (${decl} ms) supérieur au repère usuel de 50 ms (donnée constructeur, pas une clause IEC 60947-2 universelle)`);
+      }
+    }
+  }
   // Pièces d'usure dont l'échéance de remplacement (année de mise en service + durée de vie
   // déclarée) est dépassée — même logique que l'avertissement d'âge des fusibles, mais reprise
   // dans les anomalies de l'équipement puisque ces pièces n'ont pas de champ "état" propre.
