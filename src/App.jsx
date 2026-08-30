@@ -5953,14 +5953,21 @@ function detailAnomalieItem(item, v) {
   let horsTolerance = false;
   const tolMinField = (item.fields || []).find((f) => f.key === "tol_min" && f.compute);
   const tolMaxField = (item.fields || []).find((f) => f.key === "tol_max" && f.compute);
-  if (tolMinField && tolMinField.unitFrom) {
-    const key = tolMinField.unitFrom;
-    const mesure = fields[key];
+  if (tolMinField) {
     const min = numOf(tolMinField.compute(fields)), max = tolMaxField ? numOf(tolMaxField.compute(fields)) : null;
-    if (mesure !== undefined && mesure !== "" && toleranceState(mesure, min, max) === "bad") {
-      parts.push(`valeur mesurée ${mesure}${tolMinField.unit ? " " + tolMinField.unit : ""}, attendu ${min}–${max}`);
-      horsTolerance = true;
-    }
+    // Vérifie le champ principal (ex. "valeur") ET L1/L2/L3 s'ils existent — un fusible/une
+    // résistance mesurée par phase peut être hors tolérance sur une seule phase sans que le champ
+    // "valeur" (moyenne/relevé global) ne le soit lui-même. Même tolérance calculée pour les deux,
+    // cohérent avec la coloration déjà appliquée à l'écran sur ces mêmes champs.
+    const champsAVerifier = [tolMinField.unitFrom, "l1", "l2", "l3"].filter((k, i, arr) => k && arr.indexOf(k) === i);
+    champsAVerifier.forEach((key) => {
+      const mesure = fields[key];
+      if (mesure !== undefined && mesure !== "" && toleranceState(mesure, min, max) === "bad") {
+        const nomChamp = key === tolMinField.unitFrom ? "valeur" : key.toUpperCase();
+        parts.push(`${nomChamp} mesurée ${mesure}${tolMinField.unit ? " " + tolMinField.unit : ""}, attendu ${min}–${max}`);
+        horsTolerance = true;
+      }
+    });
   }
   (item.fields || []).forEach((f) => {
     if (f.compute && f.longText) {
