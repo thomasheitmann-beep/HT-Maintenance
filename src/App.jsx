@@ -887,6 +887,18 @@ function champsTriphase(unit, label, decimals, mode, withDesequilibre) {
   }
   return fields;
 }
+// Fréquence d'accord théorique d'un gradin filtré, déduite de l'inductance de la self (formule de
+// Thomson f0 = 1/(2π√(LC))) et de la capacité déduite de Q/U du gradin (à 50 Hz, fréquence
+// nominale de dimensionnement) — sert de vérification croisée avec la fréquence d'accord mesurée
+// (selfFrequence), sans jamais remplacer une valeur directement mesurée si elle est renseignée.
+function gradinFrequenceAccordTheorique(q, u, selfMH) {
+  const qn = numOf(q), un = numOf(u), lMH = numOf(selfMH);
+  if (qn === null || un === null || lMH === null || !un || qn <= 0 || lMH <= 0) return null;
+  const c = (qn * 1000) / (2 * Math.PI * 50 * un * un); // Farads, à 50 Hz nominal
+  const l = lMH / 1000; // Henries
+  if (c <= 0) return null;
+  return Math.round((1 / (2 * Math.PI * Math.sqrt(l * c))) * 100) / 100;
+}
 function gradinIntensiteTheorique(q, u) {
   const qn = numOf(q), un = numOf(u);
   if (qn === null || un === null || un === 0) return null;
@@ -4621,6 +4633,7 @@ function GradinsPanel({ eq, update, idPrefix }) {
             const qMesures = [q1, q2, q3].filter((v) => v !== null);
             const qTotalMesure = qMesures.length ? Math.round((qMesures.reduce((a, b) => a + b, 0) / qMesures.length) * 100) / 100 : null;
             const qStatus = qTotalMesure === null ? null : toleranceState(e.fields.q, Math.round(qTotalMesure * 0.9 * 100) / 100, Math.round(qTotalMesure * 1.1 * 100) / 100);
+            const freqAccordTheo = gradinFrequenceAccordTheorique(e.fields.q, e.fields.u, e.fields.selfMA);
             return (
               <div key={e.id} style={{ padding: "12px 0", borderBottom: "1px solid #E2E6EB" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
@@ -4662,8 +4675,14 @@ function GradinsPanel({ eq, update, idPrefix }) {
                 </div>
 
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 8 }}>
-                  <MiniInput label="Self" unit="mA" value={e.fields.selfMA} onChange={(v) => setField(e.id, "selfMA", v)} />
+                  <MiniInput label="Self (inductance)" unit="mH" value={e.fields.selfMA} onChange={(v) => setField(e.id, "selfMA", v)} />
                   <MiniInput label="Self" unit="Hz" value={e.fields.selfFrequence} onChange={(v) => setField(e.id, "selfFrequence", v)} />
+                  {freqAccordTheo !== null && (
+                    <MiniComputed label="Fréq. d'accord déduite (Thomson)" unit="Hz" value={freqAccordTheo} />
+                  )}
+                  {freqAccordTheo !== null && numOf(e.fields.selfFrequence) !== null && Math.abs(freqAccordTheo - numOf(e.fields.selfFrequence)) / numOf(e.fields.selfFrequence) > 0.1 && (
+                    <span style={{ fontSize: 10.5, color: "#B5730A" }}>⚠ écart &gt; 10% avec la valeur mesurée — à vérifier</span>
+                  )}
                 </div>
 
                 <div style={{ fontSize: 10.5, fontWeight: 700, color: "#8B96A3", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>
@@ -5249,13 +5268,25 @@ function calcResonanceHarmonique(eq, allEquipements) {
   const qn = numOf(eq.identification?.qn); // kVAR
   const snManuel = numOf(eq.identification?.transfoSnManuel);
   const uccManuel = numOf(eq.identification?.transfoUccManuel);
+  // Détecte la présence d'une self anti-harmonique sur au moins un gradin — le calcul h0 = √(Scc/Q)
+  // suppose des condensateurs seuls, sans self ; un gradin équipé d'une self est en réalité un
+  // filtre accordé dont le point de résonance dépend de sa propre fréquence d'accord (selfFrequence),
+  // pas de ce calcul générique. On calcule néanmoins le rang d'accord propre de chaque gradin filtré
+  // (h = fréquence d'accord ÷ fréquence réseau) — une donnée directement exploitable, à la
+  // différence de selfMA (mA) dont l'usage exact n'est pas certain (probablement un seuil de
+  // protection ou un courant de fuite mesuré, pas un paramètre de calcul), donc non exploité ici.
+  const freqReseau = numOf(eq.controles?.mesures_amont?.frequence_amont?.fields?.hz) || 50;
+  const gradinsAvecSelf = (eq.controles?.gradins_dynamique || [])
+    .filter((g) => numOf(g.fields?.selfFrequence))
+    .map((g) => ({ nom: g.label || "gradin", frequence: numOf(g.fields.selfFrequence), rangAccord: Math.round((numOf(g.fields.selfFrequence) / freqReseau) * 100) / 100 }));
+  const selfInfo = gradinsAvecSelf.length ? { present: true, gradins: gradinsAvecSelf } : { present: false };
   // Repli sur saisie manuelle (Sn/Ucc directement sur la batterie) si aucun transformateur suivi
   // dans l'app ne correspond — utile quand le transfo n'est pas un équipement séparé du site.
   if (!repereTransfo) {
     if (snManuel && uccManuel) {
       if (!qn) return { manque: "Qn (kVAR) de la batterie (champ dans l'identification)" };
       const scc = (snManuel / uccManuel) * 100;
-      return { h0: Math.round(Math.sqrt(scc / qn) * 100) / 100, transfoLabel: "valeurs saisies manuellement", scc: Math.round(scc), snAffiche: snManuel, uccAffiche: uccManuel };
+      return { h0: Math.round(Math.sqrt(scc / qn) * 100) / 100, transfoLabel: "valeurs saisies manuellement", scc: Math.round(scc), snAffiche: snManuel, uccAffiche: uccManuel, selfInfo };
     }
     return { manque: "associez un transformateur suivi (champ « Transformateur associé ») ou renseignez Sn/Ucc manuellement" };
   }
@@ -5270,7 +5301,7 @@ function calcResonanceHarmonique(eq, allEquipements) {
   if (manquants.length) return { manque: `renseignez ${manquants.join(" et ")}` };
   const scc = (sn / ucc) * 100; // kVA — puissance de court-circuit approximée
   const h0 = Math.sqrt(scc / qn);
-  return { h0: Math.round(h0 * 100) / 100, transfoLabel: transfo.identification?.repere || "transfo associé", scc: Math.round(scc), snAffiche: sn, uccAffiche: ucc };
+  return { h0: Math.round(h0 * 100) / 100, transfoLabel: transfo.identification?.repere || "transfo associé", scc: Math.round(scc), snAffiche: sn, uccAffiche: ucc, selfInfo };
 }
 function ResonanceHarmoniqueCalculee({ eq, allEquipements }) {
   const r = calcResonanceHarmonique(eq, allEquipements);
@@ -5297,6 +5328,23 @@ function ResonanceHarmoniqueCalculee({ eq, allEquipements }) {
   return (
     <div style={{ background: rangProche ? "#FDF3E3" : "#EEF2F6", borderRadius: 8, padding: "10px 12px", fontSize: 12, color: rangProche ? "#8A5A0A" : "#0A5DA8", margin: "8px 0", lineHeight: 1.5 }}>
       <strong>Rang de résonance calculé (h₀ = √(Scc/Q)) : {r.h0}</strong> — Scc ≈ {r.scc} kVA (depuis {r.transfoLabel}, Sn={r.snAffiche} kVA, Ucc={r.uccAffiche}%), Q={eq.identification?.qn} kVAR.
+      {r.selfInfo?.present && (
+        <>
+          <br /><strong>⚠ Self anti-harmonique détectée</strong> — ce calcul générique (h₀ = √(Scc/Q)) suppose des condensateurs seuls et ne s'applique pas à un gradin filtré, dont la résonance dépend de sa propre fréquence d'accord :
+          <ul style={{ margin: "4px 0 0 0", paddingLeft: 18 }}>
+            {r.selfInfo.gradins.map((g, i) => (
+              <li key={i}>
+                {g.nom} : {g.frequence} Hz — rang d'accord h = {g.rangAccord}
+                {g.rangAccord >= 4.5 ? (
+                  <> ⚠ inhabituellement proche ou au-dessus du rang 5 — vérifier ce réglage (usuellement accordé nettement en dessous du rang 5, ex. h≈3,8 pour p=14% ou h≈4,2 pour p=7%, pour rester à l'écart des harmoniques 5/7).</>
+                ) : (
+                  <> — cohérent avec un accordage courant (en dessous du rang 5).</>
+                )}
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
       {rangProche ? (
         <>
           {" "}⚠ Proche du rang harmonique {rangProche} — risque de résonance partielle (surchauffe des condensateurs, distorsion de tension amplifiée) ; envisager une inductance anti-harmonique en série si des harmoniques de ce rang sont présents sur le réseau.
@@ -9275,7 +9323,7 @@ function docxEquipementElements(eq, locaux, allSites) {
           iTheo !== null ? [g.fields.i1, g.fields.i2, g.fields.i3].map((v) => (toleranceState(v, Math.round(iTheo * 0.9 * 100) / 100, Math.round(iTheo * 1.1 * 100) / 100) === "bad" ? DOCX_ORANGE : null)) : [null, null, null],
         ]));
 
-        const extra = [g.fields.selfMA && `Self : ${g.fields.selfMA} mA`, g.fields.selfFrequence && `Self : ${g.fields.selfFrequence} Hz`, g.action && `Action : ${g.action}`].filter(Boolean).join("   ·   ");
+        const extra = [g.fields.selfMA && `Self : ${g.fields.selfMA} mH`, g.fields.selfFrequence && `Fréquence d'accord : ${g.fields.selfFrequence} Hz`, g.action && `Action : ${g.action}`].filter(Boolean).join("   ·   ");
         if (extra) elements.push(new DOCX.Paragraph({ spacing: { before: 6, after: 4 }, children: [new DOCX.TextRun({ text: extra, size: 15, color: "666666" })] }));
         elements.push(docxSpacer(60));
 
