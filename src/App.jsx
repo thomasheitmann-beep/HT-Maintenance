@@ -2432,6 +2432,7 @@ function emptySite() {
       prochaineMaintenance: next.toISOString().slice(0, 10),
       syntheseRemarques: "",
       photos: [],
+      offre: { numero: "", fichier: [] }, // le numéro apparaît dans le rapport ; le fichier reste réservé aux techniciens, jamais joint au document client
     },
     equipements: [],
   };
@@ -2487,6 +2488,7 @@ function emptyIntervention(numeroRI) {
     statut: "En cours",
     linkedSiteId: null,
     linkedEquipementId: null,
+    offre: { numero: "", fichier: [] }, // idem site : numéro visible dans le RI, fichier réservé aux techniciens
   };
 }
 // Filet de sécurité / migration : les interventions créées avant l'introduction du support
@@ -2498,6 +2500,7 @@ function repairIntervention(iv) {
     const nonVide = ancien && (ancien.type || ancien.constructeur || ancien.modele || ancien.numeroSerie || ancien.localisation || ancien.reference);
     iv.equipements = nonVide ? [{ id: uid(), ...ancien }] : [];
   }
+  if (!iv.offre) iv.offre = { numero: "", fichier: [] };
   return iv;
 }
 
@@ -4459,6 +4462,18 @@ function RapportTab({ site, update }) {
         </button>
       </div>
       <TextArea value={r.syntheseRemarques} onChange={(e) => set("syntheseRemarques", e.target.value)} style={{ minHeight: 220, fontSize: 15, lineHeight: 1.6 }} />
+    </Card>
+    <Card style={{ marginTop: 14 }}>
+      <SectionTitle>Offre / Devis associé</SectionTitle>
+      <div style={{ fontSize: 11.5, color: "#8B96A3", marginBottom: 12 }}>
+        Le numéro d'offre apparaît dans le rapport ; le fichier joint reste réservé aux techniciens (jamais inclus dans le document remis au client).
+      </div>
+      <Field label="Numéro d'offre / devis">
+        <TextInput value={r.offre?.numero || ""} onChange={(e) => set("offre", { ...(r.offre || {}), numero: e.target.value })} placeholder="ex. OFF-2026-0142" />
+      </Field>
+      <div style={{ marginTop: 12 }}>
+        <FileGallery files={r.offre?.fichier || []} onChange={(files) => set("offre", { ...(r.offre || {}), fichier: files })} idPrefix={`${site.id}-offre`} />
+      </div>
     </Card>
     <div style={{ marginTop: 14 }}>
       <PhotoGallery photos={r.photos} onChange={(p) => set("photos", p)} idPrefix={`${site.id}-rapport`} />
@@ -7531,7 +7546,19 @@ function InterventionEditor({ iv, update, onBack, onDelete, onPrint }) {
           <IvField label="Client"><TextInput value={iv.client} onChange={(e) => set("client", e.target.value)} /></IvField>
           <IvField label="Site"><TextInput value={iv.site} onChange={(e) => set("site", e.target.value)} /></IvField>
           <IvField label="Email client"><TextInput type="email" value={iv.emailClient} onChange={(e) => set("emailClient", e.target.value)} placeholder="pour l'envoi par mail" /></IvField>
+          <IvField label="Numéro d'offre / devis"><TextInput value={iv.offre?.numero || ""} onChange={(e) => set("offre", { ...(iv.offre || {}), numero: e.target.value })} placeholder="ex. OFF-2026-0142" /></IvField>
         </div>
+      </Card>
+
+      <Card style={{ marginBottom: 14 }}>
+        <SectionTitle>Offre / Devis associé — pièce jointe</SectionTitle>
+        <div style={{ fontSize: 11.5, color: "#8B96A3", marginBottom: 12 }}>
+          Réservé aux techniciens — jamais inclus dans le document Word remis au client.
+        </div>
+        <FileGallery files={iv.offre?.fichier || []} onChange={(files) => set("offre", { ...(iv.offre || {}), fichier: files })} idPrefix={`${iv.id}-offre`} />
+      </Card>
+
+      <Card style={{ marginBottom: 14 }}>
 
         <div style={{ marginTop: 16 }}>
           <label style={{ fontSize: 11, fontWeight: 600, color: "#5B6B7D", letterSpacing: 0.5, textTransform: "uppercase" }}>Journée 1</label>
@@ -9817,6 +9844,9 @@ function docxCoverPage(site) {
     site.local ? new DOCX.Paragraph({ spacing: { before: 60, after: 0 }, alignment: DOCX.AlignmentType.CENTER, children: [
       new DOCX.TextRun({ text: "Local : " + site.local, color: "8B96A3", size: 20 }),
     ]}) : new DOCX.Paragraph({}),
+    site.rapport?.offre?.numero ? new DOCX.Paragraph({ spacing: { before: 60, after: 0 }, alignment: DOCX.AlignmentType.CENTER, children: [
+      new DOCX.TextRun({ text: "Offre / Devis n° " + site.rapport.offre.numero, color: "8B96A3", size: 20 }),
+    ]}) : new DOCX.Paragraph({}),
     new DOCX.Paragraph({ spacing: { before: 500, after: 0 }, alignment: DOCX.AlignmentType.CENTER, children: [
       new DOCX.TextRun({ text: "Rapport généré le " + dateGeneration, color: "8B96A3", size: 18, italics: true }),
     ]}),
@@ -9967,6 +9997,7 @@ async function generateInterventionDocx(iv) {
     ["Technicien(s)", tousTechniciens],
     ["Durée totale (journée 1)", duree],
     ["Statut", iv.statut === "Clôturée" ? "Clôturée" : "En cours"],
+    ["Offre / Devis", iv.offre?.numero ? "N° " + iv.offre.numero : ""],
   ];
   const natureText = NATURE_INTERVENTION.filter((n) => iv.nature[n.key]).map((n) => n.label).join(", ") || "—";
   const mesuresRows = [
