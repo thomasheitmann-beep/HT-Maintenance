@@ -5585,16 +5585,20 @@ function PiecesUsureUPSPanel({ eq, update }) {
 function PiecesUsureSyntheseUPS({ eq }) {
   const lignes = calcEcheancesUsureUPS(eq);
   if (lignes.length === 0) return null;
+  const anneeActuelle = new Date().getFullYear();
   return (
     <Card style={{ marginBottom: 14 }}>
       <SectionTitle>Échéances de remplacement prévues</SectionTitle>
       <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-        {lignes.map((l, i) => (
-          <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid #E2E6EB", fontSize: 12.5 }}>
-            <span style={{ color: "#3E4A5C" }}>{l.type}</span>
-            <span style={{ fontWeight: 700, color: "#1A1F26" }}>{l.annee}</span>
-          </div>
-        ))}
+        {lignes.map((l, i) => {
+          const depasse = l.annee !== null && l.annee < anneeActuelle;
+          return (
+            <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 10px", borderBottom: "1px solid #E2E6EB", fontSize: 12.5, background: depasse ? "#FDF3E3" : "transparent", borderRadius: depasse ? 6 : 0 }}>
+              <span style={{ color: depasse ? "#8A5A0A" : "#3E4A5C" }}>{depasse && "⚠ "}{l.type}</span>
+              <span style={{ fontWeight: 700, color: depasse ? "#8A5A0A" : "#1A1F26" }}>{l.annee}{depasse && " — dépassée"}</span>
+            </div>
+          );
+        })}
       </div>
     </Card>
   );
@@ -5602,16 +5606,20 @@ function PiecesUsureSyntheseUPS({ eq }) {
 function PiecesUsureSynthese({ eq }) {
   const lignes = calcPiecesUsure(eq);
   if (lignes.length === 0) return null;
+  const anneeActuelle = new Date().getFullYear();
   return (
     <Card style={{ marginBottom: 14 }}>
       <SectionTitle>Échéances de remplacement prévues</SectionTitle>
       <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-        {lignes.map((l, i) => (
-          <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid #E2E6EB", fontSize: 12.5 }}>
-            <span style={{ color: "#3E4A5C" }}>{l.type}</span>
-            <span style={{ fontWeight: 700, color: "#1A1F26" }}>{l.annee ?? "—"}</span>
-          </div>
-        ))}
+        {lignes.map((l, i) => {
+          const depasse = l.annee !== null && l.annee < anneeActuelle;
+          return (
+            <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 10px", borderBottom: "1px solid #E2E6EB", fontSize: 12.5, background: depasse ? "#FDF3E3" : "transparent", borderRadius: depasse ? 6 : 0 }}>
+              <span style={{ color: depasse ? "#8A5A0A" : "#3E4A5C" }}>{depasse && "⚠ "}{l.type}</span>
+              <span style={{ fontWeight: 700, color: depasse ? "#8A5A0A" : "#1A1F26" }}>{l.annee ?? "—"}{depasse && " — dépassée"}</span>
+            </div>
+          );
+        })}
       </div>
     </Card>
   );
@@ -5979,6 +5987,15 @@ function collectAnomalies(eq) {
       });
     }
   }
+  // Pièces d'usure dont l'échéance de remplacement (année de mise en service + durée de vie
+  // déclarée) est dépassée — même logique que l'avertissement d'âge des fusibles, mais reprise
+  // dans les anomalies de l'équipement puisque ces pièces n'ont pas de champ "état" propre.
+  const anneeActuelle = new Date().getFullYear();
+  [...calcPiecesUsure(eq), ...calcEcheancesUsureUPS(eq)].forEach((l) => {
+    if (l.annee !== null && l.annee < anneeActuelle) {
+      lines.push(`Pièce d'usure « ${l.type} » : échéance de remplacement dépassée (prévue en ${l.annee})`);
+    }
+  });
   return lines;
 }
 
@@ -5997,6 +6014,15 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
 
   const titleField = schema.identification[0];
   const subtitleField = schema.identification.find((f) => f.key.toLowerCase().includes("numeroserie")) || schema.identification[1];
+
+  // Un gradin hors tolérance doit faire remonter l'état final automatiquement — même logique que
+  // pour les mesures de fusibles : ne fait remonter QUE depuis "Conforme", jamais de rétrogradation
+  // automatique d'un état plus sévère déjà choisi volontairement par le technicien.
+  const gradinsEnDefaut = gradinsHorsTolerance(eq);
+  useEffect(() => {
+    if (gradinsEnDefaut && eq.etatFinal === "Conforme") update({ ...eq, etatFinal: "Dégradé" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gradinsEnDefaut, eq.etatFinal]);
 
   // Fusion options statiques + bibliothèque apprise, calculée une seule fois par changement réel
   // (pas à chaque frappe) — évite de refaire un Set + un tableau pour chaque champ à chaque
