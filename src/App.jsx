@@ -5941,6 +5941,34 @@ function BRKReglagePanel({ eq, update, custom, onAddCustom, onChangeCustom, onRe
   );
 }
 
+// Détail générique d'une anomalie : valeur mesurée hors tolérance (motif tol_min/tol_max, comme
+// pour les fusibles) et tout avertissement textuel déjà calculé par l'item (âge dépassé,
+// incohérence...) — pour ne plus se limiter à "Nom : Dégradé" sans dire pourquoi. Générique : couvre
+// automatiquement tout nouvel item suivant ces motifs, sans code spécifique par équipement.
+function detailAnomalieItem(item, v) {
+  if (!v || !v.fields) return { detail: "", avertissements: [] };
+  const fields = v.fields;
+  const parts = [];
+  const avertissements = [];
+  const tolMinField = (item.fields || []).find((f) => f.key === "tol_min" && f.compute);
+  const tolMaxField = (item.fields || []).find((f) => f.key === "tol_max" && f.compute);
+  if (tolMinField && tolMinField.unitFrom) {
+    const key = tolMinField.unitFrom;
+    const mesure = fields[key];
+    const min = numOf(tolMinField.compute(fields)), max = tolMaxField ? numOf(tolMaxField.compute(fields)) : null;
+    if (mesure !== undefined && mesure !== "" && toleranceState(mesure, min, max) === "bad") {
+      parts.push(`valeur mesurée ${mesure}${tolMinField.unit ? " " + tolMinField.unit : ""}, attendu ${min}–${max}`);
+    }
+  }
+  (item.fields || []).forEach((f) => {
+    if (f.compute && f.longText) {
+      const texte = f.compute(fields);
+      if (texte && texte.startsWith("⚠")) avertissements.push(texte.replace(/^⚠\s*/, ""));
+    }
+  });
+  parts.push(...avertissements);
+  return { detail: parts.length ? " (" + parts.join(" ; ") + ")" : "", avertissements };
+}
 // Parcourt tous les contrôles d'un équipement (y compris seuils dynamiques, essais liés,
 // et analyses d'huile cochées) et relève ceux dont l'état n'est pas "Conforme".
 function collectAnomalies(eq) {
@@ -5960,13 +5988,21 @@ function collectAnomalies(eq) {
     if (eq.type === "Analyse d'huile" && sec.key === "resultats") {
       sec.items.forEach((item) => {
         const v = eq.controles[sec.key][item.key];
-        if (v.fields.realise === "OUI" && v.etat && RANK_OF[v.etat] > 0) lines.push(`${item.label} : ${v.etat}`);
+        if (v.fields.realise === "OUI" && v.etat && RANK_OF[v.etat] > 0) lines.push(`${item.label} : ${v.etat}${detailAnomalieItem(item, v).detail}`);
       });
       return;
     }
     sec.items.forEach((item) => {
       const v = eq.controles[sec.key][item.key];
-      if (v && v.etat !== undefined && RANK_OF[v.etat] > 0) lines.push(`${item.label} : ${v.etat}`);
+      if (!v) return;
+      const { detail, avertissements } = detailAnomalieItem(item, v);
+      if (v.etat !== undefined && RANK_OF[v.etat] > 0) {
+        lines.push(`${item.label} : ${v.etat}${detail}`);
+      } else if (avertissements.length) {
+        // Avertissement présent (ex. durée de vie fusible dépassée) mais état encore "Conforme" —
+        // le technicien n'a pas forcément pensé à le changer manuellement ; on le relève quand même.
+        lines.push(`${item.label} : ${avertissements.join(" ; ")}`);
+      }
     });
     (eq.controles[sec.key + "__custom"] || []).forEach((c) => {
       if (c.etat && RANK_OF[c.etat] > 0) lines.push(`${c.label || "(action ajoutée)"} : ${c.etat}`);
