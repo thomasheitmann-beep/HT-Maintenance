@@ -5987,6 +5987,19 @@ function collectAnomalies(eq) {
       });
     }
   }
+  // Gradins de batterie de compensation : pas de champ "état" propre non plus — courant par phase
+  // comparé au courant théorique (Q/U), même logique que gradinsHorsTolerance mais avec le détail
+  // par gradin et par phase, nécessaire pour une remarque exploitable.
+  (eq.controles.gradins_dynamique || []).filter((g) => g.label).forEach((g) => {
+    const iTheo = gradinIntensiteTheorique(g.fields.q, g.fields.u);
+    if (iTheo === null) return;
+    const tolMin = Math.round(iTheo * 0.9 * 100) / 100, tolMax = Math.round(iTheo * 1.1 * 100) / 100;
+    [["I1", "i1"], ["I2", "i2"], ["I3", "i3"]].forEach(([label, key]) => {
+      if (toleranceState(g.fields[key], tolMin, tolMax) === "bad") {
+        lines.push(`Gradin « ${g.label} » : courant ${label} hors tolérance (${g.fields[key]} A, attendu ${tolMin}–${tolMax} A)`);
+      }
+    });
+  });
   // Pièces d'usure dont l'échéance de remplacement (année de mise en service + durée de vie
   // déclarée) est dépassée — même logique que l'avertissement d'âge des fusibles, mais reprise
   // dans les anomalies de l'équipement puisque ces pièces n'ont pas de champ "état" propre.
