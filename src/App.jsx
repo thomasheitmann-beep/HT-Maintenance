@@ -8767,12 +8767,22 @@ function docxSyntheseTable(site) {
   )});
 }
 // Word n'accepte que lettres/chiffres/underscore dans un nom de repère (bookmark), 40 caractères max.
+// Compteur d'ID de favori (bookmark) numérique, réinitialisé à chaque génération de document.
+// Contourne un bug de la bibliothèque docx : son propre générateur "unique" recrée un compteur
+// reparti de zéro à chaque appel, donnant w:id="1" à TOUS les favoris du document (invalide selon
+// la norme OOXML — des ID de favoris dupliqués). Word/LibreOffice tolèrent ça, mais Apple Pages
+// refuse d'ouvrir un tel fichier. On construit donc les favoris à la main (BookmarkStart/End) avec
+// un vrai identifiant numérique unique, plutôt que d'utiliser la classe Bookmark de la librairie.
+let bookmarkIdCounter = 0;
+function nextBookmarkNumericId() { return ++bookmarkIdCounter; }
 function docxBookmarkId(eq) { return "equip_" + eq.id.replace(/[^a-zA-Z0-9_]/g, "_").slice(0, 32); }
 function docxEquipHeader(name, bookmarkId) {
   const title = new DOCX.TextRun({ text: (name || "").toUpperCase(), bold: true, color: DOCX_WHITE, size: 24 });
+  const numericId = nextBookmarkNumericId();
+  const contenu = bookmarkId ? [new DOCX.BookmarkStart(bookmarkId, numericId), title, new DOCX.BookmarkEnd(numericId)] : [title];
   return new DOCX.Table({ width: { size: 8800, type: DOCX.WidthType.DXA }, columnWidths: [8800], rows: [new DOCX.TableRow({ children: [new DOCX.TableCell({
     width: { size: 8800, type: DOCX.WidthType.DXA }, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_DARK },
-    children: [new DOCX.Paragraph({ spacing: { before: 80, after: 80 }, children: [bookmarkId ? new DOCX.Bookmark({ id: bookmarkId, children: [title] }) : title] })],
+    children: [new DOCX.Paragraph({ spacing: { before: 80, after: 80 }, children: contenu })],
   })] })] });
 }
 function docxSpacer(h) { return new DOCX.Paragraph({ spacing: { after: h || 200 }, children: [] }); }
@@ -10142,6 +10152,7 @@ function docxCoverPage(site) {
 
 async function generateSiteDocx(site, allSites) {
   await ensureDocx();
+  bookmarkIdCounter = 0; // repart de zéro à chaque génération, pour des ID propres et prévisibles
   site = await resolvePhotosForDocx(site);
   const rank = overallRank(site);
   const rankLabel = rankToLabel(rank);
