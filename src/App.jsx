@@ -1605,10 +1605,22 @@ const LISTE_TAILLE_VIS = ["M6", "M8", "M10", "M12", "M14", "M16", "M20"];
 // les borniers de terre à vis, où 5/10/15 N·m pour M6/M8/M10 est une valeur couramment documentée
 // (repère uniquement, à vérifier ; ne s'applique pas aux connexions de puissance).
 const COUPLE_TERRE_REFERENCE = { "M6": 5, "M8": 10, "M10": 15 };
+// Couples de serrage vérifiés — notice Schneider Electric Trihal (transformateur sec enrobé),
+// convertis de m·kg en N·m (1 m·kg ≈ 9,81 N·m, conversion donnée par la notice elle-même). Valeurs
+// spécifiques à cette gamme précise — à vérifier que le transformateur concerné est bien un Trihal
+// avant de s'y fier, un autre modèle/constructeur pouvant avoir des couples différents.
+const COUPLE_TRIHAL_MT = { "M8": 9.8, "M10": 19.6, "M12": 29.4, "M14": 49.1 };
+const COUPLE_TRIHAL_BT = { "M8": 12.3, "M10": 24.5, "M12": 44.1, "M14": 68.7, "M16": 98.1 };
 function aideCoupleSerrage(taille, typeConnexion) {
   if (!taille) return "";
   if (typeConnexion === "terre" && COUPLE_TERRE_REFERENCE[taille]) {
     return `Repère indicatif pour un bornier de terre à vis ${taille} : ${COUPLE_TERRE_REFERENCE[taille]} N·m — à vérifier, ne s'applique pas à une connexion de puissance (cosse/méplat).`;
+  }
+  if (typeConnexion === "mt" && COUPLE_TRIHAL_MT[taille]) {
+    return `Repère vérifié (notice Schneider Trihal) pour les plages MT en ${taille} : ${COUPLE_TRIHAL_MT[taille]} N·m — vérifier qu'il s'agit bien d'un Trihal avant de s'y fier (effort maximum sur les plages MT : 500 N).`;
+  }
+  if (typeConnexion === "bt" && COUPLE_TRIHAL_BT[taille]) {
+    return `Repère vérifié (notice Schneider Trihal) pour les barres BT en ${taille} : ${COUPLE_TRIHAL_BT[taille]} N·m — vérifier qu'il s'agit bien d'un Trihal avant de s'y fier.`;
   }
   return `Aucune valeur générique fiable pour une connexion de puissance ${taille} — le couple varie selon le connecteur (cuivre/aluminium, cosse ou méplat) et le constructeur. Se référer à la documentation du fabricant ou à l'étiquette de l'appareil.`;
 }
@@ -1626,7 +1638,12 @@ function versMegaohms(valeur, unite) {
   if (unite === "Ω") return v / 1_000_000;
   return v; // MΩ par défaut
 }
-function isolementFields() {
+// Valeurs typiques d'isolement à froid — notice Schneider Trihal (transformateur sec enrobé),
+// section "Contrôles avant mise en service". Valeurs approximatives données par le fabricant pour
+// CE modèle précis, pas une norme générale — la notice précise elle-même que des valeurs
+// nettement inférieures peuvent simplement indiquer un appareil humide, pas un défaut.
+const ISOLEMENT_TYPIQUE_TRIHAL = { hta_terre: 250, bt_terre: 50, hta_bt: 250 };
+function isolementFields(itemType) {
   return [
     F("typeMesure", "Type de mesure", null, LISTE_TYPE_MESURE_ISOLEMENT), F("v", "Tension d'injection", null, TENSION_ISOLEMENT),
     F("valeur", "Valeur"), F("unite", "Unité", null, UNITE_ISOLEMENT),
@@ -1641,8 +1658,10 @@ function isolementFields() {
         const mesureMO = versMegaohms(f.valeur, f.unite);
         if (vInjection === null || mesureMO === null) return "";
         const seuilMO = vInjection / 1000; // 1 MΩ par kV de tension d'essai
-        if (mesureMO < seuilMO) return `⚠ ${mesureMO} MΩ mesurés, en dessous du repère indicatif de ${Math.round(seuilMO * 100) / 100} MΩ (règle 1 MΩ/kV pour ${vInjection} V d'essai) — isolement à surveiller. Repère indicatif, pas de seuil réglementaire unique pour les transformateurs.`;
-        return `${mesureMO} MΩ mesurés, au-dessus du repère indicatif de ${Math.round(seuilMO * 100) / 100} MΩ (règle 1 MΩ/kV pour ${vInjection} V d'essai). Repère indicatif, pas de seuil réglementaire unique pour les transformateurs.`;
+        const valeurTypique = ISOLEMENT_TYPIQUE_TRIHAL[itemType];
+        const comparaisonTrihal = valeurTypique ? ` À titre de comparaison (notice Schneider Trihal, si c'est bien ce modèle) : valeur typique ≈ ${valeurTypique} MΩ — un écart net à la baisse peut simplement indiquer un appareil humide plutôt qu'un défaut.` : "";
+        if (mesureMO < seuilMO) return `⚠ ${mesureMO} MΩ mesurés, en dessous du repère indicatif de ${Math.round(seuilMO * 100) / 100} MΩ (règle 1 MΩ/kV pour ${vInjection} V d'essai) — isolement à surveiller. Repère indicatif, pas de seuil réglementaire unique pour les transformateurs.${comparaisonTrihal}`;
+        return `${mesureMO} MΩ mesurés, au-dessus du repère indicatif de ${Math.round(seuilMO * 100) / 100} MΩ (règle 1 MΩ/kV pour ${vInjection} V d'essai). Repère indicatif, pas de seuil réglementaire unique pour les transformateurs.${comparaisonTrihal}`;
       },
     },
     F("pi", "PI (10/1min)"), F("dar", "DAR (60/10sec)"),
@@ -1685,8 +1704,8 @@ function buildTransformateurSchema({ sec = false } = {}) {
       { key: "electriques", title: "Contrôles électriques", items: [
         C("indicateurs_capacitifs", "Contrôle des indicateurs capacitifs de présence tension"),
         C("couple_serrage_plateau", "Couple de serrage — Plateau", coupleSerrageFields("puissance")),
-        C("connexions_bt", "Contrôle des connexions BT", coupleSerrageFields("puissance")),
-        C("couple_serrage_borne_ht", "Couple de serrage — Borne HT", coupleSerrageFields("puissance")),
+        C("connexions_bt", "Contrôle des connexions BT", coupleSerrageFields("bt")),
+        C("couple_serrage_borne_ht", "Couple de serrage — Borne HT", coupleSerrageFields("mt")),
         C("tetes_cables_hta", "Contrôle des têtes de câbles HTA"),
         C("verrouillage_cle", "Vérification du système de verrouillage à clé"),
       ]},
@@ -1712,9 +1731,9 @@ function buildTransformateurSchema({ sec = false } = {}) {
         C("resistance_enroulements_secondaire", "Résistance des enroulements — Secondaire", [...L1L2L3AvecToleranceEcart("mΩ"), F("temperature", "Température enroulement", "°C")]),
       ]},
       { key: "mesure_isolement", title: "Mesure d'isolement", items: [
-        C("hta_terre", "HTA - Terre (BT shuntée à la terre)", isolementFields()),
-        C("bt_terre", "BT - Terre (HTA shuntée à la terre)", isolementFields()),
-        C("hta_bt", "HTA - BT (enroulements court-circuités entre eux)", isolementFields()),
+        C("hta_terre", "HTA - Terre (BT shuntée à la terre)", isolementFields("hta_terre")),
+        C("bt_terre", "BT - Terre (HTA shuntée à la terre)", isolementFields("bt_terre")),
+        C("hta_bt", "HTA - BT (enroulements court-circuités entre eux)", isolementFields("hta_bt")),
       ]},
     ],
   };
