@@ -1970,6 +1970,8 @@ const SCHEMAS = {
       { key: "repere", label: "Repère / Nom de l'équipement" },
       { key: "transformateurAssocie", label: "Transformateur associé (repère)" },
       { key: "laboratoire", label: "Laboratoire" }, { key: "datePrelevement", label: "Date de prélèvement" },
+      { key: "pointPrelevement", label: "Point de prélèvement", options: ["Point haut", "Vanne basse", "DMCR", "DGPT2", "Bucholtz", "Autre"] },
+      { key: "temperatureHuile", label: "Température de l'huile (°C)", numeric: true },
     ],
     sections: [
       { key: "resultats", title: "Résultats d'analyse", items: [
