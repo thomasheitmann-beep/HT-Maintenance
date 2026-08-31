@@ -8616,7 +8616,7 @@ function docxControlRow(label, detail, action, etat) {
     detail.forEach((p, i) => {
       if (i > 0) runs.push(new DOCX.TextRun({ text: "  ·  ", size: 16, color: "999999", italics: true }));
       const couleur = p.etat === "bad" ? "C0392B" : p.etat === "ok" ? "0F8A5F" : "666666";
-      runs.push(new DOCX.TextRun({ text: p.text, size: 16, color: couleur, italics: true, bold: p.etat === "bad" }));
+      runs.push(new DOCX.TextRun({ text: p.text, size: 16, color: couleur, italics: true, ...(p.etat === "bad" ? { bold: true } : {}) }));
     });
     children.push(new DOCX.Paragraph({ spacing: { after: action ? 40 : 0 }, children: runs }));
   } else if (detail) {
