@@ -10433,7 +10433,11 @@ function dataUrlToBlob(dataUrl) {
 // L'utilisateur courant, mis à jour par le composant racine — évite de faire traverser `currentUser`
 // à travers des dizaines de composants intermédiaires (galeries de photos imbriquées profondément).
 let CURRENT_USER_FOR_STORAGE = null;
-const REST_POLL_INTERVAL_MS = 7000;
+// Intervalle de sondage (lecture) du serveur — volontairement large pour réduire la fréquence de
+// toute perturbation possible pendant une saisie longue, en plus des filets de sécurité déjà en
+// place (writeInFlight, comparaison avec le dernier état connu comme synchronisé) qui empêchent
+// normalement un sondage d'écraser une saisie non encore enregistrée.
+const REST_POLL_INTERVAL_MS = 20000;
 async function firestoreRestGet(docPath, idToken) {
   const res = await fetch(`${FIRESTORE_REST_BASE}/${docPath}`, { headers: { Authorization: `Bearer ${idToken}` } });
   if (res.status === 404) return null;
