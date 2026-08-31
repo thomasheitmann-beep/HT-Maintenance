@@ -691,8 +691,8 @@ const SECURITE_CELLULE = [
 // Mesure d'isolement simple (HTA-Terre + Entre phases), partagée entre les cellules HTA pour
 // lesquelles elle est optionnelle (pas systématiquement réalisée, contrairement au jeu de barre).
 const MESURE_ISOLEMENT_CELLULE = [
-  C("hta_terre", "HTA - Terre", [F("v", "Tension", null, TENSION_ISOLEMENT), F("valeur", "Valeur"), F("unite", "Unité", null, UNITE_ISOLEMENT)]),
-  C("entre_phases", "Entre phases", [F("v", "Tension", null, TENSION_ISOLEMENT), F("valeur", "Valeur"), F("unite", "Unité", null, UNITE_ISOLEMENT)]),
+  C("hta_terre", "HTA - Terre", [F("realise", "Mesure réalisée ?", null, ["OUI", "NON"]), F("v", "Tension", null, TENSION_ISOLEMENT), F("valeur", "Valeur"), F("unite", "Unité", null, UNITE_ISOLEMENT)]),
+  C("entre_phases", "Entre phases", [F("realise", "Mesure réalisée ?", null, ["OUI", "NON"]), F("v", "Tension", null, TENSION_ISOLEMENT), F("valeur", "Valeur"), F("unite", "Unité", null, UNITE_ISOLEMENT)]),
 ];
 // Modèles de pièces internes (bobines, moteurs...) par marque — vide pour l'instant : contrairement
 // aux fusibles (marché standardisé, catalogues publics dédiés), ces pièces sont propres à chaque
@@ -6040,6 +6040,35 @@ function detailAnomalieItem(item, v) {
   parts.push(...avertissements);
   return { detail: parts.length ? " (" + parts.join(" ; ") + ")" : "", avertissements, horsTolerance };
 }
+// Statut de tolérance ("ok"/"bad"/null) d'un champ précis d'un item — même 3 motifs que
+// detailAnomalieItem (tolérance calculée, tolérance saisie manuellement, référence constructeur
+// ± 20%), mais retourne un statut par champ plutôt qu'un simple booléen d'anomalie. Sert à colorer
+// les valeurs individuellement dans le rapport Word, comme c'est déjà fait à l'écran.
+function champTolStatus(item, fields, key) {
+  if (!fields) return null;
+  const tolMinField = (item.fields || []).find((f) => f.key === "tol_min" && f.compute);
+  const tolMaxField = (item.fields || []).find((f) => f.key === "tol_max" && f.compute);
+  if (tolMinField) {
+    const champsConcernes = [tolMinField.unitFrom, "l1", "l2", "l3"].filter(Boolean);
+    if (!champsConcernes.includes(key)) return null;
+    const min = numOf(tolMinField.compute(fields)), max = tolMaxField ? numOf(tolMaxField.compute(fields)) : null;
+    return toleranceState(fields[key], min, max);
+  }
+  if (fields.tolerance !== undefined || fields.tol_max !== undefined) {
+    if (!["l1", "l2", "l3", "valeur", "rd", "n"].includes(key)) return null;
+    const max = numOf(fields.tolerance ?? fields.tol_max);
+    const min = fields.tol_min !== undefined ? numOf(fields.tol_min) : null;
+    if (max === null) return null;
+    return toleranceState(fields[key], min, max);
+  }
+  if (fields.reference !== undefined && numOf(fields.reference) && ["l1", "l2", "l3"].includes(key)) {
+    const ref = numOf(fields.reference);
+    const mesure = numOf(fields[key]);
+    if (mesure === null) return null;
+    return Math.abs(mesure - ref) / ref > 0.2 ? "bad" : "ok";
+  }
+  return null;
+}
 // Parcourt tous les contrôles d'un équipement (y compris seuils dynamiques, essais liés,
 // et analyses d'huile cochées) et relève ceux dont l'état n'est pas "Conforme".
 function collectAnomalies(eq) {
@@ -7008,10 +7037,11 @@ function printFieldParts(item, value) {
   if (!value) return parts;
   const fields = value.fields || {};
   (item.fields || []).forEach((f) => {
+    if (f.key === "realise") return; // sa présence même dans le rapport indique déjà que c'est réalisé
     const v = f.compute ? f.compute(fields) : fields[f.key];
     const unitKey = f.unitFrom ? f.unitFrom + "Unite" : f.key + "Unite";
     const unit = f.unit ? fields[unitKey] || f.unit : "";
-    if (v !== "" && v !== null && v !== undefined) parts.push(`${f.label} : ${v}${unit ? " " + unit : ""}`);
+    if (v !== "" && v !== null && v !== undefined) parts.push({ text: `${f.label} : ${v}${unit ? " " + unit : ""}`, etat: champTolStatus(item, fields, f.key) });
   });
   return parts;
 }
@@ -7031,7 +7061,21 @@ function PrintControlLine({ item, value, extraParts }) {
     <div style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "5px 0", borderBottom: "1px solid #e5e5e5", fontSize: 11 }}>
       <div style={{ flex: "1 1 260px" }}>
         <div>{item.label}</div>
-        {parts.length > 0 && <div style={{ color: "#666", fontSize: 10 }}>{parts.join(" · ")}</div>}
+        {parts.length > 0 && (
+          <div style={{ color: "#666", fontSize: 10 }}>
+            {parts.map((p, i) => {
+              const estObjet = typeof p === "object" && p !== null;
+              const texte = estObjet ? p.text : p;
+              const couleur = estObjet && p.etat === "bad" ? "#C0392B" : estObjet && p.etat === "ok" ? "#0F8A5F" : "#666";
+              return (
+                <span key={i}>
+                  {i > 0 && <span style={{ color: "#999" }}>  ·  </span>}
+                  <span style={{ color: couleur, fontWeight: estObjet && p.etat === "bad" ? 700 : 400 }}>{texte}</span>
+                </span>
+              );
+            })}
+          </div>
+        )}
         {value.action ? <div style={{ color: "#666", fontSize: 10 }}>Action : {value.action}</div> : null}
       </div>
       {value.etat !== undefined && (
@@ -8563,8 +8607,21 @@ function docxFieldTable(rows) {
   return new DOCX.Table({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: [3400, 6200], rows: filtered.map(([l, v]) => docxFieldRow(l, v)) });
 }
 function docxControlRow(label, detail, action, etat) {
-  const children = [new DOCX.Paragraph({ spacing: { after: (detail || action) ? 40 : 0 }, children: [new DOCX.TextRun({ text: label, size: 18, color: DOCX_DARK })] })];
-  if (detail) children.push(new DOCX.Paragraph({ spacing: { after: action ? 40 : 0 }, children: [new DOCX.TextRun({ text: detail, size: 16, color: "666666", italics: true })] }));
+  const children = [new DOCX.Paragraph({ spacing: { after: (detail && (Array.isArray(detail) ? detail.length : detail)) || action ? 40 : 0 }, children: [new DOCX.TextRun({ text: label, size: 18, color: DOCX_DARK })] })];
+  if (Array.isArray(detail) && detail.length) {
+    // Format enrichi (depuis printFieldParts) : une valeur hors tolérance ressort en rouge, une
+    // valeur conforme à une tolérance connue en vert — comme la coloration déjà appliquée à
+    // l'écran. Un séparateur gris clair entre chaque valeur, jamais coloré lui-même.
+    const runs = [];
+    detail.forEach((p, i) => {
+      if (i > 0) runs.push(new DOCX.TextRun({ text: "  ·  ", size: 16, color: "999999", italics: true }));
+      const couleur = p.etat === "bad" ? "C0392B" : p.etat === "ok" ? "0F8A5F" : "666666";
+      runs.push(new DOCX.TextRun({ text: p.text, size: 16, color: couleur, italics: true, bold: p.etat === "bad" }));
+    });
+    children.push(new DOCX.Paragraph({ spacing: { after: action ? 40 : 0 }, children: runs }));
+  } else if (detail) {
+    children.push(new DOCX.Paragraph({ spacing: { after: action ? 40 : 0 }, children: [new DOCX.TextRun({ text: detail, size: 16, color: "666666", italics: true })] }));
+  }
   if (action) children.push(new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: "Action : " + action, size: 16, color: "666666" })] }));
   return new DOCX.TableRow({ children: [
     new DOCX.TableCell({ width: { size: 7600, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, children }),
@@ -8656,7 +8713,7 @@ function docxTableauMesures(items, controlesSection) {
       rows.push([item.label, f.l1, f.l2, f.l3, calc]);
       return;
     }
-    const parts = printFieldParts(item, value);
+    const parts = printFieldParts(item, value).map((p) => p.text);
     if (parts.length) rows.push([item.label, "", "", "", parts.map((p) => p.includes(" : ") ? p.split(" : ").slice(1).join(" : ") : p).join("  ·  ")]);
   });
   return docxBuildMesuresTable(rows);
@@ -8685,16 +8742,17 @@ function docxPhaseTable(rows, headers, colors) {
 // Table de synthèse : le nom de chaque équipement est un lien cliquable vers sa page dans le document.
 function docxSyntheseRow(label, etat, bookmarkId) {
   const linkRun = new DOCX.TextRun({ text: label, size: 18, color: DOCX_BLUE, underline: {} });
+  const margeGenereuse = { top: 200, bottom: 200, left: 160, right: 140 };
   return new DOCX.TableRow({ children: [
-    new DOCX.TableCell({ width: { size: 6400, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, children: [new DOCX.Paragraph({ children: [
+    new DOCX.TableCell({ width: { size: 6400, type: DOCX.WidthType.DXA }, margins: margeGenereuse, children: [new DOCX.Paragraph({ children: [
       bookmarkId ? new DOCX.InternalHyperlink({ anchor: bookmarkId, children: [linkRun] }) : new DOCX.TextRun({ text: label, size: 18, color: DOCX_DARK }),
     ] })] }),
-    new DOCX.TableCell({ width: { size: 1200, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, verticalAlign: DOCX.VerticalAlign.CENTER, children: [new DOCX.Paragraph({
+    new DOCX.TableCell({ width: { size: 1200, type: DOCX.WidthType.DXA }, margins: margeGenereuse, verticalAlign: DOCX.VerticalAlign.CENTER, children: [new DOCX.Paragraph({
       children: bookmarkId ? [new DOCX.TextRun({ text: "p. ", size: 16, color: "8B96A3" }), new DOCX.PageReference(bookmarkId, { size: 16, color: "8B96A3" })] : [],
     })] }),
     etat
-      ? new DOCX.TableCell({ width: { size: 2000, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, shading: { type: DOCX.ShadingType.CLEAR, fill: docxEtatColor(etat) }, verticalAlign: DOCX.VerticalAlign.CENTER, children: [new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, children: [new DOCX.TextRun({ text: (etat || "").toUpperCase(), bold: true, color: DOCX_WHITE, size: 16 })] })] })
-      : new DOCX.TableCell({ width: { size: 2000, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, children: [new DOCX.Paragraph("")] }),
+      ? new DOCX.TableCell({ width: { size: 2000, type: DOCX.WidthType.DXA }, margins: margeGenereuse, shading: { type: DOCX.ShadingType.CLEAR, fill: docxEtatColor(etat) }, verticalAlign: DOCX.VerticalAlign.CENTER, children: [new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, children: [new DOCX.TextRun({ text: (etat || "").toUpperCase(), bold: true, color: DOCX_WHITE, size: 16 })] })] })
+      : new DOCX.TableCell({ width: { size: 2000, type: DOCX.WidthType.DXA }, margins: margeGenereuse, children: [new DOCX.Paragraph("")] }),
   ]});
 }
 // Ordre d'affichage des équipements dans le rapport — modifiable équipement par équipement,
@@ -9463,7 +9521,7 @@ function docxEquipementElements(eq, locaux, allSites) {
       const rows = sec.items.filter((item) => eq.controles[sec.key][item.key].fields.realise === "OUI").map((item) => {
         const value = eq.controles[sec.key][item.key] || { action: "", etat: "", fields: {} };
         const parts = printFieldParts(item, value);
-        return [item.label, parts.join(" · "), value.action, value.etat];
+        return [item.label, parts, value.action, value.etat];
       });
       const t = docxControlTable(rows);
       if (t) elements.push(t);
@@ -9583,7 +9641,7 @@ function docxEquipementElements(eq, locaux, allSites) {
           rows.push(["Courant (L1/L2/L3)", fields.i1, fields.i2, fields.i3, moyenneOf(fields.i1, fields.i2, fields.i3)]);
           rows.push(["ThdI (%)", fields.thdi1, fields.thdi2, fields.thdi3, moyenneOf(fields.thdi1, fields.thdi2, fields.thdi3)]);
         } else {
-          const parts = printFieldParts(item, value);
+          const parts = printFieldParts(item, value).map((p) => p.text);
           if (parts.length) rows.push([item.label, "", "", "", parts.map((p) => p.includes(" : ") ? p.split(" : ").slice(1).join(" : ") : p).join("  ·  ")]);
         }
       });
@@ -9664,7 +9722,7 @@ function docxEquipementElements(eq, locaux, allSites) {
       const rows5 = sec.items.map((item) => {
         const value = eq.controles[sec.key][item.key] || { action: "", etat: "", fields: {} };
         const parts = printFieldParts(item, value);
-        return [item.label, parts.join(" · "), value.action, value.etat];
+        return [item.label, parts, value.action, value.etat];
       });
       const t5 = docxControlTable(rows5);
       if (t5) elements.push(t5);
@@ -9699,7 +9757,7 @@ function docxEquipementElements(eq, locaux, allSites) {
       const rows6 = sec.items.map((item) => {
         const value = eq.controles[sec.key][item.key] || { action: "", etat: "", fields: {} };
         const parts = printFieldParts(item, value);
-        return [item.label, parts.join(" · "), value.action, value.etat];
+        return [item.label, parts, value.action, value.etat];
       });
       const t6 = docxControlTable(rows6);
       if (t6) elements.push(t6);
@@ -9751,7 +9809,7 @@ function docxEquipementElements(eq, locaux, allSites) {
       const rowsRT = sec.items.map((item) => {
         const value = eq.controles[sec.key][item.key] || { action: "", etat: "", fields: {} };
         const parts = printFieldParts(item, value);
-        return [item.label, parts.join(" · "), value.action, value.etat];
+        return [item.label, parts, value.action, value.etat];
       });
       const tRT = docxControlTable(rowsRT);
       if (tRT) elements.push(tRT);
@@ -9768,7 +9826,7 @@ function docxEquipementElements(eq, locaux, allSites) {
       const rowsMeca = sec.items.map((item) => {
         const value = eq.controles[sec.key][item.key] || { action: "", etat: "", fields: {} };
         const parts = printFieldParts(item, value);
-        return [item.label, parts.join(" · "), value.action, value.etat];
+        return [item.label, parts, value.action, value.etat];
       });
       const custom = eq.controles[sec.key + "__custom"] || [];
       custom.forEach((c) => rowsMeca.push([c.label || "(action ajoutée)", "", c.action, c.etat]));
@@ -9788,8 +9846,19 @@ function docxEquipementElements(eq, locaux, allSites) {
       elements.push(docxSpacer());
       return;
     }
+    const itemsAffiches = sec.key === "mesure_isolement"
+      ? sec.items.filter((item) => {
+          const value = eq.controles[sec.key][item.key];
+          // Ne filtre que les items du motif partagé (hta_terre/entre_phases, qui ont bien un
+          // champ "realise") — le jeu de barre et le transformateur gardent leur propre structure,
+          // sans ce champ, donc jamais affectés par ce filtre.
+          if (!value || value.fields.realise === undefined) return true;
+          return value.fields.realise === "OUI";
+        })
+      : sec.items;
+    if (itemsAffiches.length === 0) return;
     elements.push(docxHeading(sec.title));
-    if (sec.key === "mesure_isolement") {
+    if (sec.key === "mesure_isolement" && sec.items.some((it) => it.key === "pi" || it.fields?.some((f) => f.key === "pi"))) {
       elements.push(docxNormeNote("CEI 60076-3 / IEEE 43. Tension d'injection identique du début à la fin de l'essai — le type de mesure indique jusqu'où il est poussé : Standard (lecture instantanée), PI = R(10 min)/R(1 min), DAR = R(60 s)/R(10 s). L'enroulement non testé doit être court-circuité (shunté) et relié à la terre."));
     } else if (["resistance_contact_chambres", "resistances_contacts", "resistance_jonctions"].some((k) => sec.items.some((it) => it.key === k))) {
       elements.push(docxNormeNote("CEI 62271-100. Mesure fiable et comparable d'une visite à l'autre uniquement avec un courant d'essai DC suffisant (100 A minimum usuel)."));
@@ -9798,10 +9867,10 @@ function docxEquipementElements(eq, locaux, allSites) {
     } else if (sec.key === "materiel_securite") {
       elements.push(docxNormeNote("NF C18-510. Chaque équipement de protection individuelle/collective doit faire l'objet d'une vérification périodique (généralement annuelle) — la seule présence de l'équipement ne suffit pas s'il est hors date de contrôle."));
     }
-    const rows = sec.items.map((item) => {
+    const rows = itemsAffiches.map((item) => {
       const value = eq.controles[sec.key][item.key] || { action: "", etat: "", fields: {} };
       const parts = printFieldParts(item, value);
-      return [item.label, parts.join(" · "), value.action, value.etat];
+      return [item.label, parts, value.action, value.etat];
     });
     const custom = eq.controles[sec.key + "__custom"] || [];
     custom.forEach((c) => rows.push([c.label || "(action ajoutée)", "", c.action, c.etat]));
@@ -10025,46 +10094,46 @@ function docxCoverPage(site) {
       width: { size: 12240, type: DOCX.WidthType.DXA }, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_AMBER },
       children: [new DOCX.Paragraph({ spacing: { before: 0, after: 0 }, children: [new DOCX.TextRun({ text: " ", size: 4 })] })],
     })] })] }),
-    new DOCX.Paragraph({ spacing: { before: 1400, after: 0 }, children: [] }),
+    new DOCX.Paragraph({ spacing: { before: 2000, after: 0 }, children: [] }),
     ...(logoWithWhiteBg ? [logoWithWhiteBg] : [new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, children: [] })]),
-    new DOCX.Paragraph({ spacing: { before: 500, after: 0 }, alignment: DOCX.AlignmentType.CENTER, children: [
+    new DOCX.Paragraph({ spacing: { before: 700, after: 0 }, alignment: DOCX.AlignmentType.CENTER, children: [
       new DOCX.TextRun({ text: "RAPPORT DE MAINTENANCE PRÉVENTIVE HT / BT / CONVERSION D'ÉNERGIE", bold: true, color: "8B96A3", size: 20 }),
     ]}),
     // Bloc "Site" — repère explicite, bien distingué du bloc "Client" qui suit.
-    new DOCX.Paragraph({ spacing: { before: 440, after: 0 }, alignment: DOCX.AlignmentType.CENTER, children: [
+    new DOCX.Paragraph({ spacing: { before: 640, after: 0 }, alignment: DOCX.AlignmentType.CENTER, children: [
       new DOCX.TextRun({ text: "SITE", bold: true, color: DOCX_AMBER, size: 16 }),
     ]}),
-    new DOCX.Paragraph({ spacing: { before: 60, after: 0 }, alignment: DOCX.AlignmentType.CENTER, children: [
+    new DOCX.Paragraph({ spacing: { before: 80, after: 0 }, alignment: DOCX.AlignmentType.CENTER, children: [
       new DOCX.TextRun({ text: site.nom || "Site", bold: true, color: DOCX_DARK, size: 52 }),
     ]}),
     // Séparateur visuel léger entre site et client, pour éviter toute confusion entre les deux.
-    new DOCX.Paragraph({ spacing: { before: 220, after: 0 }, alignment: DOCX.AlignmentType.CENTER, border: { top: { color: "D8DEE5", space: 4, style: DOCX.BorderStyle.SINGLE, size: 2 } }, children: [] }),
+    new DOCX.Paragraph({ spacing: { before: 320, after: 0 }, alignment: DOCX.AlignmentType.CENTER, border: { top: { color: "D8DEE5", space: 4, style: DOCX.BorderStyle.SINGLE, size: 2 } }, children: [] }),
     // Bloc "Client" — repère explicite, style distinct (couleur/poids) du bloc "Site" ci-dessus.
-    new DOCX.Paragraph({ spacing: { before: 220, after: 0 }, alignment: DOCX.AlignmentType.CENTER, children: [
+    new DOCX.Paragraph({ spacing: { before: 320, after: 0 }, alignment: DOCX.AlignmentType.CENTER, children: [
       new DOCX.TextRun({ text: "CLIENT", bold: true, color: "8B96A3", size: 15 }),
     ]}),
-    new DOCX.Paragraph({ spacing: { before: 60, after: 0 }, alignment: DOCX.AlignmentType.CENTER, children: [
+    new DOCX.Paragraph({ spacing: { before: 80, after: 0 }, alignment: DOCX.AlignmentType.CENTER, children: [
       new DOCX.TextRun({ text: site.client || "", bold: true, color: "3E4A5C", size: 26 }),
     ]}),
-    site.adresse ? new DOCX.Paragraph({ spacing: { before: 60, after: 0 }, alignment: DOCX.AlignmentType.CENTER, children: [
+    site.adresse ? new DOCX.Paragraph({ spacing: { before: 100, after: 0 }, alignment: DOCX.AlignmentType.CENTER, children: [
       new DOCX.TextRun({ text: site.adresse, color: "8B96A3", size: 20 }),
     ]}) : new DOCX.Paragraph({}),
-    site.local ? new DOCX.Paragraph({ spacing: { before: 60, after: 0 }, alignment: DOCX.AlignmentType.CENTER, children: [
+    site.local ? new DOCX.Paragraph({ spacing: { before: 100, after: 0 }, alignment: DOCX.AlignmentType.CENTER, children: [
       new DOCX.TextRun({ text: "Local : " + site.local, color: "8B96A3", size: 20 }),
     ]}) : new DOCX.Paragraph({}),
-    site.rapport?.offre?.numero ? new DOCX.Paragraph({ spacing: { before: 60, after: 0 }, alignment: DOCX.AlignmentType.CENTER, children: [
+    site.rapport?.offre?.numero ? new DOCX.Paragraph({ spacing: { before: 100, after: 0 }, alignment: DOCX.AlignmentType.CENTER, children: [
       new DOCX.TextRun({ text: "Offre / Devis n° " + site.rapport.offre.numero, color: "8B96A3", size: 20 }),
     ]}) : new DOCX.Paragraph({}),
-    new DOCX.Paragraph({ spacing: { before: 500, after: 0 }, alignment: DOCX.AlignmentType.CENTER, children: [
+    new DOCX.Paragraph({ spacing: { before: 700, after: 0 }, alignment: DOCX.AlignmentType.CENTER, children: [
       new DOCX.TextRun({ text: "Rapport généré le " + dateGeneration, color: "8B96A3", size: 18, italics: true }),
     ]}),
     // Le bandeau HT Maintenance est repoussé en bas de page réelle (grand espacement avant, aucun
     // après), plutôt que de flotter au milieu d'une page largement vide.
-    new DOCX.Paragraph({ spacing: { before: 5200, after: 0 }, alignment: DOCX.AlignmentType.CENTER, border: { top: { color: "D8DEE5", space: 8, style: DOCX.BorderStyle.SINGLE, size: 4 } }, children: [] }),
-    new DOCX.Paragraph({ spacing: { before: 160, after: 0 }, alignment: DOCX.AlignmentType.CENTER, children: [
+    new DOCX.Paragraph({ spacing: { before: 4200, after: 0 }, alignment: DOCX.AlignmentType.CENTER, border: { top: { color: "D8DEE5", space: 8, style: DOCX.BorderStyle.SINGLE, size: 4 } }, children: [] }),
+    new DOCX.Paragraph({ spacing: { before: 200, after: 0 }, alignment: DOCX.AlignmentType.CENTER, children: [
       new DOCX.TextRun({ text: "HT MAINTENANCE", bold: true, color: DOCX_BLUE, size: 22 }),
     ]}),
-    new DOCX.Paragraph({ spacing: { before: 40, after: 0 }, alignment: DOCX.AlignmentType.CENTER, children: [
+    new DOCX.Paragraph({ spacing: { before: 60, after: 0 }, alignment: DOCX.AlignmentType.CENTER, children: [
       new DOCX.TextRun({ text: "Maintenance électrique HTA / BT", color: "8B96A3", size: 16 }),
     ]}),
     new DOCX.Paragraph({ children: [new DOCX.PageBreak()] }),
@@ -10152,7 +10221,12 @@ async function generateSiteDocx(site, allSites) {
   children.push(docxHeading("Rapport"));
   const rapportTable = docxFieldTable(rapportRows);
   if (rapportTable) children.push(rapportTable);
-  if (site.rapport.syntheseRemarques) children.push(new DOCX.Paragraph({ spacing: { before: 80, after: 80 }, children: [new DOCX.TextRun({ text: "Synthèse des remarques et préconisations : ", bold: true, size: 18 }), new DOCX.TextRun({ text: site.rapport.syntheseRemarques, size: 18 })] }));
+  if (site.rapport.syntheseRemarques) {
+    children.push(new DOCX.Paragraph({ spacing: { before: 120, after: 100 }, children: [new DOCX.TextRun({ text: "Synthèse des remarques et préconisations", bold: true, size: 19, color: DOCX_DARK })] }));
+    site.rapport.syntheseRemarques.split("\n").filter((l) => l.trim()).forEach((ligne) => {
+      children.push(new DOCX.Paragraph({ spacing: { after: 140 }, indent: { left: 120 }, children: [new DOCX.TextRun({ text: ligne.trim(), size: 18 })] }));
+    });
+  }
   else children.push(docxSpacer());
   // Photos générales du site (ajoutées depuis l'onglet Rapport) — absentes du rapport principal
   // jusqu'ici, elles n'étaient reprises que dans le document séparé "Annexe photos".
