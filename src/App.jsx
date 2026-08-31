@@ -10254,10 +10254,30 @@ async function generateSiteDocx(site, allSites) {
   const rapportTable = docxFieldTable(rapportRows);
   if (rapportTable) children.push(rapportTable);
   if (site.rapport.syntheseRemarques) {
-    children.push(new DOCX.Paragraph({ spacing: { before: 120, after: 100 }, children: [new DOCX.TextRun({ text: "Synthèse des remarques et préconisations", bold: true, size: 19, color: DOCX_DARK })] }));
-    site.rapport.syntheseRemarques.split("\n").filter((l) => l.trim()).forEach((ligne) => {
-      children.push(new DOCX.Paragraph({ spacing: { after: 140 }, indent: { left: 120 }, children: [new DOCX.TextRun({ text: ligne.trim(), size: 18 })] }));
+    children.push(new DOCX.Paragraph({ spacing: { before: 500, after: 120 }, children: [new DOCX.TextRun({ text: "Synthèse des remarques et préconisations", bold: true, size: 19, color: DOCX_DARK })] }));
+    const lignesRemarques = site.rapport.syntheseRemarques.split("\n").filter((l) => l.trim());
+    const margeRemarque = { top: 130, bottom: 130, left: 130, right: 120 };
+    const remarquesTable = new DOCX.Table({
+      width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: [2600, 7000],
+      rows: [
+        new DOCX.TableRow({ tableHeader: true, children: [
+          new DOCX.TableCell({ width: { size: 2600, type: DOCX.WidthType.DXA }, margins: margeRemarque, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_LIGHT }, children: [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: "Équipement", bold: true, size: 17, color: "555555" })] })] }),
+          new DOCX.TableCell({ width: { size: 7000, type: DOCX.WidthType.DXA }, margins: margeRemarque, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_LIGHT }, children: [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: "Remarque", bold: true, size: 17, color: "555555" })] })] }),
+        ]}),
+        ...lignesRemarques.map((ligne) => {
+          // Chaque ligne compilée est au format "Équipement (repère) : remarque" — on sépare au
+          // premier " : " pour la colonne Équipement, le reste va dans Remarque.
+          const idx = ligne.indexOf(" : ");
+          const equip = idx >= 0 ? ligne.slice(0, idx).trim() : "";
+          const remarque = idx >= 0 ? ligne.slice(idx + 3).trim() : ligne.trim();
+          return new DOCX.TableRow({ children: [
+            new DOCX.TableCell({ width: { size: 2600, type: DOCX.WidthType.DXA }, margins: margeRemarque, children: [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: equip, size: 17, color: "555555" })] })] }),
+            new DOCX.TableCell({ width: { size: 7000, type: DOCX.WidthType.DXA }, margins: margeRemarque, children: [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: remarque, size: 18 })] })] }),
+          ]});
+        }),
+      ],
     });
+    children.push(remarquesTable);
   }
   else children.push(docxSpacer());
   // Photos générales du site (ajoutées depuis l'onglet Rapport) — absentes du rapport principal
@@ -10273,7 +10293,11 @@ async function generateSiteDocx(site, allSites) {
     });
   }
 
-  if (locauxTable) { children.push(docxHeading("Locaux")); children.push(locauxTable); children.push(docxSpacer()); }
+  if (locauxTable) {
+    // Grand espacement avant Locaux, pour bien le détacher visuellement de ce qui précède.
+    children.push(new DOCX.Paragraph({ spacing: { before: 700, after: 0 }, children: [] }));
+    children.push(docxHeading("Locaux")); children.push(locauxTable); children.push(docxSpacer());
+  }
 
   equipementsTries(site.equipements).forEach((eq) => { children.push(...docxEquipementElements(eq, site.locaux, allSites)); });
 
