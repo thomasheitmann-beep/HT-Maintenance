@@ -1033,9 +1033,8 @@ const CONTROLES_DISJONCTEUR = [
 // Chaque seuil ajouté fait apparaître automatiquement sa ligne d'essai correspondante dans
 // "Contrôles du relais de protection".
 const PARAM_SEUIL_TYPES = [
-  "50-1 — Max I phase instantané (seuil 1)", "50-2 — Max I phase instantané (seuil 2)", "50-3 — Max I phase instantané (seuil 3)",
-  "51-1 — Max I phase temporisé (seuil 1)", "51-2 — Max I phase temporisé (seuil 2)", "51-3 — Max I phase temporisé (seuil 3)",
-  "50N — Max I terre instantané", "51N — Max I terre temporisé",
+  "50-51-1 — Max I phase (seuil 1)", "50-51-2 — Max I phase (seuil 2)", "50-51-3 — Max I phase (seuil 3)",
+  "50N-51N — Max I terre",
   "46 — Déséquilibre / composante inverse",
   "67 — Max I phase directionnel", "67N — Max I terre directionnel",
   "27 — Minimum de tension", "59 — Maximum de tension", "59N — Surtension résiduelle",
@@ -1065,8 +1064,7 @@ const LISTE_MODE_DETECTION_TERRE = ["TC homopolaire dédié", "Somme des 3I (cal
 const ANSI_REGLAGE_FIELDS = {
   "50": [{ key: "courbe", label: "Courbe à temps", options: LISTE_COURBE_RELAIS }, { key: "type", label: "Type", options: LISTE_TYPE_RELAIS }, { key: "reglage", label: "Réglage", unit: "A" }, { key: "tms", label: "Multiplicateur de temps (TMS)" }],
   "51": [{ key: "courbe", label: "Courbe à temps", options: LISTE_COURBE_RELAIS }, { key: "type", label: "Type", options: LISTE_TYPE_RELAIS }, { key: "reglage", label: "Réglage", unit: "A" }, { key: "tms", label: "Multiplicateur de temps (TMS)" }],
-  "50N": [{ key: "reglage", label: "Réglage", unit: "A" }, { key: "modeDetection", label: "Mode de détection", options: LISTE_MODE_DETECTION_TERRE }],
-  "51N": [{ key: "courbe", label: "Courbe à temps", options: LISTE_COURBE_RELAIS }, { key: "reglage", label: "Réglage", unit: "A" }, { key: "modeDetection", label: "Mode de détection", options: LISTE_MODE_DETECTION_TERRE }, { key: "tms", label: "Multiplicateur de temps (TMS)" }],
+  "50N": [{ key: "courbe", label: "Courbe à temps", options: LISTE_COURBE_RELAIS }, { key: "reglage", label: "Réglage", unit: "A" }, { key: "modeDetection", label: "Mode de détection", options: LISTE_MODE_DETECTION_TERRE }, { key: "tms", label: "Multiplicateur de temps (TMS)" }],
   "46": [{ key: "reglage", label: "Réglage", unit: "%" }],
   "67": [{ key: "courbe", label: "Courbe à temps", options: LISTE_COURBE_RELAIS }, { key: "reglage", label: "Réglage", unit: "A" }, { key: "angle", label: "Angle caractéristique", unit: "°" }, { key: "tms", label: "Multiplicateur de temps (TMS)" }],
   "67N": [{ key: "courbe", label: "Courbe à temps", options: LISTE_COURBE_RELAIS }, { key: "reglage", label: "Réglage", unit: "A" }, { key: "angle", label: "Angle caractéristique", unit: "°" }, { key: "tms", label: "Multiplicateur de temps (TMS)" }],
@@ -1627,7 +1625,7 @@ function aideCoupleSerrage(taille, typeConnexion) {
 function coupleSerrageFields(typeConnexion) {
   return [
     F("taille", "Taille vis/écrou", null, LISTE_TAILLE_VIS),
-    F("couple", "Couple de serrage mesuré", "N.m"),
+    F("couple", "Couple de serrage appliqué", "N.m"),
     { key: "aide", label: "Aide technicien", longText: true, compute: (f) => aideCoupleSerrage(f.taille, typeConnexion) },
   ];
 }
@@ -1702,10 +1700,9 @@ function buildTransformateurSchema({ sec = false } = {}) {
           : [C("niveau_huile_silicagel", "Contrôle du niveau d'huile et de l'état du silicagel (respirateur)")]),
       ]},
       { key: "electriques", title: "Contrôles électriques", items: [
-        C("indicateurs_capacitifs", "Contrôle des indicateurs capacitifs de présence tension"),
-        C("couple_serrage_plateau", "Couple de serrage — Plateau", coupleSerrageFields("puissance")),
+        ...(sec ? [] : [C("couple_serrage_plateau", "Couple de serrage — Plateau", coupleSerrageFields("puissance"))]),
         C("connexions_bt", "Contrôle des connexions BT", coupleSerrageFields("bt")),
-        C("couple_serrage_borne_ht", "Couple de serrage — Borne HT", coupleSerrageFields("mt")),
+        ...(sec ? [C("connexions_ht", "Contrôle des connexions HT")] : []),
         C("tetes_cables_hta", "Contrôle des têtes de câbles HTA"),
         C("verrouillage_cle", "Vérification du système de verrouillage à clé"),
       ]},
@@ -3972,6 +3969,16 @@ function ControlRow({ item, value, onChange, idPrefix, toleranceOverride }) {
                   return u ? <span>{u}</span> : null;
                 })()}
               </label>
+            ) : f.key === "realise" && f.options ? (
+              <label key={f.key} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#3E4A5C", cursor: "pointer" }}>
+                <input
+                  type="checkbox"
+                  checked={fields[f.key] === "OUI"}
+                  onChange={(e) => setField(f.key, e.target.checked ? "OUI" : "NON")}
+                  style={{ width: 16, height: 16, accentColor: "#0A5DA8", cursor: "pointer" }}
+                />
+                {f.label}
+              </label>
             ) : f.options ? (
               <label key={f.key} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#8B96A3" }}>
                 {f.label}
@@ -4376,7 +4383,15 @@ function RapportTab({ site, update }) {
   function compilerRemarques() {
     const lignes = site.equipements
       .filter((e) => e.remarques && e.remarques.trim())
-      .map((e) => `${e.type}${e.identification.repere ? " (" + e.identification.repere + ")" : ""} : ${e.remarques.trim()}`);
+      .map((e) => {
+        // Plusieurs anomalies pour un même équipement sont déjà séparées par des retours à la
+        // ligne (collectAnomalies) — remplacées ici par " ; " pour que cet équipement ne produise
+        // qu'une seule ligne globale, indispensable pour le regroupement par équipement du tableau
+        // du rapport Word (sinon une anomalie sans le préfixe "Équipement :" se retrouvait traitée
+        // à tort comme un équipement séparé).
+        const remarquesUneLigne = e.remarques.trim().split("\n").filter((l) => l.trim()).join(" ; ");
+        return `${e.type}${e.identification.repere ? " (" + e.identification.repere + ")" : ""} : ${remarquesUneLigne}`;
+      });
     set("syntheseRemarques", lignes.length ? lignes.join("\n") : "Aucune remarque particulière relevée sur les équipements.");
   }
 
@@ -9536,8 +9551,15 @@ function docxEquipementElements(eq, locaux, allSites) {
         const tempsThermique2 = est492 ? calcTempsThermique(s.fields.constante_temps, s.essai.fields.multipleThermique || "150") : null;
         const tol = tempsTheorique2 !== null ? calcToleranceCEI(tempsTheorique2) : tempsThermique2 !== null ? calcToleranceThermique(tempsThermique2) : calcToleranceEssai(s.fields.temporisation, s.fields.temporisation_unite);
         const uInjecte = est492 ? "%" : ((ANSI_REGLAGE_FIELDS[ansiFamily(s.label)] || ANSI_REGLAGE_FIELDS_DEFAUT).find((f) => f.key === "reglage") || {}).unit || "A";
-        const detail = [s.essai.fields.l1 && `L1 : ${s.essai.fields.l1}`, s.essai.fields.l2 && `L2 : ${s.essai.fields.l2}`, s.essai.fields.l3 && `L3 : ${s.essai.fields.l3}`,
-          s.essai.fields.courant_injecte && `Valeur injectée : ${s.essai.fields.courant_injecte} ${uInjecte}`, tol && `Tolérance attendue : ${tol.min} – ${tol.max} ${tol.unite}`].filter(Boolean).join(" · ");
+        // Comme à l'écran : L1/L2/L3 colorées selon la tolérance calculée (formule CEI 60255 ou
+        // modèle thermique), au lieu d'un simple texte gris uniforme sans distinction.
+        const detail = [
+          s.essai.fields.l1 && { text: `L1 : ${s.essai.fields.l1}`, etat: tol ? toleranceState(s.essai.fields.l1, tol.min, tol.max) : null },
+          s.essai.fields.l2 && { text: `L2 : ${s.essai.fields.l2}`, etat: tol ? toleranceState(s.essai.fields.l2, tol.min, tol.max) : null },
+          s.essai.fields.l3 && { text: `L3 : ${s.essai.fields.l3}`, etat: tol ? toleranceState(s.essai.fields.l3, tol.min, tol.max) : null },
+          s.essai.fields.courant_injecte && { text: `Valeur injectée : ${s.essai.fields.courant_injecte} ${uInjecte}`, etat: null },
+          tol && { text: `Tolérance attendue : ${tol.min} – ${tol.max} ${tol.unite}`, etat: null },
+        ].filter(Boolean);
         rows.push(["Essai de déclenchement — " + s.label, detail, s.essai.action, s.essai.etat]);
       });
       const circuit = eq.controles.controles_relais.circuit_mesures_commande;
@@ -9839,6 +9861,19 @@ function docxEquipementElements(eq, locaux, allSites) {
       }
       const rowsRT = sec.items.map((item) => {
         const value = eq.controles[sec.key][item.key] || { action: "", etat: "", fields: {} };
+        if (item.key === "rapport_par_phase" && rTheo !== null) {
+          // Coloration comme à l'écran : L1/L2/L3 comparées à la tolérance théorique calculée
+          // ci-dessus (dépend des tensions + couplage de l'équipement, pas d'un champ de l'item
+          // lui-même) — printFieldParts ne peut pas la découvrir seul, injectée ici directement.
+          const tolTheoLigne = calcToleranceRapportTransfo(rTheo);
+          const f = value.fields || {};
+          const parts = [
+            f.l1 && { text: `L1 : ${f.l1}`, etat: tolTheoLigne ? toleranceState(f.l1, tolTheoLigne.min, tolTheoLigne.max) : null },
+            f.l2 && { text: `L2 : ${f.l2}`, etat: tolTheoLigne ? toleranceState(f.l2, tolTheoLigne.min, tolTheoLigne.max) : null },
+            f.l3 && { text: `L3 : ${f.l3}`, etat: tolTheoLigne ? toleranceState(f.l3, tolTheoLigne.min, tolTheoLigne.max) : null },
+          ].filter(Boolean);
+          return [item.label, parts, value.action, value.etat];
+        }
         const parts = printFieldParts(item, value);
         return [item.label, parts, value.action, value.etat];
       });
@@ -10254,7 +10289,10 @@ async function generateSiteDocx(site, allSites) {
   const rapportTable = docxFieldTable(rapportRows);
   if (rapportTable) children.push(rapportTable);
   if (site.rapport.syntheseRemarques) {
-    children.push(new DOCX.Paragraph({ spacing: { before: 500, after: 120 }, children: [new DOCX.TextRun({ text: "Synthèse des remarques et préconisations", bold: true, size: 19, color: DOCX_DARK })] }));
+    // Même espacement que celui appliqué avant "Locaux", pour bien détacher cette section de ce
+    // qui précède (tableau "Rapport").
+    children.push(new DOCX.Paragraph({ spacing: { before: 700, after: 0 }, children: [] }));
+    children.push(new DOCX.Paragraph({ spacing: { before: 0, after: 120 }, children: [new DOCX.TextRun({ text: "Synthèse des remarques et préconisations", bold: true, size: 19, color: DOCX_DARK })] }));
     const lignesRemarques = site.rapport.syntheseRemarques.split("\n").filter((l) => l.trim());
     const margeRemarque = { top: 130, bottom: 130, left: 130, right: 120 };
     const remarquesTable = new DOCX.Table({
