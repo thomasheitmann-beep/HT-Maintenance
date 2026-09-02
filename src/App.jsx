@@ -8642,6 +8642,28 @@ function docxFieldTable(rows) {
   if (filtered.length === 0) return null;
   return new DOCX.Table({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: [3400, 6200], rows: filtered.map(([l, v]) => docxFieldRow(l, v)) });
 }
+// Table d'échéances de remplacement de pièces d'usure, colorée par année — rouge (dépassée), orange
+// (année en cours), vert (à venir) — avec une alerte textuelle pour les deux premiers cas, comme
+// pour l'avertissement d'âge des fusibles.
+function docxEcheancesUsureTable(lignes) {
+  const filtered = lignes.filter((l) => l.annee !== null && l.annee !== undefined);
+  if (filtered.length === 0) return null;
+  const anneeActuelle = new Date().getFullYear();
+  return new DOCX.Table({
+    width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: [3400, 2400, 3800],
+    rows: filtered.map((l) => {
+      const depassee = l.annee < anneeActuelle, enCours = l.annee === anneeActuelle;
+      const couleurFond = depassee ? "FDECEA" : enCours ? "FDF3E3" : "EAF6EF";
+      const couleurTexte = depassee ? "C0392B" : enCours ? "8A5A0A" : "0F8A5F";
+      const alerte = depassee ? "⚠ Échéance dépassée — remplacement à prévoir" : enCours ? "⚠ Échéance cette année — à planifier" : "";
+      return new DOCX.TableRow({ children: [
+        new DOCX.TableCell({ width: { size: 3400, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, children: [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: l.type, size: 18, color: DOCX_DARK })] })] }),
+        new DOCX.TableCell({ width: { size: 2400, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, shading: { type: DOCX.ShadingType.CLEAR, fill: couleurFond }, children: [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: String(l.annee), bold: true, size: 18, color: couleurTexte })] })] }),
+        new DOCX.TableCell({ width: { size: 3800, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, children: [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: alerte, size: 16, color: couleurTexte, italics: !!alerte })] })] }),
+      ]});
+    }),
+  });
+}
 function docxControlRow(label, detail, action, etat) {
   const children = [new DOCX.Paragraph({ spacing: { after: (detail && (Array.isArray(detail) ? detail.length : detail)) || action ? 40 : 0 }, children: [new DOCX.TextRun({ text: label, size: 18, color: DOCX_DARK })] })];
   if (Array.isArray(detail) && detail.length) {
@@ -8780,12 +8802,9 @@ function docxSyntheseRow(label, etat, bookmarkId) {
   const linkRun = new DOCX.TextRun({ text: label, size: 18, color: DOCX_BLUE, underline: {} });
   const margeGenereuse = { top: 200, bottom: 200, left: 160, right: 140 };
   return new DOCX.TableRow({ children: [
-    new DOCX.TableCell({ width: { size: 6400, type: DOCX.WidthType.DXA }, margins: margeGenereuse, children: [new DOCX.Paragraph({ children: [
+    new DOCX.TableCell({ width: { size: 7600, type: DOCX.WidthType.DXA }, margins: margeGenereuse, children: [new DOCX.Paragraph({ children: [
       bookmarkId ? new DOCX.InternalHyperlink({ anchor: bookmarkId, children: [linkRun] }) : new DOCX.TextRun({ text: label, size: 18, color: DOCX_DARK }),
     ] })] }),
-    new DOCX.TableCell({ width: { size: 1200, type: DOCX.WidthType.DXA }, margins: margeGenereuse, verticalAlign: DOCX.VerticalAlign.CENTER, children: [new DOCX.Paragraph({
-      children: bookmarkId ? [new DOCX.TextRun({ text: "p. ", size: 16, color: "8B96A3" }), new DOCX.PageReference(bookmarkId, { size: 16, color: "8B96A3" })] : [],
-    })] }),
     etat
       ? new DOCX.TableCell({ width: { size: 2000, type: DOCX.WidthType.DXA }, margins: margeGenereuse, shading: { type: DOCX.ShadingType.CLEAR, fill: docxEtatColor(etat) }, verticalAlign: DOCX.VerticalAlign.CENTER, children: [new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, children: [new DOCX.TextRun({ text: (etat || "").toUpperCase(), bold: true, color: DOCX_WHITE, size: 16 })] })] })
       : new DOCX.TableCell({ width: { size: 2000, type: DOCX.WidthType.DXA }, margins: margeGenereuse, children: [new DOCX.Paragraph("")] }),
@@ -8798,7 +8817,7 @@ function equipementsTries(equipements) {
 }
 function docxSyntheseTable(site) {
   if (site.equipements.length === 0) return null;
-  return new DOCX.Table({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: [6400, 1200, 2000], rows: equipementsTries(site.equipements).map((eq) =>
+  return new DOCX.Table({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: [7600, 2000], rows: equipementsTries(site.equipements).map((eq) =>
     docxSyntheseRow(eq.type + (eq.identification.repere ? " — " + eq.identification.repere : ""), eq.etatFinal, docxBookmarkId(eq))
   )});
 }
@@ -9834,7 +9853,7 @@ function docxEquipementElements(eq, locaux, allSites) {
       // destinée au client — description/marque/modèle/quantité/mise en service restent internes.
       elements.push(docxHeading("Échéances de remplacement prévues"));
       const lignes = calcEcheancesUsureUPS(eq);
-      const t7 = docxFieldTable(lignes.map((l) => [l.type, String(l.annee)]));
+      const t7 = docxEcheancesUsureTable(lignes);
       if (t7) elements.push(t7);
       else elements.push(new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: "Aucune donnée renseignée", size: 18, color: "666666" })] }));
       elements.push(docxSpacer());
@@ -9845,7 +9864,7 @@ function docxEquipementElements(eq, locaux, allSites) {
       // destinée au client — les références et années de mise en service restent internes.
       elements.push(docxHeading("Échéances de remplacement prévues"));
       const lignes = calcPiecesUsure(eq);
-      const t = docxFieldTable(lignes.map((l) => [l.type, l.annee !== null ? String(l.annee) : "—"]));
+      const t = docxEcheancesUsureTable(lignes);
       if (t) elements.push(t);
       else elements.push(new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: "Aucune donnée renseignée", size: 18, color: "666666" })] }));
       elements.push(docxSpacer());
