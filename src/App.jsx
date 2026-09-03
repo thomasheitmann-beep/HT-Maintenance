@@ -1609,6 +1609,22 @@ const COUPLE_TERRE_REFERENCE = { "M6": 5, "M8": 10, "M10": 15 };
 // avant de s'y fier, un autre modèle/constructeur pouvant avoir des couples différents.
 const COUPLE_TRIHAL_MT = { "M8": 9.8, "M10": 19.6, "M12": 29.4, "M14": 49.1 };
 const COUPLE_TRIHAL_BT = { "M8": 12.3, "M10": 24.5, "M12": 44.1, "M14": 68.7, "M16": 98.1 };
+// Couples d'étanchéité pour transformateur huile (goujons de traversées/passe-barres, vis de
+// liaison couvercle-cuve, bouchons) — d'après documentation transformateur fournie par
+// l'utilisateur (photo, fabricant non identifié sur l'extrait — à vérifier que c'est bien le
+// modèle concerné avant de s'y fier). Valeurs vérifiées par cohérence interne (m.N ≈ m.kg × 10).
+const COUPLE_ETANCHEITE_HUILE = {
+  goujons: { "M8": 15, "M10": 24 },
+  passe_barres: { "M6": 3 },
+  couvercle_cuve: { "M8": 18, "M10": 24 },
+  bouchon_remplissage: { "M22": 120 },
+  bouchon_vidange: { "1\"": 250 },
+};
+function aideCoupleEtancheite(taille, sousType) {
+  const table = COUPLE_ETANCHEITE_HUILE[sousType];
+  if (!taille || !table || !table[taille]) return "Aucune valeur disponible pour cette taille — se référer à la documentation du fabricant.";
+  return `Repère (documentation transformateur fournie, fabricant non identifié sur l'extrait) pour ${taille} : ${table[taille]} N·m — vérifier qu'il s'agit bien du modèle concerné avant de s'y fier.`;
+}
 function aideCoupleSerrage(taille, typeConnexion) {
   if (!taille) return "";
   if (typeConnexion === "terre" && COUPLE_TERRE_REFERENCE[taille]) {
@@ -1627,6 +1643,14 @@ function coupleSerrageFields(typeConnexion) {
     F("taille", "Taille vis/écrou", null, LISTE_TAILLE_VIS),
     F("couple", "Couple de serrage appliqué", "N.m"),
     { key: "aide", label: "Aide technicien", longText: true, compute: (f) => aideCoupleSerrage(f.taille, typeConnexion) },
+  ];
+}
+function coupleEtancheiteFields(sousType) {
+  const tailles = Object.keys(COUPLE_ETANCHEITE_HUILE[sousType] || {});
+  return [
+    ...(tailles.length > 1 ? [F("taille", "Taille", null, tailles)] : []),
+    F("couple", "Couple de serrage appliqué", "N.m"),
+    { key: "aide", label: "Aide technicien", longText: true, compute: (f) => aideCoupleEtancheite(f.taille || tailles[0], sousType) },
   ];
 }
 function versMegaohms(valeur, unite) {
@@ -1695,6 +1719,13 @@ function buildTransformateurSchema({ sec = false } = {}) {
         C("raccordement_cables", "Raccordement des câbles HT et BT"),
         C("distances_refroidissement", "Distances extérieures nécessaires au refroidissement"),
         C("raccordement_sondes", "Raccordement des sondes de température aux relais thermiques"),
+        ...(sec ? [] : [
+          C("couple_goujons_traversees", "Couple de serrage — Goujons de traversées / passe-barres", coupleEtancheiteFields("goujons")),
+          C("couple_vis_passe_barres", "Couple de serrage — Vis de passe-barres", coupleEtancheiteFields("passe_barres")),
+          C("couple_couvercle_cuve", "Couple de serrage — Vis de liaison couvercle-cuve", coupleEtancheiteFields("couvercle_cuve")),
+          C("couple_bouchon_remplissage", "Couple de serrage — Bouchon de remplissage", coupleEtancheiteFields("bouchon_remplissage")),
+          C("couple_bouchon_vidange", "Couple de serrage — Bouchon de vidange", coupleEtancheiteFields("bouchon_vidange")),
+        ]),
         ...(sec
           ? [C("etat_enrobage", "État de l'enrobage / résine"), C("ventilation_forcee", "Contrôle de la ventilation forcée")]
           : [C("niveau_huile_silicagel", "Contrôle du niveau d'huile et de l'état du silicagel (respirateur)")]),
@@ -3930,9 +3961,14 @@ function ControlRow({ item, value, onChange, idPrefix, toleranceOverride }) {
   // du champ n'a pas d'effet concret sur la synthèse/le rapport si le technicien ne pense pas à
   // changer le menu déroulant lui-même. Ne fait remonter QUE depuis "Conforme" (jamais de
   // rétrogradation automatique d'un état plus sévère choisi volontairement).
+  // Référence toujours à jour sur "value" — évite qu'un effet programmé avant une frappe rapide
+  // (dans un autre champ du même item, ex. "Action") n'écrase cette frappe en repartant d'un
+  // "value" capturé avant elle.
+  const valueRef = useRef(value);
+  useEffect(() => { valueRef.current = value; }, [value]);
   const uneMesureHorsTolerance = (item.fields || []).some((f) => fieldValidState(f.key) === "bad");
   useEffect(() => {
-    if (uneMesureHorsTolerance && value.etat === "Conforme") onChange({ ...value, etat: "Dégradé" });
+    if (uneMesureHorsTolerance && valueRef.current.etat === "Conforme") onChange({ ...valueRef.current, etat: "Dégradé" });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uneMesureHorsTolerance, value.etat]);
   return (
@@ -4533,18 +4569,6 @@ function RapportTab({ site, update }) {
         </button>
       </div>
       <TextArea value={r.syntheseRemarques} onChange={(e) => set("syntheseRemarques", e.target.value)} style={{ minHeight: 220, fontSize: 15, lineHeight: 1.6 }} />
-    </Card>
-    <Card style={{ marginTop: 14 }}>
-      <SectionTitle>Offre / Devis associé</SectionTitle>
-      <div style={{ fontSize: 11.5, color: "#8B96A3", marginBottom: 12 }}>
-        Le numéro d'offre apparaît dans le rapport ; le fichier joint reste réservé aux techniciens (jamais inclus dans le document remis au client).
-      </div>
-      <Field label="Numéro d'offre / devis">
-        <TextInput value={r.offre?.numero || ""} onChange={(e) => set("offre", { ...(r.offre || {}), numero: e.target.value })} placeholder="ex. OFF-2026-0142" />
-      </Field>
-      <div style={{ marginTop: 12 }}>
-        <FileGallery files={r.offre?.fichier || []} onChange={(files) => set("offre", { ...(r.offre || {}), fichier: files })} idPrefix={`${site.id}-offre`} />
-      </div>
     </Card>
     <div style={{ marginTop: 14 }}>
       <PhotoGallery photos={r.photos} onChange={(p) => set("photos", p)} idPrefix={`${site.id}-rapport`} />
@@ -6264,10 +6288,16 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
   // automatiquement — même logique que pour les mesures de fusibles : ne fait remonter QUE depuis
   // "Conforme", jamais de rétrogradation automatique d'un état plus sévère déjà choisi
   // volontairement par le technicien.
+  // Référence toujours à jour sur "eq" — l'effet ci-dessous ne se redéclenche que si
+  // gradinsEnDefaut/rapportEnDefaut/etatFinal changent, pas à chaque frappe ; sans cette
+  // référence, un effet programmé avant une frappe rapide pourrait écraser la saisie la plus
+  // récente en repartant d'un "eq" capturé avant cette frappe.
+  const eqRef = useRef(eq);
+  useEffect(() => { eqRef.current = eq; }, [eq]);
   const gradinsEnDefaut = gradinsHorsTolerance(eq);
   const rapportEnDefaut = rapportTransformationHorsTolerance(eq);
   useEffect(() => {
-    if ((gradinsEnDefaut || rapportEnDefaut) && eq.etatFinal === "Conforme") update({ ...eq, etatFinal: "Dégradé" });
+    if ((gradinsEnDefaut || rapportEnDefaut) && eqRef.current.etatFinal === "Conforme") update({ ...eqRef.current, etatFinal: "Dégradé" });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gradinsEnDefaut, rapportEnDefaut, eq.etatFinal]);
 
@@ -7650,6 +7680,18 @@ function SiteDetail({ site, allSites, update, onBack, onDelete, onPrint, onPrint
                 copierLabel="Copier depuis Contact client"
               />
             </Field>
+          </div>
+          <div style={{ marginTop: 14 }}>
+            <SectionTitle>Offre / Devis associé</SectionTitle>
+            <div style={{ fontSize: 11.5, color: "#8B96A3", marginBottom: 12 }}>
+              Le numéro d'offre apparaît dans le rapport ; le fichier joint reste réservé aux techniciens (jamais inclus dans le document remis au client).
+            </div>
+            <Field label="Numéro d'offre / devis">
+              <TextInput value={site.rapport?.offre?.numero || ""} onChange={(e) => update((d) => ({ ...d, rapport: { ...d.rapport, offre: { ...(d.rapport?.offre || {}), numero: e.target.value } } }))} placeholder="ex. OFF-2026-0142" />
+            </Field>
+            <div style={{ marginTop: 12 }}>
+              <FileGallery files={site.rapport?.offre?.fichier || []} onChange={(files) => update((d) => ({ ...d, rapport: { ...d.rapport, offre: { ...(d.rapport?.offre || {}), fichier: files } } }))} idPrefix={`${site.id}-offre`} />
+            </div>
           </div>
           <div style={{ marginTop: 14 }}>
             <Field label={<>Notes internes <span style={{ fontWeight: 400, color: "#8B96A3", textTransform: "none", letterSpacing: 0 }}>— usage technicien uniquement, jamais visible du client ni dans le rapport Word</span></>}>
