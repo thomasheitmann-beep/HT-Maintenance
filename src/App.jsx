@@ -1665,9 +1665,25 @@ function versMegaohms(valeur, unite) {
 // CE modèle précis, pas une norme générale — la notice précise elle-même que des valeurs
 // nettement inférieures peuvent simplement indiquer un appareil humide, pas un défaut.
 const ISOLEMENT_TYPIQUE_TRIHAL = { hta_terre: 250, bt_terre: 50, hta_bt: 250 };
-function isolementFields(itemType) {
+const ISOLEMENT_TYPIQUE_LABEL = { hta_terre: "MT/masse", bt_terre: "BT/masse", hta_bt: "MT/BT" };
+function isolementFields(itemType, classeIsolation) {
+  const valeurTypique = ISOLEMENT_TYPIQUE_TRIHAL[itemType];
+  const labelTypique = ISOLEMENT_TYPIQUE_LABEL[itemType];
+  // Seuil PI par classe d'isolation — IEEE 43-2013, Table 3 : classe A = 1,5, classes B/F/H = 2,0.
+  // Utilise la classe réellement renseignée sur l'équipement (champ "Classe d'isolation (sec)",
+  // options F/H) quand elle est connue — sinon repli sur 2,0 (valeur des classes B/F/H, les plus
+  // courantes) avec la mention générique dans le texte.
+  const piMin = classeIsolation === "A" ? 1.5 : 2.0;
+  const classeAffichee = classeIsolation ? `classe ${classeIsolation}` : "classes B/F/H";
   return [
     F("typeMesure", "Type de mesure", null, LISTE_TYPE_MESURE_ISOLEMENT), F("v", "Tension d'injection", null, TENSION_ISOLEMENT),
+    // Repère toujours visible, dès avant la saisie — reprend directement les valeurs approximatives
+    // de la notice Schneider Trihal ("Les valeurs approximatives des résistances sont : MT/masse =
+    // 250 MΩ, BT/masse = 50 MΩ, MT/BT = 250 MΩ"), par mesure. À vérifier que c'est bien ce modèle.
+    ...(valeurTypique ? [{
+      key: "valeurTypiqueNote", label: "Valeur typique attendue pour cette mesure", longText: true,
+      compute: () => `${labelTypique} ≈ ${valeurTypique} MΩ (notice Schneider Trihal, si c'est bien ce modèle) — un écart net à la baisse peut simplement indiquer un appareil humide plutôt qu'un défaut.`,
+    }] : []),
     F("valeur", "Valeur"), F("unite", "Unité", null, UNITE_ISOLEMENT),
     // Seuil indicatif — règle largement citée (guide IEEE sur les machines tournantes, pratique
     // NETA) : résistance d'isolement minimale ≈ 1 MΩ par kV de tension d'essai. Ce n'est pas une
@@ -1680,16 +1696,47 @@ function isolementFields(itemType) {
         const mesureMO = versMegaohms(f.valeur, f.unite);
         if (vInjection === null || mesureMO === null) return "";
         const seuilMO = vInjection / 1000; // 1 MΩ par kV de tension d'essai
-        const valeurTypique = ISOLEMENT_TYPIQUE_TRIHAL[itemType];
-        const comparaisonTrihal = valeurTypique ? ` À titre de comparaison (notice Schneider Trihal, si c'est bien ce modèle) : valeur typique ≈ ${valeurTypique} MΩ — un écart net à la baisse peut simplement indiquer un appareil humide plutôt qu'un défaut.` : "";
+        const comparaisonTrihal = valeurTypique ? ` À titre de comparaison (notice Schneider Trihal, si c'est bien ce modèle) : ${labelTypique} typique ≈ ${valeurTypique} MΩ — un écart net à la baisse peut simplement indiquer un appareil humide plutôt qu'un défaut.` : "";
         if (mesureMO < seuilMO) return `⚠ ${mesureMO} MΩ mesurés, en dessous du repère indicatif de ${Math.round(seuilMO * 100) / 100} MΩ (règle 1 MΩ/kV pour ${vInjection} V d'essai) — isolement à surveiller. Repère indicatif, pas de seuil réglementaire unique pour les transformateurs.${comparaisonTrihal}`;
-        return `${mesureMO} MΩ mesurés, au-dessus du repère indicatif de ${Math.round(seuilMO * 100) / 100} MΩ (règle 1 MΩ/kV pour ${vInjection} V d'essai). Repère indicatif, pas de seuil réglementaire unique pour les transformateurs.${comparaisonTrihal}`;
+        return `✓ ${mesureMO} MΩ mesurés, au-dessus du repère indicatif de ${Math.round(seuilMO * 100) / 100} MΩ (règle 1 MΩ/kV pour ${vInjection} V d'essai). Repère indicatif, pas de seuil réglementaire unique pour les transformateurs.${comparaisonTrihal}`;
       },
     },
-    F("pi", "PI (10/1min)"), F("dar", "DAR (60/10sec)"),
+    F("pi", "PI (10/1min)"),
+    // PI (indice de polarisation) — IEEE 43-2013, Table 3 : minimum recommandé 2,0 pour les
+    // classes d'isolation B/F/H (la grande majorité des équipements actuels), 1,5 pour la classe A
+    // (isolants anciens). Faute de champ "classe d'isolation" dans l'app, seuil 2,0 utilisé par
+    // défaut (précisé dans le texte) — à ajuster si l'équipement est connu comme classe A.
+    // PI ≈ 1 = aucune absorption diélectrique significative (contamination, humidité, isolant
+    // dégradé). PI > 8 = isolant ancien (vernis/bakélite) potentiellement desséché et cassant, pas
+    // nécessairement bon signe.
+    {
+      key: "aidePI", label: "Appréciation du PI (IEEE 43-2013, Table 3)", longText: true,
+      compute: (f) => {
+        const pi = numOf(f.pi);
+        if (pi === null) return "";
+        if (pi <= 1.05) return `🔴 PI = ${pi} — proche de 1, absorption diélectrique quasi nulle. Syndrome possible : contamination, humidité ou isolant dégradé. IEEE 43-2013 : minimum recommandé ${piMin} (${classeAffichee}).`;
+        if (pi < piMin) return `⚠ PI = ${pi} — en dessous du minimum recommandé (${piMin}, ${classeAffichee}) mais absorption non nulle. IEEE 43-2013, Table 3. À surveiller, à confirmer avec l'historique de l'équipement.`;
+        if (pi > 8) return `⚠ PI = ${pi} — supérieur à 8. Syndrome possible : isolant ancien (vernis/bakélite) desséché et cassant, pas nécessairement un signe favorable. IEEE 43-2013.`;
+        return `✓ PI = ${pi} — au-dessus du minimum recommandé (${piMin}, ${classeAffichee}). IEEE 43-2013, Table 3.`;
+      },
+    },
+    F("dar", "DAR (60/10sec)"),
+    // DAR (rapport d'absorption diélectrique) — pratique courante associée à IEEE 43 : > 1,6 =
+    // isolement excellent, < 1,25 = insuffisant. Zone intermédiaire = à surveiller.
+    {
+      key: "aideDAR", label: "Appréciation du DAR (pratique IEEE 43)", longText: true,
+      compute: (f) => {
+        const dar = numOf(f.dar);
+        if (dar === null) return "";
+        if (dar < 1) return `🔴 DAR = ${dar} — inférieur à 1, absorption diélectrique quasi nulle. Syndrome possible : contamination, humidité ou isolant dégradé.`;
+        if (dar < 1.25) return `⚠ DAR = ${dar} — en dessous de 1,25, isolement insuffisant selon la pratique courante (IEEE 43). À surveiller.`;
+        if (dar < 1.6) return `⚠ DAR = ${dar} — entre 1,25 et 1,6, zone intermédiaire. À surveiller.`;
+        return `✓ DAR = ${dar} — supérieur ou égal à 1,6, isolement excellent selon la pratique courante (IEEE 43).`;
+      },
+    },
   ];
 }
-function buildTransformateurSchema({ sec = false } = {}) {
+function buildTransformateurSchema({ sec = false, classeIsolation = null } = {}) {
   return {
     identification: [
       { key: "repere", label: "Repère / Nom de l'équipement" },
@@ -1719,6 +1766,14 @@ function buildTransformateurSchema({ sec = false } = {}) {
         C("raccordement_cables", "Raccordement des câbles HT et BT"),
         C("distances_refroidissement", "Distances extérieures nécessaires au refroidissement"),
         C("raccordement_sondes", "Raccordement des sondes de température aux relais thermiques"),
+        ...(sec
+          ? [C("etat_enrobage", "État de l'enrobage / résine"), C("ventilation_forcee", "Contrôle de la ventilation forcée")]
+          : [C("niveau_huile_silicagel", "Contrôle du niveau d'huile et de l'état du silicagel (respirateur)")]),
+      ]},
+      { key: "mecaniques", title: "Contrôles mécaniques", items: [
+        ...(sec ? [] : [C("couple_serrage_plateau", "Couple de serrage — Plateau", coupleSerrageFields("puissance"))]),
+        C("connexions_bt", "Contrôle des connexions BT", coupleSerrageFields("bt")),
+        ...(sec ? [C("connexions_ht", "Contrôle des connexions HT", coupleSerrageFields("mt"))] : []),
         ...(sec ? [] : [
           C("couple_goujons_traversees", "Couple de serrage — Goujons de traversées / passe-barres", coupleEtancheiteFields("goujons")),
           C("couple_vis_passe_barres", "Couple de serrage — Vis de passe-barres", coupleEtancheiteFields("passe_barres")),
@@ -1726,14 +1781,8 @@ function buildTransformateurSchema({ sec = false } = {}) {
           C("couple_bouchon_remplissage", "Couple de serrage — Bouchon de remplissage", coupleEtancheiteFields("bouchon_remplissage")),
           C("couple_bouchon_vidange", "Couple de serrage — Bouchon de vidange", coupleEtancheiteFields("bouchon_vidange")),
         ]),
-        ...(sec
-          ? [C("etat_enrobage", "État de l'enrobage / résine"), C("ventilation_forcee", "Contrôle de la ventilation forcée")]
-          : [C("niveau_huile_silicagel", "Contrôle du niveau d'huile et de l'état du silicagel (respirateur)")]),
       ]},
       { key: "electriques", title: "Contrôles électriques", items: [
-        ...(sec ? [] : [C("couple_serrage_plateau", "Couple de serrage — Plateau", coupleSerrageFields("puissance"))]),
-        C("connexions_bt", "Contrôle des connexions BT", coupleSerrageFields("bt")),
-        ...(sec ? [C("connexions_ht", "Contrôle des connexions HT")] : []),
         C("tetes_cables_hta", "Contrôle des têtes de câbles HTA"),
         C("verrouillage_cle", "Vérification du système de verrouillage à clé"),
       ]},
@@ -1749,7 +1798,7 @@ function buildTransformateurSchema({ sec = false } = {}) {
         C("test_defaut_temp_t2", "Test défaut temp T2", [F("valeur", "Valeur", "°C")], ACTIONS_RELAIS_TRANSFORMATEUR),
       ]},
       { key: "rapport_transformation", title: "Rapport de transformation", items: [
-        C("rapport_par_phase", "Rapport par phase (mesuré)", [F("l1", "L1"), F("l2", "L2"), F("l3", "L3")]),
+        C("rapport_par_phase", "Rapport de transformation", [F("l1", "L1"), F("l2", "L2"), F("l3", "L3")]),
         // CEI 60076-1 / IEEE C57.12.90 : mesure hors tension, transformateur à l'équilibre thermique
         // (pas juste après mise hors service). Chaque phase se mesure individuellement (pas de shunt
         // entre phases, contrairement à l'isolement) — un écart > 2 % entre phases indique une
@@ -1759,9 +1808,9 @@ function buildTransformateurSchema({ sec = false } = {}) {
         C("resistance_enroulements_secondaire", "Résistance des enroulements — Secondaire", [...L1L2L3AvecToleranceEcart("mΩ"), F("temperature", "Température enroulement", "°C")]),
       ]},
       { key: "mesure_isolement", title: "Mesure d'isolement", items: [
-        C("hta_terre", "HTA - Terre (BT shuntée à la terre)", isolementFields("hta_terre")),
-        C("bt_terre", "BT - Terre (HTA shuntée à la terre)", isolementFields("bt_terre")),
-        C("hta_bt", "HTA - BT (enroulements court-circuités entre eux)", isolementFields("hta_bt")),
+        C("hta_terre", "HTA - Terre (BT shuntée à la terre)", isolementFields("hta_terre", classeIsolation)),
+        C("bt_terre", "BT - Terre (HTA shuntée à la terre)", isolementFields("bt_terre", classeIsolation)),
+        C("hta_bt", "HTA - BT (enroulements court-circuités entre eux)", isolementFields("hta_bt", classeIsolation)),
       ]},
     ],
   };
@@ -2295,7 +2344,7 @@ function getSchema(eq) {
     const r = (eq.controles && eq.controles.regimes_reseaux) || {};
     return buildInverseurSchema({ source1Mono: r.source1 === "Monophasé", source2Mono: r.source2 === "Monophasé", utilisationMono: r.utilisation === "Monophasé" });
   }
-  if (eq.type === "Transformateur") return buildTransformateurSchema({ sec: eq.identification?.typeIsolation === "Sec (résine/enrobé)" });
+  if (eq.type === "Transformateur") return buildTransformateurSchema({ sec: eq.identification?.typeIsolation === "Sec (résine/enrobé)", classeIsolation: eq.identification?.classeIsolation });
   if (eq.type === "Interrupteur HTA") return buildInterrupteurHTASchema({ avecRelais: eq.identification?.presenceRelais === "Oui" });
   if (eq.type === "Interrupteur Fusible HTA") return buildInterrupteurFusibleHTASchema({ avecRelais: eq.identification?.presenceRelais === "Oui" });
   return SCHEMAS[eq.type];
@@ -3334,14 +3383,15 @@ function Combo({ value, onChange, options, listId, style, placeholder, numeric, 
 // permet de changer d'échelle (mV/V/kV…) ; sinon l'unité reste affichée telle quelle.
 function NumberWithUnit({ value, unit, onValueChange, onUnitChange, width, validState }) {
   const family = unitFamilyFor(unit);
-  const borderColor = validState === "ok" ? "#0F8A5F" : validState === "bad" ? "#C0392B" : "#D8DEE5";
+  const borderColor = validState === "ok" ? "#0F8A5F" : validState === "bad" ? "#C0392B" : validState === "warning" ? "#B5730A" : "#D8DEE5";
+  const bgColor = validState === "ok" ? "#F0FBF6" : validState === "bad" ? "#FDF1F0" : validState === "warning" ? "#FDF3E3" : inputStyle.background;
   return (
     <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
       <input
         type="number" step="any"
         value={value ?? ""}
         onChange={(e) => onValueChange(e.target.value)}
-        style={{ ...inputStyle, width: width || 66, padding: "5px 7px", fontSize: 12, border: `1.5px solid ${borderColor}`, background: validState === "ok" ? "#F0FBF6" : validState === "bad" ? "#FDF1F0" : inputStyle.background }}
+        style={{ ...inputStyle, width: width || 66, padding: "5px 7px", fontSize: 12, border: `1.5px solid ${borderColor}`, background: bgColor }}
       />
       {family ? (
         <select value={unit || family[0]} onChange={(e) => onUnitChange(e.target.value)} style={{ ...inputStyle, width: 62, padding: "5px 4px", fontSize: 11.5 }}>
@@ -3948,13 +3998,20 @@ function ControlRow({ item, value, onChange, idPrefix, toleranceOverride }) {
   const computedMin = toleranceOverride ? toleranceOverride.min : (tolMinField ? numOf(tolMinField.compute(fields)) : null);
   const computedMax = toleranceOverride ? toleranceOverride.max : (tolMaxField ? numOf(tolMaxField.compute(fields)) : null);
   const MESURE_KEYS = ["l1", "l2", "l3", "rd", "n"];
+  // Une valeur hors tolérance colore en orange (dégradé) par défaut — seul un passage manuel du
+  // technicien à "Défaillant" fait passer la couleur au rouge. Le vert (conforme) et l'absence de
+  // tolérance (null) ne sont jamais affectés par cette règle.
+  function colorFromToleranceEtat(brut) {
+    if (brut !== "bad") return brut;
+    return value.etat === "Défaillant" ? "bad" : "warning";
+  }
   function fieldValidState(key) {
-    if (tolMinField && tolMinField.unitFrom === key) return toleranceState(fields[key], computedMin, computedMax);
+    if (tolMinField && tolMinField.unitFrom === key) return colorFromToleranceEtat(toleranceState(fields[key], computedMin, computedMax));
     // L1/L2/L3 mesurent la même grandeur que le champ "unitFrom" (ex. la résistance d'un fusible),
     // juste par phase plutôt qu'en une seule valeur — elles doivent être comparées à la même
     // tolérance calculée, pas seulement le champ principal.
-    if ((tolMinField || toleranceOverride) && MESURE_KEYS.includes(key)) return toleranceState(fields[key], computedMin, computedMax);
-    if (MESURE_KEYS.includes(key) && hasToleranceField) return toleranceState(fields[key], null, toleranceMax);
+    if ((tolMinField || toleranceOverride) && MESURE_KEYS.includes(key)) return colorFromToleranceEtat(toleranceState(fields[key], computedMin, computedMax));
+    if (MESURE_KEYS.includes(key) && hasToleranceField) return colorFromToleranceEtat(toleranceState(fields[key], null, toleranceMax));
     return null;
   }
   // Une mesure hors tolérance doit faire remonter l'état automatiquement — sinon la couleur rouge
@@ -3966,7 +4023,7 @@ function ControlRow({ item, value, onChange, idPrefix, toleranceOverride }) {
   // "value" capturé avant elle.
   const valueRef = useRef(value);
   useEffect(() => { valueRef.current = value; }, [value]);
-  const uneMesureHorsTolerance = (item.fields || []).some((f) => fieldValidState(f.key) === "bad");
+  const uneMesureHorsTolerance = (item.fields || []).some((f) => ["warning", "bad"].includes(fieldValidState(f.key)));
   useEffect(() => {
     if (uneMesureHorsTolerance && valueRef.current.etat === "Conforme") onChange({ ...valueRef.current, etat: "Dégradé" });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -3981,13 +4038,18 @@ function ControlRow({ item, value, onChange, idPrefix, toleranceOverride }) {
               (() => {
                 const texte = f.compute(fields);
                 if (!texte) return null;
-                const estAvertissement = texte.startsWith("⚠");
+                // ✓ vert (conforme), ⚠ orange (à surveiller), 🔴 rouge (hors norme), sinon bleu
+                // (informatif neutre, comportement d'origine conservé).
+                const style = texte.startsWith("🔴") ? { bg: "#FDECEA", fg: "#C0392B" }
+                  : texte.startsWith("✓") ? { bg: "#EAF6EF", fg: "#0F8A5F" }
+                  : texte.startsWith("⚠") ? { bg: "#FDF3E3", fg: "#8A5A0A" }
+                  : { bg: "#EEF2F6", fg: "#0A5DA8" };
                 return (
                   <div key={f.key} style={{ width: "100%", marginTop: 4 }}>
                     <div style={{ fontSize: 10.5, color: "#8B96A3", marginBottom: 3 }}>{f.label}</div>
                     <div style={{
                       padding: "9px 12px", borderRadius: 8, fontSize: 12.5, fontWeight: 600, lineHeight: 1.5,
-                      background: estAvertissement ? "#FDF3E3" : "#EEF2F6", color: estAvertissement ? "#8A5A0A" : "#0A5DA8",
+                      background: style.bg, color: style.fg,
                     }}>
                       {texte}
                     </div>
@@ -6094,7 +6156,7 @@ function detailAnomalieItem(item, v) {
   (item.fields || []).forEach((f) => {
     if (f.compute && f.longText) {
       const texte = f.compute(fields);
-      if (texte && texte.startsWith("⚠")) avertissements.push(texte.replace(/^⚠\s*/, ""));
+      if (texte && (texte.startsWith("⚠") || texte.startsWith("🔴"))) avertissements.push(texte.replace(/^(⚠|🔴)\s*/, ""));
     }
   });
   parts.push(...avertissements);
@@ -6104,28 +6166,31 @@ function detailAnomalieItem(item, v) {
 // detailAnomalieItem (tolérance calculée, tolérance saisie manuellement, référence constructeur
 // ± 20%), mais retourne un statut par champ plutôt qu'un simple booléen d'anomalie. Sert à colorer
 // les valeurs individuellement dans le rapport Word, comme c'est déjà fait à l'écran.
-function champTolStatus(item, fields, key) {
+function champTolStatus(item, fields, key, etat) {
   if (!fields) return null;
+  // Même règle que côté écran : hors tolérance colore en orange (dégradé) par défaut, rouge
+  // seulement si le technicien a explicitement choisi "Défaillant".
+  const colorer = (brut) => (brut !== "bad" ? brut : etat === "Défaillant" ? "bad" : "warning");
   const tolMinField = (item.fields || []).find((f) => f.key === "tol_min" && f.compute);
   const tolMaxField = (item.fields || []).find((f) => f.key === "tol_max" && f.compute);
   if (tolMinField) {
     const champsConcernes = [tolMinField.unitFrom, "l1", "l2", "l3"].filter(Boolean);
     if (!champsConcernes.includes(key)) return null;
     const min = numOf(tolMinField.compute(fields)), max = tolMaxField ? numOf(tolMaxField.compute(fields)) : null;
-    return toleranceState(fields[key], min, max);
+    return colorer(toleranceState(fields[key], min, max));
   }
   if (fields.tolerance !== undefined || fields.tol_max !== undefined) {
     if (!["l1", "l2", "l3", "valeur", "rd", "n"].includes(key)) return null;
     const max = numOf(fields.tolerance ?? fields.tol_max);
     const min = fields.tol_min !== undefined ? numOf(fields.tol_min) : null;
     if (max === null) return null;
-    return toleranceState(fields[key], min, max);
+    return colorer(toleranceState(fields[key], min, max));
   }
   if (fields.reference !== undefined && numOf(fields.reference) && ["l1", "l2", "l3"].includes(key)) {
     const ref = numOf(fields.reference);
     const mesure = numOf(fields[key]);
     if (mesure === null) return null;
-    return Math.abs(mesure - ref) / ref > 0.2 ? "bad" : "ok";
+    return colorer(Math.abs(mesure - ref) / ref > 0.2 ? "bad" : "ok");
   }
   return null;
 }
@@ -7107,7 +7172,14 @@ function printFieldParts(item, value) {
     const v = f.compute ? f.compute(fields) : fields[f.key];
     const unitKey = f.unitFrom ? f.unitFrom + "Unite" : f.key + "Unite";
     const unit = f.unit ? fields[unitKey] || f.unit : "";
-    if (v !== "" && v !== null && v !== undefined) parts.push({ text: `${f.label} : ${v}${unit ? " " + unit : ""}`, etat: champTolStatus(item, fields, f.key) });
+    if (v !== "" && v !== null && v !== undefined) {
+      // Pour un champ texte calculé (longText), l'état se déduit du marqueur ✓/⚠/🔴 en tête du
+      // texte plutôt que de champTolStatus (qui ne s'applique pas à ce type de champ).
+      const etat = f.longText
+        ? (String(v).startsWith("🔴") ? "bad" : String(v).startsWith("✓") ? "ok" : String(v).startsWith("⚠") ? "warning" : null)
+        : champTolStatus(item, fields, f.key, value.etat);
+      parts.push({ text: `${f.label} : ${v}${unit ? " " + unit : ""}`, etat });
+    }
   });
   return parts;
 }
@@ -7132,7 +7204,7 @@ function PrintControlLine({ item, value, extraParts }) {
             {parts.map((p, i) => {
               const estObjet = typeof p === "object" && p !== null;
               const texte = estObjet ? p.text : p;
-              const couleur = estObjet && p.etat === "bad" ? "#C0392B" : estObjet && p.etat === "ok" ? "#0F8A5F" : "#666";
+              const couleur = estObjet && p.etat === "bad" ? "#C0392B" : estObjet && p.etat === "warning" ? "#B5730A" : estObjet && p.etat === "ok" ? "#0F8A5F" : "#666";
               return (
                 <span key={i}>
                   {i > 0 && <span style={{ color: "#999" }}>  ·  </span>}
@@ -8687,6 +8759,12 @@ function docxFieldTable(rows) {
 // Table d'échéances de remplacement de pièces d'usure, colorée par année — rouge (dépassée), orange
 // (année en cours), vert (à venir) — avec une alerte textuelle pour les deux premiers cas, comme
 // pour l'avertissement d'âge des fusibles.
+// Même règle orange/rouge que champTolStatus, pour les deux cas particuliers du rapport Word
+// (essai de déclenchement, rapport de transformation) qui construisent leur détail directement
+// sans passer par champTolStatus.
+function docxColorerEtat(brut, etat) {
+  return brut !== "bad" ? brut : etat === "Défaillant" ? "bad" : "warning";
+}
 function docxEcheancesUsureTable(lignes) {
   const filtered = lignes.filter((l) => l.annee !== null && l.annee !== undefined);
   if (filtered.length === 0) return null;
@@ -8715,7 +8793,7 @@ function docxControlRow(label, detail, action, etat) {
     const runs = [];
     detail.forEach((p, i) => {
       if (i > 0) runs.push(new DOCX.TextRun({ text: "  ·  ", size: 16, color: "999999", italics: true }));
-      const couleur = p.etat === "bad" ? "C0392B" : p.etat === "ok" ? "0F8A5F" : "666666";
+      const couleur = p.etat === "bad" ? "C0392B" : p.etat === "warning" ? "B5730A" : p.etat === "ok" ? "0F8A5F" : "666666";
       runs.push(new DOCX.TextRun({ text: p.text, size: 16, color: couleur, italics: true, ...(p.etat === "bad" ? { bold: true } : {}) }));
     });
     children.push(new DOCX.Paragraph({ spacing: { after: action ? 40 : 0 }, children: runs }));
@@ -9615,9 +9693,9 @@ function docxEquipementElements(eq, locaux, allSites) {
         // Comme à l'écran : L1/L2/L3 colorées selon la tolérance calculée (formule CEI 60255 ou
         // modèle thermique), au lieu d'un simple texte gris uniforme sans distinction.
         const detail = [
-          s.essai.fields.l1 && { text: `L1 : ${s.essai.fields.l1}`, etat: tol ? toleranceState(s.essai.fields.l1, tol.min, tol.max) : null },
-          s.essai.fields.l2 && { text: `L2 : ${s.essai.fields.l2}`, etat: tol ? toleranceState(s.essai.fields.l2, tol.min, tol.max) : null },
-          s.essai.fields.l3 && { text: `L3 : ${s.essai.fields.l3}`, etat: tol ? toleranceState(s.essai.fields.l3, tol.min, tol.max) : null },
+          s.essai.fields.l1 && { text: `L1 : ${s.essai.fields.l1}`, etat: tol ? docxColorerEtat(toleranceState(s.essai.fields.l1, tol.min, tol.max), s.essai.etat) : null },
+          s.essai.fields.l2 && { text: `L2 : ${s.essai.fields.l2}`, etat: tol ? docxColorerEtat(toleranceState(s.essai.fields.l2, tol.min, tol.max), s.essai.etat) : null },
+          s.essai.fields.l3 && { text: `L3 : ${s.essai.fields.l3}`, etat: tol ? docxColorerEtat(toleranceState(s.essai.fields.l3, tol.min, tol.max), s.essai.etat) : null },
           s.essai.fields.courant_injecte && { text: `Valeur injectée : ${s.essai.fields.courant_injecte} ${uInjecte}`, etat: null },
           tol && { text: `Tolérance attendue : ${tol.min} – ${tol.max} ${tol.unite}`, etat: null },
         ].filter(Boolean);
@@ -9929,9 +10007,9 @@ function docxEquipementElements(eq, locaux, allSites) {
           const tolTheoLigne = calcToleranceRapportTransfo(rTheo);
           const f = value.fields || {};
           const parts = [
-            f.l1 && { text: `L1 : ${f.l1}`, etat: tolTheoLigne ? toleranceState(f.l1, tolTheoLigne.min, tolTheoLigne.max) : null },
-            f.l2 && { text: `L2 : ${f.l2}`, etat: tolTheoLigne ? toleranceState(f.l2, tolTheoLigne.min, tolTheoLigne.max) : null },
-            f.l3 && { text: `L3 : ${f.l3}`, etat: tolTheoLigne ? toleranceState(f.l3, tolTheoLigne.min, tolTheoLigne.max) : null },
+            f.l1 && { text: `L1 : ${f.l1}`, etat: tolTheoLigne ? docxColorerEtat(toleranceState(f.l1, tolTheoLigne.min, tolTheoLigne.max), value.etat) : null },
+            f.l2 && { text: `L2 : ${f.l2}`, etat: tolTheoLigne ? docxColorerEtat(toleranceState(f.l2, tolTheoLigne.min, tolTheoLigne.max), value.etat) : null },
+            f.l3 && { text: `L3 : ${f.l3}`, etat: tolTheoLigne ? docxColorerEtat(toleranceState(f.l3, tolTheoLigne.min, tolTheoLigne.max), value.etat) : null },
           ].filter(Boolean);
           return [item.label, parts, value.action, value.etat];
         }
