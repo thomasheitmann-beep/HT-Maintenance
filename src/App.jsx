@@ -10192,36 +10192,33 @@ function docxEquipementElements(eq, locaux, allSites) {
 
 // Pied de page avec petit logo + numérotation (Page X / Y) — Word calcule les valeurs à
 // l'ouverture/impression. Logo discret pour casser la monotonie du fond blanc sans surcharger.
-// Construit avec des taquets de tabulation (et non un tableau) : un tableau dans un pied de
-// page est mal interprété par Apple Pages (largeurs/centrage ignorés, contenu décalé à gauche),
-// alors que les taquets de tabulation sont rendus à l'identique dans Word et dans Pages.
+// Construit avec 3 paragraphes distincts, chacun avec un simple alignement (centré/centré/droite) :
+// ni tableau ni taquet de tabulation, qui se sont tous deux révélés mal interprétés selon le
+// lecteur (largeurs/centrage ignorés, tabulation traitée comme un taquet gauche). L'alignement de
+// paragraphe seul est le mécanisme le plus universellement fiable, quel que soit le logiciel.
 function docxFooterPagination() {
   const logoFooter = docxImage(LOGO_DARK, 32, 24);
-  // Largeur utile de la page (12240 twips de large, marges gauche/droite 600 chacune, cf.
-  // section properties des documents générés) : le taquet centre est au milieu de cette
-  // largeur utile, le taquet droit à sa fin.
-  const largeurUtile = 12240 - 600 - 600; // 11040
   return new DOCX.Footer({
     children: [
       new DOCX.Paragraph({
         border: { top: { style: DOCX.BorderStyle.SINGLE, size: 4, color: DOCX_SILVER, space: 4 } },
-        tabStops: [
-          { type: DOCX.TabStopType.CENTER, position: largeurUtile / 2 },
-          { type: DOCX.TabStopType.RIGHT, position: largeurUtile },
-        ],
-        spacing: { before: 60, after: 10 },
+        alignment: DOCX.AlignmentType.CENTER,
+        spacing: { before: 60, after: 4 },
         children: [
-          new DOCX.TextRun({ text: "\t" }),
           ...(logoFooter ? [logoFooter, new DOCX.TextRun({ text: "  ", size: 15 })] : []),
           new DOCX.TextRun({ text: "HT MAINTENANCE", bold: true, color: DOCX_BLUE, size: 17 }),
-          new DOCX.TextRun({ text: "\t" }),
+        ],
+      }),
+      new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, spacing: { after: 20 }, children: [new DOCX.TextRun({ text: "Maintenance électrique HTA / BT / Conversion d'énergie", color: "8B96A3", size: 13 })] }),
+      new DOCX.Paragraph({
+        alignment: DOCX.AlignmentType.RIGHT,
+        children: [
           new DOCX.TextRun({ text: "Page ", size: 15, color: "8B96A3" }),
           new DOCX.TextRun({ children: [DOCX.PageNumber.CURRENT], size: 15, color: "8B96A3" }),
           new DOCX.TextRun({ text: " / ", size: 15, color: "8B96A3" }),
           new DOCX.TextRun({ children: [DOCX.PageNumber.TOTAL_PAGES], size: 15, color: "8B96A3" }),
         ],
       }),
-      new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, children: [new DOCX.TextRun({ text: "Maintenance électrique HTA / BT / Conversion d'énergie", color: "8B96A3", size: 13 })] }),
     ],
   });
 }
