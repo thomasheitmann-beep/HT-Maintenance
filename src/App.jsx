@@ -5419,7 +5419,19 @@ function SchemaOnduleur({ eq, update }) {
 }
 function RapportTheoriqueCalcule({ eq }) {
   const r = calcRapportTheoriqueTransfo(eq);
-  if (r === null) return null;
+  if (r === null) {
+    const manquants = [];
+    if (!eq.identification.tensionPrimaire) manquants.push("Tension primaire");
+    if (!eq.identification.tensionSecondaire) manquants.push("Tension secondaire");
+    if (!eq.identification.couplage) manquants.push("Couplage");
+    return (
+      <Card style={{ marginBottom: 14, background: "#FDF3E3" }}>
+        <div style={{ fontSize: 12.5, color: "#8A5A0A" }}>
+          ⚠ Rapport théorique non calculable — renseignez {manquants.length ? manquants.join(", ") : "les informations manquantes"} dans l'identification pour activer la coloration automatique des mesures ci-dessous.
+        </div>
+      </Card>
+    );
+  }
   const tol = calcToleranceRapportTransfo(r);
   return (
     <Card style={{ marginBottom: 14 }}>
