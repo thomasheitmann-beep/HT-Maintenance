@@ -690,10 +690,6 @@ const SECURITE_CELLULE = [
 ];
 // Mesure d'isolement simple (HTA-Terre + Entre phases), partagée entre les cellules HTA pour
 // lesquelles elle est optionnelle (pas systématiquement réalisée, contrairement au jeu de barre).
-const MESURE_ISOLEMENT_CELLULE = [
-  C("hta_terre", "HTA - Terre", [F("realise", "Mesure réalisée ?", null, ["OUI", "NON"]), F("v", "Tension", null, TENSION_ISOLEMENT), F("valeur", "Valeur"), F("unite", "Unité", null, UNITE_ISOLEMENT)]),
-  C("entre_phases", "Entre phases", [F("realise", "Mesure réalisée ?", null, ["OUI", "NON"]), F("v", "Tension", null, TENSION_ISOLEMENT), F("valeur", "Valeur"), F("unite", "Unité", null, UNITE_ISOLEMENT)]),
-];
 // Modèles de pièces internes (bobines, moteurs...) par marque — vide pour l'instant : contrairement
 // aux fusibles (marché standardisé, catalogues publics dédiés), ces pièces sont propres à chaque
 // fabricant de cellule/disjoncteur (pièces détachées), sans catalogue de référence public unique.
@@ -1666,7 +1662,7 @@ function versMegaohms(valeur, unite) {
 // nettement inférieures peuvent simplement indiquer un appareil humide, pas un défaut.
 const ISOLEMENT_TYPIQUE_TRIHAL = { hta_terre: 250, bt_terre: 50, hta_bt: 250 };
 const ISOLEMENT_TYPIQUE_LABEL = { hta_terre: "MT/masse", bt_terre: "BT/masse", hta_bt: "MT/BT" };
-function isolementFields(itemType, classeIsolation) {
+function isolementFields(itemType, classeIsolation, avecRealise) {
   const valeurTypique = ISOLEMENT_TYPIQUE_TRIHAL[itemType];
   const labelTypique = ISOLEMENT_TYPIQUE_LABEL[itemType];
   // Seuil PI par classe d'isolation — IEEE 43-2013, Table 3 : classe A = 1,5, classes B/F/H = 2,0.
@@ -1676,6 +1672,7 @@ function isolementFields(itemType, classeIsolation) {
   const piMin = classeIsolation === "A" ? 1.5 : 2.0;
   const classeAffichee = classeIsolation ? `classe ${classeIsolation}` : "classes B/F/H";
   return [
+    ...(avecRealise ? [F("realise", "Mesure réalisée ?", null, ["OUI", "NON"])] : []),
     F("typeMesure", "Type de mesure", null, LISTE_TYPE_MESURE_ISOLEMENT), F("v", "Tension d'injection", null, TENSION_ISOLEMENT),
     // Repère toujours visible, dès avant la saisie — reprend directement les valeurs approximatives
     // de la notice Schneider Trihal ("Les valeurs approximatives des résistances sont : MT/masse =
@@ -1736,6 +1733,14 @@ function isolementFields(itemType, classeIsolation) {
     },
   ];
 }
+// Mesure d'isolement des cellules HTA (Interrupteur, Disjoncteur, Contacteur, Comptage) — même
+// structure complète que celle du transformateur (type de mesure, seuil indicatif, PI, DAR...),
+// avec en plus la case "Mesure réalisée ?" puisque cette section reste optionnelle pour ces
+// équipements. Pas de "valeur typique" Trihal ici (repère propre aux transformateurs).
+const MESURE_ISOLEMENT_CELLULE = [
+  C("hta_terre", "HTA - Terre", isolementFields("hta_terre_cellule", null, true)),
+  C("entre_phases", "Entre phases", isolementFields("entre_phases_cellule", null, true)),
+];
 function buildTransformateurSchema({ sec = false, classeIsolation = null } = {}) {
   return {
     identification: [
@@ -1771,11 +1776,9 @@ function buildTransformateurSchema({ sec = false, classeIsolation = null } = {})
           : [C("niveau_huile_silicagel", "Contrôle du niveau d'huile et de l'état du silicagel (respirateur)")]),
       ]},
       { key: "mecaniques", title: "Contrôles mécaniques", items: [
-        ...(sec ? [] : [C("couple_serrage_plateau", "Couple de serrage — Plateau", coupleSerrageFields("puissance"))]),
         C("connexions_bt", "Contrôle des connexions BT", coupleSerrageFields("bt")),
         ...(sec ? [C("connexions_ht", "Contrôle des connexions HT", coupleSerrageFields("mt"))] : []),
         ...(sec ? [] : [
-          C("couple_goujons_traversees", "Couple de serrage — Goujons de traversées / passe-barres", coupleEtancheiteFields("goujons")),
           C("couple_vis_passe_barres", "Couple de serrage — Vis de passe-barres", coupleEtancheiteFields("passe_barres")),
           C("couple_couvercle_cuve", "Couple de serrage — Vis de liaison couvercle-cuve", coupleEtancheiteFields("couvercle_cuve")),
           C("couple_bouchon_remplissage", "Couple de serrage — Bouchon de remplissage", coupleEtancheiteFields("bouchon_remplissage")),
@@ -2269,14 +2272,12 @@ const SCHEMAS = {
         C("thermographie", "Contrôle thermographique / points chauds", [F("temperature", "Température relevée", "°C"), F("charge", "Charge au moment du contrôle", "%")]),
       ]},
       { key: "mesure_isolement", title: "Mesure d'isolement", items: [
-        C("phase1_terre", "Phase 1 - Terre", [F("typeMesure", "Type de mesure", null, LISTE_TYPE_MESURE_ISOLEMENT), F("v", "Tension d'injection", null, TENSION_ISOLEMENT), F("valeur", "Valeur"), F("unite", "Unité", null, UNITE_ISOLEMENT)]),
-        C("phase2_terre", "Phase 2 - Terre", [F("typeMesure", "Type de mesure", null, LISTE_TYPE_MESURE_ISOLEMENT), F("v", "Tension d'injection", null, TENSION_ISOLEMENT), F("valeur", "Valeur"), F("unite", "Unité", null, UNITE_ISOLEMENT)]),
-        C("phase3_terre", "Phase 3 - Terre", [F("typeMesure", "Type de mesure", null, LISTE_TYPE_MESURE_ISOLEMENT), F("v", "Tension d'injection", null, TENSION_ISOLEMENT), F("valeur", "Valeur"), F("unite", "Unité", null, UNITE_ISOLEMENT)]),
-        C("phase1_phase2", "Phase 1 - Phase 2", [F("typeMesure", "Type de mesure", null, LISTE_TYPE_MESURE_ISOLEMENT), F("v", "Tension d'injection", null, TENSION_ISOLEMENT), F("valeur", "Valeur"), F("unite", "Unité", null, UNITE_ISOLEMENT)]),
-        C("phase2_phase3", "Phase 2 - Phase 3", [F("typeMesure", "Type de mesure", null, LISTE_TYPE_MESURE_ISOLEMENT), F("v", "Tension d'injection", null, TENSION_ISOLEMENT), F("valeur", "Valeur"), F("unite", "Unité", null, UNITE_ISOLEMENT)]),
-        C("phase3_phase1", "Phase 3 - Phase 1", [F("typeMesure", "Type de mesure", null, LISTE_TYPE_MESURE_ISOLEMENT), F("v", "Tension d'injection", null, TENSION_ISOLEMENT), F("valeur", "Valeur"), F("unite", "Unité", null, UNITE_ISOLEMENT)]),
-        C("pi_jdb", "PI (10/1min)", [F("v", "Tension d'injection", null, TENSION_ISOLEMENT), F("resultat", "Résultat (PI)")]),
-        C("dar_jdb", "DAR (60/10sec)", [F("v", "Tension d'injection", null, TENSION_ISOLEMENT), F("resultat", "Résultat (DAR)")]),
+        C("phase1_terre", "Phase 1 - Terre", isolementFields("phase1_terre_jdb", null, false)),
+        C("phase2_terre", "Phase 2 - Terre", isolementFields("phase2_terre_jdb", null, false)),
+        C("phase3_terre", "Phase 3 - Terre", isolementFields("phase3_terre_jdb", null, false)),
+        C("phase1_phase2", "Phase 1 - Phase 2", isolementFields("phase1_phase2_jdb", null, false)),
+        C("phase2_phase3", "Phase 2 - Phase 3", isolementFields("phase2_phase3_jdb", null, false)),
+        C("phase3_phase1", "Phase 3 - Phase 1", isolementFields("phase3_phase1_jdb", null, false)),
       ]},
     ],
   },
@@ -11367,7 +11368,7 @@ export default function App({ currentUser, onLogout }) {
                 border: view === "sites" ? "1px solid #FFC10755" : "1px solid #D8DEE5", background: view === "sites" ? "rgba(255,193,7,0.12)" : "transparent",
                 color: view === "sites" ? BRAND.amber : "#5B6B7D", fontSize: 12.5, fontWeight: 600, cursor: "pointer",
               }}>
-                <Building2 size={13} /> Sites
+                <Building2 size={13} /> Interventions
               </button>
               <button onClick={() => setView("interventions")} style={{
                 display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: 999,
