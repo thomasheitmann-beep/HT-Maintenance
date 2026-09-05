@@ -9664,11 +9664,11 @@ function docxEquipementElements(eq, locaux, allSites) {
   eq = repairEquipementControles(eq);
   const schema = getSchema(eq);
   if (!schema) {
-    return [new DOCX.Paragraph({ children: [new DOCX.PageBreak()] }), docxEquipHeader(eq.type || "Équipement", docxBookmarkId(eq), eq.etatFinal), docxSpacer(40),
+    return [new DOCX.Paragraph({ children: [new DOCX.PageBreak()] }), docxEquipHeader((eq.type || "Équipement") + (eq.identification.repere ? " — " + eq.identification.repere : ""), docxBookmarkId(eq), eq.etatFinal), docxSpacer(40),
       new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: "Type d'équipement non reconnu — données non affichées.", italics: true, color: "C0392B", size: 18 })] }), docxSpacer()];
   }
   const localNom = (locaux || []).find((l) => l.id === eq.localId);
-  const elements = [new DOCX.Paragraph({ children: [new DOCX.PageBreak()] }), docxEquipHeader(eq.type, docxBookmarkId(eq), eq.etatFinal), docxSpacer(40)];
+  const elements = [new DOCX.Paragraph({ children: [new DOCX.PageBreak()] }), docxEquipHeader(eq.type + (eq.identification.repere ? " — " + eq.identification.repere : ""), docxBookmarkId(eq), eq.etatFinal), docxSpacer(40)];
   if (localNom) elements.push(new DOCX.Paragraph({ spacing: { after: 60 }, children: [new DOCX.TextRun({ text: "Local : " + (localNom.nom || "Local sans nom"), size: 16, color: "666666", italics: true })] }));
   else elements.push(docxSpacer(40));
   if (schema.identification.length) {
@@ -10188,30 +10188,30 @@ function docxEquipementElements(eq, locaux, allSites) {
 // l'ouverture/impression. Logo discret pour casser la monotonie du fond blanc sans surcharger.
 function docxFooterPagination() {
   const logoFooter = docxImage(LOGO_DARK, 32, 24);
+  const margesFooter = { top: 100, bottom: 60, left: 0, right: 0 };
   return new DOCX.Footer({
     children: [
-      new DOCX.Paragraph({
-        alignment: DOCX.AlignmentType.CENTER,
-        border: { top: { style: DOCX.BorderStyle.SINGLE, size: 4, color: DOCX_SILVER } },
-        spacing: { before: 100, after: 10 },
-        children: [
-          ...(logoFooter ? [logoFooter, new DOCX.TextRun({ text: "  ", size: 15 })] : []),
-          new DOCX.TextRun({ text: "HT MAINTENANCE", bold: true, color: DOCX_BLUE, size: 17 }),
-        ],
-      }),
-      new DOCX.Paragraph({
-        alignment: DOCX.AlignmentType.CENTER,
-        spacing: { after: 40 },
-        children: [new DOCX.TextRun({ text: "Maintenance électrique HTA / BT / Conversion d'énergie", color: "8B96A3", size: 13 })],
-      }),
-      new DOCX.Paragraph({
-        alignment: DOCX.AlignmentType.CENTER,
-        children: [
-          new DOCX.TextRun({ text: "Page ", size: 15, color: "8B96A3" }),
-          new DOCX.TextRun({ children: [DOCX.PageNumber.CURRENT], size: 15, color: "8B96A3" }),
-          new DOCX.TextRun({ text: " / ", size: 15, color: "8B96A3" }),
-          new DOCX.TextRun({ children: [DOCX.PageNumber.TOTAL_PAGES], size: 15, color: "8B96A3" }),
-        ],
+      new DOCX.Table({
+        width: { size: 10800, type: DOCX.WidthType.DXA }, columnWidths: [2400, 6000, 2400],
+        borders: { top: { style: DOCX.BorderStyle.SINGLE, size: 4, color: DOCX_SILVER }, bottom: { style: DOCX.BorderStyle.NONE }, left: { style: DOCX.BorderStyle.NONE }, right: { style: DOCX.BorderStyle.NONE }, insideHorizontal: { style: DOCX.BorderStyle.NONE }, insideVertical: { style: DOCX.BorderStyle.NONE } },
+        rows: [new DOCX.TableRow({ children: [
+          new DOCX.TableCell({ width: { size: 2400, type: DOCX.WidthType.DXA }, margins: margesFooter, children: [new DOCX.Paragraph("")] }),
+          new DOCX.TableCell({ width: { size: 6000, type: DOCX.WidthType.DXA }, margins: margesFooter, children: [
+            new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, spacing: { after: 10 }, children: [
+              ...(logoFooter ? [logoFooter, new DOCX.TextRun({ text: "  ", size: 15 })] : []),
+              new DOCX.TextRun({ text: "HT MAINTENANCE", bold: true, color: DOCX_BLUE, size: 17 }),
+            ]}),
+            new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, children: [new DOCX.TextRun({ text: "Maintenance électrique HTA / BT / Conversion d'énergie", color: "8B96A3", size: 13 })] }),
+          ]}),
+          new DOCX.TableCell({ width: { size: 2400, type: DOCX.WidthType.DXA }, margins: margesFooter, verticalAlign: DOCX.VerticalAlign.CENTER, children: [
+            new DOCX.Paragraph({ alignment: DOCX.AlignmentType.RIGHT, children: [
+              new DOCX.TextRun({ text: "Page ", size: 15, color: "8B96A3" }),
+              new DOCX.TextRun({ children: [DOCX.PageNumber.CURRENT], size: 15, color: "8B96A3" }),
+              new DOCX.TextRun({ text: " / ", size: 15, color: "8B96A3" }),
+              new DOCX.TextRun({ children: [DOCX.PageNumber.TOTAL_PAGES], size: 15, color: "8B96A3" }),
+            ]}),
+          ]}),
+        ]})],
       }),
     ],
   });
@@ -10339,52 +10339,58 @@ function docxCoverPage(site) {
       children: [new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, children: [logoImg] })],
     })] })],
   }) : null;
+  const blocSiteClientEnfants = [
+    // Bloc "Site" — repère explicite, bien distingué du bloc "Client" qui suit.
+    new DOCX.Paragraph({ spacing: { before: 0, after: 0 }, alignment: DOCX.AlignmentType.CENTER, children: [
+      new DOCX.TextRun({ text: "SITE", bold: true, color: DOCX_AMBER, size: 16 }),
+    ]}),
+    new DOCX.Paragraph({ spacing: { before: 100, after: 0 }, alignment: DOCX.AlignmentType.CENTER, children: [
+      new DOCX.TextRun({ text: site.nom || "Site", bold: true, color: DOCX_DARK, size: 52 }),
+    ]}),
+    // Séparateur visuel léger entre site et client, pour éviter toute confusion entre les deux.
+    new DOCX.Paragraph({ spacing: { before: 500, after: 0 }, alignment: DOCX.AlignmentType.CENTER, border: { top: { color: "D8DEE5", space: 4, style: DOCX.BorderStyle.SINGLE, size: 2 } }, children: [] }),
+    // Bloc "Client" — repère explicite, style distinct (couleur/poids) du bloc "Site" ci-dessus.
+    new DOCX.Paragraph({ spacing: { before: 500, after: 0 }, alignment: DOCX.AlignmentType.CENTER, children: [
+      new DOCX.TextRun({ text: "CLIENT", bold: true, color: "8B96A3", size: 15 }),
+    ]}),
+    new DOCX.Paragraph({ spacing: { before: 100, after: 0 }, alignment: DOCX.AlignmentType.CENTER, children: [
+      new DOCX.TextRun({ text: site.client || "", bold: true, color: "3E4A5C", size: 26 }),
+    ]}),
+    site.adresse ? new DOCX.Paragraph({ spacing: { before: 120, after: 0 }, alignment: DOCX.AlignmentType.CENTER, children: [
+      new DOCX.TextRun({ text: site.adresse, color: "8B96A3", size: 20 }),
+    ]}) : new DOCX.Paragraph({}),
+    site.local ? new DOCX.Paragraph({ spacing: { before: 120, after: 0 }, alignment: DOCX.AlignmentType.CENTER, children: [
+      new DOCX.TextRun({ text: "Local : " + site.local, color: "8B96A3", size: 20 }),
+    ]}) : new DOCX.Paragraph({}),
+    site.rapport?.offre?.numero ? new DOCX.Paragraph({ spacing: { before: 500, after: 0 }, alignment: DOCX.AlignmentType.CENTER, children: [
+      new DOCX.TextRun({ text: "Offre / Devis n° " + site.rapport.offre.numero, color: "8B96A3", size: 20 }),
+    ]}) : new DOCX.Paragraph({}),
+  ];
+  // Bloc Site/Client/Offre placé dans un encadré légèrement teinté et largement espacé — occupe une
+  // bonne partie de la page libérée par le retrait du bandeau "HT MAINTENANCE" (déjà répété en pied
+  // de page), sans laisser un simple grand vide blanc.
+  const blocSiteClient = new DOCX.Table({
+    width: { size: 9600, type: DOCX.WidthType.DXA }, columnWidths: [9600], alignment: DOCX.AlignmentType.CENTER,
+    rows: [new DOCX.TableRow({ children: [new DOCX.TableCell({
+      width: { size: 9600, type: DOCX.WidthType.DXA }, shading: { type: DOCX.ShadingType.CLEAR, fill: "FAFBFC" },
+      margins: { top: 500, bottom: 500, left: 400, right: 400 },
+      children: blocSiteClientEnfants,
+    })] })],
+  });
   return [
     new DOCX.Table({ width: { size: 12240, type: DOCX.WidthType.DXA }, columnWidths: [12240], rows: [new DOCX.TableRow({ children: [new DOCX.TableCell({
       width: { size: 12240, type: DOCX.WidthType.DXA }, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_AMBER },
       children: [new DOCX.Paragraph({ spacing: { before: 0, after: 0 }, children: [new DOCX.TextRun({ text: " ", size: 4 })] })],
     })] })] }),
-    new DOCX.Paragraph({ spacing: { before: 2000, after: 0 }, children: [] }),
+    new DOCX.Paragraph({ spacing: { before: 1600, after: 0 }, children: [] }),
     ...(logoWithWhiteBg ? [logoWithWhiteBg] : [new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, children: [] })]),
     new DOCX.Paragraph({ spacing: { before: 700, after: 0 }, alignment: DOCX.AlignmentType.CENTER, children: [
       new DOCX.TextRun({ text: "RAPPORT DE MAINTENANCE PRÉVENTIVE HT / BT / CONVERSION D'ÉNERGIE", bold: true, color: "8B96A3", size: 20 }),
     ]}),
-    // Bloc "Site" — repère explicite, bien distingué du bloc "Client" qui suit.
-    new DOCX.Paragraph({ spacing: { before: 640, after: 0 }, alignment: DOCX.AlignmentType.CENTER, children: [
-      new DOCX.TextRun({ text: "SITE", bold: true, color: DOCX_AMBER, size: 16 }),
-    ]}),
-    new DOCX.Paragraph({ spacing: { before: 80, after: 0 }, alignment: DOCX.AlignmentType.CENTER, children: [
-      new DOCX.TextRun({ text: site.nom || "Site", bold: true, color: DOCX_DARK, size: 52 }),
-    ]}),
-    // Séparateur visuel léger entre site et client, pour éviter toute confusion entre les deux.
-    new DOCX.Paragraph({ spacing: { before: 320, after: 0 }, alignment: DOCX.AlignmentType.CENTER, border: { top: { color: "D8DEE5", space: 4, style: DOCX.BorderStyle.SINGLE, size: 2 } }, children: [] }),
-    // Bloc "Client" — repère explicite, style distinct (couleur/poids) du bloc "Site" ci-dessus.
-    new DOCX.Paragraph({ spacing: { before: 320, after: 0 }, alignment: DOCX.AlignmentType.CENTER, children: [
-      new DOCX.TextRun({ text: "CLIENT", bold: true, color: "8B96A3", size: 15 }),
-    ]}),
-    new DOCX.Paragraph({ spacing: { before: 80, after: 0 }, alignment: DOCX.AlignmentType.CENTER, children: [
-      new DOCX.TextRun({ text: site.client || "", bold: true, color: "3E4A5C", size: 26 }),
-    ]}),
-    site.adresse ? new DOCX.Paragraph({ spacing: { before: 100, after: 0 }, alignment: DOCX.AlignmentType.CENTER, children: [
-      new DOCX.TextRun({ text: site.adresse, color: "8B96A3", size: 20 }),
-    ]}) : new DOCX.Paragraph({}),
-    site.local ? new DOCX.Paragraph({ spacing: { before: 100, after: 0 }, alignment: DOCX.AlignmentType.CENTER, children: [
-      new DOCX.TextRun({ text: "Local : " + site.local, color: "8B96A3", size: 20 }),
-    ]}) : new DOCX.Paragraph({}),
-    site.rapport?.offre?.numero ? new DOCX.Paragraph({ spacing: { before: 100, after: 0 }, alignment: DOCX.AlignmentType.CENTER, children: [
-      new DOCX.TextRun({ text: "Offre / Devis n° " + site.rapport.offre.numero, color: "8B96A3", size: 20 }),
-    ]}) : new DOCX.Paragraph({}),
-    new DOCX.Paragraph({ spacing: { before: 700, after: 0 }, alignment: DOCX.AlignmentType.CENTER, children: [
+    new DOCX.Paragraph({ spacing: { before: 900, after: 0 }, children: [] }),
+    blocSiteClient,
+    new DOCX.Paragraph({ spacing: { before: 900, after: 0 }, alignment: DOCX.AlignmentType.CENTER, children: [
       new DOCX.TextRun({ text: "Rapport généré le " + dateGeneration, color: "8B96A3", size: 18, italics: true }),
-    ]}),
-    // Le bandeau HT Maintenance est repoussé en bas de page réelle (grand espacement avant, aucun
-    // après), plutôt que de flotter au milieu d'une page largement vide.
-    new DOCX.Paragraph({ spacing: { before: 4200, after: 0 }, alignment: DOCX.AlignmentType.CENTER, border: { top: { color: "D8DEE5", space: 8, style: DOCX.BorderStyle.SINGLE, size: 4 } }, children: [] }),
-    new DOCX.Paragraph({ spacing: { before: 200, after: 0 }, alignment: DOCX.AlignmentType.CENTER, children: [
-      new DOCX.TextRun({ text: "HT MAINTENANCE", bold: true, color: DOCX_BLUE, size: 22 }),
-    ]}),
-    new DOCX.Paragraph({ spacing: { before: 60, after: 0 }, alignment: DOCX.AlignmentType.CENTER, children: [
-      new DOCX.TextRun({ text: "Maintenance électrique HTA / BT", color: "8B96A3", size: 16 }),
     ]}),
     new DOCX.Paragraph({ children: [new DOCX.PageBreak()] }),
   ];
