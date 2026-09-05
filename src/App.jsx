@@ -8975,13 +8975,17 @@ function docxSyntheseTable(site) {
 let bookmarkIdCounter = 0;
 function nextBookmarkNumericId() { return ++bookmarkIdCounter; }
 function docxBookmarkId(eq) { return "equip_" + eq.id.replace(/[^a-zA-Z0-9_]/g, "_").slice(0, 32); }
-function docxEquipHeader(name, bookmarkId) {
+function docxEquipHeader(name, bookmarkId, etat) {
   const title = new DOCX.TextRun({ text: (name || "").toUpperCase(), bold: true, color: DOCX_WHITE, size: 24 });
   const numericId = nextBookmarkNumericId();
   const contenu = bookmarkId ? [new DOCX.BookmarkStart(bookmarkId, numericId), title, new DOCX.BookmarkEnd(numericId)] : [title];
+  // Fine bordure colorée à gauche reprenant l'état de l'équipement — casse la monotonie du bandeau
+  // sombre uni sans rien distraire, et donne un repère visuel immédiat en parcourant le rapport.
+  const couleurAccent = etat ? docxEtatColor(etat) : DOCX_DARK;
   return new DOCX.Table({ width: { size: 8800, type: DOCX.WidthType.DXA }, columnWidths: [8800], rows: [new DOCX.TableRow({ children: [new DOCX.TableCell({
     width: { size: 8800, type: DOCX.WidthType.DXA }, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_DARK },
-    children: [new DOCX.Paragraph({ spacing: { before: 80, after: 80 }, children: contenu })],
+    borders: { left: { style: DOCX.BorderStyle.SINGLE, size: 36, color: couleurAccent } },
+    children: [new DOCX.Paragraph({ spacing: { before: 80, after: 80 }, indent: { left: 60 }, children: contenu })],
   })] })] });
 }
 function docxSpacer(h) { return new DOCX.Paragraph({ spacing: { after: h || 200 }, children: [] }); }
@@ -9657,11 +9661,11 @@ function docxEquipementElements(eq, locaux, allSites) {
   eq = repairEquipementControles(eq);
   const schema = getSchema(eq);
   if (!schema) {
-    return [new DOCX.Paragraph({ children: [new DOCX.PageBreak()] }), docxEquipHeader(eq.type || "Équipement", docxBookmarkId(eq)), docxSpacer(40),
+    return [new DOCX.Paragraph({ children: [new DOCX.PageBreak()] }), docxEquipHeader(eq.type || "Équipement", docxBookmarkId(eq), eq.etatFinal), docxSpacer(40),
       new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: "Type d'équipement non reconnu — données non affichées.", italics: true, color: "C0392B", size: 18 })] }), docxSpacer()];
   }
   const localNom = (locaux || []).find((l) => l.id === eq.localId);
-  const elements = [new DOCX.Paragraph({ children: [new DOCX.PageBreak()] }), docxEquipHeader(eq.type, docxBookmarkId(eq)), docxSpacer(40)];
+  const elements = [new DOCX.Paragraph({ children: [new DOCX.PageBreak()] }), docxEquipHeader(eq.type, docxBookmarkId(eq), eq.etatFinal), docxSpacer(40)];
   if (localNom) elements.push(new DOCX.Paragraph({ spacing: { after: 60 }, children: [new DOCX.TextRun({ text: "Local : " + (localNom.nom || "Local sans nom"), size: 16, color: "666666", italics: true })] }));
   else elements.push(docxSpacer(40));
   if (schema.identification.length) {
@@ -10177,8 +10181,10 @@ function docxEquipementElements(eq, locaux, allSites) {
   return elements;
 }
 
-// Pied de page avec numérotation (Page X / Y) — Word calcule les valeurs à l'ouverture/impression.
+// Pied de page avec petit logo + numérotation (Page X / Y) — Word calcule les valeurs à
+// l'ouverture/impression. Logo discret pour casser la monotonie du fond blanc sans surcharger.
 function docxFooterPagination() {
+  const logoFooter = docxImage(LOGO_DARK, 16, 12);
   return new DOCX.Footer({
     children: [
       new DOCX.Paragraph({
@@ -10186,6 +10192,7 @@ function docxFooterPagination() {
         border: { top: { style: DOCX.BorderStyle.SINGLE, size: 4, color: DOCX_SILVER } },
         spacing: { before: 80 },
         children: [
+          ...(logoFooter ? [logoFooter, new DOCX.TextRun({ text: "   ", size: 15 })] : []),
           new DOCX.TextRun({ text: "Page ", size: 15, color: "8B96A3" }),
           new DOCX.TextRun({ children: [DOCX.PageNumber.CURRENT], size: 15, color: "8B96A3" }),
           new DOCX.TextRun({ text: " / ", size: 15, color: "8B96A3" }),
@@ -10280,7 +10287,7 @@ async function generateAnnexePhotosDocx(site) {
     const photos = collectPhotosEquipement(eq);
     if (!photos.length) return;
     total += photos.length;
-    children.push(docxEquipHeader(eq.type + (eq.identification.repere ? " — " + eq.identification.repere : ""), null));
+    children.push(docxEquipHeader(eq.type + (eq.identification.repere ? " — " + eq.identification.repere : ""), null, eq.etatFinal));
     photos.forEach((p) => {
       const img = docxImage(p.dataUrl, 260, 195);
       if (!img) return;
@@ -10515,12 +10522,16 @@ async function generateInterventionDocx(iv) {
   iv = await resolvePhotosForDocx(iv);
   const duree = dureeIntervention(iv.heureDebut, iv.heureFin);
   const logoImg = docxImage(LOGO_DARK, 46, 35);
+  // Même logique visuelle que le rapport de site : une bordure colorée à gauche de l'en-tête,
+  // reprenant ici le statut de l'intervention plutôt qu'un état d'équipement.
+  const couleurStatutRI = iv.statut === "Clôturée" ? DOCX_GREEN : DOCX_ORANGE;
   const headerTable = new DOCX.Table({ width: { size: 8800, type: DOCX.WidthType.DXA }, columnWidths: [8800], rows: [new DOCX.TableRow({ children: [new DOCX.TableCell({
     width: { size: 8800, type: DOCX.WidthType.DXA }, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_DARK },
+    borders: { left: { style: DOCX.BorderStyle.SINGLE, size: 36, color: couleurStatutRI } },
     children: [
-      new DOCX.Paragraph({ spacing: { before: 160, after: 20 }, children: [...(logoImg ? [logoImg] : []), new DOCX.TextRun({ text: "   RAPPORT D'INTERVENTION", color: DOCX_SILVER, size: 16 })] }),
-      new DOCX.Paragraph({ spacing: { after: 10 }, children: [new DOCX.TextRun({ text: iv.numeroRI || "", bold: true, color: DOCX_WHITE, size: 30 })] }),
-      new DOCX.Paragraph({ spacing: { after: 160 }, children: [new DOCX.TextRun({ text: `${iv.client || ""} — ${iv.site || ""}`, color: DOCX_SILVER, size: 20 })] }),
+      new DOCX.Paragraph({ spacing: { before: 160, after: 20 }, indent: { left: 60 }, children: [...(logoImg ? [logoImg] : []), new DOCX.TextRun({ text: "   RAPPORT D'INTERVENTION", color: DOCX_SILVER, size: 16 })] }),
+      new DOCX.Paragraph({ spacing: { after: 10 }, indent: { left: 60 }, children: [new DOCX.TextRun({ text: iv.numeroRI || "", bold: true, color: DOCX_WHITE, size: 30 })] }),
+      new DOCX.Paragraph({ spacing: { after: 160 }, indent: { left: 60 }, children: [new DOCX.TextRun({ text: `${iv.client || ""} — ${iv.site || ""}`, color: DOCX_SILVER, size: 20 })] }),
     ],
   })] })] });
 
