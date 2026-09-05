@@ -4143,6 +4143,17 @@ function ControlRow({ item, value, onChange, idPrefix, toleranceOverride }) {
                     onUnitChange={(u) => setField(f.key + "Unite", u)}
                     validState={fieldValidState(f.key)}
                   />
+                ) : MESURE_KEYS.includes(f.key) || fieldValidState(f.key) ? (
+                  // Champ numérique sans unité (ex. L1/L2/L3 du rapport de transformation) mais
+                  // pouvant tout de même être comparé à une tolérance — il lui faut donc la même
+                  // coloration que NumberWithUnit, pas un simple champ texte qui l'ignorerait.
+                  <NumberWithUnit
+                    value={fields[f.key]}
+                    unit=""
+                    onValueChange={(v) => setField(f.key, v)}
+                    onUnitChange={() => {}}
+                    validState={fieldValidState(f.key)}
+                  />
                 ) : (
                   <input
                     type="text"
