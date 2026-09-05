@@ -2547,6 +2547,7 @@ function emptySite() {
     adresse: "",
     contactClient: { prenom: "", nom: "", email: "", fixe: "", portable: "" },
     contactSite: { prenom: "", nom: "", email: "", fixe: "", portable: "" },
+    photoSite: [], // photo / logo du site, affiché sur la page de garde du rapport Word
     notesInternes: "", // usage technicien uniquement — jamais repris dans un rapport Word
     local: "",
     emailEnvoi: "",
@@ -7778,6 +7779,11 @@ function SiteDetail({ site, allSites, update, onBack, onDelete, onPrint, onPrint
             </Field>
           </div>
           <div style={{ marginTop: 14 }}>
+            <Field label={<>Photo / logo du site <span style={{ fontWeight: 400, color: "#8B96A3", textTransform: "none", letterSpacing: 0 }}>— affichée sur la page de garde du rapport Word</span></>}>
+              <PhotoGallery photos={site.photoSite || []} onChange={(p) => update((d) => ({ ...d, photoSite: p }))} idPrefix={`${site.id}-photositelogo`} />
+            </Field>
+          </div>
+          <div style={{ marginTop: 14 }}>
             <SectionTitle>Offre / Devis associé</SectionTitle>
             <div style={{ fontSize: 11.5, color: "#8B96A3", marginBottom: 12 }}>
               Le numéro d'offre apparaît dans le rapport ; le fichier joint reste réservé aux techniciens (jamais inclus dans le document remis au client).
@@ -10380,6 +10386,9 @@ function docxCoverPage(site) {
       children: blocSiteClientEnfants,
     })] })],
   });
+  // Photo / logo du site (facultatif) — affiché sous l'encadré Site/Client, sur la page de garde.
+  const photoSiteDataUrl = (site.photoSite || [])[0]?.dataUrl;
+  const photoSiteImg = photoSiteDataUrl ? docxImage(photoSiteDataUrl, 260, 195) : null;
   return [
     new DOCX.Table({ width: { size: 12240, type: DOCX.WidthType.DXA }, columnWidths: [12240], rows: [new DOCX.TableRow({ children: [new DOCX.TableCell({
       width: { size: 12240, type: DOCX.WidthType.DXA }, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_AMBER },
@@ -10392,6 +10401,9 @@ function docxCoverPage(site) {
     ]}),
     new DOCX.Paragraph({ spacing: { before: 900, after: 0 }, children: [] }),
     blocSiteClient,
+    ...(photoSiteImg ? [
+      new DOCX.Paragraph({ spacing: { before: 500, after: 0 }, alignment: DOCX.AlignmentType.CENTER, children: [photoSiteImg] }),
+    ] : []),
     new DOCX.Paragraph({ spacing: { before: 900, after: 0 }, alignment: DOCX.AlignmentType.CENTER, children: [
       new DOCX.TextRun({ text: "Rapport généré le " + dateGeneration, color: "8B96A3", size: 18, italics: true }),
     ]}),
