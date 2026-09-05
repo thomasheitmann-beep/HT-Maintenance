@@ -1800,7 +1800,7 @@ function buildTransformateurSchema({ sec = false, classeIsolation = null } = {})
         C("test_defaut_temp_t1", "Test défaut temp T1", [F("valeur", "Valeur", "°C")], ACTIONS_RELAIS_TRANSFORMATEUR),
         C("test_defaut_temp_t2", "Test défaut temp T2", [F("valeur", "Valeur", "°C")], ACTIONS_RELAIS_TRANSFORMATEUR),
       ]},
-      { key: "rapport_transformation", title: "Rapport de transformation", items: [
+      { key: "rapport_transformation", title: "Rapport de transformation et résistances d'enroulement", items: [
         C("rapport_par_phase", "Rapport de transformation", [F("l1", "L1"), F("l2", "L2"), F("l3", "L3")]),
         // CEI 60076-1 / IEEE C57.12.90 : mesure hors tension, transformateur à l'équilibre thermique
         // (pas juste après mise hors service). Chaque phase se mesure individuellement (pas de shunt
@@ -8808,7 +8808,7 @@ function docxEcheancesUsureTable(lignes) {
     }),
   });
 }
-function docxControlRow(label, detail, action, etat) {
+function docxControlRow(label, detail, action, etat, isAlternate) {
   const children = [new DOCX.Paragraph({ spacing: { after: (detail && (Array.isArray(detail) ? detail.length : detail)) || action ? 40 : 0 }, children: [new DOCX.TextRun({ text: label, size: 18, color: DOCX_DARK })] })];
   if (Array.isArray(detail) && detail.length) {
     // Format enrichi (depuis printFieldParts) : une valeur hors tolérance ressort en rouge, une
@@ -8825,16 +8825,19 @@ function docxControlRow(label, detail, action, etat) {
     children.push(new DOCX.Paragraph({ spacing: { after: action ? 40 : 0 }, children: [new DOCX.TextRun({ text: detail, size: 16, color: "666666", italics: true })] }));
   }
   if (action) children.push(new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: "Action : " + action, size: 16, color: "666666" })] }));
+  // Fond gris très clair en alternance une ligne sur deux — casse la monotonie du blanc uniforme
+  // sans nuire à la lisibilité ni gêner l'impression.
+  const fondAlterne = isAlternate ? "FAFBFC" : undefined;
   return new DOCX.TableRow({ children: [
-    new DOCX.TableCell({ width: { size: 7600, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, children }),
+    new DOCX.TableCell({ width: { size: 7600, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, shading: fondAlterne ? { type: DOCX.ShadingType.CLEAR, fill: fondAlterne } : undefined, children }),
     etat
       ? new DOCX.TableCell({ width: { size: 2000, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, shading: { type: DOCX.ShadingType.CLEAR, fill: docxEtatColor(etat) }, verticalAlign: DOCX.VerticalAlign.CENTER, children: [new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, children: [new DOCX.TextRun({ text: (etat || "").toUpperCase(), bold: true, color: DOCX_WHITE, size: 16 })] })] })
-      : new DOCX.TableCell({ width: { size: 2000, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, children: [new DOCX.Paragraph("")] }),
+      : new DOCX.TableCell({ width: { size: 2000, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, shading: fondAlterne ? { type: DOCX.ShadingType.CLEAR, fill: fondAlterne } : undefined, children: [new DOCX.Paragraph("")] }),
   ]});
 }
 function docxControlTable(rows) {
   if (rows.length === 0) return null;
-  return new DOCX.Table({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: [7600, 2000], rows: rows.map((r) => docxControlRow(...r)) });
+  return new DOCX.Table({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: [7600, 2000], rows: rows.map((r, i) => docxControlRow(...r, i % 2 === 1)) });
 }
 // Tableau de mesures par phase : une ligne par grandeur (I, C, Q…), une colonne par phase — bien
 // plus lisible qu'un bloc de texte pour les mesures complètes (gradins, réseau amont/aval…).
@@ -10184,15 +10187,26 @@ function docxEquipementElements(eq, locaux, allSites) {
 // Pied de page avec petit logo + numérotation (Page X / Y) — Word calcule les valeurs à
 // l'ouverture/impression. Logo discret pour casser la monotonie du fond blanc sans surcharger.
 function docxFooterPagination() {
-  const logoFooter = docxImage(LOGO_DARK, 16, 12);
+  const logoFooter = docxImage(LOGO_DARK, 32, 24);
   return new DOCX.Footer({
     children: [
       new DOCX.Paragraph({
         alignment: DOCX.AlignmentType.CENTER,
         border: { top: { style: DOCX.BorderStyle.SINGLE, size: 4, color: DOCX_SILVER } },
-        spacing: { before: 80 },
+        spacing: { before: 100, after: 10 },
         children: [
-          ...(logoFooter ? [logoFooter, new DOCX.TextRun({ text: "   ", size: 15 })] : []),
+          ...(logoFooter ? [logoFooter, new DOCX.TextRun({ text: "  ", size: 15 })] : []),
+          new DOCX.TextRun({ text: "HT MAINTENANCE", bold: true, color: DOCX_BLUE, size: 17 }),
+        ],
+      }),
+      new DOCX.Paragraph({
+        alignment: DOCX.AlignmentType.CENTER,
+        spacing: { after: 40 },
+        children: [new DOCX.TextRun({ text: "Maintenance électrique HTA / BT / Conversion d'énergie", color: "8B96A3", size: 13 })],
+      }),
+      new DOCX.Paragraph({
+        alignment: DOCX.AlignmentType.CENTER,
+        children: [
           new DOCX.TextRun({ text: "Page ", size: 15, color: "8B96A3" }),
           new DOCX.TextRun({ children: [DOCX.PageNumber.CURRENT], size: 15, color: "8B96A3" }),
           new DOCX.TextRun({ text: " / ", size: 15, color: "8B96A3" }),
