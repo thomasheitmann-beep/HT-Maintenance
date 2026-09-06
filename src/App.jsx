@@ -2155,8 +2155,8 @@ const SCHEMAS = {
         C("puissances_amont", "Puissances", [
           F("p", "P", "kW"), F("s", "S", "kVA"),
           { key: "q", label: "Q (calculé)", unit: "kVAR", compute: (f) => { const p = numOf(f.p), s = numOf(f.s); if (p === null || s === null || s < p) return ""; return Math.round(Math.sqrt(s * s - p * p) * 1000) / 1000; } },
-          { key: "cosphi", label: "Cos Phi (calculé)", unit: null, compute: (f) => { const p = numOf(f.p), s = numOf(f.s); if (p === null || s === null || s <= 0) return ""; return Math.round((p / s) * 1000) / 1000; } },
-          { key: "tangphi", label: "Tang Phi (calculé)", unit: null, compute: (f) => { const p = numOf(f.p), s = numOf(f.s); if (p === null || s === null || p <= 0 || s < p) return ""; return Math.round((Math.sqrt(s * s - p * p) / p) * 1000) / 1000; } },
+          { key: "cosphi", label: "Cos Phi (calculé)", unit: "(cos φ)", compute: (f) => { const p = numOf(f.p), s = numOf(f.s); if (p === null || s === null || s <= 0) return ""; return Math.round((p / s) * 1000) / 1000; } },
+          { key: "tangphi", label: "Tang Phi (calculé)", unit: "(tan φ)", compute: (f) => { const p = numOf(f.p), s = numOf(f.s); if (p === null || s === null || p <= 0 || s < p) return ""; return Math.round((Math.sqrt(s * s - p * p) / p) * 1000) / 1000; } },
         ]),
       ]},
       { key: "mesures_aval", title: "Mesures réseau aval (ou batterie hors service)", items: [
@@ -2166,8 +2166,8 @@ const SCHEMAS = {
         C("puissances_aval", "Puissances", [
           F("p", "P", "kW"), F("s", "S", "kVA"),
           { key: "q", label: "Q (calculé)", unit: "kVAR", compute: (f) => { const p = numOf(f.p), s = numOf(f.s); if (p === null || s === null || s < p) return ""; return Math.round(Math.sqrt(s * s - p * p) * 1000) / 1000; } },
-          { key: "cosphi", label: "Cos Phi (calculé)", unit: null, compute: (f) => { const p = numOf(f.p), s = numOf(f.s); if (p === null || s === null || s <= 0) return ""; return Math.round((p / s) * 1000) / 1000; } },
-          { key: "tangphi", label: "Tang Phi (calculé)", unit: null, compute: (f) => { const p = numOf(f.p), s = numOf(f.s); if (p === null || s === null || p <= 0 || s < p) return ""; return Math.round((Math.sqrt(s * s - p * p) / p) * 1000) / 1000; } },
+          { key: "cosphi", label: "Cos Phi (calculé)", unit: "(cos φ)", compute: (f) => { const p = numOf(f.p), s = numOf(f.s); if (p === null || s === null || s <= 0) return ""; return Math.round((p / s) * 1000) / 1000; } },
+          { key: "tangphi", label: "Tang Phi (calculé)", unit: "(tan φ)", compute: (f) => { const p = numOf(f.p), s = numOf(f.s); if (p === null || s === null || p <= 0 || s < p) return ""; return Math.round((Math.sqrt(s * s - p * p) / p) * 1000) / 1000; } },
         ]),
       ]},
       { key: "gradins", title: "Gradins", items: [] },
