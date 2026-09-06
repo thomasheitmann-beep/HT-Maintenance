@@ -10207,24 +10207,23 @@ function docxEquipementElements(eq, locaux, allSites) {
 
 // Pied de page avec petit logo + numérotation (Page X / Y) — Word calcule les valeurs à
 // l'ouverture/impression. Logo discret pour casser la monotonie du fond blanc sans surcharger.
-// Construit avec 3 paragraphes distincts, chacun avec un simple alignement (centré/centré/droite) :
-// ni tableau ni taquet de tabulation, qui se sont tous deux révélés mal interprétés selon le
-// lecteur (largeurs/centrage ignorés, tabulation traitée comme un taquet gauche). L'alignement de
-// paragraphe seul est le mécanisme le plus universellement fiable, quel que soit le logiciel.
+// Construit avec 3 paragraphes distincts : logo + texte à gauche (alignement par défaut),
+// numérotation seule alignée à droite. Le centrage de paragraphe s'étant révélé peu fiable selon
+// le lecteur (ignoré par certains, tout ramené à gauche), on ne s'appuie plus que sur l'alignement
+// gauche (par défaut) et droite, les deux seuls qui se sont montrés fiables partout.
 function docxFooterPagination() {
   const logoFooter = docxImage(LOGO_DARK, 32, 24);
   return new DOCX.Footer({
     children: [
       new DOCX.Paragraph({
         border: { top: { style: DOCX.BorderStyle.SINGLE, size: 4, color: DOCX_SILVER, space: 4 } },
-        alignment: DOCX.AlignmentType.CENTER,
         spacing: { before: 60, after: 4 },
         children: [
           ...(logoFooter ? [logoFooter, new DOCX.TextRun({ text: "  ", size: 15 })] : []),
           new DOCX.TextRun({ text: "HT MAINTENANCE", bold: true, color: DOCX_BLUE, size: 17 }),
         ],
       }),
-      new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, spacing: { after: 20 }, children: [new DOCX.TextRun({ text: "Maintenance électrique HTA / BT / Conversion d'énergie", color: "8B96A3", size: 13 })] }),
+      new DOCX.Paragraph({ spacing: { after: 20 }, children: [new DOCX.TextRun({ text: "Maintenance électrique HTA / BT / Conversion d'énergie", color: "8B96A3", size: 13 })] }),
       new DOCX.Paragraph({
         alignment: DOCX.AlignmentType.RIGHT,
         children: [
