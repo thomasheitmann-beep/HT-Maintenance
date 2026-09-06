@@ -2664,6 +2664,7 @@ function prefillInterventionFromSite(site, eqOrList, numeroRI) {
     ...base,
     client: site.client,
     site: site.nom || site.local,
+    emailClient: site.emailEnvoi || "",
     date: site.rapport.date || todayISO(),
     technicien: site.rapport.intervenant || "",
     heureDebut: site.rapport.heureArrivee || "",
@@ -2674,6 +2675,7 @@ function prefillInterventionFromSite(site, eqOrList, numeroRI) {
     anomaliesRecommandations: list.length === 1 ? (list[0].remarques || "") : "",
     linkedSiteId: site.id,
     linkedEquipementId: list.length === 1 ? list[0].id : null,
+    offre: { ...base.offre, numero: site.rapport?.offre?.numero || "" },
   };
 }
 
@@ -7737,6 +7739,16 @@ function SiteDetail({ site, allSites, update, onBack, onDelete, onPrint, onPrint
     ...presentTypes.map((t) => ({ key: t, label: t, icon: t === "Sécurité" ? ShieldCheck : Settings2 })),
   ];
 
+  function envoyerRapportParMail() {
+    const numeroOffre = site.rapport?.offre?.numero;
+    const subject = encodeURIComponent(`Rapport de maintenance préventive — ${site.nom || site.local || ""}${numeroOffre ? " (Offre " + numeroOffre + ")" : ""}`);
+    const body = encodeURIComponent(
+      `Bonjour,\n\nVeuillez trouver ci-joint le rapport de maintenance préventive du site ${site.nom || site.local || ""} (${site.client || ""})${site.rapport?.date ? ", réalisé le " + site.rapport.date : ""}.\n\n(Pensez à joindre le document Word généré via le bouton « Rapport Word » avant l'envoi.)\n\nCordialement,\n${site.rapport?.intervenant || "HT Maintenance"}`
+    );
+    const to = site.emailEnvoi || "";
+    window.open(`mailto:${to}?subject=${subject}&body=${body}`, "_blank");
+  }
+
   return (
     <div>
       <button onClick={onBack} style={{ ...btnGhost(), marginBottom: 16 }}><ArrowLeft size={14} /> Retour au tableau de bord</button>
@@ -7826,6 +7838,7 @@ function SiteDetail({ site, allSites, update, onBack, onDelete, onPrint, onPrint
             <button onClick={() => onPrint(site)} style={btnGhost("#FFC107")}>
               <FileText size={13} /> Rapport Word
             </button>
+            <button onClick={envoyerRapportParMail} style={btnGhost("#FFC107")}><Mail size={13} /> Préparer l'email</button>
             <button onClick={() => onPrintAnnexe(site)} style={btnGhost("#0F8A5F")} title="Génère un fichier Word séparé regroupant toutes les photos du site, classées par équipement et par contrôle">
               <ImagePlus size={13} /> Annexe photos
             </button>
