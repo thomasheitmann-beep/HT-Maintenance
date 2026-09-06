@@ -3702,8 +3702,23 @@ function PhotoGallery({ photos, onChange, idPrefix }) {
     setBusy(false);
   }
 
+  // Collage (Ctrl+V) d'une image copiée dans le presse-papier — pratique pour coller directement
+  // une capture d'écran ou un logo copié depuis un site web, sans passer par un fichier enregistré.
+  function handlePaste(e) {
+    const items = e.clipboardData && e.clipboardData.items;
+    if (!items) return;
+    const fichiersImage = [];
+    for (const item of items) {
+      if (item.kind === "file" && item.type.startsWith("image/")) {
+        const f = item.getAsFile();
+        if (f) fichiersImage.push(f);
+      }
+    }
+    if (fichiersImage.length) { e.preventDefault(); handleFiles(fichiersImage); }
+  }
+
   return (
-    <Card>
+    <Card onPaste={handlePaste} tabIndex={0} style={{ outline: "none" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
         <SectionTitle>Photos</SectionTitle>
         <button onClick={() => inputRef.current && inputRef.current.click()} disabled={busy} style={btnGhost("#FFC107")}>
@@ -3724,7 +3739,7 @@ function PhotoGallery({ photos, onChange, idPrefix }) {
       </div>
       {list.length === 0 ? (
         <div style={{ textAlign: "center", padding: 22, color: "#8B96A3", fontSize: 12.5, border: "1px dashed #D8DEE5", borderRadius: 10 }}>
-          Aucune photo
+          Aucune photo — ou cliquez ici puis Ctrl+V pour coller une image copiée
         </div>
       ) : (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(120px, 1fr))", gap: 10 }}>
@@ -3961,8 +3976,8 @@ function InlineConfirmButton({ icon: Icon, label, color = "#EF4444", onConfirm }
   );
 }
 
-function Card({ children, style }) {
-  return <div style={{ background: "#FFFFFF", border: "1px solid #D8DEE5", borderRadius: 14, padding: 20, ...(style || {}) }}>{children}</div>;
+function Card({ children, style, ...rest }) {
+  return <div style={{ background: "#FFFFFF", border: "1px solid #D8DEE5", borderRadius: 14, padding: 20, ...(style || {}) }} {...rest}>{children}</div>;
 }
 function SectionTitle({ children }) {
   return <div style={{ fontSize: 11.5, fontWeight: 700, color: "#5B6B7D", letterSpacing: 0.6, textTransform: "uppercase", marginBottom: 12, fontFamily: "'Rajdhani', 'Inter', sans-serif" }}>{children}</div>;
