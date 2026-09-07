@@ -10359,7 +10359,7 @@ function docxFooterPagination() {
 // branches, manœuvres, photos par phase...), avec une légende reprenant le libellé du schéma.
 function collectPhotosEquipement(eq) {
   const result = [];
-  const addPhotos = (files, caption) => { (files || []).forEach((p) => { if (p && p.dataUrl) result.push({ dataUrl: p.dataUrl, caption }); }); };
+  const addPhotos = (files, caption) => { (files || []).forEach((p) => { if (p && p.dataUrl) result.push({ dataUrl: p.dataUrl, caption, _imgW: p._imgW, _imgH: p._imgH }); }); };
   addPhotos(eq.photos, "Photo générale de l'équipement");
   addPhotos(eq.courbeFiles, "Courbe");
   addPhotos(eq.courbeDechargeFiles, "Courbe de décharge batterie");
@@ -10465,7 +10465,8 @@ async function generateAnnexePhotosDocx(site) {
     total += photos.length;
     children.push(docxEquipHeader(eq.type + (eq.identification.repere ? " — " + eq.identification.repere : ""), null, eq.etatFinal));
     photos.forEach((p) => {
-      const img = docxImage(p.dataUrl, 260, 195);
+      const { w, h } = dimensionsAdaptees(p, 260, 320);
+      const img = docxImage(p.dataUrl, w, h);
       if (!img) return;
       children.push(new DOCX.Paragraph({ spacing: { before: 60, after: 4 }, children: [new DOCX.TextRun({ text: p.caption, bold: true, size: 16, color: DOCX_DARK })] }));
       children.push(new DOCX.Paragraph({ spacing: { after: 40 }, children: [img] }));
@@ -10475,7 +10476,8 @@ async function generateAnnexePhotosDocx(site) {
   if (photosSite.length) {
     children.push(docxEquipHeader("Photos générales du site", null));
     photosSite.forEach((p) => {
-      const img = docxImage(p.dataUrl, 260, 195);
+      const { w, h } = dimensionsAdaptees(p, 260, 320);
+      const img = docxImage(p.dataUrl, w, h);
       if (img) { children.push(new DOCX.Paragraph({ spacing: { after: 40 }, children: [img] })); total++; }
     });
   }
