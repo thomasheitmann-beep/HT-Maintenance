@@ -1649,6 +1649,13 @@ function aideCoupleSerrage(taille, typeConnexion) {
   }
   return `Aucune valeur générique fiable pour une connexion de puissance ${taille} — le couple varie selon le connecteur (cuivre/aluminium, cosse ou méplat) et le constructeur. Se référer à la documentation du fabricant ou à l'étiquette de l'appareil.`;
 }
+// Couples de serrage indicatifs par section de conducteur (bornes à vis) — repère fourni par
+// l'utilisateur ; à vérifier sur la documentation du fabricant de la borne concernée avant de s'y
+// fier, un fabricant/modèle de bornier pouvant préconiser des valeurs différentes.
+const COUPLE_SERRAGE_CONDUCTEUR = {
+  "1,5 mm²": "1,5 – 2,0", "2,5 mm²": "2,0 – 2,5", "4 mm²": "2,0 – 2,5", "6 mm²": "2,0 – 3,0",
+  "10 mm²": "2,5 – 3,5", "16 mm²": "3,0 – 4,0", "25 mm²": "4 – 5", "35 mm²": "5 – 6",
+};
 function coupleSerrageFields(typeConnexion) {
   return [
     F("taille", "Taille vis/écrou", null, LISTE_TAILLE_VIS),
@@ -2140,7 +2147,7 @@ const SCHEMAS = {
         C("serrage_connexions_batt", "Serrage des connexions"),
         C("etat_cables_batt", "État des câbles"),
         C("etat_contacts_batt", "État des contacts, contacteurs et interrupteurs"),
-        C("resistances_decharge", "Résistances de décharge", [F("valeur", "Valeur", "MΩ")]),
+        C("resistances_decharge", "Résistances de décharge"),
         C("depoussierage", "Dépoussiérage de l'installation"),
         C("test_ventilateur", "Test de fonctionnement du ventilateur (démarrage / arrêt aux seuils)"),
         C("thermographie_batt", "Contrôle thermographique", [F("temperature", "Température relevée", "°C"), F("charge", "Charge au moment du contrôle", "%")]),
@@ -3998,6 +4005,35 @@ function Card({ children, style, ...rest }) {
 }
 function SectionTitle({ children }) {
   return <div style={{ fontSize: 11.5, fontWeight: 700, color: "#5B6B7D", letterSpacing: 0.6, textTransform: "uppercase", marginBottom: 12, fontFamily: "'Rajdhani', 'Inter', sans-serif" }}>{children}</div>;
+}
+// Repère technicien affiché tel quel (toutes les sections), plutôt que de faire choisir une seule
+// section — plusieurs sections de conducteur différentes peuvent être présentes sur les connexions
+// d'une même batterie de compensation.
+function CoupleSerrageConducteurTable() {
+  return (
+    <Card style={{ marginBottom: 14 }}>
+      <SectionTitle>Aide technicien — couples de serrage par section de conducteur</SectionTitle>
+      <div style={{ fontSize: 11, color: "#8B96A3", marginBottom: 10 }}>
+        Repère indicatif (borne à vis) — plusieurs sections peuvent être présentes sur une même connexion ; à vérifier selon le fabricant de la borne.
+      </div>
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+        <thead>
+          <tr>
+            <th style={{ textAlign: "left", padding: "6px 8px", borderBottom: "1px solid #D8DEE5", color: "#5B6B7D" }}>Section conducteur</th>
+            <th style={{ textAlign: "left", padding: "6px 8px", borderBottom: "1px solid #D8DEE5", color: "#5B6B7D" }}>Couple de serrage indicatif</th>
+          </tr>
+        </thead>
+        <tbody>
+          {Object.entries(COUPLE_SERRAGE_CONDUCTEUR).map(([section, plage]) => (
+            <tr key={section}>
+              <td style={{ padding: "6px 8px", borderBottom: "1px solid #EEF1F5" }}>{section}</td>
+              <td style={{ padding: "6px 8px", borderBottom: "1px solid #EEF1F5", fontWeight: 600, color: "#0A5DA8" }}>{plage} N·m</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </Card>
+  );
 }
 function btnPrimary() {
   return { display: "inline-flex", alignItems: "center", gap: 6, background: "#FFC107", border: "none", color: "#1A1F26", borderRadius: 10, padding: "10px 16px", fontSize: 13, fontWeight: 700, cursor: "pointer" };
@@ -6687,6 +6723,24 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
                 </React.Fragment>
               );
             }
+            if (eq.type === "Batterie de compensation" && sec.key === "mecaniques") {
+              return (
+                <React.Fragment key={sec.key}>
+                  <SectionBlock
+                    title={sec.title}
+                    items={sec.items}
+                    values={eq.controles[sec.key]}
+                    onChangeItem={(itemKey, v) => setControleItem(sec.key, itemKey, v)}
+                    idPrefix={`${eq.id}-${sec.key}`}
+                    custom={eq.controles[sec.key + "__custom"] || []}
+                    onAddCustom={() => addCustomAction(sec.key)}
+                    onChangeCustom={(id, patch) => changeCustomAction(sec.key, id, patch)}
+                    onRemoveCustom={(id) => removeCustomAction(sec.key, id)}
+                  />
+                  <CoupleSerrageConducteurTable />
+                </React.Fragment>
+              );
+            }
             if (sec.key === "parametrage_relais" && TYPES_AVEC_RELAIS.includes(eq.type)) {
               return <ParametrageRelaisPanel key={sec.key} eq={eq} update={update} idPrefix={`${eq.id}-${sec.key}`} />;
             }
@@ -8905,6 +8959,20 @@ function docxControlTable(rows) {
   if (rows.length === 0) return null;
   return new DOCX.Table({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: [7600, 2000], rows: rows.map((r, i) => docxControlRow(...r, i % 2 === 1)) });
 }
+// Tableau de repère (toutes les sections, pas de sélection) — plusieurs sections de conducteur
+// différentes peuvent être présentes sur les connexions d'une même batterie de compensation.
+function docxTableCoupleSerrageConducteur() {
+  const headCell = (text) => new DOCX.TableCell({
+    width: { size: 4800, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_LIGHT },
+    children: [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text, size: 16, bold: true, color: "555555" })] })],
+  });
+  const header = new DOCX.TableRow({ children: [headCell("Section conducteur"), headCell("Couple de serrage indicatif")] });
+  const body = Object.entries(COUPLE_SERRAGE_CONDUCTEUR).map(([section, plage]) => new DOCX.TableRow({ children: [
+    new DOCX.TableCell({ width: { size: 4800, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, children: [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: section, size: 16, color: DOCX_DARK })] })] }),
+    new DOCX.TableCell({ width: { size: 4800, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, children: [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: plage + " N·m", size: 16, color: DOCX_DARK })] })] }),
+  ]}));
+  return new DOCX.Table({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: [4800, 4800], rows: [header, ...body] });
+}
 // Tableau de mesures par phase : une ligne par grandeur (I, C, Q…), une colonne par phase — bien
 // plus lisible qu'un bloc de texte pour les mesures complètes (gradins, réseau amont/aval…).
 // Rendu "intelligent" d'un contrôle de mesure : si le contrôle a des champs L1/L2/L3 (ou P/S par
@@ -10203,6 +10271,13 @@ function docxEquipementElements(eq, locaux, allSites) {
     }
     const t = docxControlTable(rows);
     if (t) elements.push(t);
+    if (eq.type === "Batterie de compensation" && sec.key === "mecaniques") {
+      elements.push(new DOCX.Paragraph({
+        spacing: { before: 60, after: 40 },
+        children: [new DOCX.TextRun({ text: "Repère indicatif — couples de serrage par section de conducteur (borne à vis) ; plusieurs sections peuvent être présentes sur une même connexion, à vérifier selon le fabricant de la borne.", size: 15, italics: true, color: "8B96A3" })],
+      }));
+      elements.push(docxTableCoupleSerrageConducteur());
+    }
     elements.push(docxSpacer());
   });
   if (eq.type === "Disjoncteur BT") {
