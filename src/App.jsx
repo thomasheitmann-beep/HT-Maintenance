@@ -8959,20 +8959,6 @@ function docxControlTable(rows) {
   if (rows.length === 0) return null;
   return new DOCX.Table({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: [7600, 2000], rows: rows.map((r, i) => docxControlRow(...r, i % 2 === 1)) });
 }
-// Tableau de repère (toutes les sections, pas de sélection) — plusieurs sections de conducteur
-// différentes peuvent être présentes sur les connexions d'une même batterie de compensation.
-function docxTableCoupleSerrageConducteur() {
-  const headCell = (text) => new DOCX.TableCell({
-    width: { size: 4800, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_LIGHT },
-    children: [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text, size: 16, bold: true, color: "555555" })] })],
-  });
-  const header = new DOCX.TableRow({ children: [headCell("Section conducteur"), headCell("Couple de serrage indicatif")] });
-  const body = Object.entries(COUPLE_SERRAGE_CONDUCTEUR).map(([section, plage]) => new DOCX.TableRow({ children: [
-    new DOCX.TableCell({ width: { size: 4800, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, children: [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: section, size: 16, color: DOCX_DARK })] })] }),
-    new DOCX.TableCell({ width: { size: 4800, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, children: [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: plage + " N·m", size: 16, color: DOCX_DARK })] })] }),
-  ]}));
-  return new DOCX.Table({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: [4800, 4800], rows: [header, ...body] });
-}
 // Tableau de mesures par phase : une ligne par grandeur (I, C, Q…), une colonne par phase — bien
 // plus lisible qu'un bloc de texte pour les mesures complètes (gradins, réseau amont/aval…).
 // Rendu "intelligent" d'un contrôle de mesure : si le contrôle a des champs L1/L2/L3 (ou P/S par
@@ -10271,13 +10257,6 @@ function docxEquipementElements(eq, locaux, allSites) {
     }
     const t = docxControlTable(rows);
     if (t) elements.push(t);
-    if (eq.type === "Batterie de compensation" && sec.key === "mecaniques") {
-      elements.push(new DOCX.Paragraph({
-        spacing: { before: 60, after: 40 },
-        children: [new DOCX.TextRun({ text: "Repère indicatif — couples de serrage par section de conducteur (borne à vis) ; plusieurs sections peuvent être présentes sur une même connexion, à vérifier selon le fabricant de la borne.", size: 15, italics: true, color: "8B96A3" })],
-      }));
-      elements.push(docxTableCoupleSerrageConducteur());
-    }
     elements.push(docxSpacer());
   });
   if (eq.type === "Disjoncteur BT") {
