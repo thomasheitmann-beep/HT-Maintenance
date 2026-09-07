@@ -975,19 +975,20 @@ function gradinsHorsTolerance(eq) {
     return ["i1", "i2", "i3"].some((k) => toleranceState(g.fields[k], tolMin, tolMax) === "bad");
   });
 }
-// Vrai si au moins un contrôle individuel (quel qu'il soit — y compris gradins, TC, branches,
-// actions personnalisées…) a été passé manuellement par le technicien en Défaillant / Non conforme
-// (rang 2). Parcourt toute la structure des contrôles sans présupposer sa forme exacte, pour
-// couvrir aussi bien les contrôles fixes que les entrées dynamiques ou personnalisées.
-function unControleEstDefaillant(eq) {
-  let trouve = false;
+// Pire rang de sévérité (RANK_OF) trouvé parmi tous les contrôles de l'équipement — fixes,
+// dynamiques (gradins, TC, branches…) ou personnalisés. -1 si aucun contrôle n'a d'état plus
+// sévère que "Non réalisé/Non présent". Contrairement à une simple détection du seul cas
+// "Défaillant", ceci capture aussi un contrôle individuel manuellement passé en "Dégradé" (ex.
+// Résistance des enroulements, BT - Terre) qui doit lui aussi faire remonter la synthèse.
+function pireRangControles(eq) {
+  let pire = -1;
   (function walk(node) {
-    if (trouve || !node || typeof node !== "object") return;
+    if (!node || typeof node !== "object") return;
     if (Array.isArray(node)) { node.forEach(walk); return; }
-    if (typeof node.etat === "string" && (RANK_OF[node.etat] ?? 0) >= 2) { trouve = true; return; }
+    if (typeof node.etat === "string") { const r = RANK_OF[node.etat]; if (r !== undefined && r > pire) pire = r; }
     Object.values(node).forEach(walk);
   })(eq.controles);
-  return trouve;
+  return pire;
 }
 // Capacité (µF) calculée à partir du courant mesuré sur une phase : C = I / (U × 2π × f)
 function gradinCapacite(i, u, f) {
@@ -6256,6 +6257,24 @@ function collectAnomalies(eq) {
   const schema = getSchema(eq);
   const isRelais = TYPES_AVEC_RELAIS.includes(eq.type);
   const lines = [];
+  // Rapport de transformation (Transformateur) : mesuré vs théorique ±0,5% CEI 60076-1 — la
+  // tolérance est calculée au niveau de l'équipement (tension primaire/secondaire), pas de l'item
+  // lui-même, donc invisible pour la détection générique de detailAnomalieItem. Précalculé ici (au
+  // lieu d'un bloc séparé plus bas) pour être fusionné dans la même ligne que l'état de l'item
+  // "Rapport de transformation" ci-dessous, plutôt que de produire deux lignes distinctes.
+  let transfoParts = [];
+  if (eq.type === "Transformateur") {
+    const rTheo = calcRapportTheoriqueTransfo(eq);
+    const tolRapport = rTheo !== null ? calcToleranceRapportTransfo(rTheo) : null;
+    const fRapport = eq.controles.rapport_transformation?.rapport_par_phase?.fields;
+    if (tolRapport && fRapport) {
+      [["L1", "l1"], ["L2", "l2"], ["L3", "l3"]].forEach(([label, key]) => {
+        if (toleranceState(fRapport[key], tolRapport.min, tolRapport.max) === "bad") {
+          transfoParts.push(`${label} hors tolérance (${fRapport[key]}, attendu ${tolRapport.min}–${tolRapport.max}, ±0,5% CEI 60076-1)`);
+        }
+      });
+    }
+  }
   schema.sections.forEach((sec) => {
     if (isRelais && sec.key === "parametrage_relais") return;
     if (isRelais && sec.key === "controles_relais") {
@@ -6277,22 +6296,30 @@ function collectAnomalies(eq) {
       const v = eq.controles[sec.key][item.key];
       if (!v) return;
       const { detail, avertissements, horsTolerance } = detailAnomalieItem(item, v);
+      // "Rapport de transformation" (rapport_par_phase) : on fusionne ici le détail par phase
+      // précalculé plus haut, pour n'obtenir qu'une seule ligne état + détail au lieu de deux.
+      const estRapportParPhase = sec.key === "rapport_transformation" && item.key === "rapport_par_phase";
+      const detailComplet = estRapportParPhase && transfoParts.length
+        ? (detail ? detail.slice(0, -1) + " ; " + transfoParts.join(" ; ") + ")" : " (" + transfoParts.join(" ; ") + ")")
+        : detail;
+      const horsToleranceComplet = horsTolerance || (estRapportParPhase && transfoParts.length > 0);
       // L'action (note libre décrivant ce qui a été constaté, ex. "trace de décharge partielle")
       // est une information de terrain précieuse — sans elle, la remarque ne dit que "Dégradé" sans
       // dire pourquoi pour un contrôle sans valeur numérique associée.
       const actionTexte = v.action && v.action.trim() ? ` — ${v.action.trim()}` : "";
       if (v.etat !== undefined && RANK_OF[v.etat] > 0) {
-        lines.push(`${item.label} : ${v.etat}${detail}${actionTexte}`);
-      } else if (horsTolerance) {
+        lines.push(`${item.label} : ${v.etat}${detailComplet}${actionTexte}`);
+      } else if (horsToleranceComplet) {
         // Valeur mesurée hors tolérance détectée indépendamment de l'état — ne dépend pas du
         // passage automatique en Dégradé (utile si celui-ci n'a pas encore eu l'occasion de se
         // déclencher, ex. remarque compilée avant réouverture de la fiche).
-        lines.push(`${item.label} : mesure hors tolérance${detail}${actionTexte}`);
+        lines.push(`${item.label} : mesure hors tolérance${detailComplet}${actionTexte}`);
       } else if (avertissements.length) {
         // Avertissement présent (ex. durée de vie fusible dépassée) mais état encore "Conforme" —
         // le technicien n'a pas forcément pensé à le changer manuellement ; on le relève quand même.
         lines.push(`${item.label} : ${avertissements.join(" ; ")}${actionTexte}`);
       }
+      if (estRapportParPhase) transfoParts = []; // consommé — évite le doublon du bloc dédié plus bas
     });
     (eq.controles[sec.key + "__custom"] || []).forEach((c) => {
       if (c.etat && RANK_OF[c.etat] > 0) lines.push(`${c.label || "(action ajoutée)"} : ${c.etat}`);
@@ -6326,22 +6353,8 @@ function collectAnomalies(eq) {
       }
     });
   });
-  // Rapport de transformation (Transformateur) : mesuré vs théorique ±0,5% CEI 60076-1 — la
-  // tolérance est calculée au niveau de l'équipement (tension primaire/secondaire), pas de l'item
-  // lui-même, donc invisible pour la détection générique ci-dessus ; vérifié séparément avec le
-  // détail par phase.
-  if (eq.type === "Transformateur") {
-    const rTheo = calcRapportTheoriqueTransfo(eq);
-    const tolRapport = rTheo !== null ? calcToleranceRapportTransfo(rTheo) : null;
-    const fRapport = eq.controles.rapport_transformation?.rapport_par_phase?.fields;
-    if (tolRapport && fRapport) {
-      [["L1", "l1"], ["L2", "l2"], ["L3", "l3"]].forEach(([label, key]) => {
-        if (toleranceState(fRapport[key], tolRapport.min, tolRapport.max) === "bad") {
-          lines.push(`Rapport de transformation : ${label} hors tolérance (${fRapport[key]}, attendu ${tolRapport.min}–${tolRapport.max}, ±0,5% CEI 60076-1)`);
-        }
-      });
-    }
-  }
+  // Rapport de transformation hors tolérance déjà pris en compte plus haut, fusionné dans la ligne
+  // de l'item "Rapport de transformation" (voir transfoParts en tête de fonction).
   // Disjoncteur BT — Court-circuit temporisé : le temps de déclenchement à T réglé doit être
   // cohérent avec la temporisation tsd effectivement réglée (écart > 20 %, même marge que pour les
   // temps d'ouverture/fermeture faute de seuil normatif universel unique pour cette comparaison).
@@ -6405,24 +6418,27 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
   const titleField = schema.identification[0];
   const subtitleField = schema.identification.find((f) => f.key.toLowerCase().includes("numeroserie")) || schema.identification[1];
 
-  // Un gradin ou un rapport de transformation hors tolérance, OU un contrôle individuel passé
-  // manuellement en Défaillant / Non conforme par le technicien, doit faire remonter l'état final
-  // automatiquement — la synthèse ne fait jamais que remonter (escalade selon la sévérité), jamais
-  // de rétrogradation automatique d'un état plus sévère déjà choisi volontairement par le technicien.
+  // Un gradin ou un rapport de transformation hors tolérance (calcul indépendant de l'état saisi,
+  // au cas où le technicien n'a pas encore pensé à le changer manuellement), OU tout contrôle
+  // individuel manuellement passé en Dégradé / Défaillant / Non conforme, doit faire remonter
+  // l'état final automatiquement — la synthèse ne fait jamais que remonter (escalade selon la
+  // sévérité), jamais de rétrogradation automatique d'un état plus sévère déjà choisi
+  // volontairement par le technicien.
   // Référence toujours à jour sur "eq" — l'effet ci-dessous ne se redéclenche que si
-  // gradinsEnDefaut/rapportEnDefaut/controleDefaillant/etatFinal changent, pas à chaque frappe ; sans
+  // gradinsEnDefaut/rapportEnDefaut/pireControle/etatFinal changent, pas à chaque frappe ; sans
   // cette référence, un effet programmé avant une frappe rapide pourrait écraser la saisie la plus
   // récente en repartant d'un "eq" capturé avant cette frappe.
   const eqRef = useRef(eq);
   useEffect(() => { eqRef.current = eq; }, [eq]);
   const gradinsEnDefaut = gradinsHorsTolerance(eq);
   const rapportEnDefaut = rapportTransformationHorsTolerance(eq);
-  const controleDefaillant = unControleEstDefaillant(eq);
+  const pireControle = pireRangControles(eq);
   useEffect(() => {
-    const cible = controleDefaillant ? "Défaillant" : (gradinsEnDefaut || rapportEnDefaut) ? "Dégradé" : null;
+    const rangCible = Math.max(pireControle, (gradinsEnDefaut || rapportEnDefaut) ? 1 : -1);
+    const cible = rangCible >= 2 ? "Défaillant" : rangCible >= 1 ? "Dégradé" : null;
     if (cible && (RANK_OF[cible] ?? 0) > (RANK_OF[eqRef.current.etatFinal] ?? 0)) update({ ...eqRef.current, etatFinal: cible });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gradinsEnDefaut, rapportEnDefaut, controleDefaillant, eq.etatFinal]);
+  }, [gradinsEnDefaut, rapportEnDefaut, pireControle, eq.etatFinal]);
 
   // Fusion options statiques + bibliothèque apprise, calculée une seule fois par changement réel
   // (pas à chaque frappe) — évite de refaire un Set + un tableau pour chaque champ à chaque
