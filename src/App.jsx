@@ -975,6 +975,20 @@ function gradinsHorsTolerance(eq) {
     return ["i1", "i2", "i3"].some((k) => toleranceState(g.fields[k], tolMin, tolMax) === "bad");
   });
 }
+// Vrai si au moins un contrôle individuel (quel qu'il soit — y compris gradins, TC, branches,
+// actions personnalisées…) a été passé manuellement par le technicien en Défaillant / Non conforme
+// (rang 2). Parcourt toute la structure des contrôles sans présupposer sa forme exacte, pour
+// couvrir aussi bien les contrôles fixes que les entrées dynamiques ou personnalisées.
+function unControleEstDefaillant(eq) {
+  let trouve = false;
+  (function walk(node) {
+    if (trouve || !node || typeof node !== "object") return;
+    if (Array.isArray(node)) { node.forEach(walk); return; }
+    if (typeof node.etat === "string" && (RANK_OF[node.etat] ?? 0) >= 2) { trouve = true; return; }
+    Object.values(node).forEach(walk);
+  })(eq.controles);
+  return trouve;
+}
 // Capacité (µF) calculée à partir du courant mesuré sur une phase : C = I / (U × 2π × f)
 function gradinCapacite(i, u, f) {
   const ii = numOf(i), uu = numOf(u), ff = numOf(f);
@@ -6391,22 +6405,24 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
   const titleField = schema.identification[0];
   const subtitleField = schema.identification.find((f) => f.key.toLowerCase().includes("numeroserie")) || schema.identification[1];
 
-  // Un gradin ou un rapport de transformation hors tolérance doit faire remonter l'état final
-  // automatiquement — même logique que pour les mesures de fusibles : ne fait remonter QUE depuis
-  // "Conforme", jamais de rétrogradation automatique d'un état plus sévère déjà choisi
-  // volontairement par le technicien.
+  // Un gradin ou un rapport de transformation hors tolérance, OU un contrôle individuel passé
+  // manuellement en Défaillant / Non conforme par le technicien, doit faire remonter l'état final
+  // automatiquement — la synthèse ne fait jamais que remonter (escalade selon la sévérité), jamais
+  // de rétrogradation automatique d'un état plus sévère déjà choisi volontairement par le technicien.
   // Référence toujours à jour sur "eq" — l'effet ci-dessous ne se redéclenche que si
-  // gradinsEnDefaut/rapportEnDefaut/etatFinal changent, pas à chaque frappe ; sans cette
-  // référence, un effet programmé avant une frappe rapide pourrait écraser la saisie la plus
+  // gradinsEnDefaut/rapportEnDefaut/controleDefaillant/etatFinal changent, pas à chaque frappe ; sans
+  // cette référence, un effet programmé avant une frappe rapide pourrait écraser la saisie la plus
   // récente en repartant d'un "eq" capturé avant cette frappe.
   const eqRef = useRef(eq);
   useEffect(() => { eqRef.current = eq; }, [eq]);
   const gradinsEnDefaut = gradinsHorsTolerance(eq);
   const rapportEnDefaut = rapportTransformationHorsTolerance(eq);
+  const controleDefaillant = unControleEstDefaillant(eq);
   useEffect(() => {
-    if ((gradinsEnDefaut || rapportEnDefaut) && eqRef.current.etatFinal === "Conforme") update({ ...eqRef.current, etatFinal: "Dégradé" });
+    const cible = controleDefaillant ? "Défaillant" : (gradinsEnDefaut || rapportEnDefaut) ? "Dégradé" : null;
+    if (cible && (RANK_OF[cible] ?? 0) > (RANK_OF[eqRef.current.etatFinal] ?? 0)) update({ ...eqRef.current, etatFinal: cible });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gradinsEnDefaut, rapportEnDefaut, eq.etatFinal]);
+  }, [gradinsEnDefaut, rapportEnDefaut, controleDefaillant, eq.etatFinal]);
 
   // Fusion options statiques + bibliothèque apprise, calculée une seule fois par changement réel
   // (pas à chaque frappe) — évite de refaire un Set + un tableau pour chaque champ à chaque
@@ -9666,6 +9682,28 @@ function docxImage(dataUrl, w, h) {
   if (!type) return null;
   try { return new DOCX.ImageRun({ data: bytes, type, transformation: { width: w || 160, height: h || 120 } }); } catch (e) { return null; }
 }
+// Calcule la taille d'une photo en conservant son ratio d'origine (portrait ou paysage), à
+// l'intérieur d'une boîte maximale — au lieu de l'étirer dans un format fixe qui la déformerait.
+// _imgW/_imgH sont renseignés par resolvePhotosForDocx avant la génération.
+function dimensionsAdaptees(p, maxLargeur, maxHauteur) {
+  const ratio = (p && p._imgW && p._imgH) ? p._imgW / p._imgH : 4 / 3;
+  let w = maxLargeur, h = Math.round(maxLargeur / ratio);
+  if (h > maxHauteur) { h = maxHauteur; w = Math.round(maxHauteur * ratio); }
+  return { w, h };
+}
+// Place une série de photos côte à côte (et non empilées), chacune gardant son orientation
+// d'origine — insérées comme plusieurs images dans un même paragraphe, Word les enchaîne sur une
+// ligne et passe automatiquement à la suivante dès que la largeur disponible est dépassée.
+function docxPhotosCoteACote(photos, maxLargeur, maxHauteur) {
+  const runs = [];
+  (photos || []).forEach((p) => {
+    const { w, h } = dimensionsAdaptees(p, maxLargeur || 200, maxHauteur || 220);
+    const img = docxImage(p.dataUrl, w, h);
+    if (img) { runs.push(img); runs.push(new DOCX.TextRun({ text: "   " })); }
+  });
+  if (!runs.length) return null;
+  return new DOCX.Paragraph({ spacing: { after: 60 }, children: runs });
+}
 
 // Photos tension/courant par phase (L1/L2/L3) posées côte à côte dans un tableau 3 colonnes plutôt
 // qu'empilées verticalement — même contenu, mais beaucoup moins de hauteur de page consommée.
@@ -9877,10 +9915,7 @@ function docxEquipementElements(eq, locaux, allSites) {
         if (extra) elements.push(new DOCX.Paragraph({ spacing: { before: 6, after: 4 }, children: [new DOCX.TextRun({ text: extra, size: 15, color: "666666" })] }));
         elements.push(docxSpacer(60));
 
-        (g.photos || []).forEach((p) => {
-          const img = docxImage(p.dataUrl, 160, 120);
-          if (img) elements.push(new DOCX.Paragraph({ spacing: { after: 20 }, children: [img] }));
-        });
+        { const galerie = docxPhotosCoteACote(g.photos, 160, 180); if (galerie) elements.push(galerie); }
       });
       elements.push(docxSpacer());
       return;
@@ -10166,7 +10201,7 @@ function docxEquipementElements(eq, locaux, allSites) {
     children: [new DOCX.TextRun({ text: "Synthèse de l'état — à l'issue de la maintenance : ", bold: true, size: 18, color: DOCX_DARK }), new DOCX.TextRun({ text: (eq.etatFinal || "").toUpperCase(), bold: true, size: 18, color: docxEtatColor(eq.etatFinal) })],
   }));
   if (eq.remarques) elements.push(new DOCX.Paragraph({ spacing: { after: 80 }, children: [new DOCX.TextRun({ text: "Remarques : ", bold: true, size: 18 }), new DOCX.TextRun({ text: eq.remarques, size: 18 })] }));
-  (eq.photos || []).forEach((p) => { const img = docxImage(p.dataUrl, 200, 150); if (img) elements.push(new DOCX.Paragraph({ spacing: { after: 40 }, children: [img] })); });
+  { const galerie = docxPhotosCoteACote(eq.photos, 200, 220); if (galerie) { elements.push(docxSpacer(160)); elements.push(galerie); } }
 
   // Courbe de déclenchement (Disjoncteur BT) : image en grand format (≈ moitié de page), suivie
   // d'une phrase indiquant si les essais du disjoncteur sont conformes ou non.
@@ -10298,19 +10333,43 @@ async function urlToDataUrl(url) {
 // Parcourt une copie du site/de l'intervention et remplace chaque URL Storage par son contenu en
 // base64, pour que le reste de la génération Word (docxImage) fonctionne exactement comme avant,
 // sans aucune modification — seule cette étape de préparation est nouvelle.
+// Charge une image en mémoire juste pour lire ses dimensions naturelles (largeur/hauteur réelles) —
+// nécessaire pour conserver son orientation d'origine (portrait ou paysage) dans le rapport Word,
+// au lieu de la forcer dans un format fixe qui la déformerait.
+function chargerDimensionsImage(dataUrl) {
+  return new Promise((resolve) => {
+    try {
+      const img = new Image();
+      img.onload = () => resolve({ w: img.naturalWidth || 4, h: img.naturalHeight || 3 });
+      img.onerror = () => resolve(null);
+      img.src = dataUrl;
+    } catch (e) { resolve(null); }
+  });
+}
 async function resolvePhotosForDocx(obj) {
   const clone = JSON.parse(JSON.stringify(obj));
-  const nodes = [];
+  const httpNodes = [];
+  const imgNodes = [];
   (function walk(node) {
     if (Array.isArray(node)) { node.forEach(walk); return; }
     if (node && typeof node === "object") {
-      if (typeof node.dataUrl === "string" && node.dataUrl.startsWith("http")) nodes.push(node);
+      if (typeof node.dataUrl === "string") {
+        if (node.dataUrl.startsWith("http")) httpNodes.push(node);
+        imgNodes.push(node);
+      }
       Object.values(node).forEach(walk);
     }
   })(clone);
-  await Promise.all(nodes.map(async (node) => {
+  await Promise.all(httpNodes.map(async (node) => {
     try { node.dataUrl = await urlToDataUrl(node.dataUrl); }
     catch (e) { console.error("[Word] Photo introuvable, ignorée :", e); node.dataUrl = null; }
+  }));
+  // Dimensions naturelles de chaque photo (une fois l'URL résolue en base64 ci-dessus) — utilisées
+  // par docxPhotosCoteACote pour garder le format portrait/paysage d'origine.
+  await Promise.all(imgNodes.map(async (node) => {
+    if (!node.dataUrl) return;
+    const dim = await chargerDimensionsImage(node.dataUrl);
+    if (dim) { node._imgW = dim.w; node._imgH = dim.h; }
   }));
   return clone;
 }
