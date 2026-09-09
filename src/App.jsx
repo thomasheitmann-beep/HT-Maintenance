@@ -1244,6 +1244,36 @@ function calcToleranceRapportTransfo(rapportTheorique) {
 function champsMono(unit, label) {
   return [F("l1", label || "Valeur", unit)];
 }
+// Seuils indicatifs de distorsion harmonique — repères de planification génériques (EN 50160 pour
+// le THdV en BT ; CEI 61000-3-6 pour les niveaux HTA/HTB/THT ; IEEE 519-2014 pour le ThdI, qui
+// dépend en toute rigueur du rapport Isc/IL — 10% est un repère de vigilance moyen en l'absence de
+// calcul précis). Valeur générique donnée à titre indicatif, à confirmer selon le gestionnaire de
+// réseau et le niveau de tension concerné. Volontairement PAS appliqué au réseau normal/secours
+// (entrée) d'un onduleur ou d'un redresseur : cette mesure est prise en AMONT de leur propre
+// redresseur, et sa distorsion (notamment en courant) dépend directement du type de redresseur
+// (6/12 impulsions, IGBT…) plutôt que d'un seuil réseau générique.
+function champsSeuilThdv(champs) {
+  return [...champs,
+    { key: "tol_min", label: "Seuil bas", unit: null, compute: () => "" },
+    { key: "tol_max", label: "Seuil indicatif THdV (EN 50160 / CEI 61000-3-6)", unit: "%", compute: () => 8 },
+  ];
+}
+function champsSeuilThdi(champs) {
+  return [...champs,
+    { key: "tol_min", label: "Seuil bas", unit: null, compute: () => "" },
+    { key: "tol_max", label: "Seuil indicatif ThdI (repère général — dépend en réalité du rapport Isc/IL, IEEE 519-2014)", unit: "%", compute: () => 10 },
+  ];
+}
+// Déséquilibre de tension : seuil normatif EN 50160 (réseau BT, 95 % du temps sur 10 min). Le champ
+// "desequilibre" doit déjà être présent dans champs (ex. via champsTriphase(..., true)). phaseKeys:
+// [] désactive la coloration par défaut de L1/L2/L3 : seul le champ "desequilibre" est comparé au
+// seuil, pas les valeurs de tension brutes.
+function champsSeuilDesequilibre(champs) {
+  return [...champs,
+    { key: "tol_min", label: "Seuil bas", unit: null, unitFrom: "desequilibre", phaseKeys: [], compute: () => "" },
+    { key: "tol_max", label: "Seuil indicatif de déséquilibre (EN 50160)", unit: "%", unitFrom: "desequilibre", phaseKeys: [], compute: () => 2 },
+  ];
+}
 // FP seul, sans "Nature" — pour le réseau normal, où seule la valeur du facteur de puissance
 // mesuré à l'écran a un sens (l'onduleur ne donne pas d'indication de nature inductif/capacitif).
 function fpSeulItem(mono) {
@@ -1300,7 +1330,10 @@ function puissanceFpItem(mono) {
 function tensionCourantItem(mono, unit, label) {
   if (mono) return champsMono(unit, label);
   const decimals = unit === "V" ? 0 : 1;
-  return champsTriphase(unit, label, decimals, "moyenne", true);
+  const champs = champsTriphase(unit, label, decimals, "moyenne", true);
+  // Déséquilibre de tension : seuil EN 50160, ne s'applique qu'aux grandeurs en Volts (pas de seuil
+  // EN 50160 équivalent pour le déséquilibre de courant).
+  return unit === "V" ? champsSeuilDesequilibre(champs) : champs;
 }
 function buildOnduleurSchema({ normalMono = false, secoursMono = false, utilisationMono = false, onduleurMono = false } = {}) {
   return {
@@ -1384,10 +1417,10 @@ function buildOnduleurSchema({ normalMono = false, secoursMono = false, utilisat
       { key: "mesures_utilisation", title: "Mesures — Utilisation (sortie)", items: [
         C("tension_simple_utilisation", "Tension simple", tensionCourantItem(utilisationMono, "V", "Tension")),
         ...(utilisationMono ? [] : [C("tension_utilisation", "Tension composée", tensionCourantItem(false, "V", "Tension"))]),
-        C("thdv_utilisation", "Taux de distorsion tension", utilisationMono ? champsMono("%", "THdV") : champsTriphase("%", "THdV", 1, "max")),
+        C("thdv_utilisation", "Taux de distorsion tension", champsSeuilThdv(utilisationMono ? champsMono("%", "THdV") : champsTriphase("%", "THdV", 1, "max"))),
         C("courant_utilisation", "Courant", tensionCourantItem(utilisationMono, "A", "Courant")),
         ...(utilisationMono ? [] : [C("courant_neutre_utilisation", "Courant dans le neutre", [F("in", "IN", "A")])]),
-        C("thdi_utilisation", "Taux de distorsion courant", utilisationMono ? champsMono("%", "ThdI") : champsTriphase("%", "ThdI", 1, "moyenne")),
+        C("thdi_utilisation", "Taux de distorsion courant", champsSeuilThdi(utilisationMono ? champsMono("%", "ThdI") : champsTriphase("%", "ThdI", 1, "moyenne"))),
         C("puissance_fp_utilisation", "Puissance (P, S relevés — Q calculé) et cos φ fondamental", cosPhiFondamentalItem(utilisationMono)),
         C("dv_sortie_secours", "ΔV sortie / secours", utilisationMono ? champsMono("V", "ΔV") : champsTriphase("V", "ΔV", 1, "moyenne")),
         C("regime_neutre_utilisation", "Régime de neutre", [F("valeur", "Valeur", null, LISTE_REGIME_NEUTRE)]),
@@ -1565,7 +1598,7 @@ function buildInverseurSchema({ source1Mono = false, source2Mono = false, utilis
       { key: "mesures_source1", title: "Mesures — Source 1 en charge", items: [
         C("tension_simple_s1", "Tension simple", tensionCourantItem(source1Mono, "V", "Tension")),
         ...(source1Mono ? [] : [C("tension_composee_s1", "Tension composée", tensionCourantItem(false, "V", "Tension"))]),
-        C("thdv_s1", "Taux de distorsion tension", source1Mono ? champsMono("%", "THdV") : champsTriphase("%", "THdV", 1, "max")),
+        C("thdv_s1", "Taux de distorsion tension", champsSeuilThdv(source1Mono ? champsMono("%", "THdV") : champsTriphase("%", "THdV", 1, "max"))),
         C("frequence_s1", "Fréquence", [F("hz", "Valeur", "Hz")]),
         C("dv_s1_s2", "ΔV Source 1 / Source 2", tensionCourantItem(source1Mono, "V", "ΔV")),
         C("tension_cs_s1", "Tension CS", tensionCourantItem(source1Mono, "V", "Tension CS")),
@@ -1573,7 +1606,7 @@ function buildInverseurSchema({ source1Mono = false, source2Mono = false, utilis
       { key: "mesures_source2", title: "Mesures — Source 2 en charge", items: [
         C("tension_simple_s2", "Tension simple", tensionCourantItem(source2Mono, "V", "Tension")),
         ...(source2Mono ? [] : [C("tension_composee_s2", "Tension composée", tensionCourantItem(false, "V", "Tension"))]),
-        C("thdv_s2", "Taux de distorsion tension", source2Mono ? champsMono("%", "THdV") : champsTriphase("%", "THdV", 1, "max")),
+        C("thdv_s2", "Taux de distorsion tension", champsSeuilThdv(source2Mono ? champsMono("%", "THdV") : champsTriphase("%", "THdV", 1, "max"))),
         C("frequence_s2", "Fréquence", [F("hz", "Valeur", "Hz")]),
         C("dv_s2_s1", "ΔV Source 2 / Source 1", tensionCourantItem(source2Mono, "V", "ΔV")),
         C("tension_cs_s2", "Tension CS", tensionCourantItem(source2Mono, "V", "Tension CS")),
@@ -1581,10 +1614,10 @@ function buildInverseurSchema({ source1Mono = false, source2Mono = false, utilis
       { key: "mesures_utilisation", title: "Mesures — Utilisation", items: [
         C("tension_simple_utilisation", "Tension simple", tensionCourantItem(utilisationMono, "V", "Tension")),
         ...(utilisationMono ? [] : [C("tension_utilisation", "Tension composée", tensionCourantItem(false, "V", "Tension"))]),
-        C("thdv_utilisation", "Taux de distorsion tension", utilisationMono ? champsMono("%", "THdV") : champsTriphase("%", "THdV", 1, "max")),
+        C("thdv_utilisation", "Taux de distorsion tension", champsSeuilThdv(utilisationMono ? champsMono("%", "THdV") : champsTriphase("%", "THdV", 1, "max"))),
         C("courant_utilisation", "Courant", tensionCourantItem(utilisationMono, "A", "Courant")),
         ...(utilisationMono ? [] : [C("courant_neutre_utilisation", "Courant dans le neutre", [F("in", "IN", "A")])]),
-        C("thdi_utilisation", "Taux de distorsion courant", utilisationMono ? champsMono("%", "ThdI") : champsTriphase("%", "ThdI", 1, "moyenne")),
+        C("thdi_utilisation", "Taux de distorsion courant", champsSeuilThdi(utilisationMono ? champsMono("%", "ThdI") : champsTriphase("%", "ThdI", 1, "moyenne"))),
         C("puissance_fp_utilisation", "Puissance (P, S relevés — Q calculé) et cos φ fondamental", cosPhiFondamentalItem(utilisationMono)),
         C("regime_neutre_utilisation", "Régime de neutre", [F("valeur", "Valeur", null, LISTE_REGIME_NEUTRE)]),
         C("tension_terre_neutre_utilisation", "Tension terre / neutre", [F("v", "Valeur", "V")]),
@@ -2172,8 +2205,16 @@ const SCHEMAS = {
       { key: "mesures_amont", title: "Mesures réseau amont (batterie en service)", items: [
         C("gradins_en_service", "Gradins en service lors de la mesure", [F("valeur", "Gradins actifs (ex. 1, 2, 3)")]),
         C("frequence_amont", "Fréquence", [F("hz", "Fréquence", "Hz")]),
-        C("tensions_amont", "Tensions", [F("u12", "U12", "V"), F("u23", "U23", "V"), F("u31", "U31", "V"), F("thdv1", "THdV L1", "%"), F("thdv2", "THdV L2", "%"), F("thdv3", "THdV L3", "%")]),
-        C("courants_amont", "Courants", [F("i1", "I1", "A"), F("i2", "I2", "A"), F("i3", "I3", "A"), F("thdi1", "ThdI L1", "%"), F("thdi2", "ThdI L2", "%"), F("thdi3", "ThdI L3", "%")]),
+        C("tensions_amont", "Tensions", [
+          F("u12", "U12", "V"), F("u23", "U23", "V"), F("u31", "U31", "V"), F("thdv1", "THdV L1", "%"), F("thdv2", "THdV L2", "%"), F("thdv3", "THdV L3", "%"),
+          { key: "tol_min", label: "Seuil bas", unit: null, phaseKeys: ["thdv1", "thdv2", "thdv3"], compute: () => "" },
+          { key: "tol_max", label: "Seuil indicatif THdV", unit: "% (seuil EN 50160 / CEI 61000-3-6)", phaseKeys: ["thdv1", "thdv2", "thdv3"], compute: () => 8 },
+        ]),
+        C("courants_amont", "Courants", [
+          F("i1", "I1", "A"), F("i2", "I2", "A"), F("i3", "I3", "A"), F("thdi1", "ThdI L1", "%"), F("thdi2", "ThdI L2", "%"), F("thdi3", "ThdI L3", "%"),
+          { key: "tol_min", label: "Seuil bas", unit: null, phaseKeys: ["thdi1", "thdi2", "thdi3"], compute: () => "" },
+          { key: "tol_max", label: "Seuil indicatif ThdI", unit: "% (repère général — dépend du rapport Isc/IL, IEEE 519-2014)", phaseKeys: ["thdi1", "thdi2", "thdi3"], compute: () => 10 },
+        ]),
         C("puissances_amont", "Puissances", [
           F("p", "P", "kW"), F("s", "S", "kVA"),
           { key: "q", label: "Q (calculé)", unit: "kVAR", compute: (f) => { const p = numOf(f.p), s = numOf(f.s); if (p === null || s === null || s < p) return ""; return Math.round(Math.sqrt(s * s - p * p) * 1000) / 1000; } },
@@ -2183,8 +2224,16 @@ const SCHEMAS = {
       ]},
       { key: "mesures_aval", title: "Mesures réseau aval (ou batterie hors service)", items: [
         C("frequence_aval", "Fréquence", [F("hz", "Fréquence", "Hz")]),
-        C("tensions_aval", "Tensions", [F("u12", "U12", "V"), F("u23", "U23", "V"), F("u31", "U31", "V"), F("thdv1", "THdV L1", "%"), F("thdv2", "THdV L2", "%"), F("thdv3", "THdV L3", "%")]),
-        C("courants_aval", "Courants", [F("i1", "I1", "A"), F("i2", "I2", "A"), F("i3", "I3", "A"), F("thdi1", "ThdI L1", "%"), F("thdi2", "ThdI L2", "%"), F("thdi3", "ThdI L3", "%")]),
+        C("tensions_aval", "Tensions", [
+          F("u12", "U12", "V"), F("u23", "U23", "V"), F("u31", "U31", "V"), F("thdv1", "THdV L1", "%"), F("thdv2", "THdV L2", "%"), F("thdv3", "THdV L3", "%"),
+          { key: "tol_min", label: "Seuil bas", unit: null, phaseKeys: ["thdv1", "thdv2", "thdv3"], compute: () => "" },
+          { key: "tol_max", label: "Seuil indicatif THdV", unit: "% (seuil EN 50160 / CEI 61000-3-6)", phaseKeys: ["thdv1", "thdv2", "thdv3"], compute: () => 8 },
+        ]),
+        C("courants_aval", "Courants", [
+          F("i1", "I1", "A"), F("i2", "I2", "A"), F("i3", "I3", "A"), F("thdi1", "ThdI L1", "%"), F("thdi2", "ThdI L2", "%"), F("thdi3", "ThdI L3", "%"),
+          { key: "tol_min", label: "Seuil bas", unit: null, phaseKeys: ["thdi1", "thdi2", "thdi3"], compute: () => "" },
+          { key: "tol_max", label: "Seuil indicatif ThdI", unit: "% (repère général — dépend du rapport Isc/IL, IEEE 519-2014)", phaseKeys: ["thdi1", "thdi2", "thdi3"], compute: () => 10 },
+        ]),
         C("puissances_aval", "Puissances", [
           F("p", "P", "kW"), F("s", "S", "kVA"),
           { key: "q", label: "Q (calculé)", unit: "kVAR", compute: (f) => { const p = numOf(f.p), s = numOf(f.s); if (p === null || s === null || s < p) return ""; return Math.round(Math.sqrt(s * s - p * p) * 1000) / 1000; } },
@@ -2249,9 +2298,9 @@ const SCHEMAS = {
     ],
     sections: [
       { key: "mesures_utilisation", title: "Mesures", items: [
-        C("tension_simple_utilisation", "Tension simple", champsTriphase("V", "Tension", 0, "moyenne", true)),
-        C("tension_utilisation", "Tension composée", champsTriphase("V", "Tension", 0, "moyenne", true)),
-        C("thdv_utilisation", "Taux de distorsion tension", champsTriphase("%", "THdV", 1, "max")),
+        C("tension_simple_utilisation", "Tension simple", champsSeuilDesequilibre(champsTriphase("V", "Tension", 0, "moyenne", true))),
+        C("tension_utilisation", "Tension composée", champsSeuilDesequilibre(champsTriphase("V", "Tension", 0, "moyenne", true))),
+        C("thdv_utilisation", "Taux de distorsion tension", champsSeuilThdv(champsTriphase("%", "THdV", 1, "max"))),
         C("courant_utilisation", "Courant", champsTriphase("A", "Courant", 1, "moyenne", true)),
         C("courant_neutre_utilisation", "Courant dans le neutre", [F("in", "IN", "A")]),
         C("puissance_fp_utilisation", "Puissance et facteur de puissance", [
@@ -4068,6 +4117,10 @@ function ControlRow({ item, value, onChange, idPrefix, toleranceOverride }) {
   const computedMin = toleranceOverride ? toleranceOverride.min : (tolMinField ? numOf(tolMinField.compute(fields)) : null);
   const computedMax = toleranceOverride ? toleranceOverride.max : (tolMaxField ? numOf(tolMaxField.compute(fields)) : null);
   const MESURE_KEYS = ["l1", "l2", "l3", "rd", "n"];
+  // Un item peut mélanger plusieurs grandeurs (ex. batterie de compensation : U12/U23/U31 ET
+  // THdV1/2/3 dans le même contrôle) — phaseKeys permet à un tol_min/tol_max de cibler un triplet
+  // de champs spécifique (ex. thdv1/thdv2/thdv3) plutôt que le triplet l1/l2/l3 par défaut.
+  const mesureKeysConcernees = (tolMinField && tolMinField.phaseKeys) || MESURE_KEYS;
   // Une valeur hors tolérance colore en orange (dégradé) par défaut — seul un passage manuel du
   // technicien à "Défaillant" fait passer la couleur au rouge. Le vert (conforme) et l'absence de
   // tolérance (null) ne sont jamais affectés par cette règle.
@@ -4077,10 +4130,10 @@ function ControlRow({ item, value, onChange, idPrefix, toleranceOverride }) {
   }
   function fieldValidState(key) {
     if (tolMinField && tolMinField.unitFrom === key) return colorFromToleranceEtat(toleranceState(fields[key], computedMin, computedMax));
-    // L1/L2/L3 mesurent la même grandeur que le champ "unitFrom" (ex. la résistance d'un fusible),
-    // juste par phase plutôt qu'en une seule valeur — elles doivent être comparées à la même
-    // tolérance calculée, pas seulement le champ principal.
-    if ((tolMinField || toleranceOverride) && MESURE_KEYS.includes(key)) return colorFromToleranceEtat(toleranceState(fields[key], computedMin, computedMax));
+    // L1/L2/L3 (ou le triplet ciblé par phaseKeys) mesurent la même grandeur que le champ
+    // "unitFrom" (ex. la résistance d'un fusible), juste par phase plutôt qu'en une seule valeur —
+    // elles doivent être comparées à la même tolérance calculée, pas seulement le champ principal.
+    if ((tolMinField || toleranceOverride) && mesureKeysConcernees.includes(key)) return colorFromToleranceEtat(toleranceState(fields[key], computedMin, computedMax));
     if (MESURE_KEYS.includes(key) && hasToleranceField) return colorFromToleranceEtat(toleranceState(fields[key], null, toleranceMax));
     return null;
   }
@@ -6267,7 +6320,7 @@ function champTolStatus(item, fields, key, etat) {
   const tolMinField = (item.fields || []).find((f) => f.key === "tol_min" && f.compute);
   const tolMaxField = (item.fields || []).find((f) => f.key === "tol_max" && f.compute);
   if (tolMinField) {
-    const champsConcernes = [tolMinField.unitFrom, "l1", "l2", "l3"].filter(Boolean);
+    const champsConcernes = [tolMinField.unitFrom, ...(tolMinField.phaseKeys || ["l1", "l2", "l3"])].filter(Boolean);
     if (!champsConcernes.includes(key)) return null;
     const min = numOf(tolMinField.compute(fields)), max = tolMaxField ? numOf(tolMaxField.compute(fields)) : null;
     return colorer(toleranceState(fields[key], min, max));
