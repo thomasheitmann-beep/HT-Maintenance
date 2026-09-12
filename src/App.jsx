@@ -2316,6 +2316,7 @@ const SCHEMAS = {
         C("thdv_utilisation", "Taux de distorsion tension", champsSeuilThdv(champsTriphase("%", "THdV", 1, "max"))),
         C("courant_utilisation", "Courant", champsTriphase("A", "Courant", 1, "moyenne", true)),
         C("courant_neutre_utilisation", "Courant dans le neutre", [F("in", "IN", "A")]),
+        C("thdi_utilisation", "Taux de distorsion courant", champsSeuilThdi(champsTriphase("%", "ThdI", 1, "moyenne"))),
         C("puissance_fp_utilisation", "Puissance (P, S relevés — Q calculé) et facteur de puissance", [
           F("p1", "P actif L1", "kW"), F("p2", "P actif L2", "kW"), F("p3", "P actif L3", "kW"),
           F("s1", "S apparent L1", "kVA"), F("s2", "S apparent L2", "kVA"), F("s3", "S apparent L3", "kVA"),
@@ -7614,11 +7615,26 @@ function computeBRKValues(eq) {
   };
 }
 
-function PrintEquipement({ eq }) {
+function PrintEquipement({ eq, allEquipements = [] }) {
   eq = repairEquipementControles(eq); // filet de sécurité, même principe que côté Word
   const schema = getSchema(eq);
   const isRelaisSeuils = TYPES_AVEC_RELAIS.includes(eq.type);
   const brk = eq.type === "Disjoncteur BT" ? computeBRKValues(eq) : null;
+  // Bilan de puissance : résout transfo_id/disj_id (identifiants techniques) vers la
+  // référence/puissance/calibre de l'équipement réellement lié, comme côté rapport Word — sans ça,
+  // l'aperçu affiche un identifiant technique illisible au lieu du nom de l'équipement.
+  let identificationAffichee = eq.identification;
+  if (eq.type === "Bilan de puissance") {
+    const transfo = allEquipements.find((e) => e.id === eq.identification.transfo_id);
+    const disj = allEquipements.find((e) => e.id === eq.identification.disj_id);
+    identificationAffichee = {
+      ...eq.identification,
+      transfo_reference: eq.identification.transfo_reference || transfo?.identification?.repere || "",
+      puissanceKVA: eq.identification.puissanceKVA || transfo?.identification?.puissance || "",
+      disj_reference: eq.identification.disj_reference || disj?.identification?.repere || "",
+      calibreDisjoncteur: eq.identification.calibreDisjoncteur || disj?.identification?.intensiteNominale || "",
+    };
+  }
   return (
     <div style={{ marginBottom: 22, breakInside: "avoid", pageBreakBefore: "always" }}>
       <div style={{ background: BRAND.dark, color: "#fff", padding: "9px 14px", borderRadius: 6, marginBottom: 14, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
@@ -7626,7 +7642,7 @@ function PrintEquipement({ eq }) {
         <span style={{ width: 26, height: 4, background: BRAND.amber, borderRadius: 2 }} />
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "2px 20px", marginBottom: 12 }}>
-        {schema.identification.map((f) => <PrintFieldRow key={f.key} label={f.label} value={formatIdentificationValue(eq.identification[f.key])} />)}
+        {schema.identification.filter((f) => !IDENTIFICATION_CHAMPS_TECHNIQUES.includes(f.key)).map((f) => <PrintFieldRow key={f.key} label={f.label} value={formatIdentificationValue(identificationAffichee[f.key])} />)}
       </div>
       {schema.sections.map((sec) => (
         <PrintSection key={sec.key} title={sec.title}>
@@ -7783,7 +7799,7 @@ function PrintSynthese({ site }) {
         <tbody>
           {items.map((eq, i) => {
             const schema = getSchema(eq);
-            const idLabel = schema.identification.filter((f) => f.key !== "repere").map((f) => formatIdentificationValue(eq.identification[f.key])).filter(Boolean).join(" · ");
+            const idLabel = schema.identification.filter((f) => f.key !== "repere" && !IDENTIFICATION_CHAMPS_TECHNIQUES.includes(f.key)).map((f) => formatIdentificationValue(eq.identification[f.key])).filter(Boolean).join(" · ");
             const repere = eq.identification.repere;
             return (
               <tr key={i} style={{ borderBottom: "1px solid #e5e5e5" }}>
@@ -7859,7 +7875,7 @@ function PrintReport({ site }) {
 
       <PrintSynthese site={site} />
 
-      {site.equipements.map((eq) => <PrintEquipement key={eq.id} eq={eq} />)}
+      {site.equipements.map((eq) => <PrintEquipement key={eq.id} eq={eq} allEquipements={site.equipements} />)}
 
       <div style={{ marginTop: 24, paddingTop: 10, borderTop: `1px solid ${BRAND.silver}`, display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 9, color: "#888" }}>
         <span>HT Maintenance — Maintenance électrique HTA / BT</span>
@@ -10043,6 +10059,33 @@ function docxPhotosParPhase(prefixeLabel, photosParPhase) {
   return new DOCX.Table({ width: { size: 9900, type: DOCX.WidthType.DXA }, columnWidths: [3300, 3300, 3300], rows: [new DOCX.TableRow({ children: cellules })] });
 }
 
+// Retrouve un équipement par son id, tous sites confondus (les id sont uniques dans toute l'app) —
+// utilisé pour résoudre un rattachement (Bilan de puissance) vers l'équipement réellement lié.
+function equipementParId(allSites, id) {
+  if (!id) return null;
+  for (const s of allSites || []) {
+    const found = (s.equipements || []).find((e) => e.id === id);
+    if (found) return found;
+  }
+  return null;
+}
+// Identification à afficher pour Bilan de puissance : résout les rattachements (transfo_id/disj_id
+// ne sont que des identifiants techniques, jamais montrés tels quels) vers la référence/puissance/
+// calibre réels de l'équipement lié — même si le technicien n'a jamais cliqué sur "Reprendre les
+// données". Les champs *_id eux-mêmes sont exclus de l'affichage (repris par filter côté appelant).
+function identificationBilanPuissanceAffichee(eq, allSites) {
+  if (eq.type !== "Bilan de puissance") return eq.identification;
+  const transfo = equipementParId(allSites, eq.identification.transfo_id);
+  const disj = equipementParId(allSites, eq.identification.disj_id);
+  return {
+    ...eq.identification,
+    transfo_reference: eq.identification.transfo_reference || transfo?.identification?.repere || "",
+    puissanceKVA: eq.identification.puissanceKVA || transfo?.identification?.puissance || "",
+    disj_reference: eq.identification.disj_reference || disj?.identification?.repere || "",
+    calibreDisjoncteur: eq.identification.calibreDisjoncteur || disj?.identification?.intensiteNominale || "",
+  };
+}
+const IDENTIFICATION_CHAMPS_TECHNIQUES = ["transfo_id", "disj_id"];
 function docxEquipementElements(eq, locaux, allSites) {
   // Filet de sécurité : quelle que soit l'origine des données (ancien format, migration, edge case),
   // on s'assure que la structure de contrôles est complète avant de générer le rapport — évite un
@@ -10058,7 +10101,8 @@ function docxEquipementElements(eq, locaux, allSites) {
   if (localNom) elements.push(new DOCX.Paragraph({ spacing: { after: 60 }, children: [new DOCX.TextRun({ text: "Local : " + (localNom.nom || "Local sans nom"), size: 16, color: "666666", italics: true })] }));
   else elements.push(docxSpacer(40));
   if (schema.identification.length) {
-    const t = docxFieldTable(schema.identification.map((f) => [f.label, formatIdentificationValue(eq.identification[f.key])]));
+    const identificationAffichee = identificationBilanPuissanceAffichee(eq, allSites);
+    const t = docxFieldTable(schema.identification.filter((f) => !IDENTIFICATION_CHAMPS_TECHNIQUES.includes(f.key)).map((f) => [f.label, formatIdentificationValue(identificationAffichee[f.key])]));
     if (t) { elements.push(t); elements.push(docxSpacer()); }
   }
   if (eq.type === "Transformateur" && eq.identification?.typeRefroidissement && DESCRIPTION_REFROIDISSEMENT_TRANSFO[eq.identification.typeRefroidissement]) {
