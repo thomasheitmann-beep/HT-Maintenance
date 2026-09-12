@@ -7993,6 +7993,7 @@ function PrintIntervention({ iv }) {
 
 function SiteDetail({ site, allSites, update, onBack, onDelete, onPrint, onPrintAnnexe, onCreateIntervention, clientsRegistry, contactsRegistry, caracteristiquesLibrary, apprendreCaracteristique }) {
   const [reprendreOpen, setReprendreOpen] = useState(false);
+  const [reprendreSelection, setReprendreSelection] = useState([]);
   const presentTypes = useMemo(() => EQUIPMENT_TYPES.filter((t) => site.equipements.some((e) => e.type === t)), [site.equipements]);
   const [activeTab, setActiveTab] = useState("rapport");
   const [addMenuOpenHTA, setAddMenuOpenHTA] = useState(false);
@@ -8014,24 +8015,34 @@ function SiteDetail({ site, allSites, update, onBack, onDelete, onPrint, onPrint
     setAddMenuOpenHTA(false);
     setAddMenuOpenConv(false);
   }
-  function reprendreEquipement(source) {
-    const eq = dupliquerEquipementPourNouvelleVisite(source);
-    if (site.locaux && site.locaux.length) eq.localId = site.locaux[0].id;
-    eq.ordre = (site.equipements.length + 1) * 10;
-    update((d) => ({ ...d, equipements: [...d.equipements, eq] }));
-    setActiveTab(eq.type);
+  function reprendreEquipementsSelectionnes() {
+    const sources = equipementsMemeSite.filter(({ eq }) => reprendreSelection.includes(eq.id)).map(({ eq }) => eq);
+    if (!sources.length) return;
+    const nouveaux = sources.map((source, i) => {
+      const eq = dupliquerEquipementPourNouvelleVisite(source);
+      if (site.locaux && site.locaux.length) eq.localId = site.locaux[0].id;
+      eq.ordre = (site.equipements.length + 1 + i) * 10;
+      return eq;
+    });
+    update((d) => ({ ...d, equipements: [...d.equipements, ...nouveaux] }));
+    setActiveTab(nouveaux[0].type);
     setReprendreOpen(false);
+    setReprendreSelection([]);
   }
-  // Équipements des autres sites (visites précédentes), les plus récents en premier.
-  const equipementsAutresSites = useMemo(() => {
+  // Équipements des visites précédentes DU MÊME SITE (même nom) — le client associé peut avoir
+  // changé entre deux visites (reprise du contrat, changement de raison sociale…), mais les
+  // équipements physiquement présents sur le site restent les mêmes.
+  const equipementsMemeSite = useMemo(() => {
     const list = [];
+    const nomSite = (site.nom || "").trim().toLowerCase();
     (allSites || []).forEach((s) => {
       if (s.id === site.id) return;
+      if ((s.nom || "").trim().toLowerCase() !== nomSite) return;
       (s.equipements || []).forEach((e) => list.push({ eq: e, site: s }));
     });
     list.sort((a, b) => (b.site.rapport?.date || "").localeCompare(a.site.rapport?.date || ""));
     return list;
-  }, [allSites, site.id]);
+  }, [allSites, site.id, site.nom]);
 
   const rank = overallRank(site);
   const tabs = [
@@ -8174,20 +8185,37 @@ function SiteDetail({ site, allSites, update, onBack, onDelete, onPrint, onPrint
 
         <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 10, gap: 10, flexWrap: "wrap" }}>
           <div style={{ position: "relative" }}>
-            <button onClick={() => setReprendreOpen((o) => !o)} disabled={equipementsAutresSites.length === 0}
-              style={{ ...btnGhost("#0F8A5F"), opacity: equipementsAutresSites.length === 0 ? 0.4 : 1, cursor: equipementsAutresSites.length === 0 ? "not-allowed" : "pointer" }}
-              title="Reprendre un équipement déjà créé sur un autre site/visite, avec ses caractéristiques mais sans les mesures">
+            <button onClick={() => setReprendreOpen((o) => !o)} disabled={equipementsMemeSite.length === 0}
+              style={{ ...btnGhost("#0F8A5F"), opacity: equipementsMemeSite.length === 0 ? 0.4 : 1, cursor: equipementsMemeSite.length === 0 ? "not-allowed" : "pointer" }}
+              title="Reprendre un ou plusieurs équipements déjà créés lors d'une visite précédente de ce même site, avec leurs caractéristiques mais sans les mesures">
               <RefreshCw size={13} /> Reprendre un équipement existant
             </button>
-            {reprendreOpen && equipementsAutresSites.length > 0 && (
-              <div style={{ position: "absolute", right: 0, top: "110%", background: "#F7F8FA", border: "1px solid #D8DEE5", borderRadius: 10, overflow: "hidden", zIndex: 50, minWidth: 300, maxHeight: 320, overflowY: "auto", boxShadow: "0 12px 30px rgba(0,0,0,0.4)" }}>
-                {equipementsAutresSites.map(({ eq, site: s }) => (
-                  <div key={eq.id} onClick={() => reprendreEquipement(eq)} style={{ padding: "9px 14px", fontSize: 12, color: "#3E4A5C", cursor: "pointer", borderBottom: "1px solid #E2E6EB" }}
-                    onMouseEnter={(e) => (e.currentTarget.style.background = "#E2E6EB")} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
-                    <div style={{ fontWeight: 700 }}>{eq.type}{eq.identification.repere ? " — " + eq.identification.repere : ""}</div>
-                    <div style={{ fontSize: 10.5, color: "#8B96A3" }}>{s.nom || s.local || "Site sans nom"} · {s.rapport?.date || "date inconnue"}</div>
-                  </div>
-                ))}
+            {reprendreOpen && equipementsMemeSite.length > 0 && (
+              <div style={{ position: "absolute", right: 0, top: "110%", background: "#F7F8FA", border: "1px solid #D8DEE5", borderRadius: 10, overflow: "hidden", zIndex: 50, minWidth: 320, maxHeight: 360, display: "flex", flexDirection: "column", boxShadow: "0 12px 30px rgba(0,0,0,0.4)" }}>
+                <div style={{ overflowY: "auto", flex: "1 1 auto" }}>
+                  {equipementsMemeSite.map(({ eq, site: s }) => (
+                    <label key={eq.id} style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "9px 14px", fontSize: 12, color: "#3E4A5C", cursor: "pointer", borderBottom: "1px solid #E2E6EB" }}
+                      onMouseEnter={(e) => (e.currentTarget.style.background = "#E2E6EB")} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
+                      <input
+                        type="checkbox"
+                        checked={reprendreSelection.includes(eq.id)}
+                        onChange={() => setReprendreSelection((sel) => sel.includes(eq.id) ? sel.filter((id) => id !== eq.id) : [...sel, eq.id])}
+                        style={{ marginTop: 2, accentColor: "#0F8A5F", cursor: "pointer" }}
+                      />
+                      <div>
+                        <div style={{ fontWeight: 700 }}>{eq.type}{eq.identification.repere ? " — " + eq.identification.repere : ""}</div>
+                        <div style={{ fontSize: 10.5, color: "#8B96A3" }}>{s.client ? s.client + " · " : ""}{s.rapport?.date || "date inconnue"}</div>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+                <div style={{ padding: 10, borderTop: "1px solid #D8DEE5", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
+                  <span style={{ fontSize: 11, color: "#8B96A3" }}>{reprendreSelection.length} sélectionné{reprendreSelection.length > 1 ? "s" : ""}</span>
+                  <button onClick={reprendreEquipementsSelectionnes} disabled={reprendreSelection.length === 0}
+                    style={{ ...btnPrimary(), opacity: reprendreSelection.length === 0 ? 0.4 : 1, cursor: reprendreSelection.length === 0 ? "not-allowed" : "pointer" }}>
+                    Reprendre la sélection
+                  </button>
+                </div>
               </div>
             )}
           </div>
