@@ -3487,7 +3487,7 @@ function Combo({ value, onChange, options, listId, style, placeholder, numeric, 
 
 // Valeur numérique + unité : si l'unité appartient à une famille (V/A/Ω/VA), un sélecteur
 // permet de changer d'échelle (mV/V/kV…) ; sinon l'unité reste affichée telle quelle.
-function NumberWithUnit({ value, unit, onValueChange, onUnitChange, width, validState }) {
+function NumberWithUnit({ value, unit, onValueChange, onUnitChange, width, fontSize, validState }) {
   const family = unitFamilyFor(unit);
   const borderColor = validState === "ok" ? "#0F8A5F" : validState === "bad" ? "#C0392B" : validState === "warning" ? "#B5730A" : "#D8DEE5";
   const bgColor = validState === "ok" ? "#F0FBF6" : validState === "bad" ? "#FDF1F0" : validState === "warning" ? "#FDF3E3" : inputStyle.background;
@@ -3497,7 +3497,7 @@ function NumberWithUnit({ value, unit, onValueChange, onUnitChange, width, valid
         type="number" step="any"
         value={value ?? ""}
         onChange={(e) => onValueChange(e.target.value)}
-        style={{ ...inputStyle, width: width || 66, padding: "5px 7px", fontSize: 12, border: `1.5px solid ${borderColor}`, background: bgColor }}
+        style={{ ...inputStyle, width: width || 66, padding: fontSize ? "8px 10px" : "5px 7px", fontSize: fontSize || 12, fontWeight: fontSize ? 600 : 400, border: `1.5px solid ${borderColor}`, background: bgColor }}
       />
       {family ? (
         <select value={unit || family[0]} onChange={(e) => onUnitChange(e.target.value)} style={{ ...inputStyle, width: 62, padding: "5px 4px", fontSize: 11.5 }}>
@@ -4295,6 +4295,8 @@ function ControlRow({ item, value, onChange, idPrefix, toleranceOverride }) {
                     onValueChange={(v) => setField(f.key, v)}
                     onUnitChange={(u) => setField(f.key + "Unite", u)}
                     validState={fieldValidState(f.key)}
+                    width={f.unit === "kWh" ? 110 : undefined}
+                    fontSize={f.unit === "kWh" ? 16 : undefined}
                   />
                 ) : MESURE_KEYS.includes(f.key) || fieldValidState(f.key) ? (
                   // Champ numérique sans unité (ex. L1/L2/L3 du rapport de transformation) mais
