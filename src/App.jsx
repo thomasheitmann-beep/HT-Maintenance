@@ -1254,13 +1254,13 @@ function champsMono(unit, label) {
 // (6/12 impulsions, IGBT…) plutôt que d'un seuil réseau générique.
 function champsSeuilThdv(champs) {
   return [...champs,
-    { key: "tol_min", label: "Seuil bas", unit: null, compute: () => "" },
+    { key: "tol_min", label: "Seuil bas", unit: null, hidden: true, compute: () => "" },
     { key: "tol_max", label: "Seuil indicatif THdV (EN 50160 / CEI 61000-3-6)", unit: "%", compute: () => 8 },
   ];
 }
 function champsSeuilThdi(champs) {
   return [...champs,
-    { key: "tol_min", label: "Seuil bas", unit: null, compute: () => "" },
+    { key: "tol_min", label: "Seuil bas", unit: null, hidden: true, compute: () => "" },
     { key: "tol_max", label: "Seuil indicatif ThdI (repère général — dépend en réalité du rapport Isc/IL, IEEE 519-2014)", unit: "%", compute: () => 10 },
   ];
 }
@@ -1270,7 +1270,7 @@ function champsSeuilThdi(champs) {
 // seuil, pas les valeurs de tension brutes.
 function champsSeuilDesequilibre(champs) {
   return [...champs,
-    { key: "tol_min", label: "Seuil bas", unit: null, unitFrom: "desequilibre", phaseKeys: [], compute: () => "" },
+    { key: "tol_min", label: "Seuil bas", unit: null, hidden: true, unitFrom: "desequilibre", phaseKeys: [], compute: () => "" },
     { key: "tol_max", label: "Seuil indicatif de déséquilibre (EN 50160)", unit: "%", unitFrom: "desequilibre", phaseKeys: [], compute: () => 2 },
   ];
 }
@@ -2214,12 +2214,12 @@ const SCHEMAS = {
         C("frequence_amont", "Fréquence", [F("hz", "Fréquence", "Hz")]),
         C("tensions_amont", "Tensions", [
           F("u12", "U12", "V"), F("u23", "U23", "V"), F("u31", "U31", "V"), F("thdv1", "THdV L1", "%"), F("thdv2", "THdV L2", "%"), F("thdv3", "THdV L3", "%"),
-          { key: "tol_min", label: "Seuil bas", unit: null, phaseKeys: ["thdv1", "thdv2", "thdv3"], compute: () => "" },
+          { key: "tol_min", label: "Seuil bas", unit: null, hidden: true, phaseKeys: ["thdv1", "thdv2", "thdv3"], compute: () => "" },
           { key: "tol_max", label: "Seuil indicatif THdV", unit: "% (seuil EN 50160 / CEI 61000-3-6)", phaseKeys: ["thdv1", "thdv2", "thdv3"], compute: () => 8 },
         ]),
         C("courants_amont", "Courants", [
           F("i1", "I1", "A"), F("i2", "I2", "A"), F("i3", "I3", "A"), F("thdi1", "ThdI L1", "%"), F("thdi2", "ThdI L2", "%"), F("thdi3", "ThdI L3", "%"),
-          { key: "tol_min", label: "Seuil bas", unit: null, phaseKeys: ["thdi1", "thdi2", "thdi3"], compute: () => "" },
+          { key: "tol_min", label: "Seuil bas", unit: null, hidden: true, phaseKeys: ["thdi1", "thdi2", "thdi3"], compute: () => "" },
           { key: "tol_max", label: "Seuil indicatif ThdI", unit: "% (repère général — dépend du rapport Isc/IL, IEEE 519-2014)", phaseKeys: ["thdi1", "thdi2", "thdi3"], compute: () => 10 },
         ]),
         C("puissances_amont", "Puissances", [
@@ -2233,12 +2233,12 @@ const SCHEMAS = {
         C("frequence_aval", "Fréquence", [F("hz", "Fréquence", "Hz")]),
         C("tensions_aval", "Tensions", [
           F("u12", "U12", "V"), F("u23", "U23", "V"), F("u31", "U31", "V"), F("thdv1", "THdV L1", "%"), F("thdv2", "THdV L2", "%"), F("thdv3", "THdV L3", "%"),
-          { key: "tol_min", label: "Seuil bas", unit: null, phaseKeys: ["thdv1", "thdv2", "thdv3"], compute: () => "" },
+          { key: "tol_min", label: "Seuil bas", unit: null, hidden: true, phaseKeys: ["thdv1", "thdv2", "thdv3"], compute: () => "" },
           { key: "tol_max", label: "Seuil indicatif THdV", unit: "% (seuil EN 50160 / CEI 61000-3-6)", phaseKeys: ["thdv1", "thdv2", "thdv3"], compute: () => 8 },
         ]),
         C("courants_aval", "Courants", [
           F("i1", "I1", "A"), F("i2", "I2", "A"), F("i3", "I3", "A"), F("thdi1", "ThdI L1", "%"), F("thdi2", "ThdI L2", "%"), F("thdi3", "ThdI L3", "%"),
-          { key: "tol_min", label: "Seuil bas", unit: null, phaseKeys: ["thdi1", "thdi2", "thdi3"], compute: () => "" },
+          { key: "tol_min", label: "Seuil bas", unit: null, hidden: true, phaseKeys: ["thdi1", "thdi2", "thdi3"], compute: () => "" },
           { key: "tol_max", label: "Seuil indicatif ThdI", unit: "% (repère général — dépend du rapport Isc/IL, IEEE 519-2014)", phaseKeys: ["thdi1", "thdi2", "thdi3"], compute: () => 10 },
         ]),
         C("puissances_aval", "Puissances", [
@@ -4188,6 +4188,7 @@ function ControlRow({ item, value, onChange, idPrefix, toleranceOverride }) {
         <span style={{ fontSize: 12.5, color: "#3E4A5C", flex: "1 1 240px" }}>{item.label}</span>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
           {(item.fields || []).map((f) =>
+            f.hidden ? null :
             f.compute && f.longText ? (
               (() => {
                 const texte = f.compute(fields);
@@ -6350,12 +6351,14 @@ function detailAnomalieItem(item, v) {
     // résistance mesurée par phase peut être hors tolérance sur une seule phase sans que le champ
     // "valeur" (moyenne/relevé global) ne le soit lui-même. Même tolérance calculée pour les deux,
     // cohérent avec la coloration déjà appliquée à l'écran sur ces mêmes champs.
-    const champsAVerifier = [tolMinField.unitFrom, "l1", "l2", "l3"].filter((k, i, arr) => k && arr.indexOf(k) === i);
+    const champsAVerifier = [tolMinField.unitFrom, ...(tolMinField.phaseKeys || ["l1", "l2", "l3"])].filter((k, i, arr) => k && arr.indexOf(k) === i);
     champsAVerifier.forEach((key) => {
       const mesure = fields[key];
       if (mesure !== undefined && mesure !== "" && toleranceState(mesure, min, max) === "bad") {
-        const nomChamp = key === tolMinField.unitFrom ? "valeur" : key.toUpperCase();
-        parts.push(`${nomChamp} mesurée ${mesure}${tolMinField.unit ? " " + tolMinField.unit : ""}, attendu ${min}–${max}`);
+        const nomChamp = key === tolMinField.unitFrom
+          ? ((item.fields || []).find((f) => f.key === key)?.label || "valeur")
+          : key.toUpperCase();
+        parts.push(`${nomChamp} mesurée ${mesure}${tolMinField.unit ? " " + tolMinField.unit : ""}, attendu ${min !== null ? min + "–" : "≤ "}${max}`);
         horsTolerance = true;
       }
     });
