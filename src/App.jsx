@@ -452,7 +452,7 @@ const LISTE_TRANSFORMATEUR_AMONT = ["Sans transformateur amont", "Avec transform
 const LISTE_ALIMENTATION_RESEAUX = ["1 réseau d'alimentation", "1 réseau d'alimentation (réseaux normal et secours pontés au bornier)", "2 réseaux d'alimentation indépendants (normal et secours séparés)"];
 const LISTE_TRANSFORMATEUR_SORTIE = ["Sans transformateur de sortie", "Avec transformateur de sortie"];
 const LISTE_PRESENCE_CHARGEUR = ["Présent", "Non présent"];
-const LISTE_RATTACHEMENT_BILAN = ["Transformateur", "Disjoncteur BT", "TGBT"];
+const LISTE_RATTACHEMENT_BILAN = ["Transformateur", "Disjoncteur BT", "TGBT / Tableau divisionnaire"];
 const LISTE_TYPE_SOURCE_INV = ["ASI (Alimentation Statique sans Interruption)", "Onduleur", "Groupe électrogène", "Groupe tournant", "Turbine à gaz", "TGBT", "Transformateur", "Fournisseur ERDF ou autre", "Aucune"];
 const LISTE_REGIME_NEUTRE_BT = ["TNS", "TT", "TNC", "IT"];
 const LISTE_ETAT_ARRIVEE_DEPART = ["Conforme", "Non conforme", "À l'arrêt", "En marche"];
@@ -1667,20 +1667,27 @@ const COUPLE_ETANCHEITE_HUILE = {
 function aideCoupleEtancheite(taille, sousType) {
   const table = COUPLE_ETANCHEITE_HUILE[sousType];
   if (!taille || !table || !table[taille]) return "Aucune valeur disponible pour cette taille — se référer à la documentation du fabricant.";
-  return `Repère (documentation transformateur fournie, fabricant non identifié sur l'extrait) pour ${taille} : ${table[taille]} N·m — vérifier qu'il s'agit bien du modèle concerné avant de s'y fier.`;
+  return `Repère (documentation transformateur fournie, fabricant non identifié sur l'extrait) pour ${taille} : ${table[taille]} N·m — vérifier qu'il s'agit bien du modèle concerné avant de s'y fier.${texteDouille(taille)}`;
+}
+// Correspondance vis/écrou métrique ISO -> taille de douille/clé plate (cotes "sur plats", norme
+// DIN 931/934 pour les hexagonaux standards) — valeurs normalisées, valables pour une tête ou un
+// écrou hexagonal standard ; une vis à tête différente (Allen/BTR, Torx…) ne s'y retrouve pas.
+const DOUILLE_METRIQUE = { "M4": 7, "M5": 8, "M6": 10, "M8": 13, "M10": 17, "M12": 19, "M14": 22, "M16": 24, "M18": 27, "M20": 30, "M22": 32, "M24": 36 };
+function texteDouille(taille) {
+  return DOUILLE_METRIQUE[taille] ? ` Douille/clé : ${DOUILLE_METRIQUE[taille]} mm (hexagonal standard — ne s'applique pas à une tête Allen/BTR ou Torx).` : "";
 }
 function aideCoupleSerrage(taille, typeConnexion) {
   if (!taille) return "";
   if (typeConnexion === "terre" && COUPLE_TERRE_REFERENCE[taille]) {
-    return `Repère indicatif pour un bornier de terre à vis ${taille} : ${COUPLE_TERRE_REFERENCE[taille]} N·m — à vérifier, ne s'applique pas à une connexion de puissance (cosse/méplat).`;
+    return `Repère indicatif pour un bornier de terre à vis ${taille} : ${COUPLE_TERRE_REFERENCE[taille]} N·m — à vérifier, ne s'applique pas à une connexion de puissance (cosse/méplat).${texteDouille(taille)}`;
   }
   if (typeConnexion === "mt" && COUPLE_TRIHAL_MT[taille]) {
-    return `Repère vérifié (notice Schneider Trihal) pour les plages MT en ${taille} : ${COUPLE_TRIHAL_MT[taille]} N·m — vérifier qu'il s'agit bien d'un Trihal avant de s'y fier (effort maximum sur les plages MT : 500 N).`;
+    return `Repère vérifié (notice Schneider Trihal) pour les plages MT en ${taille} : ${COUPLE_TRIHAL_MT[taille]} N·m — vérifier qu'il s'agit bien d'un Trihal avant de s'y fier (effort maximum sur les plages MT : 500 N).${texteDouille(taille)}`;
   }
   if (typeConnexion === "bt" && COUPLE_TRIHAL_BT[taille]) {
-    return `Repère vérifié (notice Schneider Trihal) pour les barres BT en ${taille} : ${COUPLE_TRIHAL_BT[taille]} N·m — vérifier qu'il s'agit bien d'un Trihal avant de s'y fier.`;
+    return `Repère vérifié (notice Schneider Trihal) pour les barres BT en ${taille} : ${COUPLE_TRIHAL_BT[taille]} N·m — vérifier qu'il s'agit bien d'un Trihal avant de s'y fier.${texteDouille(taille)}`;
   }
-  return `Aucune valeur générique fiable pour une connexion de puissance ${taille} — le couple varie selon le connecteur (cuivre/aluminium, cosse ou méplat) et le constructeur. Se référer à la documentation du fabricant ou à l'étiquette de l'appareil.`;
+  return `Aucune valeur générique fiable pour une connexion de puissance ${taille} — le couple varie selon le connecteur (cuivre/aluminium, cosse ou méplat) et le constructeur. Se référer à la documentation du fabricant ou à l'étiquette de l'appareil.${texteDouille(taille)}`;
 }
 // Couples de serrage indicatifs par section de conducteur (bornes à vis) — repère fourni par
 // l'utilisateur ; à vérifier sur la documentation du fabricant de la borne concernée avant de s'y
@@ -2289,10 +2296,16 @@ const SCHEMAS = {
   "Bilan de puissance": {
     identification: [
       { key: "repere", label: "Repère / Point de mesure" },
-      { key: "rattachement", label: "Rattaché à", options: LISTE_RATTACHEMENT_BILAN },
-      { key: "referenceRattachement", label: "Référence du transformateur / disjoncteur / TGBT" },
+      { key: "rattachements", label: "Rattaché à", options: LISTE_RATTACHEMENT_BILAN, multi: true },
+      { key: "transfo_id", label: "Transformateur rattaché" },
+      { key: "transfo_reference", label: "Référence du transformateur" },
       { key: "puissanceKVA", label: "Puissance nominale installée (kVA)", numeric: true },
+      { key: "disj_id", label: "Disjoncteur BT rattaché" },
+      { key: "disj_reference", label: "Référence du disjoncteur" },
       { key: "calibreDisjoncteur", label: "Calibre du disjoncteur (A)", numeric: true },
+      { key: "tgbt_reference", label: "Référence du TGBT / tableau divisionnaire" },
+      { key: "tgbt_calibre", label: "Calibre général (A)", numeric: true },
+      { key: "tgbt_departs", label: "Nombre de départs", numeric: true },
       { key: "tensionNominale", label: "Tension nominale (V)" },
       { key: "anneeMiseEnService", label: "Année de mise en service", numeric: true },
     ],
@@ -2303,9 +2316,10 @@ const SCHEMAS = {
         C("thdv_utilisation", "Taux de distorsion tension", champsSeuilThdv(champsTriphase("%", "THdV", 1, "max"))),
         C("courant_utilisation", "Courant", champsTriphase("A", "Courant", 1, "moyenne", true)),
         C("courant_neutre_utilisation", "Courant dans le neutre", [F("in", "IN", "A")]),
-        C("puissance_fp_utilisation", "Puissance et facteur de puissance", [
+        C("puissance_fp_utilisation", "Puissance (P, S relevés — Q calculé) et facteur de puissance", [
           F("p1", "P actif L1", "kW"), F("p2", "P actif L2", "kW"), F("p3", "P actif L3", "kW"),
           F("s1", "S apparent L1", "kVA"), F("s2", "S apparent L2", "kVA"), F("s3", "S apparent L3", "kVA"),
+          qCalculeField(1, false), qCalculeField(2, false), qCalculeField(3, false),
           { key: "cosphi1", label: "Cos φ L1 (calculé)", unit: null, compute: (f) => { const p = numOf(f.p1), s = numOf(f.s1); return (p === null || s === null || !s) ? "" : Math.round((p / s) * 100) / 100; } },
           { key: "cosphi2", label: "Cos φ L2 (calculé)", unit: null, compute: (f) => { const p = numOf(f.p2), s = numOf(f.s2); return (p === null || s === null || !s) ? "" : Math.round((p / s) * 100) / 100; } },
           { key: "cosphi3", label: "Cos φ L3 (calculé)", unit: null, compute: (f) => { const p = numOf(f.p3), s = numOf(f.s3); return (p === null || s === null || !s) ? "" : Math.round((p / s) * 100) / 100; } },
@@ -2316,6 +2330,23 @@ const SCHEMAS = {
         C("regime_neutre_utilisation", "Régime de neutre", [F("valeur", "Valeur", null, LISTE_REGIME_NEUTRE)]),
         C("tension_terre_neutre_utilisation", "Tension terre / neutre", [F("v", "Valeur", "V")]),
         C("frequence_utilisation", "Fréquence", [F("hz", "Valeur", "Hz")]),
+      ]},
+      { key: "bilan_energie", title: "Relevé d'énergie (kWh)", items: [
+        C("mesure_energie", "Relevé d'énergie sur une durée donnée", [
+          F("duree", "Durée de la mesure", "min", ["10", "15", "30", "60"], "10"),
+          F("kwh_t0", "Relevé kWh à t0", "kWh"),
+          F("kwh_t1", "Relevé kWh à t0 + durée", "kWh"),
+          { key: "delta", label: "Énergie consommée sur la période (calculé)", unit: "kWh", compute: (f) => { const a = numOf(f.kwh_t0), b = numOf(f.kwh_t1); if (a === null || b === null) return ""; return Math.round((b - a) * 1000) / 1000; } },
+          { key: "puissanceMoyenne", label: "Puissance moyenne sur la période (calculé)", unit: "kW", compute: (f) => { const a = numOf(f.kwh_t0), b = numOf(f.kwh_t1), d = numOf(f.duree); if (a === null || b === null || !d) return ""; return Math.round(((b - a) / (d / 60)) * 100) / 100; } },
+        ]),
+        // Comparaison optionnelle avec la centrale de mesure fixe du tableau électrique (si présente)
+        // — technicien libre de la renseigner ou non ; sert à vérifier la cohérence entre la mesure
+        // de référence (pince/analyseur) ci-dessus et l'affichage propre du tableau.
+        C("comparaison_centrale_mesure", "Comparaison avec centrale de mesure interne au tableau (optionnel)", [
+          F("kwh_centrale_t0", "Relevé centrale interne à t0", "kWh"),
+          F("kwh_centrale_t1", "Relevé centrale interne à t0 + durée", "kWh"),
+          { key: "delta_centrale", label: "Énergie mesurée par la centrale (calculé)", unit: "kWh", compute: (f) => { const a = numOf(f.kwh_centrale_t0), b = numOf(f.kwh_centrale_t1); if (a === null || b === null) return ""; return Math.round((b - a) * 1000) / 1000; } },
+        ]),
       ]},
     ],
   },
@@ -2553,7 +2584,7 @@ function createControlesDefaults(schema) {
 function emptyEquipement(type) {
   const schema = SCHEMAS[type];
   const identification = {};
-  schema.identification.forEach((f) => (identification[f.key] = ""));
+  schema.identification.forEach((f) => (identification[f.key] = f.multi ? [] : ""));
   const controles = createControlesDefaults(schema);
   if (type === "Sécurité") {
     Object.keys(controles.materiel_securite).forEach((k) => { controles.materiel_securite[k].fields.present = "OUI"; });
@@ -5674,15 +5705,71 @@ function ResonanceHarmoniqueCalculee({ eq, allEquipements }) {
     </div>
   );
 }
+// Compare l'énergie mesurée en référence (pince/analyseur) à celle affichée par une centrale de
+// mesure interne au tableau, sur la même période — les deux contrôles sont saisis séparément
+// (mesure_energie / comparaison_centrale_mesure), ce calcul les rapproche.
+function calcComparaisonEnergie(eq) {
+  const ref = eq.controles?.bilan_energie?.mesure_energie?.fields;
+  const centrale = eq.controles?.bilan_energie?.comparaison_centrale_mesure?.fields;
+  if (!ref || !centrale) return null;
+  const a0 = numOf(ref.kwh_t0), a1 = numOf(ref.kwh_t1);
+  const b0 = numOf(centrale.kwh_centrale_t0), b1 = numOf(centrale.kwh_centrale_t1);
+  if (a0 === null || a1 === null || b0 === null || b1 === null) return null;
+  const deltaRef = Math.round((a1 - a0) * 1000) / 1000;
+  const deltaCentrale = Math.round((b1 - b0) * 1000) / 1000;
+  const ecartKwh = Math.round((deltaCentrale - deltaRef) * 1000) / 1000;
+  const ecartPct = deltaRef ? Math.round((ecartKwh / deltaRef) * 1000) / 10 : null;
+  return { deltaRef, deltaCentrale, ecartKwh, ecartPct };
+}
+function ComparaisonEnergieCalculee({ eq }) {
+  const c = calcComparaisonEnergie(eq);
+  if (!c) return null;
+  // Pas de seuil réglementaire pour l'écart entre deux points de mesure — 5% est un repère de
+  // vigilance courant en pratique (précision d'un TC/TP de classe usuelle, décalage d'horloge entre
+  // les deux relevés), pas une tolérance normative.
+  const ecartNotable = c.ecartPct !== null && Math.abs(c.ecartPct) > 5;
+  return (
+    <div style={{ background: ecartNotable ? "#FDF3E3" : "#EEF2F6", borderRadius: 8, padding: "10px 12px", fontSize: 12, color: ecartNotable ? "#8A5A0A" : "#0A5DA8", margin: "8px 0", lineHeight: 1.5 }}>
+      <strong>Comparaison des mesures sur la période :</strong> référence = {c.deltaRef} kWh, centrale interne = {c.deltaCentrale} kWh
+      — écart = {c.ecartKwh} kWh{c.ecartPct !== null && <> ({c.ecartPct > 0 ? "+" : ""}{c.ecartPct} %)</>}.
+      {ecartNotable ? (
+        <> ⚠ Écart notable (&gt; 5 %, repère de vigilance courant, pas un seuil réglementaire) — vérifier la classe de précision de la centrale, le rapport de TC associé, ou un décalage entre les deux relevés.</>
+      ) : (
+        <> Écart cohérent avec l'imprécision usuelle de mesure.</>
+      )}
+    </div>
+  );
+}
+// Couleur d'une barre de taux de charge selon sa sévérité — mêmes repères visuels que le reste de
+// l'app (vert conforme, orange à surveiller, rouge en dépassement) : pas un seuil normatif unique,
+// juste une convention de charge pratique (100% = calibre/puissance nominale atteint).
+function couleurTauxCharge(pct) {
+  if (pct === null || pct === undefined) return "#D8DEE5";
+  if (pct > 100) return "#EF4444";
+  if (pct > 80) return "#FB923C";
+  return "#2DD4BF";
+}
 function TauxChargeCalcule({ eq }) {
   const t = calcTauxCharge(eq);
   if (!t) return null;
   const base = numOf(eq.identification?.calibreDisjoncteur) ? "I mesuré ÷ calibre du disjoncteur" : "S mesuré ÷ puissance nominale";
+  const phases = [["L1", t.t1], ["L2", t.t2], ["L3", t.t3]];
+  // Échelle du graphique : 100% de haut correspond à un taux de charge de 120%, pour laisser de la
+  // marge visuelle au-dessus de la pleine charge plutôt que de saturer la barre pile à 100%.
+  const echelleMax = 120;
   return (
     <Card style={{ marginBottom: 14 }}>
-      <div style={{ fontSize: 12.5, color: "#5B6B7D" }}>
-        Taux de charge calculé ({base}) :{" "}
-        <b style={{ color: "#1A1F26" }}>L1 : {t.t1 ?? "—"}%  ·  L2 : {t.t2 ?? "—"}%  ·  L3 : {t.t3 ?? "—"}%</b>
+      <div style={{ fontSize: 12.5, color: "#5B6B7D", marginBottom: 10 }}>Taux de charge calculé ({base})</div>
+      <div style={{ display: "flex", gap: 22, alignItems: "flex-end", height: 90 }}>
+        {phases.map(([label, pct]) => (
+          <div key={label} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6, width: 48 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: couleurTauxCharge(pct) }}>{pct ?? "—"}%</div>
+            <div style={{ width: 26, height: 60, background: "#EEF1F5", borderRadius: 4, display: "flex", alignItems: "flex-end", overflow: "hidden" }}>
+              <div style={{ width: "100%", height: pct ? `${Math.min(100, Math.round((pct / echelleMax) * 100))}%` : 0, background: couleurTauxCharge(pct), borderRadius: "4px 4px 0 0", transition: "height 0.2s" }} />
+            </div>
+            <div style={{ fontSize: 11, color: "#8B96A3" }}>{label}</div>
+          </div>
+        ))}
       </div>
     </Card>
   );
@@ -6599,6 +6686,32 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
               <SectionTitle>Identification</SectionTitle>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 14 }}>
                 {schema.identification.map((f) => {
+                  // Bilan de puissance : ces champs ne sont pertinents que pour UN type de
+                  // rattachement précis (transformateur / disjoncteur / TGBT) — masqués de la
+                  // liste générique, ils sont rendus dans un panneau dédié par type sélectionné
+                  // juste en dessous (voir plus bas), au lieu d'être tous affichés en permanence.
+                  if (eq.type === "Bilan de puissance" && ["transfo_id", "transfo_reference", "puissanceKVA", "disj_id", "disj_reference", "calibreDisjoncteur", "tgbt_reference", "tgbt_calibre", "tgbt_departs"].includes(f.key)) {
+                    return null;
+                  }
+                  if (f.multi) {
+                    const valeurs = eq.identification[f.key] || [];
+                    const toggle = (opt) => {
+                      const next = valeurs.includes(opt) ? valeurs.filter((v) => v !== opt) : [...valeurs, opt];
+                      setIdentification(f.key, next);
+                    };
+                    return (
+                      <Field key={f.key} label={f.label}>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                          {(f.options || []).map((opt) => (
+                            <label key={opt} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, cursor: "pointer" }}>
+                              <input type="checkbox" checked={valeurs.includes(opt)} onChange={() => toggle(opt)} />
+                              {opt}
+                            </label>
+                          ))}
+                        </div>
+                      </Field>
+                    );
+                  }
                   if (f.key === "transformateurAssocie" && eq.type === "Batterie de compensation") {
                     const transfosConnus = allEquipements.filter((e) => e.type === "Transformateur" && e.identification?.repere).map((e) => e.identification.repere);
                     return (
@@ -6639,18 +6752,6 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
                             Reprendre {rapportComptage} depuis la cellule Comptage HTA ({comptageAvecTP.identification.repere || "sans repère"})
                           </div>
                         )}
-                      </Field>
-                    );
-                  }
-                  if (eq.type === "Bilan de puissance" && f.key === "referenceRattachement" && (eq.identification.rattachement === "Transformateur" || eq.identification.rattachement === "Disjoncteur BT")) {
-                    const candidats = allEquipements.filter((e) => e.type === eq.identification.rattachement && e.id !== eq.id);
-                    return (
-                      <Field key={f.key} label={f.label}>
-                        <Select value={eq.identification[f.key] || ""} onChange={(e2) => setIdentification(f.key, e2.target.value)}>
-                          <option value="">— Choisir un {eq.identification.rattachement.toLowerCase()} —</option>
-                          {candidats.map((c) => <option key={c.id} value={c.identification.repere || c.id}>{c.identification.repere || `${eq.identification.rattachement} sans repère`}</option>)}
-                        </Select>
-                        {candidats.length === 0 && <div style={{ fontSize: 10.5, color: "#8B96A3", marginTop: 4 }}>Aucun {eq.identification.rattachement.toLowerCase()} créé sur ce site pour l'instant.</div>}
                       </Field>
                     );
                   }
@@ -6704,60 +6805,113 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
             </div>
           )}
 
-          {eq.type === "Bilan de puissance" && (eq.identification.rattachement === "Transformateur" || eq.identification.rattachement === "Disjoncteur BT") && (() => {
-            const typeCible = eq.identification.rattachement;
-            const candidats = allEquipements.filter((e) => e.type === typeCible && e.id !== eq.id);
-            const lie = candidats.find((e) => e.id === eq.identification.rattachementEquipementId);
-            const reprendreDonnees = () => {
-              if (!lie) return;
-              if (typeCible === "Transformateur") {
-                update({
-                  ...eq,
-                  identification: {
-                    ...eq.identification,
-                    referenceRattachement: lie.identification.repere || "",
+          {eq.type === "Bilan de puissance" && (eq.identification.rattachements || []).length > 0 && (
+            <div style={{ marginBottom: 16, display: "flex", flexDirection: "column", gap: 12 }}>
+              {(eq.identification.rattachements || []).includes("Transformateur") && (() => {
+                const candidats = allEquipements.filter((e) => e.type === "Transformateur" && e.id !== eq.id);
+                const lie = candidats.find((e) => e.id === eq.identification.transfo_id);
+                const reprendreDonnees = () => {
+                  if (!lie) return;
+                  update({ ...eq, identification: { ...eq.identification,
+                    transfo_reference: lie.identification.repere || "",
                     puissanceKVA: lie.identification.puissance || eq.identification.puissanceKVA,
-                    calibreDisjoncteur: "",
                     tensionNominale: lie.identification.tensionSecondaire || eq.identification.tensionNominale,
                     anneeMiseEnService: lie.identification.anneeMiseEnService || eq.identification.anneeMiseEnService,
-                  },
-                });
-              } else {
-                update({
-                  ...eq,
-                  identification: {
-                    ...eq.identification,
-                    referenceRattachement: lie.identification.repere || "",
-                    calibreDisjoncteur: lie.identification.intensiteNominale || eq.identification.calibreDisjoncteur,
-                  },
-                });
-              }
-            };
-            return (
-              <div style={{ marginBottom: 16, padding: 12, background: "#F4F6F8", borderRadius: 10, border: "1px solid #E2E6EB" }}>
-                <div style={{ fontSize: 11.5, fontWeight: 700, color: "#5B6B7D", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.4 }}>Rattacher à un équipement déjà créé</div>
-                {candidats.length === 0 ? (
-                  <div style={{ fontSize: 12.5, color: "#8B96A3" }}>Aucun équipement {typeCible} créé sur ce site pour l'instant.</div>
-                ) : (
-                  <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-                    <div style={{ minWidth: 220 }}>
-                      <Select value={eq.identification.rattachementEquipementId || ""} onChange={(e) => setIdentification("rattachementEquipementId", e.target.value)}>
-                        <option value="">— Choisir un {typeCible.toLowerCase()} —</option>
-                        {candidats.map((t) => <option key={t.id} value={t.id}>{t.identification.repere || `${typeCible} sans repère`}</option>)}
-                      </Select>
-                    </div>
-                    {lie && (
-                      <button onClick={reprendreDonnees} style={btnGhost(BRAND.blue)}>
-                        <RefreshCw size={13} /> Reprendre les données{typeCible === "Disjoncteur BT" ? " (calibre)" : ""}
-                      </button>
+                  }});
+                };
+                return (
+                  <div style={{ padding: 12, background: "#F4F6F8", borderRadius: 10, border: "1px solid #E2E6EB" }}>
+                    <div style={{ fontSize: 11.5, fontWeight: 700, color: "#5B6B7D", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.4 }}>Rattaché à un transformateur</div>
+                    {candidats.length > 0 ? (
+                      <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: lie ? 0 : 12 }}>
+                        <div style={{ minWidth: 220 }}>
+                          <Select value={eq.identification.transfo_id || ""} onChange={(e) => setIdentification("transfo_id", e.target.value)}>
+                            <option value="">— Choisir un transformateur (ou laisser vide pour saisir manuellement) —</option>
+                            {candidats.map((t) => <option key={t.id} value={t.id}>{t.identification.repere || "Transformateur sans repère"}</option>)}
+                          </Select>
+                        </div>
+                        {lie && <button onClick={reprendreDonnees} style={btnGhost(BRAND.blue)}><RefreshCw size={13} /> Reprendre les données (puissance)</button>}
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: 12.5, color: "#8B96A3", marginBottom: 12 }}>Aucun transformateur créé sur ce site — renseignez ses caractéristiques manuellement ci-dessous.</div>
+                    )}
+                    {!lie && (
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12 }}>
+                        <Field label="Référence du transformateur"><TextInput value={eq.identification.transfo_reference || ""} onChange={(e) => setIdentification("transfo_reference", e.target.value)} /></Field>
+                        <Field label="Puissance nominale (kVA)"><TextInput type="number" step="any" value={eq.identification.puissanceKVA || ""} onChange={(e) => setIdentification("puissanceKVA", e.target.value)} /></Field>
+                      </div>
                     )}
                   </div>
-                )}
-              </div>
-            );
-          })()}
+                );
+              })()}
+              {(eq.identification.rattachements || []).includes("Disjoncteur BT") && (() => {
+                const candidats = allEquipements.filter((e) => e.type === "Disjoncteur BT" && e.id !== eq.id);
+                const lie = candidats.find((e) => e.id === eq.identification.disj_id);
+                const reprendreDonnees = () => {
+                  if (!lie) return;
+                  update({ ...eq, identification: { ...eq.identification,
+                    disj_reference: lie.identification.repere || "",
+                    calibreDisjoncteur: lie.identification.intensiteNominale || eq.identification.calibreDisjoncteur,
+                  }});
+                };
+                return (
+                  <div style={{ padding: 12, background: "#F4F6F8", borderRadius: 10, border: "1px solid #E2E6EB" }}>
+                    <div style={{ fontSize: 11.5, fontWeight: 700, color: "#5B6B7D", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.4 }}>Rattaché à un disjoncteur BT</div>
+                    {candidats.length > 0 ? (
+                      <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: lie ? 0 : 12 }}>
+                        <div style={{ minWidth: 220 }}>
+                          <Select value={eq.identification.disj_id || ""} onChange={(e) => setIdentification("disj_id", e.target.value)}>
+                            <option value="">— Choisir un disjoncteur BT (ou laisser vide pour saisir manuellement) —</option>
+                            {candidats.map((t) => <option key={t.id} value={t.id}>{t.identification.repere || "Disjoncteur BT sans repère"}</option>)}
+                          </Select>
+                        </div>
+                        {lie && <button onClick={reprendreDonnees} style={btnGhost(BRAND.blue)}><RefreshCw size={13} /> Reprendre les données (calibre)</button>}
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: 12.5, color: "#8B96A3", marginBottom: 12 }}>Aucun disjoncteur BT créé sur ce site — renseignez ses caractéristiques manuellement ci-dessous.</div>
+                    )}
+                    {!lie && (
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12 }}>
+                        <Field label="Référence du disjoncteur"><TextInput value={eq.identification.disj_reference || ""} onChange={(e) => setIdentification("disj_reference", e.target.value)} /></Field>
+                        <Field label="Calibre du disjoncteur (A)"><TextInput type="number" step="any" value={eq.identification.calibreDisjoncteur || ""} onChange={(e) => setIdentification("calibreDisjoncteur", e.target.value)} /></Field>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+              {(eq.identification.rattachements || []).includes("TGBT / Tableau divisionnaire") && (
+                <div style={{ padding: 12, background: "#F4F6F8", borderRadius: 10, border: "1px solid #E2E6EB" }}>
+                  <div style={{ fontSize: 11.5, fontWeight: 700, color: "#5B6B7D", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.4 }}>TGBT / Tableau divisionnaire</div>
+                  <div style={{ fontSize: 12.5, color: "#8B96A3", marginBottom: 12 }}>Pas de fiche équipement dédiée dans l'app pour ce type — renseignez ses caractéristiques directement ici.</div>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12 }}>
+                    <Field label="Référence du TGBT / tableau divisionnaire"><TextInput value={eq.identification.tgbt_reference || ""} onChange={(e) => setIdentification("tgbt_reference", e.target.value)} /></Field>
+                    <Field label="Calibre général (A)"><TextInput type="number" step="any" value={eq.identification.tgbt_calibre || ""} onChange={(e) => setIdentification("tgbt_calibre", e.target.value)} /></Field>
+                    <Field label="Nombre de départs"><TextInput type="number" step="any" value={eq.identification.tgbt_departs || ""} onChange={(e) => setIdentification("tgbt_departs", e.target.value)} /></Field>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {schema.sections.map((sec) => {
+            if (eq.type === "Bilan de puissance" && sec.key === "bilan_energie") {
+              return (
+                <React.Fragment key={sec.key}>
+                  <SectionBlock
+                    title={sec.title}
+                    items={sec.items}
+                    values={eq.controles[sec.key]}
+                    onChangeItem={(itemKey, v) => setControleItem(sec.key, itemKey, v)}
+                    idPrefix={`${eq.id}-${sec.key}`}
+                    custom={eq.controles[sec.key + "__custom"] || []}
+                    onAddCustom={() => addCustomAction(sec.key)}
+                    onChangeCustom={(id, patch) => changeCustomAction(sec.key, id, patch)}
+                    onRemoveCustom={(id) => removeCustomAction(sec.key, id)}
+                  />
+                  <ComparaisonEnergieCalculee eq={eq} />
+                </React.Fragment>
+              );
+            }
             if (eq.type === "Batterie de compensation" && sec.key === "mesures_amont") {
               return (
                 <React.Fragment key={sec.key}>
@@ -7421,6 +7575,11 @@ function PrintSection({ title, children }) {
   );
 }
 
+// Formate une valeur d'identification pour l'affichage — gère le cas des champs multi-sélection
+// (ex. rattachements de Bilan de puissance), stockés en tableau plutôt qu'en chaîne simple.
+function formatIdentificationValue(v) {
+  return Array.isArray(v) ? v.join(", ") : v;
+}
 function PrintFieldRow({ label, value }) {
   return (
     <div style={{ display: "flex", gap: 8, fontSize: 11, padding: "3px 0" }}>
@@ -7463,7 +7622,7 @@ function PrintEquipement({ eq }) {
         <span style={{ width: 26, height: 4, background: BRAND.amber, borderRadius: 2 }} />
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "2px 20px", marginBottom: 12 }}>
-        {schema.identification.map((f) => <PrintFieldRow key={f.key} label={f.label} value={eq.identification[f.key]} />)}
+        {schema.identification.map((f) => <PrintFieldRow key={f.key} label={f.label} value={formatIdentificationValue(eq.identification[f.key])} />)}
       </div>
       {schema.sections.map((sec) => (
         <PrintSection key={sec.key} title={sec.title}>
@@ -7620,7 +7779,7 @@ function PrintSynthese({ site }) {
         <tbody>
           {items.map((eq, i) => {
             const schema = getSchema(eq);
-            const idLabel = schema.identification.filter((f) => f.key !== "repere").map((f) => eq.identification[f.key]).filter(Boolean).join(" · ");
+            const idLabel = schema.identification.filter((f) => f.key !== "repere").map((f) => formatIdentificationValue(eq.identification[f.key])).filter(Boolean).join(" · ");
             const repere = eq.identification.repere;
             return (
               <tr key={i} style={{ borderBottom: "1px solid #e5e5e5" }}>
@@ -9867,7 +10026,7 @@ function docxEquipementElements(eq, locaux, allSites) {
   if (localNom) elements.push(new DOCX.Paragraph({ spacing: { after: 60 }, children: [new DOCX.TextRun({ text: "Local : " + (localNom.nom || "Local sans nom"), size: 16, color: "666666", italics: true })] }));
   else elements.push(docxSpacer(40));
   if (schema.identification.length) {
-    const t = docxFieldTable(schema.identification.map((f) => [f.label, eq.identification[f.key]]));
+    const t = docxFieldTable(schema.identification.map((f) => [f.label, formatIdentificationValue(eq.identification[f.key])]));
     if (t) { elements.push(t); elements.push(docxSpacer()); }
   }
   if (eq.type === "Transformateur" && eq.identification?.typeRefroidissement && DESCRIPTION_REFROIDISSEMENT_TRANSFO[eq.identification.typeRefroidissement]) {
@@ -10310,6 +10469,19 @@ function docxEquipementElements(eq, locaux, allSites) {
     }
     const t = docxControlTable(rows);
     if (t) elements.push(t);
+    if (sec.key === "bilan_energie" && eq.type === "Bilan de puissance") {
+      const c = calcComparaisonEnergie(eq);
+      if (c) {
+        const ecartNotable = c.ecartPct !== null && Math.abs(c.ecartPct) > 5;
+        elements.push(docxNormeNote(
+          `Comparaison des mesures sur la période : référence = ${c.deltaRef} kWh, centrale interne = ${c.deltaCentrale} kWh — écart = ${c.ecartKwh} kWh` +
+          (c.ecartPct !== null ? ` (${c.ecartPct > 0 ? "+" : ""}${c.ecartPct} %)` : "") +
+          (ecartNotable
+            ? ". Écart notable (> 5 %, repère de vigilance courant, pas un seuil réglementaire) — vérifier la classe de précision de la centrale, le rapport de TC associé, ou un décalage entre les deux relevés."
+            : ". Écart cohérent avec l'imprécision usuelle de mesure.")
+        ));
+      }
+    }
     elements.push(docxSpacer());
   });
   if (eq.type === "Disjoncteur BT") {
