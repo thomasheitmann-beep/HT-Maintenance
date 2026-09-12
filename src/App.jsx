@@ -4295,8 +4295,7 @@ function ControlRow({ item, value, onChange, idPrefix, toleranceOverride }) {
                     onValueChange={(v) => setField(f.key, v)}
                     onUnitChange={(u) => setField(f.key + "Unite", u)}
                     validState={fieldValidState(f.key)}
-                    width={f.unit === "kWh" ? 110 : undefined}
-                    fontSize={f.unit === "kWh" ? 16 : undefined}
+                    width={f.unit === "kWh" ? 140 : undefined}
                   />
                 ) : MESURE_KEYS.includes(f.key) || fieldValidState(f.key) ? (
                   // Champ numérique sans unité (ex. L1/L2/L3 du rapport de transformation) mais
