@@ -7832,7 +7832,7 @@ function PrintReport({ site }) {
       <div style={{ height: 6, background: `linear-gradient(90deg, ${BRAND.blue}, ${BRAND.amber})` }} />
       <div style={{ padding: "18px 24px 12px", display: "flex", justifyContent: "space-between", alignItems: "flex-start", background: BRAND.dark, color: "#fff" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <img src={LOGO_DARK} alt="HT Maintenance" style={{ width: 52, height: 52, objectFit: "cover", borderRadius: 8 }} />
+          <img src={LOGO_WHITE} alt="HT Maintenance" style={{ width: 78, height: 39, objectFit: "contain", borderRadius: 6 }} />
           <div>
             <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: 1.2, color: BRAND.silver }}>Rapport de maintenance préventive HT</div>
             <div style={{ fontSize: 20, fontWeight: 800 }}>{site.nom || "Site"}</div>
@@ -7897,7 +7897,7 @@ function PrintIntervention({ iv }) {
       <div style={{ height: 6, background: `linear-gradient(90deg, ${BRAND.blue}, ${BRAND.amber})` }} />
       <div style={{ padding: "18px 24px 12px", display: "flex", justifyContent: "space-between", alignItems: "flex-start", background: BRAND.dark, color: "#fff" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <img src={LOGO_DARK} alt="HT Maintenance" style={{ width: 52, height: 52, objectFit: "cover", borderRadius: 8 }} />
+          <img src={LOGO_WHITE} alt="HT Maintenance" style={{ width: 78, height: 39, objectFit: "contain", borderRadius: 6 }} />
           <div>
             <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: 1.2, color: BRAND.silver }}>Rapport d'intervention</div>
             <div style={{ fontSize: 20, fontWeight: 800 }}>{iv.numeroRI}</div>
@@ -11811,7 +11811,7 @@ export default function App({ currentUser, onLogout }) {
         <div style={{ maxWidth: 1100, margin: "0 auto" }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18, flexWrap: "wrap", gap: 12 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              <img src={LOGO_DARK} alt="HT Maintenance" style={{ width: 44, height: 44, borderRadius: 10, objectFit: "cover", boxShadow: "0 6px 18px rgba(10,93,168,0.35)" }} />
+              <img src={LOGO_DARK} alt="HT Maintenance" style={{ width: 88, height: 44, objectFit: "contain" }} />
               <div>
                 <h1 style={{ margin: 0, fontSize: 20, fontWeight: 800, letterSpacing: 0.3, fontFamily: "'Rajdhani', 'Inter', sans-serif", textTransform: "uppercase" }}>
                   HT <span style={{ color: BRAND.amber }}>Maintenance</span>
