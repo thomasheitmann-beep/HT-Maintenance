@@ -2453,6 +2453,30 @@ function getSchema(eq) {
   if (eq.type === "Interrupteur Fusible HTA") return buildInterrupteurFusibleHTASchema({ avecRelais: eq.identification?.presenceRelais === "Oui" });
   return SCHEMAS[eq.type];
 }
+// Classement d'un contrôle selon les niveaux de maintenance AFNOR (NF X60-000), par règle générique
+// selon la nature du geste plutôt qu'un étiquetage manuel item par item :
+// - "1-2" (exploitant, sans instrument) : contrôle purement visuel (état/action), sans aucune
+//   valeur mesurée ni interprétation calculée à partir d'une mesure.
+// - "3-4" (technicien spécialisé HT Maintenance) : dès qu'un champ porte une unité (valeur
+//   mesurée) ou une interprétation calculée (longText, ex. analyse d'huile, DAR/PI) — nécessite un
+//   instrument de mesure, un démontage ou une analyse.
+function niveauItem(item) {
+  const champs = item.fields || [];
+  const aUneMesure = champs.some((f) => !!f.unit || (f.compute && f.longText));
+  return aUneMesure ? "3-4" : "1-2";
+}
+const NIVEAUX_MAINTENANCE = ["1-2", "3-4", "1-4"];
+const LABEL_NIVEAU_MAINTENANCE = { "1-2": "Niveau 1-2 — Exploitant (visuel)", "3-4": "Niveau 3-4 — Technicien spécialisé (mesures)", "1-4": "Niveau 1-4 — Gamme complète" };
+// Filtre les sections/items d'un schéma selon le niveau de maintenance choisi pour l'équipement —
+// "1-4" ne filtre rien (comportement historique inchangé). Les sections qui n'ont plus aucun item
+// après filtrage sont retirées, pour ne pas afficher un titre de section vide.
+function schemaFiltreeParNiveau(schema, niveauMaintenance) {
+  if (!schema || !niveauMaintenance || niveauMaintenance === "1-4") return schema;
+  const sections = schema.sections
+    .map((sec) => ({ ...sec, items: sec.items.filter((it) => niveauItem(it) === niveauMaintenance) }))
+    .filter((sec) => sec.items.length > 0);
+  return { ...schema, sections };
+}
 
 /* =========================================================================
    Helpers état / rang de conformité
@@ -2620,6 +2644,7 @@ function emptyEquipement(type) {
     type,
     ordre: 0, // détermine la position dans le rapport — réattribué séquentiellement à la création
     localId: "",
+    niveauMaintenance: "1-4", // gamme AFNOR NF X60-000 : 1-2 (exploitant, visuel), 3-4 (technicien spécialisé, mesures), 1-4 (tout)
     identification,
     controles,
     etatFinal: "Conforme",
@@ -2636,6 +2661,7 @@ function emptyEquipement(type) {
 function dupliquerEquipementPourNouvelleVisite(source) {
   const fresh = emptyEquipement(source.type);
   fresh.identification = { ...source.identification };
+  fresh.niveauMaintenance = source.niveauMaintenance || "1-4";
   fresh.lignageId = source.lignageId || source.id;
   return fresh;
 }
@@ -6435,7 +6461,7 @@ function champTolStatus(item, fields, key, etat) {
 // Parcourt tous les contrôles d'un équipement (y compris seuils dynamiques, essais liés,
 // et analyses d'huile cochées) et relève ceux dont l'état n'est pas "Conforme".
 function collectAnomalies(eq) {
-  const schema = getSchema(eq);
+  const schema = schemaFiltreeParNiveau(getSchema(eq), eq.niveauMaintenance);
   const isRelais = TYPES_AVEC_RELAIS.includes(eq.type);
   const lines = [];
   // Rapport de transformation (Transformateur) : mesuré vs théorique ±0,5% CEI 60076-1 — la
@@ -6585,7 +6611,7 @@ function collectAnomalies(eq) {
 
 const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, removable = true, onDuplicate, locaux = [], allEquipements = [], allSites = [], caracteristiquesLibrary = {}, apprendreCaracteristique }) {
   const [open, setOpen] = useState(true);
-  const schema = getSchema(eq);
+  const schema = schemaFiltreeParNiveau(getSchema(eq), eq.niveauMaintenance);
   const setIdentification = (k, v) => update(repairEquipementControles({ ...eq, identification: { ...eq.identification, [k]: v } }));
   const setControleItem = (sectionKey, itemKey, v) =>
     update({ ...eq, controles: { ...eq.controles, [sectionKey]: { ...eq.controles[sectionKey], [itemKey]: v } } });
@@ -6677,15 +6703,24 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
 
       {open && (
         <div style={{ marginTop: 16 }}>
-          {locaux.length > 1 && (
-            <div style={{ marginBottom: 16, maxWidth: 260 }}>
-              <Field label="Local">
-                <Select value={eq.localId} onChange={(e) => update({ ...eq, localId: e.target.value })}>
-                  {locaux.map((l) => <option key={l.id} value={l.id}>{l.nom || "Local sans nom"}</option>)}
+          <div style={{ marginBottom: 16, display: "flex", gap: 16, flexWrap: "wrap" }}>
+            {locaux.length > 1 && (
+              <div style={{ maxWidth: 260 }}>
+                <Field label="Local">
+                  <Select value={eq.localId} onChange={(e) => update({ ...eq, localId: e.target.value })}>
+                    {locaux.map((l) => <option key={l.id} value={l.id}>{l.nom || "Local sans nom"}</option>)}
+                  </Select>
+                </Field>
+              </div>
+            )}
+            <div style={{ maxWidth: 280 }}>
+              <Field label="Niveau de maintenance (AFNOR)">
+                <Select value={eq.niveauMaintenance || "1-4"} onChange={(e) => update({ ...eq, niveauMaintenance: e.target.value })}>
+                  {NIVEAUX_MAINTENANCE.map((n) => <option key={n} value={n}>{LABEL_NIVEAU_MAINTENANCE[n]}</option>)}
                 </Select>
               </Field>
             </div>
-          )}
+          </div>
           {schema.identification.length > 0 && (
             <div style={{ marginBottom: 16 }}>
               <SectionTitle>Identification</SectionTitle>
@@ -7617,7 +7652,7 @@ function computeBRKValues(eq) {
 
 function PrintEquipement({ eq, allEquipements = [] }) {
   eq = repairEquipementControles(eq); // filet de sécurité, même principe que côté Word
-  const schema = getSchema(eq);
+  const schema = schemaFiltreeParNiveau(getSchema(eq), eq.niveauMaintenance);
   const isRelaisSeuils = TYPES_AVEC_RELAIS.includes(eq.type);
   const brk = eq.type === "Disjoncteur BT" ? computeBRKValues(eq) : null;
   // Bilan de puissance : résout transfo_id/disj_id (identifiants techniques) vers la
@@ -10091,7 +10126,7 @@ function docxEquipementElements(eq, locaux, allSites) {
   // on s'assure que la structure de contrôles est complète avant de générer le rapport — évite un
   // plantage si une section conditionnelle (ex. relais activé) n'a pas été réparée en amont.
   eq = repairEquipementControles(eq);
-  const schema = getSchema(eq);
+  const schema = schemaFiltreeParNiveau(getSchema(eq), eq.niveauMaintenance);
   if (!schema) {
     return [new DOCX.Paragraph({ children: [new DOCX.PageBreak()] }), docxEquipHeader((eq.type || "Équipement") + (eq.identification.repere ? " — " + eq.identification.repere : ""), docxBookmarkId(eq), eq.etatFinal), docxSpacer(40),
       new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: "Type d'équipement non reconnu — données non affichées.", italics: true, color: "C0392B", size: 18 })] }), docxSpacer()];
