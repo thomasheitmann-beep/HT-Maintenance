@@ -50,6 +50,18 @@ const F = (key, label, unit, options, defaultValue) => ({ key, label, unit, opti
 
 /* ---- Listes déroulantes reprises des validations de données Excel ---- */
 const LISTE_INTERVENANTS = ["Thomas HEITMANN"];
+// Checklist standard de préambule d'intervention HTA/BT — cases à cocher, purement déclaratives
+// (aucun calcul associé), à adapter librement selon le contexte du site.
+const PREAMBULE_CHECKLIST_ITEMS = [
+  { key: "accueilSecurite", label: "Accueil sécurité réalisé" },
+  { key: "habilitations", label: "Habilitations électriques vérifiées" },
+  { key: "consignation", label: "Consignation électrique effectuée avant intervention" },
+  { key: "vat", label: "Vérification d'absence de tension (VAT) réalisée" },
+  { key: "epi", label: "Équipements de protection individuelle (EPI) portés" },
+  { key: "autorisationTravail", label: "Autorisation de travail / permis obtenu" },
+  { key: "planPrevention", label: "Plan de prévention signé (si applicable)" },
+  { key: "balisage", label: "Balisage de la zone d'intervention mis en place" },
+];
 const LISTE_ETAT_INSTALLATION = ["Conforme (R.A.S)", "Dégradé (actions à prévoir)", "Défaillant (actions urgentes)"];
 const LISTE_TYPE_POSTE = ["Intérieur", "Extérieur", "Aérien", "Souterrain", "Préfabriqué"];
 // Combine les régimes de neutre HTA (isolé/compensé/résistant) et les schémas de liaison à la
@@ -2683,6 +2695,7 @@ function emptySite() {
     rapport: {
       date: todayISO(), dateFin: "", intervenant: "", intervenantsSupplementaires: [], heureArrivee: "", heureFin: "", journeesSupplementaires: [],
       nombreEquipements: "",
+      preambuleChecklist: {}, preambuleHoraireType: "8h00 – 12h00 / 13h30 – 17h30", preambuleNombreIntervenants: "",
       environnementEtat: "Conforme (R.A.S)", environnementRemarque: "",
       fonctionnementEtat: "Conforme (R.A.S)", fonctionnementRemarque: "",
       prochaineMaintenance: next.toISOString().slice(0, 10),
@@ -4686,8 +4699,36 @@ function RapportTab({ site, update }) {
     set("syntheseRemarques", lignes.length ? lignes.join("\n") : "Aucune remarque particulière relevée sur les équipements.");
   }
 
+  const nbIntervenantsAuto = [r.intervenant, ...(r.intervenantsSupplementaires || [])].filter(Boolean).length;
   return (
     <>
+    <Card>
+      <SectionTitle>Préambule</SectionTitle>
+      <div style={{ marginBottom: 18 }}>
+        <label style={{ fontSize: 11, fontWeight: 600, color: "#5B6B7D", letterSpacing: 0.5, textTransform: "uppercase", display: "block", marginBottom: 10 }}>Avant intervention</label>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 8 }}>
+          {PREAMBULE_CHECKLIST_ITEMS.map((it) => (
+            <label key={it.key} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, cursor: "pointer" }}>
+              <input
+                type="checkbox"
+                checked={!!(r.preambuleChecklist || {})[it.key]}
+                onChange={(e) => set("preambuleChecklist", { ...(r.preambuleChecklist || {}), [it.key]: e.target.checked })}
+              />
+              {it.label}
+            </label>
+          ))}
+        </div>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 14 }}>
+        <Field label="Horaire type">
+          <TextInput value={r.preambuleHoraireType || ""} onChange={(e) => set("preambuleHoraireType", e.target.value)} placeholder="ex. 8h00 – 12h00 / 13h30 – 17h30" />
+        </Field>
+        <Field label="Nombre d'intervenants">
+          <TextInput type="number" value={r.preambuleNombreIntervenants || ""} onChange={(e) => set("preambuleNombreIntervenants", e.target.value)} placeholder={String(nbIntervenantsAuto || "")} />
+          <div style={{ fontSize: 10.5, color: "#8B96A3", marginTop: 4 }}>{nbIntervenantsAuto} technicien{nbIntervenantsAuto > 1 ? "s" : ""} HT Maintenance renseigné{nbIntervenantsAuto > 1 ? "s" : ""} ci-dessous — modifiable si d'autres personnes (site, sous-traitant…) étaient présentes.</div>
+        </Field>
+      </div>
+    </Card>
     <Card>
       <SectionTitle>Intervention</SectionTitle>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
@@ -7980,6 +8021,8 @@ function PrintReport({ site }) {
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "2px 24px", marginBottom: 10 }}>
           <PrintFieldRow label="Heure d'arrivée" value={site.rapport.heureArrivee} />
           <PrintFieldRow label="Heure de fin" value={site.rapport.heureFin} />
+          <PrintFieldRow label="Horaire type" value={site.rapport.preambuleHoraireType} />
+          <PrintFieldRow label="Nombre d'intervenants" value={site.rapport.preambuleNombreIntervenants || [site.rapport.intervenant, ...(site.rapport.intervenantsSupplementaires || [])].filter(Boolean).length} />
           <PrintFieldRow label="Marque" value={site.rapport.marque} />
           <PrintFieldRow label="Année de mise en service" value={site.rapport.anneeMiseEnService} />
           <PrintFieldRow label="Courant assigné (Ir)" value={site.rapport.courantAssigne} />
@@ -7987,6 +8030,9 @@ function PrintReport({ site }) {
           <PrintFieldRow label="Nombre d'équipements" value={site.rapport.nombreEquipements} />
           <PrintFieldRow label="Prochaine maintenance recommandée avant" value={site.rapport.prochaineMaintenance} />
         </div>
+        {PREAMBULE_CHECKLIST_ITEMS.some((it) => (site.rapport.preambuleChecklist || {})[it.key]) && (
+          <PrintFieldRow label="Préambule — avant intervention" value={PREAMBULE_CHECKLIST_ITEMS.filter((it) => (site.rapport.preambuleChecklist || {})[it.key]).map((it) => it.label).join(" · ")} />
+        )}
         <PrintFieldRow label="Environnement" value={site.rapport.environnementEtat} />
         {site.rapport.environnementRemarque && <div style={{ fontSize: 10, color: "#666", marginBottom: 6 }}>{site.rapport.environnementRemarque}</div>}
         <PrintFieldRow label="Fonctionnement de l'installation" value={site.rapport.fonctionnementEtat} />
@@ -11034,12 +11080,17 @@ async function generateSiteDocx(site, allSites) {
     (site.contactClient.nom || "").trim().toLowerCase() === (site.contactSite.nom || "").trim().toLowerCase() &&
     (site.contactClient.email || site.contactClient.nom); // ne compte pas deux fiches vides comme "identiques"
   const contactClientTexte = memePersonne ? "" : formatContact(site.contactClient);
+  const nbIntervenantsRapport = (site.rapport.preambuleNombreIntervenants || "").trim() || String([site.rapport.intervenant, ...(site.rapport.intervenantsSupplementaires || [])].filter(Boolean).length || "");
+  const checklistCochee = PREAMBULE_CHECKLIST_ITEMS.filter((it) => (site.rapport.preambuleChecklist || {})[it.key]).map((it) => it.label);
   const rapportRows = [
     ...(site.adresse ? [["Adresse du site", site.adresse]] : []),
     ...(contactClientTexte ? [["Contact client", contactClientTexte]] : []),
     ...(contactSiteTexte ? [["Contact site", contactSiteTexte]] : []),
     ["Date(s) d'intervention", journeesTexte || site.rapport.date],
     ["Intervenant(s)", tousIntervenants],
+    ...(nbIntervenantsRapport ? [["Nombre d'intervenants", nbIntervenantsRapport]] : []),
+    ...(site.rapport.preambuleHoraireType ? [["Horaire type", site.rapport.preambuleHoraireType]] : []),
+    ...(checklistCochee.length ? [["Préambule — avant intervention", checklistCochee.join(" · ")]] : []),
     ["Nombre d'équipements", String(site.equipements.length)], ["Prochaine maintenance recommandée avant", site.rapport.prochaineMaintenance],
     ["Environnement", [site.rapport.environnementEtat, site.rapport.environnementRemarque].filter(Boolean).join(" — ")],
     ["Fonctionnement de l'installation", [site.rapport.fonctionnementEtat, site.rapport.fonctionnementRemarque].filter(Boolean).join(" — ")],
