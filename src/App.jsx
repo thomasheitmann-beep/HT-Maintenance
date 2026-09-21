@@ -4781,11 +4781,12 @@ function RapportTab({ site, update }) {
                 <Combo value={l.marque} onChange={(v) => setLocalField(l.id, "marque", v)} options={LISTE_MARQUES} listId={`${l.id}-marque`} />
               </Field>
               <Field label="Année de mise en service"><TextInput value={l.anneeMiseEnService} onChange={(e) => setLocalField(l.id, "anneeMiseEnService", e.target.value)} /></Field>
-              <Field label="Norme de la protection fusible HTA">
+              <Field label="Norme du poste">
                 <Select value={l.normeFusible || ""} onChange={(e) => setLocalField(l.id, "normeFusible", e.target.value)}>
                   <option value="">—</option>
                   {["NF C13-100", "NF C13-200", "DIN"].map((n) => <option key={n} value={n}>{n}</option>)}
                 </Select>
+                <div style={{ fontSize: 10.5, color: "#8B96A3", marginTop: 4 }}>Caractéristique générale du poste — utilisée actuellement pour le contrôle du calibre fusible HTA.</div>
               </Field>
               <Field label="Type de poste">
                 <Combo value={l.typeDePoste} onChange={(v) => setLocalField(l.id, "typeDePoste", v)} options={LISTE_TYPE_POSTE} listId={`${l.id}-typeposte`} />
