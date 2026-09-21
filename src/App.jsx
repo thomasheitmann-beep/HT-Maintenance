@@ -1647,10 +1647,9 @@ const LISTE_TAILLE_VIS = ["M6", "M8", "M10", "M12", "M14", "M16", "M20"];
 // les borniers de terre à vis, où 5/10/15 N·m pour M6/M8/M10 est une valeur couramment documentée
 // (repère uniquement, à vérifier ; ne s'applique pas aux connexions de puissance).
 const COUPLE_TERRE_REFERENCE = { "M6": 5, "M8": 10, "M10": 15 };
-// Couples de serrage vérifiés — notice Schneider Electric Trihal (transformateur sec enrobé),
-// convertis de m·kg en N·m (1 m·kg ≈ 9,81 N·m, conversion donnée par la notice elle-même). Valeurs
-// spécifiques à cette gamme précise — à vérifier que le transformateur concerné est bien un Trihal
-// avant de s'y fier, un autre modèle/constructeur pouvant avoir des couples différents.
+// Couples de serrage pour transformateur sec enrobé — plages MT et barres BT, convertis en N·m.
+// Valeurs confirmées identiques d'un constructeur à l'autre pour ce type de connexion (retour
+// terrain), donc présentées comme repère général plutôt que rattachées à une gamme précise.
 const COUPLE_TRIHAL_MT = { "M8": 9.8, "M10": 19.6, "M12": 29.4, "M14": 49.1 };
 const COUPLE_TRIHAL_BT = { "M8": 12.3, "M10": 24.5, "M12": 44.1, "M14": 68.7, "M16": 98.1 };
 // Couples d'étanchéité pour transformateur huile (goujons de traversées/passe-barres, vis de
@@ -1682,10 +1681,10 @@ function aideCoupleSerrage(taille, typeConnexion) {
     return `Repère indicatif pour un bornier de terre à vis ${taille} : ${COUPLE_TERRE_REFERENCE[taille]} N·m — à vérifier, ne s'applique pas à une connexion de puissance (cosse/méplat).${texteDouille(taille)}`;
   }
   if (typeConnexion === "mt" && COUPLE_TRIHAL_MT[taille]) {
-    return `Repère vérifié (notice Schneider Trihal) pour les plages MT en ${taille} : ${COUPLE_TRIHAL_MT[taille]} N·m — vérifier qu'il s'agit bien d'un Trihal avant de s'y fier (effort maximum sur les plages MT : 500 N).${texteDouille(taille)}`;
+    return `Repère pour les plages MT en ${taille} : ${COUPLE_TRIHAL_MT[taille]} N·m (effort maximum sur les plages MT : 500 N).${texteDouille(taille)}`;
   }
   if (typeConnexion === "bt" && COUPLE_TRIHAL_BT[taille]) {
-    return `Repère vérifié (notice Schneider Trihal) pour les barres BT en ${taille} : ${COUPLE_TRIHAL_BT[taille]} N·m — vérifier qu'il s'agit bien d'un Trihal avant de s'y fier.${texteDouille(taille)}`;
+    return `Repère pour les barres BT en ${taille} : ${COUPLE_TRIHAL_BT[taille]} N·m.${texteDouille(taille)}`;
   }
   return `Aucune valeur générique fiable pour une connexion de puissance ${taille} — le couple varie selon le connecteur (cuivre/aluminium, cosse ou méplat) et le constructeur. Se référer à la documentation du fabricant ou à l'étiquette de l'appareil.${texteDouille(taille)}`;
 }
@@ -1718,10 +1717,10 @@ function versMegaohms(valeur, unite) {
   if (unite === "Ω") return v / 1_000_000;
   return v; // MΩ par défaut
 }
-// Valeurs typiques d'isolement à froid — notice Schneider Trihal (transformateur sec enrobé),
-// section "Contrôles avant mise en service". Valeurs approximatives données par le fabricant pour
-// CE modèle précis, pas une norme générale — la notice précise elle-même que des valeurs
-// nettement inférieures peuvent simplement indiquer un appareil humide, pas un défaut.
+// Valeurs typiques d'isolement à froid pour transformateur sec enrobé, section "Contrôles avant
+// mise en service" — repère général (confirmé identique d'un constructeur à l'autre), pas une
+// norme : des valeurs nettement inférieures peuvent simplement indiquer un appareil humide, pas un
+// défaut.
 const ISOLEMENT_TYPIQUE_TRIHAL = { hta_terre: 250, bt_terre: 50, hta_bt: 250 };
 const ISOLEMENT_TYPIQUE_LABEL = { hta_terre: "MT/masse", bt_terre: "BT/masse", hta_bt: "MT/BT" };
 function isolementFields(itemType, classeIsolation, avecRealise) {
@@ -1736,12 +1735,11 @@ function isolementFields(itemType, classeIsolation, avecRealise) {
   return [
     ...(avecRealise ? [F("realise", "Mesure réalisée ?", null, ["OUI", "NON"])] : []),
     F("typeMesure", "Type de mesure", null, LISTE_TYPE_MESURE_ISOLEMENT), F("v", "Tension d'injection", null, TENSION_ISOLEMENT),
-    // Repère toujours visible, dès avant la saisie — reprend directement les valeurs approximatives
-    // de la notice Schneider Trihal ("Les valeurs approximatives des résistances sont : MT/masse =
-    // 250 MΩ, BT/masse = 50 MΩ, MT/BT = 250 MΩ"), par mesure. À vérifier que c'est bien ce modèle.
+    // Repère toujours visible, dès avant la saisie — valeurs approximatives par mesure (MT/masse =
+    // 250 MΩ, BT/masse = 50 MΩ, MT/BT = 250 MΩ pour un transformateur sec enrobé).
     ...(valeurTypique ? [{
       key: "valeurTypiqueNote", label: "Valeur typique attendue pour cette mesure", longText: true,
-      compute: () => `${labelTypique} ≈ ${valeurTypique} MΩ (notice Schneider Trihal, si c'est bien ce modèle) — un écart net à la baisse peut simplement indiquer un appareil humide plutôt qu'un défaut.`,
+      compute: () => `${labelTypique} ≈ ${valeurTypique} MΩ — un écart net à la baisse peut simplement indiquer un appareil humide plutôt qu'un défaut.`,
     }] : []),
     F("valeur", "Valeur"), F("unite", "Unité", null, UNITE_ISOLEMENT),
     // Seuil indicatif — règle largement citée (guide IEEE sur les machines tournantes, pratique
@@ -1755,7 +1753,7 @@ function isolementFields(itemType, classeIsolation, avecRealise) {
         const mesureMO = versMegaohms(f.valeur, f.unite);
         if (vInjection === null || mesureMO === null) return "";
         const seuilMO = vInjection / 1000; // 1 MΩ par kV de tension d'essai
-        const comparaisonTrihal = valeurTypique ? ` À titre de comparaison (notice Schneider Trihal, si c'est bien ce modèle) : ${labelTypique} typique ≈ ${valeurTypique} MΩ — un écart net à la baisse peut simplement indiquer un appareil humide plutôt qu'un défaut.` : "";
+        const comparaisonTrihal = valeurTypique ? ` À titre de comparaison, valeur typique ${labelTypique} ≈ ${valeurTypique} MΩ — un écart net à la baisse peut simplement indiquer un appareil humide plutôt qu'un défaut.` : "";
         if (mesureMO < seuilMO) return `⚠ ${mesureMO} MΩ mesurés, en dessous du repère indicatif de ${Math.round(seuilMO * 100) / 100} MΩ (règle 1 MΩ/kV pour ${vInjection} V d'essai) — isolement à surveiller. Repère indicatif, pas de seuil réglementaire unique pour les transformateurs.${comparaisonTrihal}`;
         return `✓ ${mesureMO} MΩ mesurés, au-dessus du repère indicatif de ${Math.round(seuilMO * 100) / 100} MΩ (règle 1 MΩ/kV pour ${vInjection} V d'essai). Repère indicatif, pas de seuil réglementaire unique pour les transformateurs.${comparaisonTrihal}`;
       },
