@@ -1921,6 +1921,7 @@ function buildInterrupteurFusibleHTASchema({ avecRelais = false } = {}) {
       { key: "typeCellule", label: "Type de cellule", options: LISTE_TYPE_CELLULE["Interrupteur Fusible HTA"] }, { key: "numeroSerie", label: "Numéro de série" },
       { key: "presenceRelais", label: "Présence d'un relais de protection", options: ["Non", "Oui"] },
       ...(avecRelais ? [{ key: "rapportTPProtection", label: "Rapport TP de protection", options: LISTE_RAPPORT_TP }] : []),
+      { key: "transformateurAssocie", label: "Transformateur associé (repère, pour le contrôle du calibre fusible)" },
     ],
     sections: [
       { key: "mecaniques", title: "Contrôles mécaniques", items: [
@@ -2695,7 +2696,7 @@ function emptySite() {
   };
 }
 function emptyLocal(nom) {
-  return { id: uid(), nom: nom || "", typeDePoste: "", regimeNeutre: "", marque: "", anneeMiseEnService: "" };
+  return { id: uid(), nom: nom || "", typeDePoste: "", regimeNeutre: "", marque: "", anneeMiseEnService: "", normeFusible: "" };
 }
 
 function worstRank(labels) { return labels.reduce((worst, l) => Math.max(worst, RANK_OF[l] ?? 0), 0); }
@@ -4780,6 +4781,12 @@ function RapportTab({ site, update }) {
                 <Combo value={l.marque} onChange={(v) => setLocalField(l.id, "marque", v)} options={LISTE_MARQUES} listId={`${l.id}-marque`} />
               </Field>
               <Field label="Année de mise en service"><TextInput value={l.anneeMiseEnService} onChange={(e) => setLocalField(l.id, "anneeMiseEnService", e.target.value)} /></Field>
+              <Field label="Norme de la protection fusible HTA">
+                <Select value={l.normeFusible || ""} onChange={(e) => setLocalField(l.id, "normeFusible", e.target.value)}>
+                  <option value="">—</option>
+                  {["NF C13-100", "NF C13-200", "DIN"].map((n) => <option key={n} value={n}>{n}</option>)}
+                </Select>
+              </Field>
               <Field label="Type de poste">
                 <Combo value={l.typeDePoste} onChange={(v) => setLocalField(l.id, "typeDePoste", v)} options={LISTE_TYPE_POSTE} listId={`${l.id}-typeposte`} />
               </Field>
@@ -5634,6 +5641,59 @@ function RapportTheoriqueCalcule({ eq }) {
         {tol && <span> — tolérance CEI 60076-1 (±0,5 %) : {tol.min} – {tol.max}</span>}
       </div>
     </Card>
+  );
+}
+// Vérifie la cohérence entre le calibre du fusible HTA installé et la puissance du transformateur
+// associé — la règle applicable dépend de la norme choisie sur le LOCAL de l'équipement (chaque
+// équipement est rattaché à un local, et la norme de protection est une caractéristique du poste,
+// pas de la cellule individuelle) :
+// - NF C13-100 (postes publics à comptage BT, un seul transformateur) : la protection par fusible
+//   n'est valable que si Ib < 45 A (NF C13-100 §433.2) — au-delà, un disjoncteur est requis. Le
+//   tableau 43B (calibres précis par palier de puissance) n'est volontairement pas reproduit ici :
+//   les sources disponibles ne concordent pas assez précisément sur les valeurs intermédiaires.
+// - NF C13-200 (installations HTA privées/industrielles) : pas de plafond fixe à 45 A, le calibre
+//   est déterminé par les tableaux du constructeur de la cellule — repère indicatif seulement.
+// - DIN : calibres plus élevés disponibles (80/100/125 A), étude et accord du constructeur de la
+//   cellule nécessaires — pas de règle générique fiable à appliquer ici non plus.
+// Dans tous les cas, In >= 1,4 x Ib reste un repère de bon sens (évite la fusion intempestive à
+// l'enclenchement) — appliqué quelle que soit la norme. Ib = Sn / (√3 x U_HTA). Ne calcule que si
+// un transformateur est bien associé et que puissance + tension primaire sont renseignées.
+function calcVerificationFusibleTransfo(eq, allEquipements, locaux) {
+  if (eq.type !== "Interrupteur Fusible HTA") return null;
+  const repereTransfo = (eq.identification?.transformateurAssocie || "").trim();
+  if (!repereTransfo) return null;
+  const transfo = (allEquipements || []).find((e) => e.type === "Transformateur" && (e.identification.repere || "").trim() === repereTransfo);
+  if (!transfo) return null;
+  const sn = numOf(transfo.identification.puissance); // kVA
+  const u = numOf(transfo.identification.tensionPrimaire); // kV
+  if (sn === null || !u) return null;
+  const ib = Math.round((sn / (Math.sqrt(3) * u)) * 100) / 100; // A
+  const inFusible = numOf(eq.controles?.electriques?.fusibles_installes?.fields?.in);
+  const local = (locaux || []).find((l) => l.id === eq.localId);
+  const norme = (local && local.normeFusible) || "NF C13-100";
+  const ibTropEleve = norme === "NF C13-100" && ib > 45;
+  const seuilMin = Math.round(1.4 * ib * 100) / 100;
+  const sousCalibre = inFusible !== null && inFusible < seuilMin;
+  return { transfoRepere: transfo.identification.repere || repereTransfo, sn, u, ib, inFusible, seuilMin, ibTropEleve, sousCalibre, norme };
+}
+function texteVerificationFusibleTransfo(v) {
+  let texte = `Contrôle calibre fusible / transformateur « ${v.transfoRepere} » (${v.norme}) : Ib (courant de base primaire, ${v.sn} kVA sous ${v.u} kV) = ${v.ib} A — repère de bon sens In ≥ 1,4 × Ib = ${v.seuilMin} A.`;
+  if (v.inFusible !== null) texte += ` Calibre installé : ${v.inFusible} A.`;
+  if (v.ibTropEleve) texte += " ⚠ Ib > 45 A : au-delà de ce seuil, la protection par fusible n'est normalement plus valable en NF C13-100 pour un poste à un seul transformateur — un disjoncteur HTA est requis à la place.";
+  if (v.sousCalibre) texte += " ⚠ Calibre installé inférieur au seuil recommandé (risque de fusion intempestive à l'enclenchement) — à vérifier.";
+  if (v.norme === "NF C13-200") texte += " Norme NF C13-200 : pas de plafond fixe à 45 A — le calibre exact doit suivre les préconisations du constructeur de la cellule (repère indicatif : jusqu'à environ 1600 kVA avec des fusibles FN 63 A).";
+  if (v.norme === "DIN") texte += " Fusibles DIN : calibres plus élevés disponibles (80/100/125 A) — étude et accord du constructeur de la cellule nécessaires pour valider ce calibre.";
+  if (!v.ibTropEleve && !v.sousCalibre && v.inFusible !== null && v.norme === "NF C13-100") texte += " Cohérent avec la règle générale.";
+  return texte;
+}
+function VerificationFusibleTransfo({ eq, allEquipements, locaux }) {
+  const v = calcVerificationFusibleTransfo(eq, allEquipements, locaux);
+  if (!v) return null;
+  const alerte = v.ibTropEleve || v.sousCalibre;
+  return (
+    <div style={{ background: alerte ? "#FDF3E3" : "#EEF2F6", borderRadius: 8, padding: "10px 12px", fontSize: 12, color: alerte ? "#8A5A0A" : "#0A5DA8", margin: "8px 0", lineHeight: 1.5 }}>
+      {texteVerificationFusibleTransfo(v)}
+    </div>
   );
 }
 // Calcul du rang de résonance harmonique entre la batterie de condensateurs et la réactance du
@@ -6795,6 +6855,18 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
                       </Field>
                     );
                   }
+                  if (eq.type === "Interrupteur Fusible HTA" && f.key === "transformateurAssocie") {
+                    const transfosCell = allEquipements.filter((e) => e.type === "Transformateur" && e.id !== eq.id);
+                    return (
+                      <Field key={f.key} label={f.label}>
+                        <Select value={eq.identification[f.key] || ""} onChange={(e2) => setIdentification(f.key, e2.target.value)}>
+                          <option value="">— Choisir un transformateur —</option>
+                          {transfosCell.map((t) => <option key={t.id} value={t.identification.repere || t.id}>{t.identification.repere || "Transformateur sans repère"}</option>)}
+                        </Select>
+                        {transfosCell.length === 0 && <div style={{ fontSize: 10.5, color: "#8B96A3", marginTop: 4 }}>Aucun transformateur créé sur ce site pour l'instant.</div>}
+                      </Field>
+                    );
+                  }
                   if (eq.type === "Analyse d'huile" && f.key === "transformateurAssocie") {
                     const transfosHuile = allEquipements.filter((e) => e.type === "Transformateur" && e.identification.typeIsolation !== "Sec (résine/enrobé)" && e.id !== eq.id);
                     return (
@@ -6949,6 +7021,24 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
                     onRemoveCustom={(id) => removeCustomAction(sec.key, id)}
                   />
                   <ComparaisonEnergieCalculee eq={eq} />
+                </React.Fragment>
+              );
+            }
+            if (eq.type === "Interrupteur Fusible HTA" && sec.key === "electriques") {
+              return (
+                <React.Fragment key={sec.key}>
+                  <SectionBlock
+                    title={sec.title}
+                    items={sec.items}
+                    values={eq.controles[sec.key]}
+                    onChangeItem={(itemKey, v) => setControleItem(sec.key, itemKey, v)}
+                    idPrefix={`${eq.id}-${sec.key}`}
+                    custom={eq.controles[sec.key + "__custom"] || []}
+                    onAddCustom={() => addCustomAction(sec.key)}
+                    onChangeCustom={(id, patch) => changeCustomAction(sec.key, id, patch)}
+                    onRemoveCustom={(id) => removeCustomAction(sec.key, id)}
+                  />
+                  <VerificationFusibleTransfo eq={eq} allEquipements={allEquipements} locaux={locaux} />
                 </React.Fragment>
               );
             }
@@ -10580,6 +10670,11 @@ function docxEquipementElements(eq, locaux, allSites) {
     }
     const t = docxControlTable(rows);
     if (t) elements.push(t);
+    if (sec.key === "electriques" && eq.type === "Interrupteur Fusible HTA") {
+      const transfosSite = (allSites || []).flatMap((s) => s.equipements || []);
+      const v = calcVerificationFusibleTransfo(eq, transfosSite, locaux);
+      if (v) elements.push(docxNormeNote(texteVerificationFusibleTransfo(v)));
+    }
     if (sec.key === "bilan_energie" && eq.type === "Bilan de puissance") {
       const c = calcComparaisonEnergie(eq);
       if (c) {
