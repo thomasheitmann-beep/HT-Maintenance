@@ -2695,7 +2695,7 @@ function emptySite() {
     rapport: {
       date: todayISO(), dateFin: "", intervenant: "", intervenantsSupplementaires: [], heureArrivee: "", heureFin: "", journeesSupplementaires: [],
       nombreEquipements: "",
-      preambuleChecklist: {}, preambuleHoraireType: "8h00 – 12h00 / 13h30 – 17h30", preambuleNombreIntervenants: "",
+      preambuleChecklist: {}, preambuleNombreIntervenants: "",
       environnementEtat: "Conforme (R.A.S)", environnementRemarque: "",
       fonctionnementEtat: "Conforme (R.A.S)", fonctionnementRemarque: "",
       prochaineMaintenance: next.toISOString().slice(0, 10),
@@ -4719,10 +4719,7 @@ function RapportTab({ site, update }) {
           ))}
         </div>
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 14 }}>
-        <Field label="Horaire type">
-          <TextInput value={r.preambuleHoraireType || ""} onChange={(e) => set("preambuleHoraireType", e.target.value)} placeholder="ex. 8h00 – 12h00 / 13h30 – 17h30" />
-        </Field>
+      <div style={{ maxWidth: 260 }}>
         <Field label="Nombre d'intervenants">
           <TextInput type="number" value={r.preambuleNombreIntervenants || ""} onChange={(e) => set("preambuleNombreIntervenants", e.target.value)} placeholder={String(nbIntervenantsAuto || "")} />
           <div style={{ fontSize: 10.5, color: "#8B96A3", marginTop: 4 }}>{nbIntervenantsAuto} technicien{nbIntervenantsAuto > 1 ? "s" : ""} HT Maintenance renseigné{nbIntervenantsAuto > 1 ? "s" : ""} ci-dessous — modifiable si d'autres personnes (site, sous-traitant…) étaient présentes.</div>
@@ -8021,7 +8018,6 @@ function PrintReport({ site }) {
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "2px 24px", marginBottom: 10 }}>
           <PrintFieldRow label="Heure d'arrivée" value={site.rapport.heureArrivee} />
           <PrintFieldRow label="Heure de fin" value={site.rapport.heureFin} />
-          <PrintFieldRow label="Horaire type" value={site.rapport.preambuleHoraireType} />
           <PrintFieldRow label="Nombre d'intervenants" value={site.rapport.preambuleNombreIntervenants || [site.rapport.intervenant, ...(site.rapport.intervenantsSupplementaires || [])].filter(Boolean).length} />
           <PrintFieldRow label="Marque" value={site.rapport.marque} />
           <PrintFieldRow label="Année de mise en service" value={site.rapport.anneeMiseEnService} />
@@ -11089,7 +11085,6 @@ async function generateSiteDocx(site, allSites) {
     ["Date(s) d'intervention", journeesTexte || site.rapport.date],
     ["Intervenant(s)", tousIntervenants],
     ...(nbIntervenantsRapport ? [["Nombre d'intervenants", nbIntervenantsRapport]] : []),
-    ...(site.rapport.preambuleHoraireType ? [["Horaire type", site.rapport.preambuleHoraireType]] : []),
     ...(checklistCochee.length ? [["Préambule — avant intervention", checklistCochee.join(" · ")]] : []),
     ["Nombre d'équipements", String(site.equipements.length)], ["Prochaine maintenance recommandée avant", site.rapport.prochaineMaintenance],
     ["Environnement", [site.rapport.environnementEtat, site.rapport.environnementRemarque].filter(Boolean).join(" — ")],
