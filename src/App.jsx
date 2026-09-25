@@ -1041,7 +1041,11 @@ const CONTROLES_DISJONCTEUR = [
   C("resistance_bobine_declenchement", "Résistances de la bobine de déclenchement", [F("rd", "Rd", "Ω"), F("tolerance", "Tolérance", "Ω")]),
   C("etat_isolants_disj", "État général des isolants"),
   C("etat_chambres_coupure", "État général des chambres de coupures"),
-  C("resistance_contact_chambres", "Résistances de contact des chambres de coupure", [...L1L2L3("µΩ"), F("tolerance", "Tolérance", "µΩ"), F("courantEssai", "Courant d'essai", "A", LISTE_COURANT_ESSAI_CONTACT)]),
+  // Repère par défaut : valeur nominale usuelle ≈ 47 µΩ, tolérance ≈ x20 avant anomalie (soit
+  // ≈ 940 µΩ) — pré-rempli comme point de départ modifiable, pas une valeur universelle : la CEI
+  // 62271-100 ne fixe rien de fixe (ça dépend de la technologie — SF6, vide, air — et du calibre),
+  // à ajuster selon la doc constructeur de CE modèle précis si elle donne une valeur différente.
+  C("resistance_contact_chambres", "Résistances de contact des chambres de coupure", [...L1L2L3("µΩ"), F("tolerance", "Tolérance", "µΩ", null, "940"), F("courantEssai", "Courant d'essai", "A", LISTE_COURANT_ESSAI_CONTACT)]),
   // CEI 62271-100 ne fixe pas de valeur universelle (dépend fortement de la technologie — SF6, vide,
   // air — et du calibre) : le seul repère pertinent est la valeur donnée par le constructeur pour CE
   // modèle précis, à comparer à la mesure relevée.
