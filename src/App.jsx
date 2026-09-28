@@ -415,16 +415,92 @@ const MARQUE_GAMME_RELAIS_HTA = {
   "Chauvin Arnoux": ["Centrale CVM-NRJ"],
 };
 // BT : unités de déclenchement intégrées aux disjoncteurs (produits différents du relais HTA).
-const LISTE_MARQUE_RELAIS_BT = ["Schneider Electric", "Merlin Gerin", "ABB", "Siemens", "Eaton", "Legrand", "General Electric"];
+const LISTE_MARQUE_RELAIS_BT = ["Schneider Electric", "Merlin Gerin", "ABB", "Siemens", "Eaton", "Moeller", "Legrand", "General Electric"];
+// Familles de déclencheurs (unités de protection) BT — reprises des catalogues et notices constructeur.
+// Schneider / Merlin Gerin : Micrologic 2.0 à 7.0 (Compact NS ≥ 630 A, Masterpact NT/NW ; suffixes A =
+// ampèremètre, P = puissance, H = harmoniques) · Micrologic X (Masterpact MTZ) · gamme STR (Compact NS
+// < 630 A et ≥ 630 A anciens, Masterpact M) · thermique-magnétique TM-D / TM-G / MA (Compact NS/NSX).
+const MICROLOGIC_2_7 = ["Micrologic 2.0", "Micrologic 3.0", "Micrologic 5.0", "Micrologic 6.0", "Micrologic 7.0", "Micrologic 2.0 A", "Micrologic 3.0 A", "Micrologic 5.0 A", "Micrologic 6.0 A", "Micrologic 7.0 A", "Micrologic 5.0 P", "Micrologic 6.0 P", "Micrologic 7.0 P", "Micrologic 5.0 H", "Micrologic 6.0 H", "Micrologic 7.0 H"];
+const MICROLOGIC_X = ["Micrologic 2.0 X", "Micrologic 5.0 X", "Micrologic 6.0 X", "Micrologic 7.0 X"];
+const MICROLOGIC_NSX = ["Micrologic 2.2", "Micrologic 2.3", "Micrologic 5.2 A/E", "Micrologic 5.3 A/E", "Micrologic 6.2 A/E", "Micrologic 6.3 A/E", "Micrologic 1.3 M", "Micrologic 2.2 M", "Micrologic 2.3 M", "Micrologic 2.2 G", "Micrologic 2.3 G", "Micrologic 6.2 E-M", "Micrologic 6.3 E-M"];
+const STR_COMPACT_NS = ["STR22ME", "STR22GE", "STR22SE", "STR23SE", "STR23SP", "STR43ME", "STR53UE", "STR53UP", "STR25DE", "STR35SE/GE", "STR45AE", "STR45BE", "STR55UE"];
+const STR_MASTERPACT_M = ["STR28D", "STR38S", "STR58U", "STR68U"];
+const TM_SCHNEIDER = ["TM-D", "TM-G", "MA"];
+// ABB SACE : thermique-magnétique TMF/TMD/TMA/TMG/MA · électroniques PR211/PR212 (Isomax S), PR221DS,
+// PR222DS/P, PR222DS/PD, PR222MP, PR223DS, PR231/P, PR232/P, PR331/P, PR332/P, PR333/P (Tmax T),
+// PR121/P, PR122/P, PR123/P (Emax E) · Ekip (Tmax XT, Emax 2).
+const ABB_TM = ["TMF", "TMD", "TMA", "TMG", "MA"];
+const ABB_PR_ISOMAX = ["PR211", "PR212", "PR211/P", "PR212/P"];
+const ABB_PR_TMAX = ["PR221DS", "PR222DS/P", "PR222DS/PD", "PR222MP", "PR223DS", "PR231/P", "PR232/P", "PR331/P", "PR332/P", "PR333/P"];
+const ABB_PR_EMAX = ["PR121/P", "PR122/P", "PR123/P"];
+const ABB_EKIP = ["Ekip Dip", "Ekip Touch", "Ekip Hi-Touch", "Ekip G Touch", "Ekip M Touch", "Ekip LCD"];
+// Siemens : 3WL ETU15B…ETU76B · 3WA ETU600 · 3VA1 thermique-magnétique TM · 3VA2/3VA6 électroniques ETU3xx/5xx/8xx.
+const SIEMENS_3WL = ["ETU15B", "ETU25B", "ETU27B", "ETU45B", "ETU55B", "ETU76B"];
+const SIEMENS_3WA = ["ETU600"];
+const SIEMENS_3VA1 = ["TM120M", "TM210", "TM220", "TM240"];
+const SIEMENS_3VA2 = ["ETU310M", "ETU320", "ETU330", "ETU340", "ETU350", "ETU350M", "ETU550", "ETU560", "ETU850", "ETU860", "ETU860M"];
+// Legrand : DMX³ unités MP 2.10 / MP 4.10 (MP4) / MP6 · DPX / DPX³ magnétothermique, électronique, HP (S10).
+const LEGRAND_DMX = ["MP 2.10", "MP 4.10", "MP4", "MP6"];
+const LEGRAND_DPX = ["Magnétothermique", "Électronique", "Électronique HP (S10)"];
+// Eaton / Moeller NZM : magnétothermique (-A), électroniques (-VE / -VX), protection moteur (-ME).
+const EATON_NZM = ["Magnétothermique (-A)", "Électronique (-VE)", "Électronique (-VX)", "Moteur (-ME)"];
 const MARQUE_GAMME_RELAIS_BT = {
-  "Schneider Electric": ["Micrologic 2.0", "Micrologic 5.0", "Micrologic 6.0", "Micrologic 7.0"],
-  "Merlin Gerin": ["Micrologic 2.0", "Micrologic 5.0", "Micrologic 6.0"],
-  "ABB": ["Ekip Touch", "Ekip Dip", "Ekip LCD", "Ekip Hi-Touch"],
-  "Siemens": ["ETU25B", "ETU45B", "ETU76B"],
-  "Eaton": ["Digitrip 3000", "IZM trip unit"],
-  "Legrand": ["Micrologic (DMX³)"],
+  "Schneider Electric": [...MICROLOGIC_2_7, ...MICROLOGIC_X, ...MICROLOGIC_NSX, ...STR_COMPACT_NS, ...STR_MASTERPACT_M, ...TM_SCHNEIDER],
+  "Merlin Gerin": [...MICROLOGIC_2_7, ...MICROLOGIC_NSX, ...STR_COMPACT_NS, ...STR_MASTERPACT_M, ...TM_SCHNEIDER],
+  "ABB": [...ABB_TM, ...ABB_PR_ISOMAX, ...ABB_PR_TMAX, ...ABB_PR_EMAX, ...ABB_EKIP],
+  "Siemens": [...SIEMENS_3WL, ...SIEMENS_3WA, ...SIEMENS_3VA1, ...SIEMENS_3VA2],
+  "Eaton": [...EATON_NZM, "Digitrip 3000", "IZM trip unit"],
+  "Moeller": [...EATON_NZM, "IZM trip unit"],
+  "Legrand": [...LEGRAND_DMX, ...LEGRAND_DPX],
   "General Electric": ["Entelliguard TU"],
 };
+// Déclencheurs ASSOCIÉS à un disjoncteur donné : règles testées dans l'ordre sur "modèle + type" (texte
+// libre accepté). Seuls les couples vérifiés en documentation sont listés ; sans règle qui colle, le
+// champ retombe sur la famille de la marque du déclencheur (un déclencheur peut être d'une autre
+// marque que le disjoncteur — rétrofit).
+const DECLENCHEURS_BT_REGLES = [
+  [/masterpact\s*m\s*\d|\bm(08|10|12|16|20|25|32|40|50|63)\b/, [...STR_MASTERPACT_M, "Micrologic 2.0", "Micrologic 5.0", "Micrologic 6.0", "Micrologic 7.0"]],
+  [/mtz/, MICROLOGIC_X],
+  [/masterpact\s*n[tw]|\bn[tw]\s*\d/, MICROLOGIC_2_7],
+  [/nsxm/, ["TM-D", "Micrologic 4.1"]],
+  [/nsx/, [...TM_SCHNEIDER, ...MICROLOGIC_NSX]],
+  [/ns\s*(80|100|160|250)\b/, [...TM_SCHNEIDER, "STR22ME", "STR22GE", "STR22SE"]],
+  [/ns\s*(400|630)\b/, ["STR23SE", "STR23SP", "STR43ME", "STR53UE", "STR53UP", ...MICROLOGIC_2_7]],
+  [/ns\s*(630b|800|1000|1250|1600|2000|2500|3200)/, [...MICROLOGIC_2_7, "STR25DE", "STR35SE/GE", "STR45AE", "STR45BE", "STR55UE"]],
+  [/isomax|\bs[1-8]\b/, [...ABB_TM, ...ABB_PR_ISOMAX]],
+  [/emax\s*2|\be[1-6]\.2\b/, ["Ekip Dip", "Ekip Touch", "Ekip Hi-Touch", "Ekip G Touch"]],
+  [/emax\s*x1|\bx1\b/, ["PR331/P", "PR332/P", "PR333/P"]],
+  [/emax|\be[1-6]\b/, ABB_PR_EMAX],
+  [/xt\s*[1-7]/, [...ABB_TM, "Ekip Dip", "Ekip Touch", "Ekip Hi-Touch", "Ekip G Touch", "Ekip M Touch"]],
+  [/\bt7\b/, ["PR231/P", "PR232/P", "PR331/P", "PR332/P"]],
+  [/\bt8\b/, ["PR331/P", "PR332/P", "PR333/P"]],
+  [/\bt[4-6]\b/, ["TMD", "TMA", "TMG", "MA", "PR221DS", "PR222DS/P", "PR222DS/PD", "PR222MP", "PR223DS"]],
+  [/\bt[1-3]\b|ts3/, ["TMF", "TMD", "TMA", "MA", "PR221DS"]],
+  [/3wa/, SIEMENS_3WA],
+  [/3wl|sentron\s*wl/, SIEMENS_3WL],
+  [/3va1/, SIEMENS_3VA1],
+  [/3va2|3va6|3va27/, SIEMENS_3VA2],
+  [/dmx/, LEGRAND_DMX],
+  [/dpx/, LEGRAND_DPX],
+  [/nzm/, EATON_NZM],
+];
+function declencheursAssocies(identification) {
+  const texte = `${(identification && identification.modele) || ""} ${(identification && identification.typeDisjoncteur) || ""}`.toLowerCase().replace(/³/g, "3");
+  for (const [re, unites] of DECLENCHEURS_BT_REGLES) if (re.test(texte)) return unites;
+  return null;
+}
+// Référence du déclencheur : déclencheurs associés au disjoncteur en tête de liste ; si une marque de
+// déclencheur est choisie, on ne garde que ceux de cette marque (puis le reste de sa famille).
+function referencesDeclencheurBT(identification) {
+  const marqueRelais = identification && identification.marqueRelais;
+  const famille = marqueRelais && MARQUE_GAMME_RELAIS_BT[marqueRelais];
+  const assoc = declencheursAssocies(identification);
+  if (assoc && famille) {
+    const communs = assoc.filter((u) => famille.includes(u));
+    return communs.length ? [...communs, ...famille.filter((u) => !communs.includes(u))] : famille;
+  }
+  return assoc || famille || combineValues(MARQUE_GAMME_RELAIS_BT);
+}
 const LISTE_REF_DISJONCTEUR = ["SF1", "ORTHOFLUOR"];
 const LISTE_TYPE_CELLULE = {
   "Interrupteur HTA": ["INTERRUPTEUR - IM", "INTERRUPTEUR - IS", "INTERRUPTEUR - N1G", "INTERRUPTEUR - SDC"],
@@ -629,7 +705,7 @@ const MARQUE_TYPE_DISJONCTEUR_BT = {
   "Schneider Electric": ["MASTERPACT", "COMPACT"],
   "Merlin Gerin": ["MASTERPACT", "COMPACT"],
   "ABB": ["ISOMAX", "EMAX", "EMAX 2", "TMAX"],
-  "Siemens": ["3WL", "3WN", "3VA"],
+  "Siemens": ["3WL", "3WN", "3WA", "3VA", "3VL"],
   "Eaton": ["NZM", "IZM"],
   "Moeller": ["NZM", "IZM"],
   "Legrand": ["DMX", "DMX³", "DPX"],
@@ -669,19 +745,35 @@ function combineValues(mapping) {
 }
 const LISTE_MODELE_CELLULE_HTA_OPTIONS = optionsParMarque(MARQUE_MODELE_CELLULE_HTA, combineValues(MARQUE_MODELE_CELLULE_HTA));
 // Modèle BT = variante/calibre réel dans la gamme du disjoncteur (ex. Masterpact MTZ1/MTZ2/MTZ3).
+const MODELES_MASTERPACT_M = ["M08", "M10", "M12", "M16", "M20", "M25", "M32", "M40", "M50", "M63"].map((m) => `Masterpact ${m}`);
+const MODELES_MASTERPACT_NT_NW = ["Masterpact NT", "Masterpact NT06", "Masterpact NT08", "Masterpact NT10", "Masterpact NT12", "Masterpact NT16", "Masterpact NW", "Masterpact NW08", "Masterpact NW10", "Masterpact NW12", "Masterpact NW16", "Masterpact NW20", "Masterpact NW25", "Masterpact NW32", "Masterpact NW40", "Masterpact NW40b", "Masterpact NW50", "Masterpact NW63"];
+const MODELES_COMPACT_NS = ["Compact NS", "Compact NS80H", "Compact NS100", "Compact NS160", "Compact NS250", "Compact NS400", "Compact NS630", "Compact NS630b", "Compact NS800", "Compact NS1000", "Compact NS1250", "Compact NS1600", "Compact NS1600b", "Compact NS2000", "Compact NS2500", "Compact NS3200"];
 const MARQUE_MODELE_BT = {
-  "Schneider Electric": ["Compact NSX100", "Compact NSX250", "Compact NSX630", "Masterpact MTZ1", "Masterpact MTZ2", "Masterpact MTZ3", "Masterpact NT", "Masterpact NW"],
-  "Merlin Gerin": ["Compact NS", "Masterpact NT", "Masterpact NW"],
-  "ABB": ["Tmax T1", "Tmax T4", "Tmax T7", "Isomax S4", "Isomax S6", "Emax E1", "Emax E2", "Emax E3", "Emax E4", "Emax E6"],
-  "Siemens": ["3VA1", "3VA2", "3WL04", "3WL08", "3WL10"],
-  "Eaton": ["NZM1", "NZM2", "NZM3", "IZM16", "IZM26"],
+  "Schneider Electric": ["Compact NSXm", "Compact NSX100", "Compact NSX160", "Compact NSX250", "Compact NSX400", "Compact NSX630", ...MODELES_COMPACT_NS, "Masterpact MTZ1", "Masterpact MTZ2", "Masterpact MTZ3", ...MODELES_MASTERPACT_NT_NW, ...MODELES_MASTERPACT_M],
+  "Merlin Gerin": [...MODELES_COMPACT_NS, ...MODELES_MASTERPACT_NT_NW, ...MODELES_MASTERPACT_M],
+  "ABB": ["Tmax T1", "Tmax T2", "Tmax T3", "Tmax T4", "Tmax T5", "Tmax T6", "Tmax T7", "Tmax T8", "Tmax XT1", "Tmax XT2", "Tmax XT3", "Tmax XT4", "Tmax XT5", "Tmax XT6", "Tmax XT7", "Isomax S1", "Isomax S2", "Isomax S3", "Isomax S4", "Isomax S5", "Isomax S6", "Isomax S7", "Isomax S8", "Emax E1", "Emax E2", "Emax E3", "Emax E4", "Emax E6", "Emax X1", "Emax 2 E1.2", "Emax 2 E2.2", "Emax 2 E4.2", "Emax 2 E6.2"],
+  "Siemens": ["3VA1", "3VA2", "3VA6", "3VA27", "3WL04", "3WL08", "3WL10", "3WL11", "3WL12", "3WA"],
+  "Eaton": ["NZM1", "NZM2", "NZM3", "NZM4", "NZML2", "NZML3", "IZM16", "IZM26"],
   "Moeller": ["NZM", "IZM"],
-  "Legrand": ["DPX3 160", "DPX3 250", "DPX3 630", "DMX3 1600", "DMX3 2500", "DMX3 4000"],
+  "Legrand": ["DPX 125", "DPX 250", "DPX 630", "DPX 1600", "DPX3 160", "DPX3 250", "DPX3 630", "DPX3 1600", "DMX3 1600", "DMX3 2500", "DMX3 4000"],
   "General Electric": ["Record Plus", "Entelliguard G"],
 };
-const LISTE_MODELE_BT_OPTIONS = optionsParMarque(MARQUE_MODELE_BT, combineValues(MARQUE_MODELE_BT));
+// Modèle proposé selon la marque ET le type (famille) déjà choisi, pour ne montrer que les calibres de
+// la bonne gamme (ex. type Masterpact → M/NT/NW/MTZ, pas les Compact). Comparaison insensible à la
+// casse et aux exposants (DMX³ = DMX3). Sans résultat, retombe sur la liste de la marque.
+function modelesBTParType(identification) {
+  const marque = identification && identification.marque;
+  const type = identification && identification.typeDisjoncteur;
+  const liste = (marque && MARQUE_MODELE_BT[marque]) || combineValues(MARQUE_MODELE_BT);
+  if (!type) return liste;
+  const norm = (s) => String(s).toLowerCase().replace(/³/g, "3");
+  const t = norm(type);
+  const filtre = liste.filter((m) => { const n = norm(m); return n.includes(t) && !(t === "emax" && n.includes("emax 2")); });
+  return filtre.length ? filtre : liste;
+}
+const LISTE_MODELE_BT_OPTIONS = modelesBTParType;
 const LISTE_REFERENCE_RELAIS_HTA_OPTIONS = optionsParChamp("marqueRelais", MARQUE_GAMME_RELAIS_HTA, combineValues(MARQUE_GAMME_RELAIS_HTA));
-const LISTE_REFERENCE_RELAIS_BT_OPTIONS = optionsParChamp("marqueRelais", MARQUE_GAMME_RELAIS_BT, combineValues(MARQUE_GAMME_RELAIS_BT));
+const LISTE_REFERENCE_RELAIS_BT_OPTIONS = referencesDeclencheurBT;
 const MARQUE_MODELE_ONDULEUR = {
   "Schneider Electric": ["Galaxy VX", "Galaxy VS", "Galaxy PW", "Symmetra PX", "Comet"],
   "APC": ["Symmetra PX", "Smart-UPS"],
@@ -2533,14 +2625,14 @@ const SCHEMAS = {
         ]),
       ]},
       { key: "materiel_securite", title: "Matériel de sécurité (NF C18-510)", items: [
-        S("tabouret_tapis", "Tabouret ou tapis isolant", [F("present", "Présent", null, OUI_NON_LIST), F("dateVerification", "Date de dernière vérification", "date")]),
-        S("gants_isolants", "Gants isolants", [F("present", "Présent", null, OUI_NON_LIST), F("dateVerification", "Date de dernière vérification", "date")]),
-        S("perche_sauvetage", "Perche de sauvetage", [F("present", "Présent", null, OUI_NON_LIST), F("dateVerification", "Date de dernière vérification", "date")]),
-        S("perche_vat", "Perche de vérification d'absence de tension (VAT)", [F("present", "Présent", null, OUI_NON_LIST), F("dateVerification", "Date de dernière vérification", "date")]),
-        S("malt_cc", "Dispositif de mise à la terre et en court-circuit (MALT/CC)", [F("present", "Présent", null, OUI_NON_LIST), F("dateVerification", "Date de dernière vérification", "date")]),
-        S("extincteur", "Extincteur CO2 (adapté au risque électrique)", [F("present", "Présent", null, OUI_NON_LIST), F("dateVerification", "Date de dernier contrôle", "date")]),
+        S("tabouret_tapis", "Tabouret ou tapis isolant", [F("present", "Présent", null, OUI_NON_LIST), F("dateVerification", "Date de dernière vérification")]),
+        S("gants_isolants", "Gants isolants", [F("present", "Présent", null, OUI_NON_LIST), F("dateVerification", "Date de dernière vérification")]),
+        S("perche_sauvetage", "Perche de sauvetage", [F("present", "Présent", null, OUI_NON_LIST), F("dateVerification", "Date de dernière vérification")]),
+        S("perche_vat", "Perche de vérification d'absence de tension (VAT)", [F("present", "Présent", null, OUI_NON_LIST), F("dateVerification", "Date de dernière vérification")]),
+        S("malt_cc", "Dispositif de mise à la terre et en court-circuit (MALT/CC)", [F("present", "Présent", null, OUI_NON_LIST), F("dateVerification", "Date de dernière vérification")]),
+        S("extincteur", "Extincteur CO2 (adapté au risque électrique)", [F("present", "Présent", null, OUI_NON_LIST), F("dateVerification", "Date de dernier contrôle")]),
         S("lampe_securite", "Lampe de sécurité", [F("present", "Présent", null, OUI_NON_LIST)]),
-        S("casque_ecran", "Casque avec écran facial anti-UV / anti-arc", [F("present", "Présent", null, OUI_NON_LIST), F("dateVerification", "Date de dernière vérification", "date")]),
+        S("casque_ecran", "Casque avec écran facial anti-UV / anti-arc", [F("present", "Présent", null, OUI_NON_LIST), F("dateVerification", "Date de dernière vérification")]),
         S("balisage", "Balisage / signalisation de la zone de travail", [F("present", "Présent", null, OUI_NON_LIST)]),
         S("carnet_prescription", "Carnet de prescriptions / registre de consignation", [F("present", "Présent", null, OUI_NON_LIST)]),
       ]},
@@ -4452,6 +4544,16 @@ function ControlRow({ item, value, onChange, idPrefix, toleranceOverride }) {
                   </label>
                 );
               })()
+            ) : f.key === "dateVerification" ? (
+              <label key={f.key} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#8B96A3" }}>
+                {f.label}
+                <input
+                  type="date"
+                  value={fields[f.key] ?? ""}
+                  onChange={(e) => setField(f.key, e.target.value)}
+                  style={{ ...inputStyle, width: 150, padding: "5px 7px", fontSize: 12 }}
+                />
+              </label>
             ) : (
               <label key={f.key} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#8B96A3" }}>
                 {f.label}
@@ -7798,6 +7900,7 @@ function printFieldParts(item, value) {
   const fields = value.fields || {};
   (item.fields || []).forEach((f) => {
     if (f.key === "realise") return; // sa présence même dans le rapport indique déjà que c'est réalisé
+    if (f.key === "aide") return; // aide technicien (couple de serrage indicatif) : utile en saisie, pas dans le rapport — seule la valeur de couple renseignée par le technicien doit y figurer
     const v = f.compute ? f.compute(fields) : fields[f.key];
     const unitKey = f.unitFrom ? f.unitFrom + "Unite" : f.key + "Unite";
     const unit = f.unit ? fields[unitKey] || f.unit : "";
@@ -9442,6 +9545,42 @@ function docxHeading(text) {
 function docxNormeNote(texte) {
   return new DOCX.Paragraph({ spacing: { before: 20, after: 80 }, children: [new DOCX.TextRun({ text: texte, italics: true, size: 15, color: "666666" })] });
 }
+// Encart dédié à la comparaison mesure de référence / centrale de mesure interne — plus lisible
+// qu'une simple note en petit texte italique : chiffres clés en gras, fond coloré selon que l'écart
+// est notable (orange, > 5 %) ou cohérent (bleu/gris), même code couleur que l'app.
+function docxComparaisonEnergieBox(c) {
+  const ecartNotable = c.ecartPct !== null && Math.abs(c.ecartPct) > 5;
+  const bg = ecartNotable ? "FDF3E3" : "EEF2F6";
+  const fg = ecartNotable ? "8A5A0A" : "0A5DA8";
+  return new DOCX.Table({
+    width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: [TABLE_WIDTH],
+    rows: [new DOCX.TableRow({ children: [new DOCX.TableCell({
+      width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, shading: { type: DOCX.ShadingType.CLEAR, fill: bg },
+      margins: { top: 110, bottom: 110, left: 150, right: 150 },
+      children: [
+        new DOCX.Paragraph({ spacing: { after: 50 }, children: [
+          new DOCX.TextRun({ text: "Comparaison des mesures sur la période", bold: true, size: 19, color: fg }),
+        ]}),
+        new DOCX.Paragraph({ spacing: { after: 50 }, children: [
+          new DOCX.TextRun({ text: "Référence : ", size: 17, color: DOCX_DARK }),
+          new DOCX.TextRun({ text: `${c.deltaRef} kWh`, bold: true, size: 17, color: DOCX_DARK }),
+          new DOCX.TextRun({ text: "    Centrale interne : ", size: 17, color: DOCX_DARK }),
+          new DOCX.TextRun({ text: `${c.deltaCentrale} kWh`, bold: true, size: 17, color: DOCX_DARK }),
+          new DOCX.TextRun({ text: "    Écart : ", size: 17, color: DOCX_DARK }),
+          new DOCX.TextRun({ text: `${c.ecartKwh} kWh${c.ecartPct !== null ? ` (${c.ecartPct > 0 ? "+" : ""}${c.ecartPct} %)` : ""}`, bold: true, size: 17, color: fg }),
+        ]}),
+        new DOCX.Paragraph({ children: [
+          new DOCX.TextRun({
+            text: ecartNotable
+              ? "⚠ Écart notable (> 5 %, repère de vigilance courant, pas un seuil réglementaire) — vérifier la classe de précision de la centrale, le rapport de TC associé, ou un décalage entre les deux relevés."
+              : "Écart cohérent avec l'imprécision usuelle de mesure.",
+            size: 16, italics: true, color: fg,
+          }),
+        ]}),
+      ],
+    })] })],
+  });
+}
 function docxFieldRow(label, value) {
   return new DOCX.TableRow({ children: [
     new DOCX.TableCell({ width: { size: 3400, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_LIGHT }, children: [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: label, size: 18, color: "555555" })] })] }),
@@ -10845,16 +10984,7 @@ function docxEquipementElements(eq, locaux, allSites) {
     }
     if (sec.key === "bilan_energie" && eq.type === "Bilan de puissance") {
       const c = calcComparaisonEnergie(eq);
-      if (c) {
-        const ecartNotable = c.ecartPct !== null && Math.abs(c.ecartPct) > 5;
-        elements.push(docxNormeNote(
-          `Comparaison des mesures sur la période : référence = ${c.deltaRef} kWh, centrale interne = ${c.deltaCentrale} kWh — écart = ${c.ecartKwh} kWh` +
-          (c.ecartPct !== null ? ` (${c.ecartPct > 0 ? "+" : ""}${c.ecartPct} %)` : "") +
-          (ecartNotable
-            ? ". Écart notable (> 5 %, repère de vigilance courant, pas un seuil réglementaire) — vérifier la classe de précision de la centrale, le rapport de TC associé, ou un décalage entre les deux relevés."
-            : ". Écart cohérent avec l'imprécision usuelle de mesure.")
-        ));
-      }
+      if (c) elements.push(docxComparaisonEnergieBox(c));
     }
     elements.push(docxSpacer());
   });
