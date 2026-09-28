@@ -389,17 +389,27 @@ const LISTE_TEMPO_UNITE = ["ms", "s"];
 const LISTE_ETAT_SEUIL = ["", "Actif"];
 const LISTE_TR_MODE = ["Ajustable", "Fixe"];
 const LISTE_TR_CLASSE = ["1.5", "6"];
-const LISTE_RELAIS_MARQUE = ["SEPAM", "MICOM"];
 // Le relais de protection peut être d'une marque différente de celle de la cellule (ex. cellule
 // Schneider avec relais ABB) — sa marque et sa gamme sont donc indépendantes de celles de l'équipement.
 // HTA : relais de protection numériques autonomes.
-const LISTE_MARQUE_RELAIS_HTA = ["Schneider Electric", "Merlin Gerin", "ABB", "Siemens", "GE / Alstom", "Schweitzer Engineering Laboratories (SEL)", "Socomec", "Chauvin Arnoux"];
+const LISTE_MARQUE_RELAIS_HTA = ["Schneider Electric", "Merlin Gerin", "Areva", "Alstom", "GE / Alstom", "ABB", "Siemens", "Ormazabal", "VAMP", "Schweitzer Engineering Laboratories (SEL)", "Socomec", "Chauvin Arnoux"];
+// Familles de relais réutilisées entre plusieurs marques (la même gamme porte des plaques différentes
+// selon l'époque : MiCOM est née chez Alstom, est passée chez Areva T&D, puis chez Schneider Electric
+// en 2010 ; Sepam / VIP / Statimax sont d'origine Merlin Gerin).
+const RELAIS_MICOM = ["MiCOM P111", "MiCOM P12x", "MiCOM P13x", "MiCOM P14x", "MiCOM P22x", "MiCOM P24x", "MiCOM P34x", "MiCOM P44x", "MiCOM P52x", "MiCOM P54x", "MiCOM P63x", "MiCOM P64x", "MiCOM P72x", "MiCOM P74x", "MiCOM P84x"];
+const RELAIS_MICOM_ANCIENS = ["K-Series (KCGG / KCEG)", "MCGG", "CDG"];
+const RELAIS_SEPAM_ANCIENS = ["SEPAM 100", "SEPAM 1000+", "SEPAM 2000"];
+const RELAIS_VIP = ["VIP 35", "VIP 200", "VIP 201", "VIP 300 LL/LH", "VIP 400"];
 const MARQUE_GAMME_RELAIS_HTA = {
-  "Schneider Electric": ["SEPAM S20", "SEPAM S40", "SEPAM S80", "SEPAM T20", "SEPAM M20"],
-  "Merlin Gerin": ["SEPAM S20", "SEPAM S40", "SEPAM S80"],
-  "ABB": ["REF615", "REJ601", "REM620", "Relion 615"],
-  "Siemens": ["SIPROTEC 5", "SIPROTEC 4", "7SJ"],
-  "GE / Alstom": ["MiCOM P12x", "MiCOM P14x", "MiCOM P54x"],
+  "Schneider Electric": ["SEPAM série 10", "SEPAM série 20", "SEPAM série 40", "SEPAM série 60", "SEPAM série 80", "SEPAM S20", "SEPAM S40", "SEPAM S80", "SEPAM T20", "SEPAM M20", ...RELAIS_SEPAM_ANCIENS, "Statimax", ...RELAIS_VIP, "Easergy P3", "Easergy P5", "VAMP 50 (série)", "VAMP 200 (série)", ...RELAIS_MICOM],
+  "Merlin Gerin": ["SEPAM S20", "SEPAM S40", "SEPAM S80", ...RELAIS_SEPAM_ANCIENS, "Statimax", ...RELAIS_VIP],
+  "Areva": [...RELAIS_MICOM, ...RELAIS_MICOM_ANCIENS],
+  "Alstom": [...RELAIS_MICOM, ...RELAIS_MICOM_ANCIENS],
+  "GE / Alstom": [...RELAIS_MICOM, ...RELAIS_MICOM_ANCIENS],
+  "ABB": ["REF615", "REJ601", "REM620", "Relion 615", "Relion 611", "Relion 620", "Relion 630", "REF541", "REF542plus", "REF543", "REF545", "REF610", "REF620", "REF630", "REM610", "REM615", "REM630", "REU610", "REX521", "REJ603", "SPAJ 140 C", "SPAJ 141 C", "SPAJ 142 C", "SPAJ 144 C"],
+  "Siemens": ["SIPROTEC 5", "SIPROTEC 4", "SIPROTEC Compact", "7SJ", "7SJ600", "7SJ511", "7SJ512", "7SJ531", "7SJ61", "7SJ62", "7SJ63", "7SJ64", "7SJ80", "7SJ81", "7SJ82", "7SJ85", "7SK80"],
+  "Ormazabal": ["ekor.rpg", "ekor.rpt", "ekor.rps", "ekor.rci", "ekor.rpa", "ekor.sys", "RPGM", "RPTA"],
+  "VAMP": ["VAMP 50 (série)", "VAMP 200 (série)"],
   "Schweitzer Engineering Laboratories (SEL)": ["SEL-751", "SEL-387", "SEL-700G"],
   "Socomec": ["Diris A40", "Diris A60"],
   "Chauvin Arnoux": ["Centrale CVM-NRJ"],
@@ -423,6 +433,109 @@ const LISTE_TYPE_CELLULE = {
   "Disjoncteur HTA": ["DISJONCTEUR - DM1", "DISJONCTEUR - D1G", "DISJONCTEUR - DM2", "DISJONCTEUR - D2G", "DISJONCTEUR - PGC", "DISJONCTEUR - PGB", "DISJONCTEUR - SBC"],
   "Contacteur HTA": ["DISJONCTEUR - DM1", "DISJONCTEUR - D1G", "DISJONCTEUR - DM2", "DISJONCTEUR - D2G", "DISJONCTEUR - PGC", "DISJONCTEUR - PGB", "DISJONCTEUR - SBC"],
 };
+// Codes de fonction ("Type de cellule") propres à chaque gamme constructeur — repris des catalogues
+// et notices : Schneider SM6-24 / RM6, Alstom-Areva Fluokit M24/M+, Cahors GRANY, ABB SafeRing/SafePlus,
+// Siemens 8DJH, Ormazabal cgmcosmos. Un code n'a de sens que dans sa gamme (un "L" n'est pas la même
+// fonction chez Siemens et chez Ormazabal) : la liste proposée dépend donc du Modèle choisi, puis à
+// défaut de la Marque, puis retombe sur la liste historique. Saisie libre toujours possible.
+// Gammes dont les codes n'ont pas pu être vérifiés (PIX, Premset, MCset, VM6, Normabloc, Fluomatic,
+// xiria, FluoCell…) : volontairement absentes, elles gardent la liste historique.
+const TYPE_CELLULE_PAR_GAMME = {
+  // SM6 : IM/IMC/IMB interrupteur · EMB mise à la terre barres · PM interrupteur-fusibles associés ·
+  // QM/QMC/QMB combiné interrupteur-fusibles · CRM/CVM contacteur · DM1-A/D/S disjoncteur SF6
+  // déconnectable · DMV-A/D/S idem vide · DMVL latéral · DM1-W/Z débrochable · DM2 double
+  // sectionnement · CM/CM2 transformateurs de potentiel · GBC-A/B mesures I/U · NSM arrivée
+  // prioritaire+secours · GIM/GEM/GBM gaines · GAM/GAM2 gaine d'arrivée · SM sectionneur · TM transfo aux.
+  "SM6": {
+    "Interrupteur HTA": ["INTERRUPTEUR - IM", "INTERRUPTEUR - IMC", "INTERRUPTEUR - IMB", "INTERRUPTEUR - SM", "INTERRUPTEUR - NSM-câbles", "INTERRUPTEUR - NSM-barres", "INTERRUPTEUR - GAM", "INTERRUPTEUR - GAM2", "INTERRUPTEUR - GIM", "INTERRUPTEUR - GEM", "INTERRUPTEUR - GBM", "INTERRUPTEUR - EMB"],
+    "Interrupteur Fusible HTA": ["INTERRUPTEUR-FUSIBLE - QM", "INTERRUPTEUR-FUSIBLE - QMC", "INTERRUPTEUR-FUSIBLE - QMB", "INTERRUPTEUR-FUSIBLE - PM"],
+    "Disjoncteur HTA": ["DISJONCTEUR - DM1-A", "DISJONCTEUR - DM1-D", "DISJONCTEUR - DM1-S", "DISJONCTEUR - DM1-W", "DISJONCTEUR - DM1-Z", "DISJONCTEUR - DM2", "DISJONCTEUR - DMV-A", "DISJONCTEUR - DMV-D", "DISJONCTEUR - DMV-S", "DISJONCTEUR - DMVL-A", "DISJONCTEUR - DMVL-D"],
+    "Comptage HTA": ["COMPTAGE - CM", "COMPTAGE - CM2", "COMPTAGE - GBC-A", "COMPTAGE - GBC-B", "COMPTAGE - TM"],
+  },
+  // RM6 (monobloc de 1 à 4 fonctions, configurations NE / RE / LE / DE = non extensible, extensible à
+  // droite / à gauche, module extensible) : I interrupteur 400-630 A · Q interrupteur-fusibles combinés
+  // 200 A · D disjoncteur 200 A (départ transformateur) · B disjoncteur 630 A (départ ligne) · D2S
+  // double sectionnement · IC/BC couplage interrupteur/disjoncteur · O raccordement câble · T transfo
+  // de potentiel · Mt mesure MT.
+  "RM6": {
+    "Interrupteur HTA": ["INTERRUPTEUR - I", "INTERRUPTEUR - IC", "INTERRUPTEUR - O"],
+    "Interrupteur Fusible HTA": ["INTERRUPTEUR-FUSIBLE - Q"],
+    "Disjoncteur HTA": ["DISJONCTEUR - D", "DISJONCTEUR - B", "DISJONCTEUR - D2S", "DISJONCTEUR - BC"],
+    "Comptage HTA": ["COMPTAGE - Mt", "COMPTAGE - T"],
+  },
+  // Fluokit M24 / M24+ / M+ (Alstom → Areva → Schneider) : IS interrupteur-sectionneur (arrivée ou
+  // départ) · PF protection par interrupteur-fusibles associés · PFA idem combinés (percuteur) · PGB
+  // protection générale départ barres · PGC protection générale départ câbles (PGC+LR = couplage +
+  // remontée barres) · TM mesure/comptage HTA · LST arrivée directe · LR remontée de barres · LD.
+  "Fluokit M24": {
+    "Interrupteur HTA": ["INTERRUPTEUR - IS", "INTERRUPTEUR - LST", "INTERRUPTEUR - LR", "INTERRUPTEUR - LD"],
+    "Interrupteur Fusible HTA": ["INTERRUPTEUR-FUSIBLE - PF", "INTERRUPTEUR-FUSIBLE - PFA"],
+    "Disjoncteur HTA": ["DISJONCTEUR - PGB", "DISJONCTEUR - PGC", "DISJONCTEUR - PGC + LR"],
+    "Comptage HTA": ["COMPTAGE - TM"],
+  },
+  // Cahors GRANY : N1G arrivée interrupteur (N1GM motorisée, N1CG avec TC) · N6G arrivée directe ·
+  // DDG arrivées interrupteur en double dérivation (PASA) · CCG caisson câbles secs · P3G interrupteur
+  // fusibles combinés · P3CG idem avec transformateurs de courant · D1G disjoncteur départ câbles ·
+  // D2G disjoncteur départ barres · N5G transformateurs de tension (comptage) · N5GST TT sous-tirage
+  // de tranche. N3G : ancienne référence interrupteur-fusible, conservée (données existantes).
+  "GRANY": {
+    "Interrupteur HTA": ["INTERRUPTEUR - N1G", "INTERRUPTEUR - N1GM", "INTERRUPTEUR - N1CG", "INTERRUPTEUR - N6G", "INTERRUPTEUR - DDG", "INTERRUPTEUR - CCG"],
+    "Interrupteur Fusible HTA": ["INTERRUPTEUR-FUSIBLE - P3G", "INTERRUPTEUR-FUSIBLE - P3CG", "INTERRUPTEUR-FUSIBLE - N3G"],
+    "Disjoncteur HTA": ["DISJONCTEUR - D1G", "DISJONCTEUR - D2G"],
+    "Comptage HTA": ["COMPTAGE - N5G", "COMPTAGE - N5GST"],
+  },
+  // ABB SafeRing / SafePlus : C interrupteur-sectionneur (cable switch) · F interrupteur-fusibles ·
+  // V disjoncteur à vide · CB module disjoncteur SafePlus · D raccordement câble direct · De idem avec
+  // mise à la terre · Sl / Sv sectionnement de barres (interrupteur / disjoncteur) · M mesure · Be.
+  "SafeRing": {
+    "Interrupteur HTA": ["INTERRUPTEUR - C", "INTERRUPTEUR - D", "INTERRUPTEUR - De", "INTERRUPTEUR - Sl", "INTERRUPTEUR - Be"],
+    "Interrupteur Fusible HTA": ["INTERRUPTEUR-FUSIBLE - F"],
+    "Disjoncteur HTA": ["DISJONCTEUR - V", "DISJONCTEUR - CB", "DISJONCTEUR - Sv"],
+    "Comptage HTA": ["COMPTAGE - M"],
+  },
+  // Siemens 8DJH : R départ boucle (ring-main) · K départ câble · K(E) avec sectionneur de terre à
+  // pouvoir de fermeture · S sectionnement de barres (interrupteur-sectionneur) · E mise à la terre de
+  // barres · T départ transformateur (fusibles) · H sectionnement de barres avec interrupteur-fusibles
+  // · L départ disjoncteur · V sectionnement de barres avec disjoncteur · M comptage.
+  "8DJH": {
+    "Interrupteur HTA": ["INTERRUPTEUR - R", "INTERRUPTEUR - K", "INTERRUPTEUR - K(E)", "INTERRUPTEUR - S", "INTERRUPTEUR - E"],
+    "Interrupteur Fusible HTA": ["INTERRUPTEUR-FUSIBLE - T", "INTERRUPTEUR-FUSIBLE - H"],
+    "Disjoncteur HTA": ["DISJONCTEUR - L", "DISJONCTEUR - V"],
+    "Comptage HTA": ["COMPTAGE - M"],
+  },
+  // Ormazabal cgmcosmos : L départ (interrupteur) · P protection par fusibles · V protection par
+  // disjoncteur (vide) · S sectionnement de barres (S-Pt avec mise à la terre) · RC / R2C remontée de
+  // câble (simple / double) · RB remontée de barres (RB-Pt avec mise à la terre) · M mesure. Compacts
+  // (2LP, RLP, 2L, 3L, 3LP, 2L2P, 3L2P) : combinaisons de ces fonctions dans un même bloc.
+  "cgmcosmos": {
+    "Interrupteur HTA": ["INTERRUPTEUR - L", "INTERRUPTEUR - S", "INTERRUPTEUR - S-Pt", "INTERRUPTEUR - RC", "INTERRUPTEUR - R2C", "INTERRUPTEUR - RB", "INTERRUPTEUR - RB-Pt"],
+    "Interrupteur Fusible HTA": ["INTERRUPTEUR-FUSIBLE - P"],
+    "Disjoncteur HTA": ["DISJONCTEUR - V"],
+    "Comptage HTA": ["COMPTAGE - M"],
+  },
+};
+// Variantes d'une même gamme (mêmes codes de fonction).
+["Fluokit M24+", "Fluokit M+", "Fluokit N24+", "Fluokit C24"].forEach((g) => { TYPE_CELLULE_PAR_GAMME[g] = TYPE_CELLULE_PAR_GAMME["Fluokit M24"]; });
+["SafePlus"].forEach((g) => { TYPE_CELLULE_PAR_GAMME[g] = TYPE_CELLULE_PAR_GAMME["SafeRing"]; });
+["8DJH 36"].forEach((g) => { TYPE_CELLULE_PAR_GAMME[g] = TYPE_CELLULE_PAR_GAMME["8DJH"]; });
+["cgmcosmos-P", "cgm.3", "CGM"].forEach((g) => { TYPE_CELLULE_PAR_GAMME[g] = TYPE_CELLULE_PAR_GAMME["cgmcosmos"]; });
+// Liste de "Type de cellule" pour une fonction donnée : gamme (Modèle) si connue → sinon union des
+// gammes de la marque qui ont des codes vérifiés → sinon liste historique (toutes marques confondues).
+function typeCelluleParGamme(equipType) {
+  return (identification) => {
+    const modele = identification && identification.modele;
+    const marque = identification && identification.marque;
+    const direct = modele && TYPE_CELLULE_PAR_GAMME[modele] && TYPE_CELLULE_PAR_GAMME[modele][equipType];
+    if (direct) return direct;
+    const gammes = (marque && MARQUE_MODELE_CELLULE_HTA[marque]) || [];
+    const union = [];
+    gammes.forEach((g) => {
+      const codes = TYPE_CELLULE_PAR_GAMME[g] && TYPE_CELLULE_PAR_GAMME[g][equipType];
+      if (codes) codes.forEach((c) => { if (!union.includes(c)) union.push(c); });
+    });
+    return union.length ? union : LISTE_TYPE_CELLULE[equipType];
+  };
+}
 const LISTE_MARQUE_BRK = ["MASTERPACT", "COMPACT", "IZM", "NZM", "MEGAMAX", "ISOMAX", "EMAX", "EMAX 2", "SPECTRONIC", "MPACT", "3WL", "3WN", "DMX", "DMX³", "DPX"];
 // Type de cellule du contacteur HTA, par marque (contrairement aux disjoncteurs/interrupteurs, la
 // gamme "contacteur" est plus restreinte chez certains constructeurs).
@@ -474,7 +587,7 @@ const LISTE_RESULTAT_TRANSFERT_AUTO = ["Réalisé et conforme", "Non conforme", 
 const LISTE_CONCLUSION_DGA = ["Normal", "Surveillance", "Alerte", "Critique"];
 const LISTE_MARQUE_TDY = ["ABB", "ALSTOM", "AREVA", "CAHORS", "CONTI TRANSFO", "EFACEC", "ELKIMA", "France TRANSFO", "GBE", "MATELEC", "MERLIN GERIN", "PAUWELS", "SCHNEIDER ELECTRIC", "SIEMENS", "SNT DURIEZ", "UNELEC", "GENERAL ELECTRIC", "SGB-SMIT", "TRIHAL", "COTRADIS", "NIDEC", "TRAFOLYX", "IMEFY", "ORMAZABAL"];
 // Marques courantes par catégorie d'équipement — liste + saisie libre (une valeur absente reste saisissable).
-const LISTE_MARQUE_CELLULE_HTA = ["Schneider Electric", "Merlin Gerin", "ABB", "Siemens", "Alstom Grid", "Areva", "GE Grid Solutions", "Nexans", "CG Power", "Ormazabal", "Eaton", "Ensto", "Normelec", "SM6", "Fuji Electric"];
+const LISTE_MARQUE_CELLULE_HTA = ["Schneider Electric", "Merlin Gerin", "ABB", "Siemens", "Areva", "Alstom", "GEC Alsthom", "Alstom Grid", "Cahors", "Pommier", "CEM", "GE Grid Solutions", "Nexans", "CG Power", "Ormazabal", "Eaton", "Ensto", "Normelec", "SM6", "Fuji Electric"];
 const LISTE_MARQUE_APPAREILLAGE_BT = ["Schneider Electric", "Merlin Gerin", "ABB", "Siemens", "Legrand", "Eaton", "General Electric", "Hager", "Socomec", "Moeller", "Terasaki", "Chint"];
 const LISTE_MARQUE_ELEMENT_BATTERIE = ["EnerSys", "Yuasa", "Hoppecke", "Saft", "FIAMM", "CEAC", "Exide", "Alcad", "Oldham", "Sonnenschein", "Powersafe", "HAZE", "Panasonic", "C&D Technologies", "Fulmen"];
 const LISTE_MARQUE_ONDULEUR = ["Schneider Electric", "APC", "MGE UPS", "Eaton", "Riello UPS", "Socomec", "Vertiv", "Emerson", "Liebert", "Legrand", "ABB", "General Electric", "Delta", "Chloride", "Borri", "Piller", "Newave"];
@@ -525,15 +638,25 @@ const MARQUE_TYPE_DISJONCTEUR_BT = {
 const LISTE_TYPE_DISJONCTEUR_BT_OPTIONS = optionsParMarque(MARQUE_TYPE_DISJONCTEUR_BT, LISTE_MARQUE_BRK);
 // Modèle = gamme commerciale réelle du constructeur (ex. Schneider SM6, ABB UniSec) — distincte du
 // "Type de cellule" qui reste la variante fonctionnelle (interrupteur/disjoncteur, référence interne).
+// Gammes historiques incluses (repérées en maintenance HTA en France) : Fluokit / Fluomatic / Normabloc
+// (Alstom → Areva → Schneider), Fluair / Belledonne / Venus / V-series (Merlin Gerin), Grany / Nogaris
+// / Antares / Transbloc (Cahors-Pommier), Kit 25/27 / Cemabloc (CEM). La saisie libre reste possible.
+const GAMMES_ALSTOM_AREVA = ["Fluokit M24", "Fluokit M24+", "Fluokit M+", "Fluokit N24+", "Fluokit C24", "Fluomatic F500", "Normabloc", "Normasept", "DNF", "DNL", "ND", "KIT 25", "KIT 27", "PIX", "Gemini", "FBX"];
+const GAMMES_CAHORS = ["GRANY", "NOGARIS", "ANTARES", "TRANSBLOC 92"];
 const MARQUE_MODELE_CELLULE_HTA = {
-  "Schneider Electric": ["SM6", "RM6", "PIX", "Premset", "GHA"],
-  "Merlin Gerin": ["SM6", "RM6", "GHA"],
-  "ABB": ["UniSec", "SafeRing", "SafePlus", "UniGear ZS1"],
-  "Siemens": ["8DJH", "NXPLUS C", "SIMOSEC"],
-  "Ormazabal": ["cgmCosmos", "cgmCosmos-P", "CGC"],
+  "Schneider Electric": ["SM6", "RM6", "PIX", "Premset", "GHA", "MCset", "MC500", "Fluair", "Fluokit M24", "Fluokit M24+", "Fluokit M+", "Fluokit N24+"],
+  "Merlin Gerin": ["SM6", "RM6", "GHA", "VM6", "V23", "V500", "V700", "PY", "Fluair", "Belledonne", "Venus", "MCset", "Motorstart"],
+  "ABB": ["UniSec", "SafeRing", "SafePlus", "UniGear ZS1", "UniGear ZS3.2", "UniGear", "Safelink", "Safegear", "Uniswitch"],
+  "Siemens": ["8DJH", "8DJH 36", "8DJ10", "8DJ20", "8DH10", "NXPLUS C", "NXPLUS", "NXAIR", "SIMOSEC", "SIMOPRIME", "8BT2", "8DA10", "8DB10"],
+  "Ormazabal": ["cgmcosmos", "cgmcosmos-P", "CGC", "CGM", "cgm.3", "cgm.800", "ga / gae"],
+  "Cahors": GAMMES_CAHORS,
+  "Pommier": GAMMES_CAHORS,
+  "CEM": ["KIT 25", "KIT 27", "Cemabloc", "Cemafluor"],
+  "Areva": GAMMES_ALSTOM_AREVA,
+  "Alstom": GAMMES_ALSTOM_AREVA,
+  "GEC Alsthom": GAMMES_ALSTOM_AREVA,
+  "Alstom Grid": GAMMES_ALSTOM_AREVA,
   "GE Grid Solutions": ["Gemini", "FBX"],
-  "Alstom Grid": ["Gemini", "FBX"],
-  "Areva": ["Gemini", "FBX"],
   "Eaton": ["xiria", "SVS"],
   "CG Power": ["RMU-CG"],
 };
@@ -557,7 +680,7 @@ const MARQUE_MODELE_BT = {
   "General Electric": ["Record Plus", "Entelliguard G"],
 };
 const LISTE_MODELE_BT_OPTIONS = optionsParMarque(MARQUE_MODELE_BT, combineValues(MARQUE_MODELE_BT));
-const LISTE_REFERENCE_RELAIS_HTA_OPTIONS = optionsParChamp("marqueRelais", MARQUE_GAMME_RELAIS_HTA, LISTE_RELAIS_MARQUE);
+const LISTE_REFERENCE_RELAIS_HTA_OPTIONS = optionsParChamp("marqueRelais", MARQUE_GAMME_RELAIS_HTA, combineValues(MARQUE_GAMME_RELAIS_HTA));
 const LISTE_REFERENCE_RELAIS_BT_OPTIONS = optionsParChamp("marqueRelais", MARQUE_GAMME_RELAIS_BT, combineValues(MARQUE_GAMME_RELAIS_BT));
 const MARQUE_MODELE_ONDULEUR = {
   "Schneider Electric": ["Galaxy VX", "Galaxy VS", "Galaxy PW", "Symmetra PX", "Comet"],
@@ -1899,7 +2022,7 @@ function buildInterrupteurHTASchema({ avecRelais = false } = {}) {
   return {
     identification: [
       { key: "repere", label: "Repère / Nom de l'équipement" }, { key: "marque", label: "Marque", options: LISTE_MARQUE_CELLULE_HTA }, { key: "modele", label: "Modèle", options: LISTE_MODELE_CELLULE_HTA_OPTIONS },
-      { key: "typeCellule", label: "Type de cellule", options: LISTE_TYPE_CELLULE["Interrupteur HTA"] }, { key: "numeroSerie", label: "Numéro de série" },
+      { key: "typeCellule", label: "Type de cellule", options: typeCelluleParGamme("Interrupteur HTA") }, { key: "numeroSerie", label: "Numéro de série" },
       { key: "presenceRelais", label: "Présence d'un relais de protection", options: ["Non", "Oui"] },
       ...(avecRelais ? [{ key: "rapportTPProtection", label: "Rapport TP de protection", options: LISTE_RAPPORT_TP }] : []),
     ],
@@ -1932,7 +2055,7 @@ function buildInterrupteurFusibleHTASchema({ avecRelais = false } = {}) {
   return {
     identification: [
       { key: "repere", label: "Repère / Nom de l'équipement" }, { key: "marque", label: "Marque", options: LISTE_MARQUE_CELLULE_HTA }, { key: "modele", label: "Modèle", options: LISTE_MODELE_CELLULE_HTA_OPTIONS },
-      { key: "typeCellule", label: "Type de cellule", options: LISTE_TYPE_CELLULE["Interrupteur Fusible HTA"] }, { key: "numeroSerie", label: "Numéro de série" },
+      { key: "typeCellule", label: "Type de cellule", options: typeCelluleParGamme("Interrupteur Fusible HTA") }, { key: "numeroSerie", label: "Numéro de série" },
       { key: "presenceRelais", label: "Présence d'un relais de protection", options: ["Non", "Oui"] },
       ...(avecRelais ? [{ key: "rapportTPProtection", label: "Rapport TP de protection", options: LISTE_RAPPORT_TP }] : []),
       { key: "transformateurAssocie", label: "Transformateur associé (repère, pour le contrôle du calibre fusible)" },
@@ -1965,7 +2088,7 @@ function buildInterrupteurFusibleHTASchema({ avecRelais = false } = {}) {
 const SCHEMAS = {
   "Interrupteur HTA": buildInterrupteurHTASchema({}),
   "Comptage HTA": {
-    identification: [{ key: "repere", label: "Repère / Nom de l'équipement" }, { key: "marque", label: "Marque", options: LISTE_MARQUE_CELLULE_HTA }, { key: "modele", label: "Modèle", options: LISTE_MODELE_CELLULE_HTA_OPTIONS }, { key: "typeCellule", label: "Type de cellule", options: LISTE_TYPE_CELLULE["Comptage HTA"] }, { key: "numeroSerie", label: "Numéro de série" }],
+    identification: [{ key: "repere", label: "Repère / Nom de l'équipement" }, { key: "marque", label: "Marque", options: LISTE_MARQUE_CELLULE_HTA }, { key: "modele", label: "Modèle", options: LISTE_MODELE_CELLULE_HTA_OPTIONS }, { key: "typeCellule", label: "Type de cellule", options: typeCelluleParGamme("Comptage HTA") }, { key: "numeroSerie", label: "Numéro de série" }],
     sections: [
       { key: "mecaniques", title: "Contrôles mécaniques", items: MECA_CELLULE },
       { key: "electriques", title: "Contrôles électriques", items: [
@@ -1990,7 +2113,7 @@ const SCHEMAS = {
       { key: "repere", label: "Repère / Nom de l'équipement" }, 
       { key: "marque", label: "Marque", options: LISTE_MARQUE_CELLULE_HTA },
       { key: "modele", label: "Modèle", options: LISTE_MODELE_CELLULE_HTA_OPTIONS },
-      { key: "typeCellule", label: "Type de cellule", options: LISTE_TYPE_CELLULE["Disjoncteur HTA"] }, { key: "numeroSerie", label: "Numéro de série" },
+      { key: "typeCellule", label: "Type de cellule", options: typeCelluleParGamme("Disjoncteur HTA") }, { key: "numeroSerie", label: "Numéro de série" },
       { key: "referenceDisjoncteur", label: "Référence du disjoncteur", options: LISTE_REF_DISJONCTEUR }, { key: "numeroSerieDisjoncteur", label: "Numéro de série (disjoncteur)" },
       { key: "marqueRelais", label: "Marque du relais de protection", options: LISTE_MARQUE_RELAIS_HTA }, { key: "referenceRelais", label: "Référence du relais", options: LISTE_REFERENCE_RELAIS_HTA_OPTIONS }, { key: "numeroSerieRelais", label: "Numéro de série (relais)" },
       { key: "rapportTPProtection", label: "Rapport TP de protection", options: LISTE_RAPPORT_TP },
