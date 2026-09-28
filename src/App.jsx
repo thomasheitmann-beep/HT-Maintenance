@@ -9651,10 +9651,20 @@ function docxControlRow(label, detail, action, etat, isAlternate) {
   // Fond gris très clair en alternance une ligne sur deux — casse la monotonie du blanc uniforme
   // sans nuire à la lisibilité ni gêner l'impression.
   const fondAlterne = isAlternate ? "FAFBFC" : undefined;
+  const etatKey = etat === "Conforme" ? "ok" : (etat === "Dégradé" ? "warning" : (etat === "Défaillant" ? "bad" : null));
+  const c = etatKey && DOCX_ETAT_COULEURS[etatKey];
   return new DOCX.TableRow({ children: [
     new DOCX.TableCell({ width: { size: 7600, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, shading: fondAlterne ? { type: DOCX.ShadingType.CLEAR, fill: fondAlterne } : undefined, children }),
     etat
-      ? new DOCX.TableCell({ width: { size: 2000, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, shading: { type: DOCX.ShadingType.CLEAR, fill: docxEtatColor(etat) }, verticalAlign: DOCX.VerticalAlign.CENTER, children: [new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, children: [new DOCX.TextRun({ text: (etat || "").toUpperCase(), bold: true, color: DOCX_WHITE, size: 16 })] })] })
+      ? new DOCX.TableCell({
+          width: { size: 2000, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, verticalAlign: DOCX.VerticalAlign.CENTER,
+          shading: { type: DOCX.ShadingType.CLEAR, fill: c ? c.fond : DOCX_LIGHT },
+          borders: c ? {
+            top: { style: DOCX.BorderStyle.SINGLE, size: 6, color: c.bord }, bottom: { style: DOCX.BorderStyle.SINGLE, size: 6, color: c.bord },
+            left: { style: DOCX.BorderStyle.SINGLE, size: 6, color: c.bord }, right: { style: DOCX.BorderStyle.SINGLE, size: 6, color: c.bord },
+          } : undefined,
+          children: [new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, children: [new DOCX.TextRun({ text: (etat || "").toUpperCase(), bold: true, color: c ? c.texte : "555555", size: 16 })] })],
+        })
       : new DOCX.TableCell({ width: { size: 2000, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, shading: fondAlterne ? { type: DOCX.ShadingType.CLEAR, fill: fondAlterne } : undefined, children: [new DOCX.Paragraph("")] }),
   ]});
 }
@@ -9797,12 +9807,22 @@ function docxPhaseTable(rows, headers, colors) {
 function docxSyntheseRow(label, etat, bookmarkId) {
   const linkRun = new DOCX.TextRun({ text: label, size: 18, color: DOCX_BLUE, underline: {} });
   const margeGenereuse = { top: 200, bottom: 200, left: 160, right: 140 };
+  const etatKey = etat === "Conforme" ? "ok" : (etat === "Dégradé" ? "warning" : (etat === "Défaillant" ? "bad" : null));
+  const c = etatKey && DOCX_ETAT_COULEURS[etatKey];
   return new DOCX.TableRow({ children: [
     new DOCX.TableCell({ width: { size: 7600, type: DOCX.WidthType.DXA }, margins: margeGenereuse, children: [new DOCX.Paragraph({ children: [
       bookmarkId ? new DOCX.InternalHyperlink({ anchor: bookmarkId, children: [linkRun] }) : new DOCX.TextRun({ text: label, size: 18, color: DOCX_DARK }),
     ] })] }),
     etat
-      ? new DOCX.TableCell({ width: { size: 2000, type: DOCX.WidthType.DXA }, margins: margeGenereuse, shading: { type: DOCX.ShadingType.CLEAR, fill: docxEtatColor(etat) }, verticalAlign: DOCX.VerticalAlign.CENTER, children: [new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, children: [new DOCX.TextRun({ text: (etat || "").toUpperCase(), bold: true, color: DOCX_WHITE, size: 16 })] })] })
+      ? new DOCX.TableCell({
+          width: { size: 2000, type: DOCX.WidthType.DXA }, margins: margeGenereuse, verticalAlign: DOCX.VerticalAlign.CENTER,
+          shading: { type: DOCX.ShadingType.CLEAR, fill: c ? c.fond : DOCX_LIGHT },
+          borders: c ? {
+            top: { style: DOCX.BorderStyle.SINGLE, size: 6, color: c.bord }, bottom: { style: DOCX.BorderStyle.SINGLE, size: 6, color: c.bord },
+            left: { style: DOCX.BorderStyle.SINGLE, size: 6, color: c.bord }, right: { style: DOCX.BorderStyle.SINGLE, size: 6, color: c.bord },
+          } : undefined,
+          children: [new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, children: [new DOCX.TextRun({ text: (etat || "").toUpperCase(), bold: true, color: c ? c.texte : "555555", size: 16 })] })],
+        })
       : new DOCX.TableCell({ width: { size: 2000, type: DOCX.WidthType.DXA }, margins: margeGenereuse, children: [new DOCX.Paragraph("")] }),
   ]});
 }
