@@ -9543,7 +9543,18 @@ function docxHeading(text) {
 // Petite note en italique indiquant la norme/référence appliquée pour un contrôle donné — pour
 // tracer la méthode utilisée sans alourdir le tableau de mesures lui-même.
 function docxNormeNote(texte) {
-  return new DOCX.Paragraph({ spacing: { before: 20, after: 80 }, children: [new DOCX.TextRun({ text: texte, italics: true, size: 15, color: "666666" })] });
+  const alerte = typeof texte === "string" && texte.trim().startsWith("⚠");
+  const accent = alerte ? "B5730A" : "0A5DA8";
+  const fond = alerte ? "FDF3E3" : "EEF2F6";
+  return new DOCX.Table({
+    width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: [TABLE_WIDTH],
+    rows: [new DOCX.TableRow({ children: [new DOCX.TableCell({
+      width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, shading: { type: DOCX.ShadingType.CLEAR, fill: fond },
+      borders: { left: { style: DOCX.BorderStyle.SINGLE, size: 24, color: accent } },
+      margins: { top: 90, bottom: 90, left: 140, right: 140 },
+      children: [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: texte, size: 16, color: DOCX_DARK })] })],
+    })] })],
+  });
 }
 // Encart dédié à la comparaison mesure de référence / centrale de mesure interne — plus lisible
 // qu'une simple note en petit texte italique : chiffres clés en gras, fond coloré selon que l'écart
@@ -9660,11 +9671,26 @@ function docxControlTable(rows) {
 // valeur calculée — évite la répétition titre/tableau d'un mini-tableau par grandeur.
 // Cellule de valeur mesurée (fond blanc, sans remplissage) — la colonne "Grandeur" reste seule à
 // être grisée, pour bien distinguer description et valeurs saisies.
-function docxValCell(text) {
+// Couleurs de bordure/fond par état de tolérance — mêmes teintes que les cases colorées de l'app
+// (ok = vert, warning = orange, bad = rouge), pour un rendu Word cohérent avec l'écran. Word ne
+// permet pas de bord arrondi sur une cellule de tableau (aucune propriété OOXML équivalente) : la
+// bordure colorée + le fond clair reprennent l'esprit du design sans pouvoir arrondir les coins.
+const DOCX_ETAT_COULEURS = {
+  ok: { bord: "0F8A5F", fond: "EAF7F1", texte: "0F6B3F" },
+  warning: { bord: "B5730A", fond: "FDF3E3", texte: "8A5A0A" },
+  bad: { bord: "C0392B", fond: "FDF1F0", texte: "9A2E22" },
+};
+function docxValCell(text, state) {
   const t = text === null || text === undefined || text === "" ? "—" : String(text);
+  const c = state && DOCX_ETAT_COULEURS[state];
   return new DOCX.TableCell({
     width: { size: 1600, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS,
-    children: [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: t, size: 17, color: DOCX_DARK })] })],
+    shading: c ? { type: DOCX.ShadingType.CLEAR, fill: c.fond } : undefined,
+    borders: c ? {
+      top: { style: DOCX.BorderStyle.SINGLE, size: 6, color: c.bord }, bottom: { style: DOCX.BorderStyle.SINGLE, size: 6, color: c.bord },
+      left: { style: DOCX.BorderStyle.SINGLE, size: 6, color: c.bord }, right: { style: DOCX.BorderStyle.SINGLE, size: 6, color: c.bord },
+    } : undefined,
+    children: [new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, children: [new DOCX.TextRun({ text: t, size: 17, bold: !!c, color: c ? c.texte : DOCX_DARK })] })],
   });
 }
 // Constructeur générique : lignes [Grandeur, val1, val2, val3, Moyenne] → un seul tableau,
@@ -9677,11 +9703,11 @@ function docxBuildMesuresTable(rows, headers) {
     children: [new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, children: [new DOCX.TextRun({ text, size: 17, bold: true, color: "555555" })] })],
   });
   const header = new DOCX.TableRow({ children: [headCell("Grandeur", 2800), headCell(h[0], 1600), headCell(h[1], 1600), headCell(h[2], 1600), headCell("Moyenne des valeurs", 2000)] });
-  const body = rows.map((r) => new DOCX.TableRow({ children: [
+  const body = rows.map((r) => { const etats = r[5] || [null, null, null]; return new DOCX.TableRow({ children: [
     new DOCX.TableCell({ width: { size: 2800, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_LIGHT }, children: [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: r[0], size: 17, bold: true, color: "555555" })] })] }),
-    docxValCell(r[1]), docxValCell(r[2]), docxValCell(r[3]),
+    docxValCell(r[1], etats[0]), docxValCell(r[2], etats[1]), docxValCell(r[3], etats[2]),
     new DOCX.TableCell({ width: { size: 2000, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, children: [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: (r[4] === "" || r[4] === null || r[4] === undefined) ? "—" : String(r[4]), size: 16, color: "0A5DA8", bold: true })] })] }),
-  ]}));
+  ]}); });
   return new DOCX.Table({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: [2800, 1600, 1600, 1600, 2000], rows: [header, ...body] });
 }
 function moyenneOf(...vals) {
@@ -9727,7 +9753,8 @@ function docxTableauMesures(items, controlesSection) {
         const v = ff.compute(f);
         if (v !== "" && v !== null && v !== undefined) calc += (calc ? "  ·  " : "") + `${v}${ff.unit ? " " + ff.unit : ""}`;
       });
-      rows.push([item.label, f.l1, f.l2, f.l3, calc]);
+      const etats = [champTolStatus(item, f, "l1", value.etat), champTolStatus(item, f, "l2", value.etat), champTolStatus(item, f, "l3", value.etat)];
+      rows.push([item.label, f.l1, f.l2, f.l3, calc, etats]);
       return;
     }
     const parts = printFieldParts(item, value).map((p) => p.text);
@@ -9735,11 +9762,21 @@ function docxTableauMesures(items, controlesSection) {
   });
   return docxBuildMesuresTable(rows);
 }
+// Correspondance couleur hex (héritée de l'appelant, ex. DOCX_ORANGE) -> état, pour réutiliser le
+// même rendu case colorée (fond clair + bordure foncée) que docxValCell.
+const DOCX_COULEUR_VERS_ETAT = { [DOCX_GREEN]: "ok", [DOCX_ORANGE]: "warning", [DOCX_RED]: "bad" };
 function docxPhaseCell(text, header, shaded, color) {
   const t = text === null || text === undefined || text === "" ? "—" : String(text);
+  const etat = color && DOCX_COULEUR_VERS_ETAT[color];
+  const c = etat && DOCX_ETAT_COULEURS[etat];
   return new DOCX.TableCell({
-    width: { size: 2000, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, shading: shaded ? { type: DOCX.ShadingType.CLEAR, fill: DOCX_LIGHT } : undefined,
-    children: [new DOCX.Paragraph({ alignment: header ? DOCX.AlignmentType.CENTER : DOCX.AlignmentType.LEFT, children: [new DOCX.TextRun({ text: t, size: 17, bold: header || !!color, color: header ? "555555" : (color || DOCX_DARK) })] })],
+    width: { size: 2000, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS,
+    shading: c ? { type: DOCX.ShadingType.CLEAR, fill: c.fond } : (shaded ? { type: DOCX.ShadingType.CLEAR, fill: DOCX_LIGHT } : undefined),
+    borders: c ? {
+      top: { style: DOCX.BorderStyle.SINGLE, size: 6, color: c.bord }, bottom: { style: DOCX.BorderStyle.SINGLE, size: 6, color: c.bord },
+      left: { style: DOCX.BorderStyle.SINGLE, size: 6, color: c.bord }, right: { style: DOCX.BorderStyle.SINGLE, size: 6, color: c.bord },
+    } : undefined,
+    children: [new DOCX.Paragraph({ alignment: header || c ? DOCX.AlignmentType.CENTER : DOCX.AlignmentType.LEFT, children: [new DOCX.TextRun({ text: t, size: 17, bold: header || !!c, color: header ? "555555" : (c ? c.texte : (color || DOCX_DARK)) })] })],
   });
 }
 function docxPhaseTable(rows, headers, colors) {
@@ -9794,12 +9831,11 @@ function docxEquipHeader(name, bookmarkId, etat) {
   const title = new DOCX.TextRun({ text: (name || "").toUpperCase(), bold: true, color: DOCX_WHITE, size: 24 });
   const numericId = nextBookmarkNumericId();
   const contenu = bookmarkId ? [new DOCX.BookmarkStart(bookmarkId, numericId), title, new DOCX.BookmarkEnd(numericId)] : [title];
-  // Fine bordure colorée à gauche reprenant l'état de l'équipement — casse la monotonie du bandeau
-  // sombre uni sans rien distraire, et donne un repère visuel immédiat en parcourant le rapport.
-  const couleurAccent = etat ? docxEtatColor(etat) : DOCX_DARK;
+  // Fond teinté selon l'état de l'équipement (plutôt qu'un bandeau noir uni partout) — repère visuel
+  // immédiat en parcourant le rapport, même esprit que les badges d'état colorés de l'app.
+  const couleurFond = etat ? docxEtatColor(etat) : DOCX_DARK;
   return new DOCX.Table({ width: { size: 8800, type: DOCX.WidthType.DXA }, columnWidths: [8800], rows: [new DOCX.TableRow({ children: [new DOCX.TableCell({
-    width: { size: 8800, type: DOCX.WidthType.DXA }, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_DARK },
-    borders: { left: { style: DOCX.BorderStyle.SINGLE, size: 36, color: couleurAccent } },
+    width: { size: 8800, type: DOCX.WidthType.DXA }, shading: { type: DOCX.ShadingType.CLEAR, fill: couleurFond },
     children: [new DOCX.Paragraph({ spacing: { before: 80, after: 80 }, indent: { left: 60 }, children: contenu })],
   })] })] });
 }
