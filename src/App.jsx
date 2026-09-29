@@ -10102,8 +10102,8 @@ function drawIconCommutateurStatique(ctx, x, y, w, h, orientation) {
     const cy = y + h / 2, xPic = x + w * 0.15;
     ctx.beginPath(); ctx.moveTo(xPic, cy); ctx.lineTo(x + w * 0.85, y + h * 0.08); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(xPic, cy); ctx.lineTo(x + w * 0.85, y + h * 0.92); ctx.stroke();
-    drawSymboleAC(ctx, x + w * 0.38, y + h * 0.22, w * 0.16);
-    drawSymboleAC(ctx, x + w * 0.38, y + h * 0.78, w * 0.16);
+    drawSymboleAC(ctx, x + w * 0.35, y + h * 0.15, w * 0.16);
+    drawSymboleAC(ctx, x + w * 0.35, y + h * 0.85, w * 0.16);
     drawSymboleAC(ctx, x + w * 0.68, cy, w * 0.16);
     return b;
   }
@@ -10112,8 +10112,8 @@ function drawIconCommutateurStatique(ctx, x, y, w, h, orientation) {
   const cx = x + w / 2, yPic = y + h * 0.15;
   ctx.beginPath(); ctx.moveTo(cx, yPic); ctx.lineTo(x + w * 0.08, y + h * 0.85); ctx.stroke();
   ctx.beginPath(); ctx.moveTo(cx, yPic); ctx.lineTo(x + w * 0.92, y + h * 0.85); ctx.stroke();
-  drawSymboleAC(ctx, x + w * 0.22, y + h * 0.38, w * 0.1);
-  drawSymboleAC(ctx, x + w * 0.78, y + h * 0.38, w * 0.1);
+  drawSymboleAC(ctx, x + w * 0.15, y + h * 0.35, w * 0.1);
+  drawSymboleAC(ctx, x + w * 0.85, y + h * 0.35, w * 0.1);
   drawSymboleAC(ctx, cx, y + h * 0.68, w * 0.1);
   return b;
 }
