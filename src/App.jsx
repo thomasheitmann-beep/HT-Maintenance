@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import * as DOCX_FS from "firebase/firestore";
+import { collection, getDocs, doc, writeBatch } from "firebase/firestore";
 import { db } from "./firebase.js";
 
 /* Logo HT Maintenance (charte graphique fournie par l'utilisateur), encodé en base64 pour un artefact autonome */
@@ -3121,6 +3122,39 @@ function fetchClientsData() {
 // Auto-complétion du client à partir de la base de contacts — sélectionner une organisation
 // pré-remplit automatiquement l'e-mail d'envoi du rapport (ou propose un choix s'il y a plusieurs
 // contacts connus pour cette organisation).
+// Éditeur d'une liste de numéros de téléphone typés (ex. [{ type: "Fixe", numero: "..." }, ...]) —
+// affiche chaque numéro avec son type et un bouton de retrait, plus un petit formulaire pour en
+// ajouter librement (type Fixe ou Mobile, pas limité à un seul de chaque).
+function TelephonesEditor({ telephones, onChange }) {
+  const liste = telephones || [];
+  const [type, setType] = useState("Fixe");
+  const [numero, setNumero] = useState("");
+  const ajouter = () => {
+    if (!numero.trim()) return;
+    onChange([...liste, { type, numero: numero.trim() }]);
+    setNumero("");
+  };
+  const retirer = (i) => onChange(liste.filter((_, idx) => idx !== i));
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 220 }}>
+      {liste.map((t, i) => (
+        <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}>
+          <span style={{ color: "#8B96A3", minWidth: 46 }}>{t.type} :</span>
+          <span style={{ flex: 1 }}>{t.numero}</span>
+          <button onClick={() => retirer(i)} style={{ background: "none", border: "none", color: "#C0392B", cursor: "pointer", padding: 2 }} title="Retirer ce numéro"><Trash2 size={12} /></button>
+        </div>
+      ))}
+      <div style={{ display: "flex", gap: 4 }}>
+        <Select value={type} onChange={(e) => setType(e.target.value)} style={{ fontSize: 11.5, flex: "0 0 80px" }}>
+          <option value="Fixe">Fixe</option>
+          <option value="Mobile">Mobile</option>
+        </Select>
+        <TextInput value={numero} onChange={(e) => setNumero(e.target.value)} placeholder="Numéro" style={{ fontSize: 11.5, flex: 1 }} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); ajouter(); } }} />
+        <button onClick={ajouter} disabled={!numero.trim()} style={{ ...btnGhost(BRAND.blue), padding: "4px 8px" }} title="Ajouter ce numéro"><Plus size={12} /></button>
+      </div>
+    </div>
+  );
+}
 // Panneau de gestion des clients — permet d'enregistrer un client (nom + e-mail) à l'avance, sans
 // passer par la création d'un site complet, de modifier un client existant (ex. e-mail périmé),
 // et d'exporter/importer la liste en Excel pour des modifications en masse.
@@ -3130,6 +3164,12 @@ function GererClientsEtContactsModal({ clientsRegistry, setClientsRegistry, cont
   const [onglet, setOnglet] = useState("organisations"); // "organisations" | "contacts"
   const [nom, setNom] = useState("");
   const [email, setEmail] = useState("");
+  const [contactOrg, setContactOrg] = useState("");
+  const [adresseOrg, setAdresseOrg] = useState("");
+  const [cpOrg, setCpOrg] = useState("");
+  const [villeOrg, setVilleOrg] = useState("");
+  const [telephonesNouveaux, setTelephonesNouveaux] = useState([]);
+  const [codeOrg, setCodeOrg] = useState("");
   const [formContact, setFormContact] = useState({ prenom: "", nom: "", organisation: "", adresse: "", email: "", fixe: "", portable: "" });
   const setFC = (k, v) => setFormContact((f) => ({ ...f, [k]: v }));
   const fileInputRef = useRef(null);
@@ -3193,8 +3233,12 @@ function GererClientsEtContactsModal({ clientsRegistry, setClientsRegistry, cont
     if (!nom.trim()) return;
     const key = nom.trim().toLowerCase();
     if (clientsRegistry.some((c) => c.nom.trim().toLowerCase() === key)) return;
-    setClientsRegistry([...clientsRegistry, { id: uid(), nom: nom.trim(), email: email.trim() }]);
-    setNom(""); setEmail("");
+    setClientsRegistry([...clientsRegistry, {
+      id: uid(), nom: nom.trim(), email: email.trim(),
+      contact: contactOrg.trim(), adresse: adresseOrg.trim(), cp: cpOrg.trim(), ville: villeOrg.trim(),
+      telephones: telephonesNouveaux, code: codeOrg.trim(),
+    }]);
+    setNom(""); setEmail(""); setContactOrg(""); setAdresseOrg(""); setCpOrg(""); setVilleOrg(""); setTelephonesNouveaux([]); setCodeOrg("");
   };
   const supprimerClient = (id) => setClientsRegistry(clientsRegistry.filter((c) => c.id !== id));
   const modifierClient = (id, patch) => setClientsRegistry(clientsRegistry.map((c) => (c.id === id ? { ...c, ...patch } : c)));
@@ -3238,7 +3282,9 @@ function GererClientsEtContactsModal({ clientsRegistry, setClientsRegistry, cont
         }
       });
       clientsPourExport.forEach((c) => {
-        rows.push({ Type: "Client", "Nom du site": "", "Client / Organisation": c.nom, Prénom: "", Nom: "", Adresse: c.adresse || "", "E-mail": c.email || "", "Téléphone fixe": c.telFixe || "", "Téléphone portable": c.telPortable || "", Rôle: "", Fonction: "" });
+        const telFixe = c.telFixe || (c.telephones || []).find((t) => t.type === "Fixe")?.numero || "";
+        const telMobile = c.telPortable || (c.telephones || []).find((t) => t.type === "Mobile")?.numero || "";
+        rows.push({ Type: "Client", "Nom du site": "", "Client / Organisation": c.nom, Prénom: "", Nom: "", Adresse: c.adresse || "", "E-mail": c.email || "", "Téléphone fixe": telFixe, "Téléphone portable": telMobile, Rôle: "", Fonction: "" });
       });
       contactsRegistry.forEach((c) => {
         rows.push({ Type: "Contact", "Nom du site": "", "Client / Organisation": c.organisation || "", Prénom: c.prenom || "", Nom: c.nom || "", Adresse: c.adresse || "", "E-mail": c.email || "", "Téléphone fixe": c.fixe || "", "Téléphone portable": c.portable || "", Rôle: "Registre", Fonction: "" });
@@ -3346,7 +3392,13 @@ function GererClientsEtContactsModal({ clientsRegistry, setClientsRegistry, cont
         {onglet === "organisations" ? (
           <>
             <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
-              <TextInput value={nom} onChange={(e) => setNom(e.target.value)} placeholder="Nom du client" style={{ flex: "1 1 180px" }} />
+              <TextInput value={nom} onChange={(e) => setNom(e.target.value)} placeholder="Nom du client (société)" style={{ flex: "1 1 180px" }} />
+              <TextInput value={contactOrg} onChange={(e) => setContactOrg(e.target.value)} placeholder="Contact (nom)" style={{ flex: "1 1 160px" }} />
+              <TextInput value={adresseOrg} onChange={(e) => setAdresseOrg(e.target.value)} placeholder="Adresse" style={{ flex: "1 1 180px" }} />
+              <TextInput value={cpOrg} onChange={(e) => setCpOrg(e.target.value)} placeholder="Code postal" style={{ flex: "1 1 100px" }} />
+              <TextInput value={villeOrg} onChange={(e) => setVilleOrg(e.target.value)} placeholder="Ville" style={{ flex: "1 1 140px" }} />
+              <TelephonesEditor telephones={telephonesNouveaux} onChange={setTelephonesNouveaux} />
+              <TextInput value={codeOrg} onChange={(e) => setCodeOrg(e.target.value)} placeholder="Code client (optionnel)" style={{ flex: "1 1 140px" }} />
               <TextInput value={email} onChange={(e) => setEmail(e.target.value)} placeholder="E-mail (optionnel)" type="email" style={{ flex: "1 1 180px" }} />
               <button onClick={ajouterClient} style={btnGhost(BRAND.blue)} disabled={!nom.trim()}><Plus size={14} /> Ajouter</button>
             </div>
@@ -3357,11 +3409,19 @@ function GererClientsEtContactsModal({ clientsRegistry, setClientsRegistry, cont
               <div style={{ fontSize: 12, color: "#8B96A3" }}>Aucun client enregistré à l'avance pour l'instant.</div>
             ) : (
               clientsRegistry.map((c) => (
-                <div key={c.id} style={{ display: "flex", gap: 8, alignItems: "center", padding: "8px 0", borderBottom: "1px solid #E2E6EB", flexWrap: "wrap" }}>
-                  <TextInput value={c.nom} onChange={(e) => modifierClient(c.id, { nom: e.target.value })} style={{ flex: "1 1 160px", fontSize: 12.5 }} />
-                  <TextInput value={c.email || ""} onChange={(e) => modifierClient(c.id, { email: e.target.value })} placeholder="sans e-mail" type="email" style={{ flex: "1 1 160px", fontSize: 12.5 }} />
-                  {dejaSurSite.has(c.nom.trim().toLowerCase()) && <span style={{ fontSize: 10, color: "#0F8A5F", whiteSpace: "nowrap" }}>a déjà un site</span>}
-                  <button onClick={() => supprimerClient(c.id)} style={{ background: "none", border: "none", color: "#C0392B", cursor: "pointer", padding: 4 }} title="Retirer"><Trash2 size={14} /></button>
+                <div key={c.id} style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 6, alignItems: "center", padding: "8px 0", borderBottom: "1px solid #E2E6EB" }}>
+                  <TextInput value={c.nom} onChange={(e) => modifierClient(c.id, { nom: e.target.value })} placeholder="Société" style={{ fontSize: 12.5 }} />
+                  <TextInput value={c.contact || ""} onChange={(e) => modifierClient(c.id, { contact: e.target.value })} placeholder="Contact" style={{ fontSize: 12.5 }} />
+                  <TextInput value={c.adresse || ""} onChange={(e) => modifierClient(c.id, { adresse: e.target.value })} placeholder="Adresse" style={{ fontSize: 12.5 }} />
+                  <TextInput value={c.cp || ""} onChange={(e) => modifierClient(c.id, { cp: e.target.value })} placeholder="CP" style={{ fontSize: 12.5 }} />
+                  <TextInput value={c.ville || ""} onChange={(e) => modifierClient(c.id, { ville: e.target.value })} placeholder="Ville" style={{ fontSize: 12.5 }} />
+                  <TelephonesEditor telephones={c.telephones} onChange={(next) => modifierClient(c.id, { telephones: next })} />
+                  <TextInput value={c.code || ""} onChange={(e) => modifierClient(c.id, { code: e.target.value })} placeholder="Code client" style={{ fontSize: 12.5 }} />
+                  <TextInput value={c.email || ""} onChange={(e) => modifierClient(c.id, { email: e.target.value })} placeholder="E-mail" type="email" style={{ fontSize: 12.5 }} />
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, justifySelf: "start" }}>
+                    {dejaSurSite.has(c.nom.trim().toLowerCase()) && <span style={{ fontSize: 10, color: "#0F8A5F", whiteSpace: "nowrap" }}>a déjà un site</span>}
+                    <button onClick={() => supprimerClient(c.id)} style={{ background: "none", border: "none", color: "#C0392B", cursor: "pointer", padding: 4 }} title="Retirer"><Trash2 size={14} /></button>
+                  </div>
                 </div>
               ))
             )}
@@ -11673,6 +11733,63 @@ async function firestoreRestSet(docPath, valueJson, updatedAt, updatedBy, idToke
   return res.json();
 }
 
+// Collection de contacts PARTAGÉE avec les autres apps HT Maintenance (ex. HT-Devis-Facture), au
+// niveau racine du même projet Firebase — un document par contact, plutôt qu'un blob JSON unique
+// comme l'ancien mécanisme REST ci-dessus (encore utilisé pour d'autres registres). Réplique à
+// l'identique le mécanisme déjà en place dans HT-Devis-Facture, pour rester interopérable.
+const CONTACTS_SHARED_COLLECTION = "contacts-ht-maintenance";
+// Champs partagés : societe, contact, adresse, cp, ville, email, telephones (+ code, optionnel).
+// "telephones" est un tableau de numéros typés ([{ type: "Fixe" | "Mobile", numero }, ...]), pas
+// une chaîne unique — remplace l'ancien champ "telephone" au singulier.
+function clientVersChampsPartages(c) {
+  return {
+    societe: c.nom || c.societe || "",
+    contact: c.contact || "",
+    adresse: c.adresse || "",
+    cp: c.cp || "",
+    ville: c.ville || "",
+    email: c.email || "",
+    telephones: c.telephones || [],
+    ...(c.code !== undefined && c.code !== "" ? { code: c.code } : {}),
+  };
+}
+async function loadContactsShared() {
+  const snap = await getDocs(collection(db, CONTACTS_SHARED_COLLECTION));
+  return snap.docs.map((d) => {
+    const v = d.data() || {};
+    // Rétrocompatibilité : un document pas encore migré peut n'avoir que l'ancien champ singulier
+    // "telephone" (chaîne) — converti à la volée en une entrée du tableau "telephones".
+    const telephones = Array.isArray(v.telephones) ? v.telephones : (v.telephone ? [{ type: "Fixe", numero: v.telephone }] : []);
+    return {
+      id: d.id, nom: v.societe || "", contact: v.contact || "", adresse: v.adresse || "",
+      cp: v.cp || "", ville: v.ville || "", email: v.email || "", telephones,
+      ...(v.code !== undefined ? { code: v.code } : {}),
+    };
+  });
+}
+// Diffère newClients/previousClients par id et n'écrit que les ajouts/modifications (set, en
+// fusion) et suppressions (delete) — jamais une réécriture complète de la collection. Découpé en
+// lots de 450 opérations (marge sous la limite Firestore de 500 par batch).
+async function syncContactsToShared(newClients, previousClients) {
+  const prevById = new Map((previousClients || []).filter((c) => c && c.id).map((c) => [c.id, c]));
+  const newById = new Map((newClients || []).filter((c) => c && c.id).map((c) => [c.id, c]));
+  const operations = [];
+  newById.forEach((c, id) => {
+    const avant = prevById.get(id);
+    if (!avant || JSON.stringify(avant) !== JSON.stringify(c)) operations.push({ type: "set", id, data: clientVersChampsPartages(c) });
+  });
+  prevById.forEach((c, id) => { if (!newById.has(id)) operations.push({ type: "delete", id }); });
+  for (let i = 0; i < operations.length; i += 450) {
+    const batch = writeBatch(db);
+    operations.slice(i, i + 450).forEach((op) => {
+      const ref = doc(db, CONTACTS_SHARED_COLLECTION, op.id);
+      if (op.type === "set") batch.set(ref, op.data, { merge: true });
+      else batch.delete(ref);
+    });
+    await batch.commit();
+  }
+}
+
 export default function App({ currentUser, onLogout }) {
   useEffect(() => { CURRENT_USER_FOR_STORAGE = currentUser; }, [currentUser]);
   const [sites, setSites] = useState([]);
@@ -11710,9 +11827,7 @@ export default function App({ currentUser, onLogout }) {
   // Registre des clients — permet d'enregistrer un client (nom + e-mail) à l'avance, sans avoir à
   // créer un site complet ; partagé entre techniciens comme sites/interventions.
   const [clientsRegistry, setClientsRegistry] = useState([]);
-  const clientsRefForPoll = useRef([]);
   const aDejaChargeDesClients = useRef(false);
-  useEffect(() => { clientsRefForPoll.current = clientsRegistry; }, [clientsRegistry]);
   const [clientsLoaded, setClientsLoaded] = useState(false);
   const clientsSaveTimer = useRef(null);
   const lastSyncedClients = useRef(null);
@@ -11966,30 +12081,40 @@ export default function App({ currentUser, onLogout }) {
 
   useEffect(() => {
     let cancelled = false;
-    let intervalId = null;
-    async function poll() {
+    (async () => {
       if (!currentUser) return;
-      if (clientsWriteInFlight.current) return;
       try {
+        const partages = await loadContactsShared();
+        if (cancelled) return;
+        if (partages.length > 0) {
+          lastSyncedClients.current = JSON.stringify(partages);
+          aDejaChargeDesClients.current = true;
+          setClientsRegistry(partages);
+          setClientsLoaded(true);
+          return;
+        }
+        // Collection partagée vide : migration automatique, une seule fois, depuis l'ancien stockage
+        // propre à cette app (sans risque à rejouer — mêmes id, donc même résultat si relancé).
         const idToken = await currentUser.getIdToken();
         const data = await firestoreRestGet("app-data/clients", idToken);
         if (cancelled) return;
-        if (!data || !data.fields) { if (lastSyncedClients.current === null) lastSyncedClients.current = "[]"; setClientsLoaded(true); return; }
-        const rawValue = (data.fields.value && data.fields.value.stringValue) || "[]";
-        if (rawValue === lastSyncedClients.current) { setClientsLoaded(true); return; }
-        if (lastSyncedClients.current !== null && JSON.stringify(clientsRefForPoll.current) !== lastSyncedClients.current) { setClientsLoaded(true); return; }
-        lastSyncedClients.current = rawValue;
-        const parsedClients = JSON.parse(rawValue);
-        if (parsedClients.length > 0) aDejaChargeDesClients.current = true;
-        setClientsRegistry(parsedClients);
+        const rawValue = (data && data.fields && data.fields.value && data.fields.value.stringValue) || "[]";
+        const anciens = JSON.parse(rawValue);
+        if (anciens.length > 0) {
+          await syncContactsToShared(anciens, []);
+          if (cancelled) return;
+          lastSyncedClients.current = JSON.stringify(anciens);
+          aDejaChargeDesClients.current = true;
+          setClientsRegistry(anciens);
+        } else {
+          lastSyncedClients.current = "[]";
+        }
         setClientsLoaded(true);
       } catch (e) {
         setClientsLoaded(true);
       }
-    }
-    poll();
-    intervalId = setInterval(poll, REST_POLL_INTERVAL_MS);
-    return () => { cancelled = true; clearInterval(intervalId); };
+    })();
+    return () => { cancelled = true; };
   }, [currentUser]);
 
   useEffect(() => {
@@ -12001,14 +12126,14 @@ export default function App({ currentUser, onLogout }) {
       console.error("[Sécurité] Écriture bloquée : liste de clients vide alors que des clients avaient déjà été chargés.");
       return;
     }
+    const precedents = lastSyncedClients.current ? JSON.parse(lastSyncedClients.current) : [];
     if (clientsRegistry.length > 0) aDejaChargeDesClients.current = true;
     lastSyncedClients.current = serialized;
     if (clientsSaveTimer.current) clearTimeout(clientsSaveTimer.current);
     clientsSaveTimer.current = setTimeout(async () => {
       clientsWriteInFlight.current = true;
       try {
-        const idToken = await currentUser.getIdToken();
-        await firestoreRestSet("app-data/clients", serialized, Date.now(), currentUser?.email, idToken);
+        await syncContactsToShared(clientsRegistry, precedents);
       } catch (e) {
         lastSyncedClients.current = null;
       } finally {
