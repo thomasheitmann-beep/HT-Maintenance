@@ -10113,7 +10113,7 @@ function drawIconCommutateurStatique(ctx, x, y, w, h, orientation) {
   ctx.beginPath(); ctx.moveTo(cx, yPic); ctx.lineTo(x + w * 0.08, y + h * 0.85); ctx.stroke();
   ctx.beginPath(); ctx.moveTo(cx, yPic); ctx.lineTo(x + w * 0.92, y + h * 0.85); ctx.stroke();
   drawSymboleAC(ctx, x + w * 0.15, y + h * 0.35, w * 0.1);
-  drawSymboleAC(ctx, x + w * 0.85, y + h * 0.35, w * 0.1);
+  drawSymboleAC(ctx, x + w * 0.90, y + h * 0.35, w * 0.1);
   drawSymboleAC(ctx, cx, y + h * 0.68, w * 0.1);
   return b;
 }
