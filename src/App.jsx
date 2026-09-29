@@ -10097,21 +10097,27 @@ function drawIconCommutateurStatique(ctx, x, y, w, h, orientation) {
   const b = draw3DBox(ctx, x, y, w, h);
   ctx.strokeStyle = SCHEMA_TRAIT; ctx.lineWidth = 1.3;
   if (orientation === "vertical") {
-    // Pic à gauche, deux diagonales vers les coins droits (entrées en haut/bas à gauche, sortie à droite)
-    const cy = y + h / 2, xPic = x + w * 0.15;
-    ctx.beginPath(); ctx.moveTo(xPic, cy); ctx.lineTo(x + w * 0.85, y + h * 0.08); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(xPic, cy); ctx.lineTo(x + w * 0.85, y + h * 0.92); ctx.stroke();
-    drawSymboleAC(ctx, x + w * 0.38, y + h * 0.22, w * 0.16);
-    drawSymboleAC(ctx, x + w * 0.38, y + h * 0.78, w * 0.16);
-    drawSymboleAC(ctx, x + w * 0.68, cy, w * 0.16);
+    // Les deux entrées (sources 1 et 2) arrivent par la GAUCHE (en haut et en bas), la sortie
+    // unique repart par la DROITE : la pointe (point de convergence) doit donc être à droite, les
+    // deux branches partant vers les coins gauches — pas l'inverse, sous peine de faire arriver le
+    // fil à l'opposé de là où le symbole "pointe".
+    const cy = y + h / 2, xPic = x + w * 0.85;
+    ctx.beginPath(); ctx.moveTo(xPic, cy); ctx.lineTo(x + w * 0.15, y + h * 0.08); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(xPic, cy); ctx.lineTo(x + w * 0.15, y + h * 0.92); ctx.stroke();
+    drawSymboleAC(ctx, x + w * 0.62, y + h * 0.22, w * 0.16);
+    drawSymboleAC(ctx, x + w * 0.62, y + h * 0.78, w * 0.16);
+    drawSymboleAC(ctx, x + w * 0.32, cy, w * 0.16);
     return b;
   }
-  const cx = x + w / 2, yPic = y + h * 0.15;
-  ctx.beginPath(); ctx.moveTo(cx, yPic); ctx.lineTo(x + w * 0.08, y + h * 0.85); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(cx, yPic); ctx.lineTo(x + w * 0.92, y + h * 0.85); ctx.stroke();
-  drawSymboleAC(ctx, x + w * 0.22, y + h * 0.38, w * 0.1);
-  drawSymboleAC(ctx, x + w * 0.78, y + h * 0.38, w * 0.1);
-  drawSymboleAC(ctx, cx, y + h * 0.68, w * 0.1);
+  // Les deux entrées (R0 à gauche, réseau secours/pontage à droite) arrivent par le HAUT, la
+  // sortie unique repart par le BAS : la pointe doit donc être en bas, les deux branches partant
+  // vers les coins hauts — même principe que ci-dessus, en vertical.
+  const cx = x + w / 2, yPic = y + h * 0.85;
+  ctx.beginPath(); ctx.moveTo(cx, yPic); ctx.lineTo(x + w * 0.08, y + h * 0.15); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(cx, yPic); ctx.lineTo(x + w * 0.92, y + h * 0.15); ctx.stroke();
+  drawSymboleAC(ctx, x + w * 0.22, y + h * 0.62, w * 0.1);
+  drawSymboleAC(ctx, x + w * 0.78, y + h * 0.62, w * 0.1);
+  drawSymboleAC(ctx, cx, y + h * 0.32, w * 0.1);
   return b;
 }
 function drawBatterie(ctx, cx, cy, s) {
@@ -10268,6 +10274,13 @@ function genererSchemaOnduleur(eq) {
     label("R0", cxM - redW / 2 - 20, yOnduleurBas + bh / 2 + 10, SCHEMA_TRAIT, "11px Arial, sans-serif");
 
     if (avecBypass) {
+      // La hauteur finale (yApresOnduleur) doit être connue AVANT de tracer les deux lignes qui
+      // entrent dans le commutateur statique (R0 à gauche, réseau secours/pontage à droite) — sinon
+      // la ligne de droite s'arrête avant d'atteindre la boîte, flottant sans s'y raccorder.
+      const csW = cxR2 - cxM + bw, csH = 64;
+      const depthCS = boxDepth(csW, csH);
+      const csLeft = cxM - bw / 2;
+      yApresOnduleur += depthCS + LABEL_MARGIN + 6;
       // Le réseau secours rejoint directement le commutateur statique — le trait doit être continu
       // depuis son point de départ (pontage ou simple trait initial), sans coupure. Le libellé est
       // placé sous le transformateur (s'il existe), avec un petit espace, jamais collé dessus.
@@ -10278,11 +10291,7 @@ function genererSchemaOnduleur(eq) {
         label(`Réseau secours ${regime("secours")}`, cxR2, yRedresseurBas - 4);
         line(cxR2, yRedresseurBas + 10, cxR2, yApresOnduleur);
       }
-      const csW = cxR2 - cxM + bw, csH = 64;
-      const depthCS = boxDepth(csW, csH);
-      const csLeft = cxM - bw / 2;
-      yApresOnduleur += depthCS + LABEL_MARGIN + 6;
-      line(cxM, yOnduleurBas, cxM, yApresOnduleur); // réajuste le trait avec le nouveau y
+      line(cxM, yOnduleurBas, cxM, yApresOnduleur);
       label("Commutateur statique", cxM + (csW - bw) / 2, yApresOnduleur - depthCS - LABEL_MARGIN);
       drawIconCommutateurStatique(ctx, csLeft, yApresOnduleur, csW, csH);
       const csMidX = csLeft + csW / 2;
