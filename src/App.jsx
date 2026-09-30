@@ -3168,6 +3168,7 @@ function GererClientsEtContactsModal({ clientsRegistry, setClientsRegistry, cont
   const [adresseOrg, setAdresseOrg] = useState("");
   const [cpOrg, setCpOrg] = useState("");
   const [villeOrg, setVilleOrg] = useState("");
+  const [paysOrg, setPaysOrg] = useState("");
   const [telephonesNouveaux, setTelephonesNouveaux] = useState([]);
   const [codeOrg, setCodeOrg] = useState("");
   const [formContact, setFormContact] = useState({ prenom: "", nom: "", organisation: "", adresse: "", email: "", fixe: "", portable: "" });
@@ -3235,10 +3236,10 @@ function GererClientsEtContactsModal({ clientsRegistry, setClientsRegistry, cont
     if (clientsRegistry.some((c) => c.nom.trim().toLowerCase() === key)) return;
     setClientsRegistry([...clientsRegistry, {
       id: uid(), nom: nom.trim(), email: email.trim(),
-      contact: contactOrg.trim(), adresse: adresseOrg.trim(), cp: cpOrg.trim(), ville: villeOrg.trim(),
+      contact: contactOrg.trim(), adresse: adresseOrg.trim(), cp: cpOrg.trim(), ville: villeOrg.trim(), pays: paysOrg.trim(),
       telephones: telephonesNouveaux, code: codeOrg.trim(),
     }]);
-    setNom(""); setEmail(""); setContactOrg(""); setAdresseOrg(""); setCpOrg(""); setVilleOrg(""); setTelephonesNouveaux([]); setCodeOrg("");
+    setNom(""); setEmail(""); setContactOrg(""); setAdresseOrg(""); setCpOrg(""); setVilleOrg(""); setPaysOrg(""); setTelephonesNouveaux([]); setCodeOrg("");
   };
   const supprimerClient = (id) => setClientsRegistry(clientsRegistry.filter((c) => c.id !== id));
   const modifierClient = (id, patch) => setClientsRegistry(clientsRegistry.map((c) => (c.id === id ? { ...c, ...patch } : c)));
@@ -3324,6 +3325,15 @@ function GererClientsEtContactsModal({ clientsRegistry, setClientsRegistry, cont
       setImportMsg("Échec de l'export — " + (e?.message || "erreur inconnue"));
     }
   };
+  // Repli quand le fichier importé n'a pas de colonne "Code postal" dédiée mais que le code
+  // postal figure dans le texte de l'adresse (ex. "628 Route de Combelle, 03800 GANNAT") — prend
+  // le DERNIER nombre à 5 chiffres trouvé, pas le premier, pour ne pas confondre avec un numéro de
+  // boîte postale ("BP 60120").
+  function parsePostalCodeFromAddress(adresse) {
+    if (!adresse) return "";
+    const matches = adresse.match(/\b\d{5}\b/g);
+    return matches ? matches[matches.length - 1] : "";
+  }
   const importerExcel = async (file) => {
     setImportMsg("");
     try {
@@ -3337,14 +3347,30 @@ function GererClientsEtContactsModal({ clientsRegistry, setClientsRegistry, cont
       const next = [...clientsRegistry];
       rows.forEach((r) => {
         const rid = r.ID || r.id;
-        const rnom = (r.Nom || r.nom || "").toString().trim();
+        const rnom = (r.Nom || r.nom || r["Société"] || r.societe || r["Client / Organisation"] || "").toString().trim();
         const remail = (r["E-mail"] || r.Email || r.email || "").toString().trim();
         if (!rnom) return;
+        const radresse = (r.Adresse || r.adresse || "").toString().trim();
+        const rcp = (r["Code postal"] || r.CP || r.cp || "").toString().trim() || parsePostalCodeFromAddress(radresse);
+        const rville = (r.Ville || r.ville || "").toString().trim();
+        const rpays = (r.Pays || r.pays || "").toString().trim();
+        const rcontact = (r.Contact || r.contact || "").toString().trim();
+        const rcode = (r.Code || r["Code client"] || r.code || "").toString().trim();
+        const rtelFixe = (r["Téléphone fixe"] || "").toString().trim();
+        const rtelMobile = (r["Téléphone portable"] || r["Téléphone mobile"] || "").toString().trim();
+        const telephones = [
+          ...(rtelFixe ? [{ type: "Fixe", numero: rtelFixe }] : []),
+          ...(rtelMobile ? [{ type: "Mobile", numero: rtelMobile }] : []),
+        ];
+        const champs = {
+          nom: rnom, email: remail, adresse: radresse, cp: rcp, ville: rville, pays: rpays, contact: rcontact, code: rcode,
+          ...(telephones.length ? { telephones } : {}),
+        };
         const idxParId = rid ? next.findIndex((c) => c.id === rid) : -1;
         const idxParNom = idxParId === -1 ? next.findIndex((c) => c.nom.trim().toLowerCase() === rnom.toLowerCase()) : -1;
         const idx = idxParId !== -1 ? idxParId : idxParNom;
-        if (idx !== -1) { next[idx] = { ...next[idx], nom: rnom, email: remail }; maj++; }
-        else { next.push({ id: uid(), nom: rnom, email: remail }); crees++; }
+        if (idx !== -1) { next[idx] = { ...next[idx], ...champs }; maj++; }
+        else { next.push({ id: uid(), ...champs }); crees++; }
       });
       setClientsRegistry(next);
       setImportMsg(`Import terminé (feuille Clients) — ${maj} mis à jour, ${crees} créé(s).`);
@@ -3397,6 +3423,7 @@ function GererClientsEtContactsModal({ clientsRegistry, setClientsRegistry, cont
               <TextInput value={adresseOrg} onChange={(e) => setAdresseOrg(e.target.value)} placeholder="Adresse" style={{ flex: "1 1 180px" }} />
               <TextInput value={cpOrg} onChange={(e) => setCpOrg(e.target.value)} placeholder="Code postal" style={{ flex: "1 1 100px" }} />
               <TextInput value={villeOrg} onChange={(e) => setVilleOrg(e.target.value)} placeholder="Ville" style={{ flex: "1 1 140px" }} />
+              <TextInput value={paysOrg} onChange={(e) => setPaysOrg(e.target.value)} placeholder="Pays (vide = France)" style={{ flex: "1 1 140px" }} />
               <TelephonesEditor telephones={telephonesNouveaux} onChange={setTelephonesNouveaux} />
               <TextInput value={codeOrg} onChange={(e) => setCodeOrg(e.target.value)} placeholder="Code client (optionnel)" style={{ flex: "1 1 140px" }} />
               <TextInput value={email} onChange={(e) => setEmail(e.target.value)} placeholder="E-mail (optionnel)" type="email" style={{ flex: "1 1 180px" }} />
@@ -3415,6 +3442,7 @@ function GererClientsEtContactsModal({ clientsRegistry, setClientsRegistry, cont
                   <TextInput value={c.adresse || ""} onChange={(e) => modifierClient(c.id, { adresse: e.target.value })} placeholder="Adresse" style={{ fontSize: 12.5 }} />
                   <TextInput value={c.cp || ""} onChange={(e) => modifierClient(c.id, { cp: e.target.value })} placeholder="CP" style={{ fontSize: 12.5 }} />
                   <TextInput value={c.ville || ""} onChange={(e) => modifierClient(c.id, { ville: e.target.value })} placeholder="Ville" style={{ fontSize: 12.5 }} />
+                  <TextInput value={c.pays || ""} onChange={(e) => modifierClient(c.id, { pays: e.target.value })} placeholder="Pays (vide = France)" style={{ fontSize: 12.5 }} />
                   <TelephonesEditor telephones={c.telephones} onChange={(next) => modifierClient(c.id, { telephones: next })} />
                   <TextInput value={c.code || ""} onChange={(e) => modifierClient(c.id, { code: e.target.value })} placeholder="Code client" style={{ fontSize: 12.5 }} />
                   <TextInput value={c.email || ""} onChange={(e) => modifierClient(c.id, { email: e.target.value })} placeholder="E-mail" type="email" style={{ fontSize: 12.5 }} />
@@ -11738,9 +11766,8 @@ async function firestoreRestSet(docPath, valueJson, updatedAt, updatedBy, idToke
 // comme l'ancien mécanisme REST ci-dessus (encore utilisé pour d'autres registres). Réplique à
 // l'identique le mécanisme déjà en place dans HT-Devis-Facture, pour rester interopérable.
 const CONTACTS_SHARED_COLLECTION = "contacts-ht-maintenance";
-// Champs partagés : societe, contact, adresse, cp, ville, email, telephones (+ code, optionnel).
-// "telephones" est un tableau de numéros typés ([{ type: "Fixe" | "Mobile", numero }, ...]), pas
-// une chaîne unique — remplace l'ancien champ "telephone" au singulier.
+// Champs partagés : societe, contact, adresse, cp, ville, pays, email, telephones (+ code,
+// optionnel). "pays" reste vide par défaut (= France) et n'est renseigné que si différent.
 function clientVersChampsPartages(c) {
   return {
     societe: c.nom || c.societe || "",
@@ -11748,6 +11775,7 @@ function clientVersChampsPartages(c) {
     adresse: c.adresse || "",
     cp: c.cp || "",
     ville: c.ville || "",
+    pays: c.pays || "",
     email: c.email || "",
     telephones: c.telephones || [],
     ...(c.code !== undefined && c.code !== "" ? { code: c.code } : {}),
@@ -11762,7 +11790,7 @@ async function loadContactsShared() {
     const telephones = Array.isArray(v.telephones) ? v.telephones : (v.telephone ? [{ type: "Fixe", numero: v.telephone }] : []);
     return {
       id: d.id, nom: v.societe || "", contact: v.contact || "", adresse: v.adresse || "",
-      cp: v.cp || "", ville: v.ville || "", email: v.email || "", telephones,
+      cp: v.cp || "", ville: v.ville || "", pays: v.pays || "", email: v.email || "", telephones,
       ...(v.code !== undefined ? { code: v.code } : {}),
     };
   });
