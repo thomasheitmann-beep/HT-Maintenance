@@ -1974,6 +1974,25 @@ function isolementFields(itemType, classeIsolation, avecRealise) {
       compute: () => `${labelTypique} ≈ ${valeurTypique} MΩ — un écart net à la baisse peut simplement indiquer un appareil humide plutôt qu'un défaut.`,
     }] : []),
     F("valeur", "Valeur"), F("unite", "Unité", null, UNITE_ISOLEMENT),
+    F("temperature", "Température de l'enroulement", "°C"),
+    // IR corrigé à 40 °C — contrairement au PI/DAR (des ratios entre deux mesures prises à la même
+    // température, donc insensibles à celle-ci), la résistance d'isolement BRUTE dépend fortement
+    // de la température : elle double environ tous les 10 °C de baisse (ou est divisée par 2 tous
+    // les 10 °C de hausse). Règle générale IEEE 43-2013 (référence 40 °C) : R40 = R_mesuré ×
+    // 2^((40−T)/10). Repère indicatif — certaines classes d'isolation ont des coefficients plus
+    // précis (ex. 1,4 pour classe B, 1,6 pour classe F par 10 °C, selon certaines sources), non
+    // repris ici faute de confirmation suffisamment fiable. Ne calcule que si température ET valeur
+    // sont renseignées — jamais de température supposée par défaut.
+    {
+      key: "irCorrige40", label: "IR corrigé à 40 °C (repère — IEEE 43-2013, règle générale ×2 / 10 °C)", longText: true,
+      compute: (f) => {
+        const mesureMO = versMegaohms(f.valeur, f.unite);
+        const temp = numOf(f.temperature);
+        if (mesureMO === null || temp === null) return "";
+        const corrige = Math.round(mesureMO * Math.pow(2, (40 - temp) / 10) * 1000) / 1000;
+        return `${corrige} MΩ à 40 °C (mesuré ${mesureMO} MΩ à ${temp} °C) — règle générale (facteur ×2 par tranche de 10 °C d'écart), repère indicatif à comparer à l'historique de l'équipement, pas une formule réglementaire unique pour les transformateurs.`;
+      },
+    },
     // Seuil indicatif — règle largement citée (guide IEEE sur les machines tournantes, pratique
     // NETA) : résistance d'isolement minimale ≈ 1 MΩ par kV de tension d'essai. Ce n'est pas une
     // clause IEC unique et universelle pour les transformateurs (NETA propose des tables plus
