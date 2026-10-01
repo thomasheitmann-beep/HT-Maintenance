@@ -1336,10 +1336,15 @@ const DEFINITION_ANSI = {
 };
 const PARAM_SEUIL_TYPES = [...Object.keys(DEFINITION_ANSI), "DEC — Protection de découplage (UTE/NF C15-400)"];
 function emptySeuilEntry(label) {
+  // Zone de déclenchement -88°/+88° pré-remplie une seule fois à la création, pour 67/67N
+  // uniquement (valeur confirmée) — posée ici plutôt qu'en filet de secours permanent à l'affichage,
+  // pour ne pas reproduire le bug qui empêchait de modifier le multiple d'injection.
+  const fam = ansiFamily(label);
+  const zoneParDefaut = (fam === "67" || fam === "67N") ? { zoneMin: "-88", zoneMax: "88" } : {};
   return {
     id: uid(), label: label || "",
-    fields: { etat: "", courbe: "", type: "", reglage: "", temporisation: "", temporisation_unite: "ms" },
-    essai: { action: "", etat: "Conforme", fields: { l1: "", l2: "", l3: "", courant_injecte: "", typeValise: "1U1I (monophasé)" } },
+    fields: { etat: "", courbe: "", type: "", reglage: "", temporisation: "", temporisation_unite: "ms", ...zoneParDefaut },
+    essai: { action: "", etat: "Conforme", fields: { l1: "", l2: "", l3: "", courant_injecte: "", typeValise: "1U1I (monophasé)", multipleInjection: "2" } },
   };
 }
 const LISTE_TYPE_VALISE = ["1U1I (monophasé)", "3U3I (triphasé)"];
@@ -1363,15 +1368,15 @@ const ANSI_REGLAGE_FIELDS = {
   "51": [{ key: "courbe", label: "Courbe à temps", options: LISTE_COURBE_RELAIS }, { key: "type", label: "Type", options: LISTE_TYPE_RELAIS }, { key: "reglage", label: "Réglage", unit: "A" }, { key: "tms", label: "Multiplicateur de temps (TMS)" }],
   "50N": [{ key: "courbe", label: "Courbe à temps", options: LISTE_COURBE_RELAIS }, { key: "reglage", label: "Réglage", unit: "A" }, { key: "modeDetection", label: "Mode de détection", options: LISTE_MODE_DETECTION_TERRE }, { key: "tms", label: "Multiplicateur de temps (TMS)" }],
   "46": [{ key: "reglage", label: "Réglage", unit: "%" }],
-  "67": [{ key: "courbe", label: "Courbe à temps", options: LISTE_COURBE_RELAIS }, { key: "reglage", label: "Réglage", unit: "A" }, { key: "angle", label: "Angle caractéristique", unit: "°" }, { key: "tms", label: "Multiplicateur de temps (TMS)" }],
-  "67N": [{ key: "courbe", label: "Courbe à temps", options: LISTE_COURBE_RELAIS }, { key: "reglage", label: "Réglage", unit: "A" }, { key: "angle", label: "Angle caractéristique", unit: "°" }, { key: "tms", label: "Multiplicateur de temps (TMS)" }],
+  "67": [{ key: "courbe", label: "Courbe à temps", options: LISTE_COURBE_RELAIS }, { key: "reglage", label: "Réglage", unit: "A" }, { key: "angle", label: "Angle caractéristique", unit: "°" }, { key: "tms", label: "Multiplicateur de temps (TMS)" }, { key: "sens", label: "Sens de détection", options: ["Amont", "Aval"] }, { key: "zoneMin", label: "Zone de déclenchement — borne basse", unit: "°" }, { key: "zoneMax", label: "Zone de déclenchement — borne haute", unit: "°" }],
+  "67N": [{ key: "courbe", label: "Courbe à temps", options: LISTE_COURBE_RELAIS }, { key: "reglage", label: "Réglage", unit: "A" }, { key: "angle", label: "Angle caractéristique", unit: "°" }, { key: "tms", label: "Multiplicateur de temps (TMS)" }, { key: "sens", label: "Sens de détection", options: ["Amont", "Aval"] }, { key: "zoneMin", label: "Zone de déclenchement — borne basse", unit: "°" }, { key: "zoneMax", label: "Zone de déclenchement — borne haute", unit: "°" }],
   "27": [{ key: "reglage", label: "Réglage", unit: "V" }],
   "59": [{ key: "reglage", label: "Réglage", unit: "V" }],
   "59N": [{ key: "reglage", label: "Réglage", unit: "V" }],
-  "32P": [{ key: "reglage", label: "Réglage", unit: "kW" }],
-  "32Q": [{ key: "reglage", label: "Réglage", unit: "kVAR" }],
-  "37P": [{ key: "reglage", label: "Réglage", unit: "kW" }],
-  "37Q": [{ key: "reglage", label: "Réglage", unit: "kVAR" }],
+  "32P": [{ key: "reglage", label: "Réglage", unit: "kW" }, { key: "sens", label: "Sens de détection", options: ["Amont", "Aval"] }, { key: "zoneMin", label: "Zone de déclenchement — borne basse", unit: "°" }, { key: "zoneMax", label: "Zone de déclenchement — borne haute", unit: "°" }],
+  "32Q": [{ key: "reglage", label: "Réglage", unit: "kVAR" }, { key: "sens", label: "Sens de détection", options: ["Amont", "Aval"] }, { key: "zoneMin", label: "Zone de déclenchement — borne basse", unit: "°" }, { key: "zoneMax", label: "Zone de déclenchement — borne haute", unit: "°" }],
+  "37P": [{ key: "reglage", label: "Réglage", unit: "kW" }, { key: "sens", label: "Sens de détection", options: ["Amont", "Aval"] }, { key: "zoneMin", label: "Zone de déclenchement — borne basse", unit: "°" }, { key: "zoneMax", label: "Zone de déclenchement — borne haute", unit: "°" }],
+  "37Q": [{ key: "reglage", label: "Réglage", unit: "kVAR" }, { key: "sens", label: "Sens de détection", options: ["Amont", "Aval"] }, { key: "zoneMin", label: "Zone de déclenchement — borne basse", unit: "°" }, { key: "zoneMax", label: "Zone de déclenchement — borne haute", unit: "°" }],
   "81H": [{ key: "reglage", label: "Réglage", unit: "Hz" }],
   "81L": [{ key: "reglage", label: "Réglage", unit: "Hz" }],
   "81R": [{ key: "reglage", label: "Réglage", unit: "Hz/s" }],
@@ -6607,7 +6612,15 @@ function ParametrageRelaisPanel({ eq, update, idPrefix, locaux = [] }) {
   const seuils = eq.controles.parametrage_relais_seuils;
   const setSeuils = (next) => update({ ...eq, controles: { ...eq.controles, parametrage_relais_seuils: next } });
   const setSeuilField = (id, k, v) => setSeuils(seuils.map((s) => (s.id === id ? { ...s, fields: { ...s.fields, [k]: v } } : s)));
-  const setSeuilLabel = (id, label) => setSeuils(seuils.map((s) => (s.id === id ? { ...s, label } : s)));
+  // Pré-remplit la zone de déclenchement -88°/+88° au moment où le technicien choisit 67 ou 67N
+  // (valeur confirmée) — seulement si les deux bornes sont encore vides, pour ne jamais écraser une
+  // valeur déjà saisie si le technicien revient en arrière puis rechoisit le même type.
+  const setSeuilLabel = (id, label) => setSeuils(seuils.map((s) => {
+    if (s.id !== id) return s;
+    const fam = ansiFamily(label);
+    const zoneParDefaut = (fam === "67" || fam === "67N") && !s.fields.zoneMin && !s.fields.zoneMax ? { zoneMin: "-88", zoneMax: "88" } : {};
+    return { ...s, label, fields: { ...s.fields, ...zoneParDefaut } };
+  }));
   const removeSeuil = (id) => setSeuils(seuils.filter((s) => s.id !== id));
   function addSeuil() {
     const used = seuils.map((s) => s.label);
@@ -6716,7 +6729,7 @@ function DisjoncteurRelaisPanel({ eq, update, custom, onAddCustom, onChangeCusto
                     return <MiniInput label="Valeur injectée" unit={uInjecte} value={s.essai.fields.courant_injecte} onChange={(v) => setEssaiField(s.id, "courant_injecte", v)} />;
                   })()}
                   {estCEI && (
-                    <MiniCombo label="Multiple d'injection" options={LISTE_MULTIPLE_INJECTION} value={s.essai.fields.multipleInjection || "2"} onChange={(v) => setEssaiField(s.id, "multipleInjection", v)} unit="×" />
+                    <MiniCombo label="Multiple d'injection" options={LISTE_MULTIPLE_INJECTION} value={s.essai.fields.multipleInjection} onChange={(v) => setEssaiField(s.id, "multipleInjection", v)} unit="×" />
                   )}
                   {est49 && (
                     <MiniSelect label="Multiple d'injection (% seuil)" options={LISTE_MULTIPLE_THERMIQUE.map((m) => m + "%")} value={(s.essai.fields.multipleThermique || "150") + "%"} onChange={(v) => setEssaiField(s.id, "multipleThermique", v.replace("%", ""))} />
@@ -6784,6 +6797,12 @@ function DisjoncteurRelaisPanel({ eq, update, custom, onAddCustom, onChangeCusto
                       </span>
                     );
                   })()}
+                  {["67", "67N", "32P", "32Q", "37P", "37Q"].includes(ansiFamily(s.label)) && (
+                    <div style={{ fontSize: 10.5, color: "#8B96A3", marginTop: 2, marginBottom: 4, lineHeight: 1.45, flexBasis: "100%" }} title="Aide au technicien — non imprimée dans le rapport">
+                      Protection directionnelle (sens réglé : {s.fields.sens || "non renseigné"}) — un simple dépassement du seuil ne suffit pas à valider l'essai, le relais compare aussi la phase du courant injecté à une tension de référence (polarisation). Méthode : injecter au seuil {ansiFamily(s.label).startsWith("67") ? `à l'angle caractéristique réglé (${s.fields.angle || "?"}°)` : "en phase (0°)"} par rapport à la tension de référence et vérifier le déclenchement, PUIS répéter à +180° (courant inversé) et vérifier que le relais NE déclenche PAS cette fois (restriction dans le sens opposé). La correspondance exacte entre un angle et « Amont »/« Aval » dépend du câblage du TC/TP de ce relais précis (polarité) — à confirmer avec la doc constructeur ou un essai de polarité, ce n'est pas une convention universelle.
+                      {s.essai.fields.typeValise !== "3U3I (triphasé)" && " En injection monophasée (1U1I), la tension de référence à utiliser n'est pas forcément celle de la même phase que le courant injecté : selon le montage de polarisation du relais (connexion 0°/30°/60°/90°, propre à ce modèle), il peut falloir une tension composée d'une autre phase (ex. injecter Ia avec Vbc, pas Va) — à vérifier dans la doc du relais avant l'essai, sous peine de fausser le résultat sans que ça se voie."}
+                    </div>
+                  )}
                   {tol && <MiniComputed label="Tolérance attendue" unit={tol.unite} value={`${tol.min} – ${tol.max}`} />}
                   <input placeholder="Action" value={s.essai.action} onChange={(e) => setEssai(s.id, { action: e.target.value })} style={{ ...inputStyle, width: actionInputWidth(s.essai.action), padding: "5px 7px", fontSize: 12 }} />
                   <Select value={s.essai.etat} onChange={(e) => setEssai(s.id, { etat: e.target.value })} style={{ width: 120, padding: "5px 7px", fontSize: 12 }}>
