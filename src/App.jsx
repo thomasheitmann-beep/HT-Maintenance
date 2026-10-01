@@ -1275,17 +1275,66 @@ const CONTROLES_DISJONCTEUR = [
 // possibles (stades), comme sur un relais LSI réel ; les autres fonctions sont à seuil unique.
 // Chaque seuil ajouté fait apparaître automatiquement sa ligne d'essai correspondante dans
 // "Contrôles du relais de protection".
-const PARAM_SEUIL_TYPES = [
-  "50-51-1 — Max I phase (seuil 1)", "50-51-2 — Max I phase (seuil 2)", "50-51-3 — Max I phase (seuil 3)",
-  "50N-51N — Max I terre",
-  "46 — Déséquilibre / composante inverse",
-  "67 — Max I phase directionnel", "67N — Max I terre directionnel",
-  "27 — Minimum de tension", "59 — Maximum de tension", "59N — Surtension résiduelle",
-  "32 — Directionnel de puissance",
-  "81O — Surfréquence", "81U — Sous-fréquence", "81R — Gradient de fréquence",
-  "87 — Différentielle", "87T — Différentielle transformateur", "87B — Différentielle jeu de barres",
-  "49 — Image thermique", "63 — Buchholz / pression", "25 — Contrôle de synchronisme", "79 — Réenclenchement automatique",
-];
+// Définitions des fonctions de protection — norme ANSI C37.2 (tableau de référence fourni par
+// l'utilisateur). Les entrées déjà adaptées à l'usage de l'app (ex. "50-51-1/2/3" pour 3 seuils
+// distincts, "50N-51N" combinant N et G) sont conservées telles quelles, avec leur définition
+// ANSI correspondante. "32" et "81O/81U" (génériques) sont remplacés par les codes officiels
+// exacts du tableau (32P/32Q, 81H/81L) — plus précis. La liste de seuils proposée au technicien
+// (PARAM_SEUIL_TYPES) est dérivée directement de cet objet, pour ne jamais désynchroniser les deux.
+const DEFINITION_ANSI = {
+  "12 — Survitesse": "Détection de survitesse des machines tournantes.",
+  "14 — Sous-vitesse": "Détection de sous-vitesse des machines tournantes.",
+  "21 — Protection de distance": "Détection de mesure d'impédance.",
+  "21B — Minimum d'impédance": "Protection de secours des générateurs contre les courts-circuits entre phases.",
+  "24 — Contrôle de flux": "Contrôle de surfluxage.",
+  "25 — Contrôle de synchronisme": "Contrôle d'autorisation de couplage de deux parties de réseau.",
+  "26 — Thermostat": "Protection contre les surcharges.",
+  "27 — Minimum de tension": "Protection pour contrôle d'une baisse de tension.",
+  "27D — Minimum de tension directe": "Protection des moteurs contre un fonctionnement à tension insuffisante.",
+  "27R — Minimum de tension rémanente": "Contrôle de disparition de la tension entretenue par les machines tournantes après déconnexion de l'alimentation.",
+  "27TN — Minimum de tension résiduelle harmonique 3": "Détection de défaut d'isolement à la terre d'enroulements statoriques (neutre impédant).",
+  "32P — Maximum de puissance active directionnelle": "Protection de contrôle de transfert maximal de puissance active.",
+  "32Q — Maximum de puissance réactive directionnelle": "Protection de contrôle de transfert maximal de puissance réactive.",
+  "37 — Minimum de courant phase": "Protection triphasée contre les minima de courant.",
+  "37P — Minimum de puissance active directionnelle": "Protection de contrôle de transfert minimal de puissance active.",
+  "37Q — Minimum de puissance réactive directionnelle": "Protection de contrôle de transfert minimal de puissance réactive.",
+  "38 — Surveillance de température de paliers": "Protection contre les échauffements anormaux des paliers des machines tournantes.",
+  "40 — Perte d'excitation": "Protection des machines synchrones contre défaut ou perte d'excitation.",
+  "46 — Déséquilibre / composante inverse": "Protection contre les déséquilibres des courants des phases (maximum de composante inverse).",
+  "47 — Maximum de tension inverse": "Protection de tension inverse et détection du sens de rotation inverse de machine tournante.",
+  "48-51LR — Démarrage trop long et blocage rotor": "Protection des moteurs contre le démarrage en surcharge ou sous tension réduite, et pour charge pouvant se bloquer.",
+  "49 — Image thermique": "Protection contre les surcharges (par image thermique).",
+  "49T — Sonde de température": "Protection contre les échauffements anormaux des enroulements des machines.",
+  "50-51-1 — Max I phase (seuil 1)": "Protection triphasée contre les courts-circuits (instantanée) et surcharges (temporisée) entre phases.",
+  "50-51-2 — Max I phase (seuil 2)": "Protection triphasée contre les courts-circuits (instantanée) et surcharges (temporisée) entre phases.",
+  "50-51-3 — Max I phase (seuil 3)": "Protection triphasée contre les courts-circuits (instantanée) et surcharges (temporisée) entre phases.",
+  "50BF — Défaillance disjoncteur": "Protection de contrôle de la non-ouverture du disjoncteur après ordre de déclenchement.",
+  "50N-51N — Max I terre": "Protection contre les défauts à la terre : 50N/51N (courant résiduel calculé ou mesuré par 3 TC) ou 50G/51G (courant résiduel mesuré directement par un seul capteur — TC ou tore).",
+  "50V — Max I phase à retenue de tension (instantanée)": "Protection triphasée contre les courts-circuits entre phases, à seuil dépendant de la tension.",
+  "50/27 — Mise sous tension accidentelle générateur": "Détection de mise sous tension accidentelle de générateur.",
+  "51V — Max I phase à retenue de tension (temporisée)": "Protection triphasée contre les courts-circuits entre phases, à seuil dépendant de la tension.",
+  "59 — Maximum de tension": "Protection de contrôle d'une tension trop élevée ou insuffisante.",
+  "59N — Surtension résiduelle": "Protection de détection de défaut d'isolement.",
+  "63 — Buchholz / pression": "Détection de défaut interne transformateur (gaz, pression).",
+  "64REF — Différentielle de terre restreinte": "Protection contre les défauts à la terre d'enroulements triphasés couplés en étoile avec neutre relié à la terre.",
+  "64G — 100 % stator générateur": "Détection de défauts d'isolement à la terre des enroulements statoriques (réseau à neutre impédant).",
+  "66 — Limitation du nombre de démarrages": "Protection contrôlant le nombre de démarrages des moteurs.",
+  "67 — Max I phase directionnel": "Protection triphasée contre les courts-circuits selon le sens d'écoulement du courant.",
+  "67N — Max I terre directionnel": "Protection contre les défauts à la terre selon le sens d'écoulement du courant (NC : Neutre Compensé).",
+  "78 — Saut de vecteur": "Protection de découplage à saut de vecteur.",
+  "78PS — Perte de synchronisme (pole slip)": "Détection de perte de synchronisme des machines synchrones en réseau.",
+  "79 — Réenclenchement automatique": "Automatisme de refermeture du disjoncteur après déclenchement sur défaut fugitif de ligne.",
+  "81H — Maximum de fréquence": "Protection contre une fréquence anormalement élevée.",
+  "81L — Minimum de fréquence": "Protection contre une fréquence anormalement basse.",
+  "81R — Dérivée de fréquence (ROCOF)": "Protection de découplage rapide entre deux parties de réseau.",
+  "87 — Différentielle": "Protection triphasée contre les défauts internes (générique — voir 87B/87G/87L/87M/87T pour un équipement précis).",
+  "87B — Différentielle jeu de barres": "Protection triphasée contre les défauts internes de jeu de barres.",
+  "87G — Différentielle générateur": "Protection triphasée contre les défauts internes d'alternateurs.",
+  "87L — Différentielle ligne": "Protection triphasée contre les défauts internes de ligne.",
+  "87M — Différentielle moteur": "Protection triphasée contre les défauts internes de moteur.",
+  "87T — Différentielle transformateur": "Protection triphasée contre les défauts internes de transformateur.",
+};
+const PARAM_SEUIL_TYPES = [...Object.keys(DEFINITION_ANSI), "DEC — Protection de découplage (UTE/NF C15-400)"];
 function emptySeuilEntry(label) {
   return {
     id: uid(), label: label || "",
@@ -1294,8 +1343,9 @@ function emptySeuilEntry(label) {
   };
 }
 const LISTE_TYPE_VALISE = ["1U1I (monophasé)", "3U3I (triphasé)"];
-// Extrait le code ANSI en tête d'un libellé de seuil (ex. "50-1 — Max I..." → "50", "81O — ..." → "81O").
+// Extrait le code ANSI en tête d'un libellé de seuil (ex. "50-1 — Max I..." → "50", "81H — ..." → "81H").
 function ansiFamily(label) {
+  if (/^DEC\b/.test(label || "")) return "DEC";
   const m = (label || "").match(/^(\d+)([A-Za-z]*)(?:-\d+)?/);
   return m ? m[1] + m[2] : null;
 }
@@ -1304,6 +1354,10 @@ function ansiFamily(label) {
 // Détection terre (50N/51N) : soit via un TC homopolaire dédié, soit calculée par le relais à
 // partir de la somme vectorielle des 3 courants de phase (pas de TC dédié dans ce cas).
 const LISTE_MODE_DETECTION_TERRE = ["TC homopolaire dédié", "Somme des 3I (calculée)"];
+// Types de protection de découplage HTA (guide UTE/NF C15-400) — pour un poste de livraison HTA
+// avec producteur. Les types B1/B2/F1/F2/F4/F5 (BT) ne sont pas proposés ici : cette liste est
+// utilisée sur le relais de protection HTA (Disjoncteur HTA / Interrupteur HTA), pas côté BT.
+const LISTE_TYPE_DECOUPLAGE_HTA = ["H1", "H2", "H3-1", "H3-2", "H4", "H5"];
 const ANSI_REGLAGE_FIELDS = {
   "50": [{ key: "courbe", label: "Courbe à temps", options: LISTE_COURBE_RELAIS }, { key: "type", label: "Type", options: LISTE_TYPE_RELAIS }, { key: "reglage", label: "Réglage", unit: "A" }, { key: "tms", label: "Multiplicateur de temps (TMS)" }],
   "51": [{ key: "courbe", label: "Courbe à temps", options: LISTE_COURBE_RELAIS }, { key: "type", label: "Type", options: LISTE_TYPE_RELAIS }, { key: "reglage", label: "Réglage", unit: "A" }, { key: "tms", label: "Multiplicateur de temps (TMS)" }],
@@ -1314,9 +1368,12 @@ const ANSI_REGLAGE_FIELDS = {
   "27": [{ key: "reglage", label: "Réglage", unit: "V" }],
   "59": [{ key: "reglage", label: "Réglage", unit: "V" }],
   "59N": [{ key: "reglage", label: "Réglage", unit: "V" }],
-  "32": [{ key: "reglage", label: "Réglage", unit: "kW" }],
-  "81O": [{ key: "reglage", label: "Réglage", unit: "Hz" }],
-  "81U": [{ key: "reglage", label: "Réglage", unit: "Hz" }],
+  "32P": [{ key: "reglage", label: "Réglage", unit: "kW" }],
+  "32Q": [{ key: "reglage", label: "Réglage", unit: "kVAR" }],
+  "37P": [{ key: "reglage", label: "Réglage", unit: "kW" }],
+  "37Q": [{ key: "reglage", label: "Réglage", unit: "kVAR" }],
+  "81H": [{ key: "reglage", label: "Réglage", unit: "Hz" }],
+  "81L": [{ key: "reglage", label: "Réglage", unit: "Hz" }],
   "81R": [{ key: "reglage", label: "Réglage", unit: "Hz/s" }],
   "87": [{ key: "reglage", label: "Réglage (pente)", unit: "%" }],
   "87T": [{ key: "reglage", label: "Réglage (pente)", unit: "%" }],
@@ -1325,7 +1382,29 @@ const ANSI_REGLAGE_FIELDS = {
   "63": [],
   "25": [{ key: "dv_max", label: "ΔV max", unit: "%" }, { key: "df_max", label: "Δf max", unit: "Hz" }, { key: "dphi_max", label: "Δφ max", unit: "°" }],
   "79": [{ key: "nb_cycles", label: "Nombre de cycles" }, { key: "temps_mort1", label: "Temps mort 1", unit: "s" }, { key: "temps_mort2", label: "Temps mort 2", unit: "s" }],
+  // Protection de découplage (guide UTE/NF C15-400, postes de livraison HTA avec producteur) — le
+  // type n'est plus choisi ici : il est lu depuis le local (cohérent avec la norme du poste), voir
+  // ParametrageRelaisPanel. Les seuils numériques réels (27, 59, 59N, 81O, 81U) se paramètrent
+  // séparément, comme des seuils à part entière dans cette même liste.
+  "DEC": [],
 };
+// Repère par type de protection de découplage (guide UTE/NF C15-400, types HTA H1 à H5) — ce que
+// les sources disponibles confirment de façon cohérente sur le comportement de chaque type. Pour
+// H3-1/H3-2 et H5, la distinction précise n'a pas pu être confirmée avec une source suffisamment
+// fiable : repère volontairement resté général sur ces points plutôt que d'affirmer un détail non
+// vérifié. Les seuils numériques exacts (valeurs de réglage U/f/temporisation) ne sont pas
+// universels : ils dépendent de la convention de raccordement avec le gestionnaire du réseau.
+function aideTypeDecouplage(type) {
+  const infos = {
+    "H1": "Protection instantanée (non temporisée), non sélective — ne nécessite pas de dispositif additionnel pour le Régime Spécial d'Exploitation (RSE), l'action étant déjà instantanée.",
+    "H2": "Protection temporisée sur défaut homopolaire (terre) uniquement.",
+    "H3-1": "Protection temporisée sur tension, fréquence et homopolaire — nécessite une fonction RSE (temporisations annulées pendant les travaux sous tension sur le réseau HTA). Distinction précise avec H3-2 non confirmée avec certitude — à vérifier avec la convention de raccordement.",
+    "H3-2": "Protection temporisée sur tension, fréquence et homopolaire — nécessite une fonction RSE. Distinction précise avec H3-1 non confirmée avec certitude — à vérifier avec la convention de raccordement.",
+    "H4": "Comme H3, avec en plus une téléaction (liaison avec le poste source, ex. fil pilote) permettant un découplage plus rapide en cas de marche en réseau séparé.",
+    "H5": "Variante du dispositif de découplage — caractéristiques précises non confirmées avec une source suffisamment fiable ; se référer à la convention de raccordement avec le gestionnaire du réseau.",
+  };
+  return infos[type] || "";
+}
 const ANSI_REGLAGE_FIELDS_DEFAUT = ANSI_REGLAGE_FIELDS["50"];
 // Aide au technicien (jamais imprimée dans le rapport) : valeur de courant à injecter au
 // secondaire pour simuler le seuil de réglage primaire, à partir du rapport TC de protection
@@ -1410,7 +1489,7 @@ function calcToleranceEssai(reglage, unite) {
 }
 // Liste des multiples d'injection courants pour vérifier une courbe à temps inverse — au seuil
 // même (M=1), le temps est théoriquement infini, donc pas un point de test exploitable.
-const LISTE_MULTIPLE_INJECTION = ["2", "3", "5", "10", "20"];
+const LISTE_MULTIPLE_INJECTION = ["2", "3", "4", "5", "10", "20"];
 // Formules CEI 60255 (temps inverse) : t = k ÷ (M^α − 1) × TMS, où M = courant injecté ÷ réglage
 // (multiple de seuil), TMS = multiplicateur de temps (réglage du relais).
 function calcTempsTheoriqueCEI(courbe, tms, multiple) {
@@ -2683,15 +2762,31 @@ function getOnduleurRegimes(eq) {
 function getSchema(eq) {
   if (eq.type === "Onduleur") {
     const schema = buildOnduleurSchema(getOnduleurRegimes(eq));
+    let out = schema;
+    // Configuration "Parallèle modulaire" : nombre de modules installés, puissance unitaire par
+    // module, et répartition entre modules nécessaires à la charge, redondants (N+x, déjà
+    // installés et sous tension) et en réserve (spares non installés, gardés au magasin).
+    if (eq.identification?.configuration === "Parallèle modulaire") {
+      const idxConfig = out.identification.findIndex((f) => f.key === "configuration");
+      const champsModulaires = [
+        { key: "nombreModules", label: "Nombre de modules installés", numeric: true },
+        { key: "puissanceParModule", label: "Puissance par module (kVA)", numeric: true },
+        { key: "nombreModulesRedondants", label: "Dont modules redondants (N+x, installés)", numeric: true },
+        { key: "nombreModulesReserve", label: "Modules en réserve (spares non installés)", numeric: true },
+        { key: "moduleBypass", label: "Module bypass", options: ["Séparé (module dédié)", "Intégré à chaque module de puissance"] },
+      ];
+      const identification = [...out.identification.slice(0, idxConfig + 1), ...champsModulaires, ...out.identification.slice(idxConfig + 1)];
+      out = { ...out, identification };
+    }
     // Un onduleur sécurité n'a ni réseau secours, ni by-pass / commutation R2 (RS) — masqués.
     if (eq.identification?.typeUPS === "Onduleur sécurité") {
       const ITEMS_R2_A_MASQUER = ["auto_alim_commutateur", "commutation_r0_r2", "controle_rs"];
-      const sections = schema.sections
+      const sections = out.sections
         .filter((s) => s.key !== "mesures_reseau_secours" && s.key !== "bypass_synoptique")
         .map((s) => (s.key === "etat_onduleur" ? { ...s, items: s.items.filter((it) => !ITEMS_R2_A_MASQUER.includes(it.key)) } : s));
-      return { ...schema, sections };
+      out = { ...out, sections };
     }
-    return schema;
+    return out;
   }
   if (eq.type === "Redresseur chargeur") return buildRedresseurSchema({ reseauMono: getOnduleurRegimes(eq).normalMono });
   if (eq.type === "Inverseur de source") {
@@ -2946,7 +3041,7 @@ function emptySite() {
   };
 }
 function emptyLocal(nom) {
-  return { id: uid(), nom: nom || "", typeDePoste: "", regimeNeutre: "", marque: "", anneeMiseEnService: "", normeFusible: "" };
+  return { id: uid(), nom: nom || "", typeDePoste: "", regimeNeutre: "", marque: "", anneeMiseEnService: "", normeFusible: "", typeDecouplage: "" };
 }
 
 function worstRank(labels) { return labels.reduce((worst, l) => Math.max(worst, RANK_OF[l] ?? 0), 0); }
@@ -3816,7 +3911,10 @@ function Combo({ value, onChange, options, listId, style, placeholder, numeric, 
       document.removeEventListener("touchstart", onDocPointer);
     };
   }, []);
-  const filtered = value ? options.filter((o) => String(o).toLowerCase().includes(String(value).toLowerCase())) : options;
+  // Ne filtre que si la valeur tapée ne correspond pas déjà exactement à une option existante —
+  // sinon (juste après une sélection, ou à l'ouverture d'un seuil déjà choisi), la liste complète
+  // reste visible plutôt que de se réduire au seul élément déjà sélectionné.
+  const filtered = (value && !options.includes(value)) ? options.filter((o) => String(o).toLowerCase().includes(String(value).toLowerCase())) : options;
   return (
     <div ref={ref} style={{ position: "relative", width: (style && style.width) || "100%" }}>
       <input
@@ -5160,6 +5258,13 @@ function RapportTab({ site, update }) {
                 </Select>
                 <div style={{ fontSize: 10.5, color: "#8B96A3", marginTop: 4 }}>Caractéristique générale du poste — utilisée actuellement pour le contrôle du calibre fusible HTA.</div>
               </Field>
+              <Field label="Type de protection de découplage (UTE/NF C15-400)">
+                <Select value={l.typeDecouplage || ""} onChange={(e) => setLocalField(l.id, "typeDecouplage", e.target.value)}>
+                  <option value="">—</option>
+                  {LISTE_TYPE_DECOUPLAGE_HTA.map((t) => <option key={t} value={t}>{t}</option>)}
+                </Select>
+                <div style={{ fontSize: 10.5, color: "#8B96A3", marginTop: 4 }}>Choix à faire en adéquation avec la norme du poste ci-dessus — repris automatiquement sur le relais de protection du Disjoncteur/Interrupteur HTA de ce local.</div>
+              </Field>
               <Field label="Type de poste">
                 <Combo value={l.typeDePoste} onChange={(v) => setLocalField(l.id, "typeDePoste", v)} options={LISTE_TYPE_POSTE} listId={`${l.id}-typeposte`} />
               </Field>
@@ -6498,7 +6603,7 @@ function CourantDechargeBranches({ eq, update }) {
     </Card>
   );
 }
-function ParametrageRelaisPanel({ eq, update, idPrefix }) {
+function ParametrageRelaisPanel({ eq, update, idPrefix, locaux = [] }) {
   const seuils = eq.controles.parametrage_relais_seuils;
   const setSeuils = (next) => update({ ...eq, controles: { ...eq.controles, parametrage_relais_seuils: next } });
   const setSeuilField = (id, k, v) => setSeuils(seuils.map((s) => (s.id === id ? { ...s, fields: { ...s.fields, [k]: v } } : s)));
@@ -6509,6 +6614,8 @@ function ParametrageRelaisPanel({ eq, update, idPrefix }) {
     const remaining = PARAM_SEUIL_TYPES.filter((t) => !used.includes(t));
     setSeuils([...seuils, emptySeuilEntry(remaining[0] || "")]);
   }
+  const localEquipement = locaux.find((l) => l.id === eq.localId);
+  const typeDecouplageLocal = localEquipement?.typeDecouplage || "";
 
   return (
     <Card style={{ marginBottom: 14 }}>
@@ -6525,6 +6632,7 @@ function ParametrageRelaisPanel({ eq, update, idPrefix }) {
           {seuils.map((s) => {
             const used = seuils.filter((x) => x.id !== s.id).map((x) => x.label);
             const options = PARAM_SEUIL_TYPES.filter((t) => !used.includes(t));
+            const estDecouplage = ansiFamily(s.label) === "DEC";
             return (
               <div key={s.id} style={{ padding: "10px 0", borderBottom: "1px solid #E2E6EB" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
@@ -6535,18 +6643,31 @@ function ParametrageRelaisPanel({ eq, update, idPrefix }) {
                     <Trash2 size={15} />
                   </button>
                 </div>
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                  <MiniSelect label="État" options={LISTE_ETAT_SEUIL} value={s.fields.etat} onChange={(v) => setSeuilField(s.id, "etat", v)} />
-                  {(ANSI_REGLAGE_FIELDS[ansiFamily(s.label)] || ANSI_REGLAGE_FIELDS_DEFAUT).map((f) =>
-                    f.options ? (
-                      <MiniSelect key={f.key} label={f.label} options={typeof f.options === "function" ? f.options(s.fields) || [] : f.options} value={s.fields[f.key]} onChange={(v) => setSeuilField(s.id, f.key, v)} />
-                    ) : (
-                      <MiniInput key={f.key} label={f.label} unit={f.unit} value={s.fields[f.key]} onChange={(v) => setSeuilField(s.id, f.key, v)} />
-                    )
-                  )}
-                  <MiniInput label="Temporisation" value={s.fields.temporisation} onChange={(v) => setSeuilField(s.id, "temporisation", v)} />
-                  <MiniSelect label="Unité" options={LISTE_TEMPO_UNITE} value={s.fields.temporisation_unite} onChange={(v) => setSeuilField(s.id, "temporisation_unite", v)} />
-                </div>
+                {estDecouplage ? (
+                  <div style={{ fontSize: 12.5, color: typeDecouplageLocal ? "#3E4A5C" : "#B5730A" }}>
+                    Type : <b>{typeDecouplageLocal || "non renseigné sur le local"}</b>
+                    {!typeDecouplageLocal && " — à définir dans la fiche du local (Norme du poste / Type de protection de découplage)."}
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                    <MiniSelect label="État" options={LISTE_ETAT_SEUIL} value={s.fields.etat} onChange={(v) => setSeuilField(s.id, "etat", v)} />
+                    {(ANSI_REGLAGE_FIELDS[ansiFamily(s.label)] || ANSI_REGLAGE_FIELDS_DEFAUT).map((f) =>
+                      f.options ? (
+                        <MiniSelect key={f.key} label={f.label} options={typeof f.options === "function" ? f.options(s.fields) || [] : f.options} value={s.fields[f.key]} onChange={(v) => setSeuilField(s.id, f.key, v)} />
+                      ) : (
+                        <MiniInput key={f.key} label={f.label} unit={f.unit} value={s.fields[f.key]} onChange={(v) => setSeuilField(s.id, f.key, v)} />
+                      )
+                    )}
+                    <MiniInput label="Temporisation" value={s.fields.temporisation} onChange={(v) => setSeuilField(s.id, "temporisation", v)} />
+                    <MiniSelect label="Unité" options={LISTE_TEMPO_UNITE} value={s.fields.temporisation_unite} onChange={(v) => setSeuilField(s.id, "temporisation_unite", v)} />
+                  </div>
+                )}
+                {estDecouplage && typeDecouplageLocal && (
+                  <div style={{ fontSize: 11, color: "#8B96A3", marginTop: 8, lineHeight: 1.5 }}>{aideTypeDecouplage(typeDecouplageLocal)}</div>
+                )}
+                {!estDecouplage && DEFINITION_ANSI[s.label] && (
+                  <div style={{ fontSize: 11, color: "#8B96A3", marginTop: 8, lineHeight: 1.5 }}>{DEFINITION_ANSI[s.label]}</div>
+                )}
               </div>
             );
           })}
@@ -6595,7 +6716,7 @@ function DisjoncteurRelaisPanel({ eq, update, custom, onAddCustom, onChangeCusto
                     return <MiniInput label="Valeur injectée" unit={uInjecte} value={s.essai.fields.courant_injecte} onChange={(v) => setEssaiField(s.id, "courant_injecte", v)} />;
                   })()}
                   {estCEI && (
-                    <MiniSelect label="Multiple d'injection" options={LISTE_MULTIPLE_INJECTION.map((m) => m + "×")} value={(s.essai.fields.multipleInjection || "2") + "×"} onChange={(v) => setEssaiField(s.id, "multipleInjection", v.replace("×", ""))} />
+                    <MiniCombo label="Multiple d'injection" options={LISTE_MULTIPLE_INJECTION} value={s.essai.fields.multipleInjection || "2"} onChange={(v) => setEssaiField(s.id, "multipleInjection", v)} unit="×" />
                   )}
                   {est49 && (
                     <MiniSelect label="Multiple d'injection (% seuil)" options={LISTE_MULTIPLE_THERMIQUE.map((m) => m + "%")} value={(s.essai.fields.multipleThermique || "150") + "%"} onChange={(v) => setEssaiField(s.id, "multipleThermique", v.replace("%", ""))} />
@@ -7452,7 +7573,7 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
               );
             }
             if (sec.key === "parametrage_relais" && TYPES_AVEC_RELAIS.includes(eq.type)) {
-              return <ParametrageRelaisPanel key={sec.key} eq={eq} update={update} idPrefix={`${eq.id}-${sec.key}`} />;
+              return <ParametrageRelaisPanel key={sec.key} eq={eq} update={update} idPrefix={`${eq.id}-${sec.key}`} locaux={locaux} />;
             }
             if (sec.key === "controles_relais" && TYPES_AVEC_RELAIS.includes(eq.type)) {
               return (
