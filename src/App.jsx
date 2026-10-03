@@ -1389,6 +1389,12 @@ const ANSI_REGLAGE_FIELDS = {
   "27": [{ key: "reglage", label: "Réglage", unit: "V" }],
   "59": [{ key: "reglage", label: "Réglage", unit: "V" }],
   "59N": [{ key: "reglage", label: "Réglage", unit: "V" }],
+  // 32N (wattmétrique homopolaire terre) : seuil de puissance résiduelle U0×I0 (simplifié en kW,
+  // comme 32P/32Q, plutôt qu'en % de Sn comme l'exprime le manuel Easergy P5 — même logique que le
+  // reste de l'app). Deux zones (aval = défaut en aval, amont = défaut en amont), chacune définie
+  // par un secteur d'activation (zoneMin/zoneMax) centré sur l'axe P0 (0° pour aval, 180° pour
+  // amont) — pas de valeur par défaut universelle trouvée dans le manuel pour ce secteur.
+  "32N": [{ key: "reglage", label: "Réglage (U0×I0)", unit: "kW" }, { key: "sens", label: "Sens de détection", options: ["Amont", "Aval"] }, { key: "zoneMin", label: "Secteur d'activation — borne basse", unit: "°" }, { key: "zoneMax", label: "Secteur d'activation — borne haute", unit: "°" }],
   "32P": [{ key: "reglage", label: "Réglage", unit: "kW" }, { key: "sens", label: "Sens de détection", options: ["Amont", "Aval"] }, { key: "zoneMin", label: "Zone de déclenchement — borne basse", unit: "°" }, { key: "zoneMax", label: "Zone de déclenchement — borne haute", unit: "°" }],
   "32Q": [{ key: "reglage", label: "Réglage", unit: "kVAR" }, { key: "sens", label: "Sens de détection", options: ["Amont", "Aval"] }, { key: "zoneMin", label: "Zone de déclenchement — borne basse", unit: "°" }, { key: "zoneMax", label: "Zone de déclenchement — borne haute", unit: "°" }],
   "37P": [{ key: "reglage", label: "Réglage", unit: "kW" }, { key: "sens", label: "Sens de détection", options: ["Amont", "Aval"] }, { key: "zoneMin", label: "Zone de déclenchement — borne basse", unit: "°" }, { key: "zoneMax", label: "Zone de déclenchement — borne haute", unit: "°" }],
@@ -1403,6 +1409,10 @@ const ANSI_REGLAGE_FIELDS = {
   "63": [],
   "25": [{ key: "dv_max", label: "ΔV max", unit: "%" }, { key: "df_max", label: "Δf max", unit: "Hz" }, { key: "dphi_max", label: "Δφ max", unit: "°" }],
   "79": [{ key: "nb_cycles", label: "Nombre de cycles" }, { key: "temps_mort1", label: "Temps mort 1", unit: "s" }, { key: "temps_mort2", label: "Temps mort 2", unit: "s" }],
+  // Retombaient sur les champs par défaut de 50 (courant en A), ce qui n'a pas de sens pour une
+  // sonde de température ou une surtension — corrigés avec leur unité propre.
+  "49T": [{ key: "reglage", label: "Seuil", unit: "°C" }],
+  "59C": [{ key: "reglage", label: "Réglage", unit: "V" }],
   // Protection de découplage (guide UTE/NF C15-400, postes de livraison HTA avec producteur) — le
   // type n'est plus choisi ici : il est lu depuis le local (cohérent avec la norme du poste), voir
   // ParametrageRelaisPanel. Les seuils numériques réels (27, 59, 59N, 81O, 81U) se paramètrent
@@ -1450,7 +1460,7 @@ function ratioTransformation(rapport) {
   const primaire = parseFloat(m[1].replace(",", ".")), secondaire = parseFloat(m[2].replace(",", "."));
   return primaire && secondaire ? secondaire / primaire : null;
 }
-function calcInjectionAide(reglagePrimaire, unite, eq, ansiCode, modeDetection, multiple, angle, zoneMin, zoneMax) {
+function calcInjectionAide(reglagePrimaire, unite, eq, ansiCode, modeDetection, multiple, angle, zoneMin, zoneMax, sens) {
   const reglage = numOf(reglagePrimaire);
   if (reglage === null || !unite) return null;
   const M = numOf(multiple) || 1; // au seuil par défaut (1×) si aucun multiple choisi
@@ -1495,16 +1505,29 @@ function calcInjectionAide(reglagePrimaire, unite, eq, ansiCode, modeDetection, 
     // secondaire standard du TP), le courant qui en découle, et le déphasage U/I (0° = puissance
     // active pure, cos φ = 1 — convention par défaut pour l'essai).
     const tcList = eq.controles.tc_dynamique || [];
-    const tcExistant = tcList.find((tc) => tc.fields.rapportPrimaire && tc.fields.secondaire && tc.label !== "Homopolaire (terre)") || tcList.find((tc) => tc.fields.rapportPrimaire && tc.fields.secondaire);
+    const estHomopolaire = ansiCode === "32N";
+    const tcExistant = estHomopolaire
+      ? (tcList.find((tc) => tc.fields.rapportPrimaire && tc.fields.secondaire && tc.label === "Homopolaire (terre)") || tcList.find((tc) => tc.fields.rapportPrimaire && tc.fields.secondaire))
+      : (tcList.find((tc) => tc.fields.rapportPrimaire && tc.fields.secondaire && tc.label !== "Homopolaire (terre)") || tcList.find((tc) => tc.fields.rapportPrimaire && tc.fields.secondaire));
     const rapportTC = tcExistant ? `${tcExistant.fields.rapportPrimaire}/${tcExistant.fields.secondaire}` : null;
     const ratioTC = ratioTransformation(rapportTC);
     const ratioTP = ratioTransformation(eq.identification.rapportTPProtection);
     if (ratioTC === null || ratioTP === null) return null;
     const pSecondaireW = reglage * 1000 * ratioTC * ratioTP;
     const uInjectee = 100;
-    const dephasage = 0;
+    // 32N : déphasage centré sur l'axe P0 — 0° pour la zone aval (défaut en aval), 180° pour la
+    // zone amont (défaut en amont), avec un secteur d'activation (zoneMin/zoneMax) autour de ce
+    // centre, sur le même principe que les bornes de zone de 67/67N.
+    const centre = estHomopolaire && sens === "Amont" ? 180 : 0;
+    const dephasage = centre;
     const iInjectee = Math.round((pSecondaireW / uInjectee) * 1000) / 1000;
-    return { type: "puissance", u: uInjectee, i: iInjectee, dephasage };
+    let limiteBasse = null, limiteHaute = null;
+    if (estHomopolaire) {
+      const zMin = numOf(zoneMin), zMax = numOf(zoneMax);
+      limiteBasse = zMin !== null ? Math.round((centre + zMin) * 100) / 100 : null;
+      limiteHaute = zMax !== null ? Math.round((centre + zMax) * 100) / 100 : null;
+    }
+    return { type: "puissance", u: uInjectee, i: iInjectee, dephasage, limiteBasse, limiteHaute };
   }
   return null;
 }
@@ -6777,7 +6800,7 @@ function DisjoncteurRelaisPanel({ eq, update, custom, onAddCustom, onChangeCusto
                     const champsReglage = ANSI_REGLAGE_FIELDS[ansiFamily(s.label)] || ANSI_REGLAGE_FIELDS_DEFAUT;
                     const champReglage = champsReglage.find((f) => f.key === "reglage");
                     const unite = champReglage ? champReglage.unit : null;
-                    const aide = calcInjectionAide(s.fields.reglage, unite, eq, ansiFamily(s.label), s.fields.modeDetection, estCEI ? (s.essai.fields.multipleInjection || "2") : null, s.fields.angle, s.fields.zoneMin, s.fields.zoneMax);
+                    const aide = calcInjectionAide(s.fields.reglage, unite, eq, ansiFamily(s.label), s.fields.modeDetection, estCEI ? (s.essai.fields.multipleInjection || "2") : null, s.fields.angle, s.fields.zoneMin, s.fields.zoneMax, s.fields.sens);
                     const hintStyle = { fontSize: 11, color: "#8B96A3", fontStyle: "italic" };
                     if (aide === null) {
                       if (unite === "%" && ansiFamily(s.label) === "46") {
@@ -6792,7 +6815,13 @@ function DisjoncteurRelaisPanel({ eq, update, custom, onAddCustom, onChangeCusto
                         );
                       }
                       if (unite === "%") {
+                        if (ansiFamily(s.label) === "49") {
+                          return <span style={hintStyle}>Image thermique — pas d'aide à l'injection calculée ici : contrairement aux autres protections, elle se teste par une injection SOUTENUE dans le temps (pas un seuil instantané), le déclenchement dépendant de la constante de temps réglée. Se référer à la méthode du constructeur du relais.</span>;
+                        }
                         return <span style={hintStyle}>Réglage en % (différentielle) — pas d'aide à l'injection calculée ici, se référer à la méthode du constructeur du relais.</span>;
+                      }
+                      if (unite === "°C") {
+                        return <span style={hintStyle}>Sonde de température (RTD/PT100) — pas une injection électrique au sens propre : le seuil se vérifie en simulant la résistance de la sonde à la température réglée (boîte à décades résistive ou simulateur de sonde dédié), pas avec un courant/tension du Compano 100.</span>;
                       }
                       if (unite && numOf(s.fields.reglage) !== null) {
                         const manque = unite === "kW" ? "un TC ET un rapport TP (identification)" : unite === "V" ? "un rapport TP (identification)" : "un TC (rapport primaire/secondaire renseigné)";
@@ -6817,6 +6846,7 @@ function DisjoncteurRelaisPanel({ eq, update, custom, onAddCustom, onChangeCusto
                           <span style={pill}>U inj. : {aide.u} V</span>
                           <span style={pill}>I inj. : {aide.i} A</span>
                           <span style={pill}>Déphasage : {aide.dephasage}°</span>
+                          {(aide.limiteHaute !== null && aide.limiteBasse !== null) && <span style={pill}>Limites secteur : {aide.limiteHaute}° et {aide.limiteBasse}°</span>}
                         </span>
                       );
                     }
@@ -6858,7 +6888,7 @@ function DisjoncteurRelaisPanel({ eq, update, custom, onAddCustom, onChangeCusto
                       </span>
                     );
                   })()}
-                  {["67", "67N", "32P", "32Q", "37P", "37Q"].includes(ansiFamily(s.label)) && (
+                  {["67", "67N", "32P", "32Q", "37P", "37Q", "32N"].includes(ansiFamily(s.label)) && (
                     <div style={{ fontSize: 10.5, color: "#8B96A3", marginTop: 2, marginBottom: 4, lineHeight: 1.45, flexBasis: "100%" }} title="Aide au technicien — non imprimée dans le rapport">
                       Protection directionnelle (sens réglé : {s.fields.sens || "non renseigné"}) — un simple dépassement du seuil ne suffit pas à valider l'essai, le relais compare aussi la phase du courant injecté à une tension de référence (polarisation). Méthode : injecter au seuil {ansiFamily(s.label).startsWith("67") ? `à l'angle caractéristique réglé (${s.fields.angle || "?"}°)` : "en phase (0°)"} par rapport à la tension de référence et vérifier le déclenchement, PUIS répéter à +180° (courant inversé) et vérifier que le relais NE déclenche PAS cette fois (restriction dans le sens opposé). La correspondance exacte entre un angle et « Amont »/« Aval » dépend du câblage du TC/TP de ce relais précis (polarité) — à confirmer avec la doc constructeur ou un essai de polarité, ce n'est pas une convention universelle.
                       {s.essai.fields.typeValise !== "3U3I (triphasé)" && " En injection monophasée (1U1I), la tension de référence à utiliser n'est pas forcément celle de la même phase que le courant injecté : selon le montage de polarisation du relais (connexion 0°/30°/60°/90°, propre à ce modèle), il peut falloir une tension composée d'une autre phase (ex. injecter Ia avec Vbc, pas Va) — à vérifier dans la doc du relais avant l'essai, sous peine de fausser le résultat sans que ça se voie."}
@@ -6873,7 +6903,7 @@ function DisjoncteurRelaisPanel({ eq, update, custom, onAddCustom, onChangeCusto
                     const champReglage2 = champsReglage2.find((f) => f.key === "reglage");
                     const unite2 = champReglage2 ? champReglage2.unit : null;
                     const estCEI2 = s.fields.courbe && s.fields.courbe !== "Constant" && s.fields.courbe !== "";
-                    const aide2 = calcInjectionAide(s.fields.reglage, unite2, eq, ansiFamily(s.label), s.fields.modeDetection, estCEI2 ? (s.essai.fields.multipleInjection || "2") : null, s.fields.angle, s.fields.zoneMin, s.fields.zoneMax);
+                    const aide2 = calcInjectionAide(s.fields.reglage, unite2, eq, ansiFamily(s.label), s.fields.modeDetection, estCEI2 ? (s.essai.fields.multipleInjection || "2") : null, s.fields.angle, s.fields.zoneMin, s.fields.zoneMax, s.fields.sens);
                     const i2 = typeof aide2 === "object" ? aide2.i : (unite2 === "A" ? aide2 : null);
                     const u2 = typeof aide2 === "object" ? aide2.u : (unite2 === "V" ? aide2 : null);
                     const alertes = [];
