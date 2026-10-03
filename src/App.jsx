@@ -6831,7 +6831,7 @@ function DisjoncteurRelaisPanel({ eq, update, custom, onAddCustom, onChangeCusto
                     }
                     const en3U3I = s.essai.fields.typeValise === "3U3I (triphasé)";
                     const pill = { fontSize: 11, color: "#0A5DA8", background: "rgba(10,93,168,0.08)", padding: "4px 8px", borderRadius: 6 };
-                    if (typeof aide === "object" && aide.type === "puissance") {
+                    if (aide && typeof aide === "object" && aide.type === "puissance") {
                       if (en3U3I) {
                         return (
                           <span style={{ display: "flex", gap: 6, flexWrap: "wrap" }} title="Aide au technicien — non imprimée dans le rapport">
@@ -6850,7 +6850,7 @@ function DisjoncteurRelaisPanel({ eq, update, custom, onAddCustom, onChangeCusto
                         </span>
                       );
                     }
-                    if (typeof aide === "object" && aide.type === "courant_directionnel") {
+                    if (aide && typeof aide === "object" && aide.type === "courant_directionnel") {
                       const limites = (aide.limiteHaute !== null && aide.limiteBasse !== null) && (
                         <span style={pill}>Limites zone : {aide.limiteHaute}° et {aide.limiteBasse}°</span>
                       );
@@ -6904,8 +6904,8 @@ function DisjoncteurRelaisPanel({ eq, update, custom, onAddCustom, onChangeCusto
                     const unite2 = champReglage2 ? champReglage2.unit : null;
                     const estCEI2 = s.fields.courbe && s.fields.courbe !== "Constant" && s.fields.courbe !== "";
                     const aide2 = calcInjectionAide(s.fields.reglage, unite2, eq, ansiFamily(s.label), s.fields.modeDetection, estCEI2 ? (s.essai.fields.multipleInjection || "2") : null, s.fields.angle, s.fields.zoneMin, s.fields.zoneMax, s.fields.sens);
-                    const i2 = typeof aide2 === "object" ? aide2.i : (unite2 === "A" ? aide2 : null);
-                    const u2 = typeof aide2 === "object" ? aide2.u : (unite2 === "V" ? aide2 : null);
+                    const i2 = (aide2 && typeof aide2 === "object") ? aide2.i : (unite2 === "A" ? aide2 : null);
+                    const u2 = (aide2 && typeof aide2 === "object") ? aide2.u : (unite2 === "V" ? aide2 : null);
                     const alertes = [];
                     if (s.essai.fields.typeValise === "3U3I (triphasé)") alertes.push("essai configuré en triphasé (3U3I), mais le Compano 100 est un appareil monophasé (1U1I) — injecter phase par phase, pas de sortie 3U3I disponible");
                     if (typeof i2 === "number" && i2 > 110) alertes.push(`courant à injecter ≈ ${i2} A > 110 A AC (limite Compano 100, disponible seulement sur un temps court)`);
