@@ -1276,9 +1276,10 @@ const CONTROLES_DISJONCTEUR = [
 // Chaque seuil ajouté fait apparaître automatiquement sa ligne d'essai correspondante dans
 // "Contrôles du relais de protection".
 // Définitions des fonctions de protection — norme ANSI C37.2 (tableau de référence fourni par
-// l'utilisateur). Les entrées déjà adaptées à l'usage de l'app (ex. "50-51-1/2/3" pour 3 seuils
-// distincts, "50N-51N" combinant N et G) sont conservées telles quelles, avec leur définition
-// ANSI correspondante. "32" et "81O/81U" (génériques) sont remplacés par les codes officiels
+// l'utilisateur). Les entrées déjà adaptées à l'usage de l'app (ex. "50-51-1/2/3" pour 3 seuils de
+// phase distincts, "50N-51N-1/2/3" de même pour 3 seuils de terre distincts, N/G combinés) sont
+// conservées telles quelles, avec leur définition ANSI correspondante. "32" et "81O/81U" (génériques,
+// anciennes versions de l'app) sont remplacés par les codes officiels
 // exacts du tableau (32P/32Q, 81H/81L) — plus précis. La liste de seuils proposée au technicien
 // (PARAM_SEUIL_TYPES) est dérivée directement de cet objet, pour ne jamais désynchroniser les deux.
 const DEFINITION_ANSI = {
@@ -1309,7 +1310,9 @@ const DEFINITION_ANSI = {
   "50-51-2 — Max I phase (seuil 2)": "Protection triphasée contre les courts-circuits (instantanée) et surcharges (temporisée) entre phases.",
   "50-51-3 — Max I phase (seuil 3)": "Protection triphasée contre les courts-circuits (instantanée) et surcharges (temporisée) entre phases.",
   "50BF — Défaillance disjoncteur": "Protection de contrôle de la non-ouverture du disjoncteur après ordre de déclenchement.",
-  "50N-51N — Max I terre": "Protection contre les défauts à la terre : 50N/51N (courant résiduel calculé ou mesuré par 3 TC) ou 50G/51G (courant résiduel mesuré directement par un seul capteur — TC ou tore).",
+  "50N-51N-1 — Max I terre (seuil 1)": "Protection contre les défauts à la terre : 50N/51N (courant résiduel calculé ou mesuré par 3 TC) ou 50G/51G (courant résiduel mesuré directement par un seul capteur — TC ou tore).",
+  "50N-51N-2 — Max I terre (seuil 2)": "Protection contre les défauts à la terre : 50N/51N (courant résiduel calculé ou mesuré par 3 TC) ou 50G/51G (courant résiduel mesuré directement par un seul capteur — TC ou tore).",
+  "50N-51N-3 — Max I terre (seuil 3)": "Protection contre les défauts à la terre : 50N/51N (courant résiduel calculé ou mesuré par 3 TC) ou 50G/51G (courant résiduel mesuré directement par un seul capteur — TC ou tore).",
   "50V — Max I phase à retenue de tension (instantanée)": "Protection triphasée contre les courts-circuits entre phases, à seuil dépendant de la tension.",
   "50/27 — Mise sous tension accidentelle générateur": "Détection de mise sous tension accidentelle de générateur.",
   "51V — Max I phase à retenue de tension (temporisée)": "Protection triphasée contre les courts-circuits entre phases, à seuil dépendant de la tension.",
@@ -1359,7 +1362,7 @@ function emptySeuilEntry(label) {
   const zoneParDefaut = (fam === "67" || fam === "67N") ? { zoneMin: "-88", zoneMax: "88" } : {};
   return {
     id: uid(), label: label || "",
-    fields: { etat: "", courbe: "", type: "", reglage: "", temporisation: "", temporisation_unite: "ms", ...zoneParDefaut },
+    fields: { groupe: "A", etat: "", courbe: "", type: "", reglage: "", temporisation: "", temporisation_unite: "ms", ...zoneParDefaut },
     essai: { action: "", etat: "Conforme", fields: { l1: "", l2: "", l3: "", courant_injecte: "", typeValise: "1U1I (monophasé)", multipleInjection: "2" } },
   };
 }
@@ -6674,9 +6677,9 @@ function ParametrageRelaisPanel({ eq, update, idPrefix, locaux = [] }) {
   }));
   const removeSeuil = (id) => setSeuils(seuils.filter((s) => s.id !== id));
   function addSeuil() {
-    const used = seuils.map((s) => s.label);
-    const remaining = PARAM_SEUIL_TYPES.filter((t) => !used.includes(t));
-    setSeuils([...seuils, emptySeuilEntry(remaining[0] || "")]);
+    // Type vide au départ (plutôt qu'un type pré-assigné automatiquement) — le technicien choisit
+    // librement dans la liste déroulante, qui montre tout le choix dès lors que le champ est vide.
+    setSeuils([...seuils, emptySeuilEntry("")]);
   }
   const localEquipement = locaux.find((l) => l.id === eq.localId);
   const typeDecouplageLocal = localEquipement?.typeDecouplage || "";
@@ -6714,6 +6717,7 @@ function ParametrageRelaisPanel({ eq, update, idPrefix, locaux = [] }) {
                   </div>
                 ) : (
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                    <MiniSelect label="Groupe" options={["A", "B"]} value={s.fields.groupe} onChange={(v) => setSeuilField(s.id, "groupe", v)} />
                     <MiniSelect label="État" options={LISTE_ETAT_SEUIL} value={s.fields.etat} onChange={(v) => setSeuilField(s.id, "etat", v)} />
                     {(ANSI_REGLAGE_FIELDS[ansiFamily(s.label)] || ANSI_REGLAGE_FIELDS_DEFAUT).map((f) =>
                       f.options ? (
@@ -6841,10 +6845,11 @@ function DisjoncteurRelaisPanel({ eq, update, custom, onAddCustom, onChangeCusto
                           </span>
                         );
                       }
+                      const estHomopolaire = ansiFamily(s.label) === "32N";
                       return (
                         <span style={{ display: "flex", gap: 6, flexWrap: "wrap" }} title="Aide au technicien — non imprimée dans le rapport">
-                          <span style={pill}>U inj. : {aide.u} V</span>
-                          <span style={pill}>I inj. : {aide.i} A</span>
+                          <span style={pill}>{estHomopolaire ? "U0 inj." : "U inj. (Va, phase A)"} : {aide.u} V</span>
+                          <span style={pill}>{estHomopolaire ? "I0 inj." : "I inj. (Ia, phase A)"} : {aide.i} A</span>
                           <span style={pill}>Déphasage : {aide.dephasage}°</span>
                           {(aide.limiteHaute !== null && aide.limiteBasse !== null) && <span style={pill}>Limites secteur : {aide.limiteHaute}° et {aide.limiteBasse}°</span>}
                         </span>
@@ -6890,7 +6895,7 @@ function DisjoncteurRelaisPanel({ eq, update, custom, onAddCustom, onChangeCusto
                   })()}
                   {["67", "67N", "32P", "32Q", "37P", "37Q", "32N"].includes(ansiFamily(s.label)) && (
                     <div style={{ fontSize: 10.5, color: "#8B96A3", marginTop: 2, marginBottom: 4, lineHeight: 1.45, flexBasis: "100%" }} title="Aide au technicien — non imprimée dans le rapport">
-                      Protection directionnelle (sens réglé : {s.fields.sens || "non renseigné"}) — un simple dépassement du seuil ne suffit pas à valider l'essai, le relais compare aussi la phase du courant injecté à une tension de référence (polarisation). Méthode : injecter au seuil {ansiFamily(s.label).startsWith("67") ? `à l'angle caractéristique réglé (${s.fields.angle || "?"}°)` : "en phase (0°)"} par rapport à la tension de référence et vérifier le déclenchement, PUIS répéter à +180° (courant inversé) et vérifier que le relais NE déclenche PAS cette fois (restriction dans le sens opposé). La correspondance exacte entre un angle et « Amont »/« Aval » dépend du câblage du TC/TP de ce relais précis (polarité) — à confirmer avec la doc constructeur ou un essai de polarité, ce n'est pas une convention universelle.
+                      Protection directionnelle (sens réglé : {s.fields.sens || "non renseigné"}) — un simple dépassement du seuil ne suffit pas à valider l'essai, le relais compare aussi la phase du courant injecté à une tension de référence (polarisation). <b>La tension de référence à utiliser n'est pas la même selon la protection</b> : {ansiFamily(s.label) === "67" || ansiFamily(s.label) === "67N" ? "pour 67/67N, c'est une tension composée d'une AUTRE phase (ex. I1 avec Ubc, pas Va — montage en quadrature)." : ansiFamily(s.label) === "32N" ? "pour 32N, ce sont les grandeurs homopolaires U0/I0 (prises sur le circuit terre/neutre), pas une phase en particulier." : "pour cette protection de puissance, c'est la tension de la MÊME phase que le courant injecté (ex. Ia avec Va, pas une tension composée — montage direct, à la différence de 67/67N)."} Méthode : injecter au seuil {ansiFamily(s.label).startsWith("67") ? `à l'angle caractéristique réglé (${s.fields.angle || "?"}°)` : "en phase (0°)"} par rapport à cette tension de référence et vérifier le déclenchement, PUIS répéter à +180° (courant inversé) et vérifier que le relais NE déclenche PAS cette fois (restriction dans le sens opposé). La correspondance exacte entre un angle et « Amont »/« Aval » dépend du câblage du TC/TP de ce relais précis (polarité) — à confirmer avec la doc constructeur ou un essai de polarité, ce n'est pas une convention universelle.
                       {s.essai.fields.typeValise !== "3U3I (triphasé)" && " En injection monophasée (1U1I), la tension de référence à utiliser n'est pas forcément celle de la même phase que le courant injecté : selon le montage de polarisation du relais (connexion 0°/30°/60°/90°, propre à ce modèle), il peut falloir une tension composée d'une autre phase (ex. injecter Ia avec Vbc, pas Va) — à vérifier dans la doc du relais avant l'essai, sous peine de fausser le résultat sans que ça se voie."}
                     </div>
                   )}
@@ -8407,7 +8412,7 @@ function PrintEquipement({ eq, allEquipements = [] }) {
                 <div style={{ flex: "1 1 260px" }}>
                   <div>{s.label || "(seuil sans nom)"}</div>
                   <div style={{ color: "#666", fontSize: 10 }}>
-                    {[s.fields.etat && `État : ${s.fields.etat}`, s.fields.courbe && `Courbe : ${s.fields.courbe}`, s.fields.type && `Type : ${s.fields.type}`,
+                    {[s.fields.groupe && `Groupe : ${s.fields.groupe}`, s.fields.etat && `État : ${s.fields.etat}`, s.fields.courbe && `Courbe : ${s.fields.courbe}`, s.fields.type && `Type : ${s.fields.type}`,
                       s.fields.reglage && `Réglage : ${s.fields.reglage} ${((ANSI_REGLAGE_FIELDS[ansiFamily(s.label)] || ANSI_REGLAGE_FIELDS_DEFAUT).find((f) => f.key === "reglage") || {}).unit || "A"}`, s.fields.temporisation && `Temporisation : ${s.fields.temporisation} ${s.fields.temporisation_unite || ""}`]
                       .filter(Boolean).join(" · ")}
                   </div>
@@ -10988,7 +10993,7 @@ function docxEquipementElements(eq, locaux, allSites) {
       } else {
         seuils.forEach((s) => {
           const uReglage = ((ANSI_REGLAGE_FIELDS[ansiFamily(s.label)] || ANSI_REGLAGE_FIELDS_DEFAUT).find((f) => f.key === "reglage") || {}).unit || "A";
-          const detail = [s.fields.etat && `État : ${s.fields.etat}`, s.fields.courbe && `Courbe : ${s.fields.courbe}`, s.fields.type && `Type : ${s.fields.type}`,
+          const detail = [s.fields.groupe && `Groupe : ${s.fields.groupe}`, s.fields.etat && `État : ${s.fields.etat}`, s.fields.courbe && `Courbe : ${s.fields.courbe}`, s.fields.type && `Type : ${s.fields.type}`,
             s.fields.reglage && `Réglage : ${s.fields.reglage} ${uReglage}`, s.fields.tms && `TMS : ${s.fields.tms}`, s.fields.temporisation && `Temporisation : ${s.fields.temporisation} ${s.fields.temporisation_unite || ""}`].filter(Boolean).join(" · ");
           elements.push(new DOCX.Paragraph({ spacing: { after: 60 }, children: [new DOCX.TextRun({ text: (s.label || "(seuil sans nom)") + (detail ? " — " + detail : ""), size: 18 })] }));
         });
