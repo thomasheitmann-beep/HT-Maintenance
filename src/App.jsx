@@ -1333,6 +1333,22 @@ const DEFINITION_ANSI = {
   "87L — Différentielle ligne": "Protection triphasée contre les défauts internes de ligne.",
   "87M — Différentielle moteur": "Protection triphasée contre les défauts internes de moteur.",
   "87T — Différentielle transformateur": "Protection triphasée contre les défauts internes de transformateur.",
+  // Fonctions supplémentaires confirmées sur le relais Easergy P5 (Schneider Electric, manuel
+  // fourni par l'utilisateur) — ajoutées pour celles ayant un vrai seuil réglable. Les fonctions de
+  // supervision/contrôle sans seuil numérique propre (60 supervision TC/TT, 74 surveillance circuit
+  // de déclenchement, 86 accrochage/acquittement, 99 seuils programmables génériques) ne sont pas
+  // ajoutées ici : elles ne s'intègrent pas au même mécanisme de seuil que les protections.
+  "32N — Protection wattmétrique homopolaire terre": "Protection de terre directionnelle adaptée aux systèmes à neutre compensé (bobine de Petersen) ou mis à la terre par résistance/impédance.",
+  "67NI — Défaut transitoire intermittent terre (directionnel)": "Détection des défauts intermittents transitoires brefs dans les réseaux de câbles compensés (défauts qui s'éteignent automatiquement au passage à zéro du courant).",
+  "51C — Déséquilibre batterie de condensateurs": "Détecte le courant de déséquilibre circulant entre les points neutres d'un condensateur en double étoile, le filtre et le banc de capacités.",
+  "68 — Sélectivité logique à maximum de courant (SOL)": "Accélère le déclenchement de la protection la plus en amont en cas de défaut proche du jeu de barres, par dialogue logique entre relais.",
+  "50HS — Enclenchement sur défaut (SOTF)": "Déclenchement rapide et non sélectif si un défaut est déjà présent lors de la remise sous tension (fermeture sur défaut).",
+  "68H5 — Détection de la 5e harmonique": "Détecte la surexcitation d'un transformateur via la composante harmonique de rang 5, pour bloquer la protection différentielle (87T) pendant l'enclenchement.",
+  "50ARC — Protection contre les arcs électriques": "Détection haute vitesse (quelques millisecondes) des amorçages d'arc sur le jeu de barres, pour limiter les dégâts.",
+  "49F — Image thermique pour départ": "Protection contre les surcharges thermiques des lignes aériennes et câbles souterrains (distincte de 49M, dédiée aux moteurs).",
+  "21FL — Localisation de défauts": "Calcule la distance du défaut (en réactance, convertie en km/miles) pour transmission vers un système de supervision (DMS).",
+  "21YN — Admittance neutre": "Protection de terre sensible pour réseau à neutre isolé, compensé ou à haute impédance, basée sur l'admittance homopolaire (Yn = I0 / −U0).",
+  "59C — Surtension condensateur": "Protection de surtension dédiée à une batterie de condensateurs.",
 };
 const PARAM_SEUIL_TYPES = [...Object.keys(DEFINITION_ANSI), "DEC — Protection de découplage (UTE/NF C15-400)"];
 function emptySeuilEntry(label) {
@@ -1434,7 +1450,7 @@ function ratioTransformation(rapport) {
   const primaire = parseFloat(m[1].replace(",", ".")), secondaire = parseFloat(m[2].replace(",", "."));
   return primaire && secondaire ? secondaire / primaire : null;
 }
-function calcInjectionAide(reglagePrimaire, unite, eq, ansiCode, modeDetection, multiple) {
+function calcInjectionAide(reglagePrimaire, unite, eq, ansiCode, modeDetection, multiple, angle, zoneMin, zoneMax) {
   const reglage = numOf(reglagePrimaire);
   if (reglage === null || !unite) return null;
   const M = numOf(multiple) || 1; // au seuil par défaut (1×) si aucun multiple choisi
@@ -1451,7 +1467,19 @@ function calcInjectionAide(reglagePrimaire, unite, eq, ansiCode, modeDetection, 
       tcList.find((tc) => tc.fields.rapportPrimaire && tc.fields.secondaire);
     const rapport = tcExistant ? `${tcExistant.fields.rapportPrimaire}/${tcExistant.fields.secondaire}` : null;
     const ratio = ratioTransformation(rapport);
-    return ratio === null ? null : Math.round(reglage * M * ratio * 1000) / 1000;
+    const courant = ratio === null ? null : Math.round(reglage * M * ratio * 1000) / 1000;
+    // Protection de courant directionnelle (67/67N) : montage en quadrature (Ia polarisé par Ubc,
+    // Ib par Uca, Ic par Uab — convention "connexion 90°") confirmée par retour terrain. Les bornes
+    // de la zone de déclenchement (zoneMin/zoneMax, ex. -88°/+88°) sont données relatives au centre
+    // de zone (angle caractéristique − 90°, décalage dû à la polarisation en quadrature), pas
+    // directement à 0° — d'où la formule angle − 90 + zone.
+    if ((ansiCode === "67" || ansiCode === "67N") && courant !== null) {
+      const angleNum = numOf(angle), zMin = numOf(zoneMin), zMax = numOf(zoneMax);
+      const limiteBasse = (angleNum !== null && zMin !== null) ? Math.round((angleNum - 90 + zMin) * 100) / 100 : null;
+      const limiteHaute = (angleNum !== null && zMax !== null) ? Math.round((angleNum - 90 + zMax) * 100) / 100 : null;
+      return { type: "courant_directionnel", u: 100, i: courant, limiteBasse, limiteHaute };
+    }
+    return courant;
   }
   if (unite === "V") {
     const ratio = ratioTransformation(eq.identification.rapportTPProtection);
@@ -6749,11 +6777,22 @@ function DisjoncteurRelaisPanel({ eq, update, custom, onAddCustom, onChangeCusto
                     const champsReglage = ANSI_REGLAGE_FIELDS[ansiFamily(s.label)] || ANSI_REGLAGE_FIELDS_DEFAUT;
                     const champReglage = champsReglage.find((f) => f.key === "reglage");
                     const unite = champReglage ? champReglage.unit : null;
-                    const aide = calcInjectionAide(s.fields.reglage, unite, eq, ansiFamily(s.label), s.fields.modeDetection, estCEI ? (s.essai.fields.multipleInjection || "2") : null);
+                    const aide = calcInjectionAide(s.fields.reglage, unite, eq, ansiFamily(s.label), s.fields.modeDetection, estCEI ? (s.essai.fields.multipleInjection || "2") : null, s.fields.angle, s.fields.zoneMin, s.fields.zoneMax);
                     const hintStyle = { fontSize: 11, color: "#8B96A3", fontStyle: "italic" };
                     if (aide === null) {
+                      if (unite === "%" && ansiFamily(s.label) === "46") {
+                        const seuilPct = numOf(s.fields.reglage);
+                        const facteur3 = seuilPct !== null ? Math.round(seuilPct * 3 * 100) / 100 : null;
+                        return (
+                          <span style={hintStyle}>
+                            Déséquilibre / composante inverse — essai standard en monophasé (compatible Compano 100) : injecter le courant sur UNE SEULE phase, les deux autres à 0 A. Avec une injection monophasée pure, la composante inverse I2 = I_injecté ÷ 3.
+                            {facteur3 !== null && ` Pour un seuil réglé à ${seuilPct} %, injecter ${facteur3} % de In sur cette phase (3 × le seuil) pour atteindre le seuil.`}
+                            {" "}Exprimé en % du courant nominal secondaire In du relais (1 A ou 5 A selon le TC) — à vérifier sur la plaque/config du relais.
+                          </span>
+                        );
+                      }
                       if (unite === "%") {
-                        return <span style={hintStyle}>Réglage en % (déséquilibre / différentielle) — pas d'aide à l'injection calculée ici, se référer à la méthode du constructeur du relais.</span>;
+                        return <span style={hintStyle}>Réglage en % (différentielle) — pas d'aide à l'injection calculée ici, se référer à la méthode du constructeur du relais.</span>;
                       }
                       if (unite && numOf(s.fields.reglage) !== null) {
                         const manque = unite === "kW" ? "un TC ET un rapport TP (identification)" : unite === "V" ? "un rapport TP (identification)" : "un TC (rapport primaire/secondaire renseigné)";
@@ -6781,6 +6820,28 @@ function DisjoncteurRelaisPanel({ eq, update, custom, onAddCustom, onChangeCusto
                         </span>
                       );
                     }
+                    if (typeof aide === "object" && aide.type === "courant_directionnel") {
+                      const limites = (aide.limiteHaute !== null && aide.limiteBasse !== null) && (
+                        <span style={pill}>Limites zone : {aide.limiteHaute}° et {aide.limiteBasse}°</span>
+                      );
+                      if (en3U3I) {
+                        return (
+                          <span style={{ display: "flex", gap: 6, flexWrap: "wrap" }} title="Aide au technicien — non imprimée dans le rapport">
+                            <span style={pill}>I1 = {aide.i} A / Ubc = {aide.u} V</span>
+                            <span style={pill}>I2 = {aide.i} A / Uca = {aide.u} V</span>
+                            <span style={pill}>I3 = {aide.i} A / Uab = {aide.u} V</span>
+                            {limites}
+                          </span>
+                        );
+                      }
+                      return (
+                        <span style={{ display: "flex", gap: 6, flexWrap: "wrap" }} title="Aide au technicien — non imprimée dans le rapport">
+                          <span style={pill}>I1 = {aide.i} A</span>
+                          <span style={pill}>Ubc = {aide.u} V</span>
+                          {limites}
+                        </span>
+                      );
+                    }
                     const directe = unite === "Hz" || unite === "Hz/s" || unite === "°";
                     if (en3U3I && (unite === "A" || unite === "V")) {
                       return (
@@ -6803,6 +6864,29 @@ function DisjoncteurRelaisPanel({ eq, update, custom, onAddCustom, onChangeCusto
                       {s.essai.fields.typeValise !== "3U3I (triphasé)" && " En injection monophasée (1U1I), la tension de référence à utiliser n'est pas forcément celle de la même phase que le courant injecté : selon le montage de polarisation du relais (connexion 0°/30°/60°/90°, propre à ce modèle), il peut falloir une tension composée d'une autre phase (ex. injecter Ia avec Vbc, pas Va) — à vérifier dans la doc du relais avant l'essai, sous peine de fausser le résultat sans que ça se voie."}
                     </div>
                   )}
+                  {(() => {
+                    // Repère Omicron Compano 100 (valise de test utilisée) — monophasé uniquement
+                    // (pas de sortie 3U3I), 110 A AC max (disponible seulement sur un temps court,
+                    // pas en continu) / 150 V AC max. Signale si l'essai configuré dépasse ses
+                    // capacités, sans bloquer la saisie — juste un repère pour anticiper l'essai.
+                    const champsReglage2 = ANSI_REGLAGE_FIELDS[ansiFamily(s.label)] || ANSI_REGLAGE_FIELDS_DEFAUT;
+                    const champReglage2 = champsReglage2.find((f) => f.key === "reglage");
+                    const unite2 = champReglage2 ? champReglage2.unit : null;
+                    const estCEI2 = s.fields.courbe && s.fields.courbe !== "Constant" && s.fields.courbe !== "";
+                    const aide2 = calcInjectionAide(s.fields.reglage, unite2, eq, ansiFamily(s.label), s.fields.modeDetection, estCEI2 ? (s.essai.fields.multipleInjection || "2") : null, s.fields.angle, s.fields.zoneMin, s.fields.zoneMax);
+                    const i2 = typeof aide2 === "object" ? aide2.i : (unite2 === "A" ? aide2 : null);
+                    const u2 = typeof aide2 === "object" ? aide2.u : (unite2 === "V" ? aide2 : null);
+                    const alertes = [];
+                    if (s.essai.fields.typeValise === "3U3I (triphasé)") alertes.push("essai configuré en triphasé (3U3I), mais le Compano 100 est un appareil monophasé (1U1I) — injecter phase par phase, pas de sortie 3U3I disponible");
+                    if (typeof i2 === "number" && i2 > 110) alertes.push(`courant à injecter ≈ ${i2} A > 110 A AC (limite Compano 100, disponible seulement sur un temps court)`);
+                    if (typeof u2 === "number" && u2 > 150) alertes.push(`tension à injecter ≈ ${u2} V > 150 V AC (limite Compano 100)`);
+                    if (!alertes.length) return null;
+                    return (
+                      <div style={{ fontSize: 10.5, color: "#B5730A", marginTop: 2, marginBottom: 4, lineHeight: 1.4, flexBasis: "100%" }} title="Aide au technicien — non imprimée dans le rapport">
+                        ⚠ Compano 100 : {alertes.join(" · ")}.
+                      </div>
+                    );
+                  })()}
                   {tol && <MiniComputed label="Tolérance attendue" unit={tol.unite} value={`${tol.min} – ${tol.max}`} />}
                   <input placeholder="Action" value={s.essai.action} onChange={(e) => setEssai(s.id, { action: e.target.value })} style={{ ...inputStyle, width: actionInputWidth(s.essai.action), padding: "5px 7px", fontSize: 12 }} />
                   <Select value={s.essai.etat} onChange={(e) => setEssai(s.id, { etat: e.target.value })} style={{ width: 120, padding: "5px 7px", fontSize: 12 }}>
