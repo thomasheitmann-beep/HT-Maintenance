@@ -2190,7 +2190,7 @@ const MESURE_ISOLEMENT_CELLULE = [
   C("hta_terre", "HTA - Terre", isolementFields("hta_terre_cellule", null, true)),
   C("entre_phases", "Entre phases", isolementFields("entre_phases_cellule", null, true)),
 ];
-function buildTransformateurSchema({ sec = false, classeIsolation = null } = {}) {
+function buildTransformateurSchema({ sec = false, classeIsolation = null, deuxSecondaires = false } = {}) {
   return {
     identification: [
       { key: "repere", label: "Repère / Nom de l'équipement" },
@@ -2199,6 +2199,8 @@ function buildTransformateurSchema({ sec = false, classeIsolation = null } = {})
       { key: "marque", label: "Marque", options: LISTE_MARQUE_TDY }, { key: "anneeMiseEnService", label: "Année de mise en service" },
       { key: "puissance", label: "Puissance (KVA)", numeric: true }, { key: "tensionPrimaire", label: "Tension primaire (KV)", numeric: true },
       { key: "couplage", label: "Couplage", options: LISTE_COUPLAGE_TDY }, { key: "tensionSecondaire", label: "Tension secondaire (V)", numeric: true },
+      { key: "deuxEnroulementsSecondaires", label: "Deux enroulements secondaires", options: ["Non", "Oui"] },
+      ...(deuxSecondaires ? [{ key: "tensionSecondaire2", label: "Tension secondaire 2 (V)", numeric: true }] : []),
       { key: "ucc", label: "Ucc (%)", numeric: true },
       ...(!sec ? [{ key: "typeRefroidissement", label: "Type de refroidissement", options: LISTE_REFROIDISSEMENT_TRANSFO }] : []),
       ...(sec ? [{ key: "classeIsolation", label: "Classe d'isolation (sec)", options: ["F", "H"] }] : []),
@@ -2250,19 +2252,28 @@ function buildTransformateurSchema({ sec = false, classeIsolation = null } = {})
         C("test_defaut_temp_t2", "Test défaut temp T2", [F("valeur", "Valeur", "°C")], ACTIONS_RELAIS_TRANSFORMATEUR),
       ]},
       { key: "rapport_transformation", title: "Rapport de transformation et résistances d'enroulement", items: [
-        C("rapport_par_phase", "Rapport de transformation", [F("l1", "L1"), F("l2", "L2"), F("l3", "L3")]),
+        C("rapport_par_phase", "Rapport de transformation" + (deuxSecondaires ? " — Secondaire 1" : ""), [F("l1", "L1"), F("l2", "L2"), F("l3", "L3")]),
         // CEI 60076-1 / IEEE C57.12.90 : mesure hors tension, transformateur à l'équilibre thermique
         // (pas juste après mise hors service). Chaque phase se mesure individuellement (pas de shunt
         // entre phases, contrairement à l'isolement) — un écart > 2 % entre phases indique une
         // anomalie (connexion desserrée, spire en court-circuit). La température relevée permet de
         // corriger et comparer les valeurs d'une visite à l'autre (résistance du cuivre ≈ +0,4 %/°C).
         C("resistance_enroulements_primaire", "Résistance des enroulements — Primaire", [...L1L2L3AvecToleranceEcart("mΩ"), F("temperature", "Température enroulement", "°C")]),
-        C("resistance_enroulements_secondaire", "Résistance des enroulements — Secondaire", [...L1L2L3AvecToleranceEcart("mΩ"), F("temperature", "Température enroulement", "°C")]),
+        C("resistance_enroulements_secondaire", "Résistance des enroulements — Secondaire" + (deuxSecondaires ? " 1" : ""), [...L1L2L3AvecToleranceEcart("mΩ"), F("temperature", "Température enroulement", "°C")]),
+        ...(deuxSecondaires ? [
+          C("rapport_par_phase_secondaire2", "Rapport de transformation — Secondaire 2", [F("l1", "L1"), F("l2", "L2"), F("l3", "L3")]),
+          C("resistance_enroulements_secondaire2", "Résistance des enroulements — Secondaire 2", [...L1L2L3AvecToleranceEcart("mΩ"), F("temperature", "Température enroulement", "°C")]),
+        ] : []),
       ]},
       { key: "mesure_isolement", title: "Mesure d'isolement", items: [
         C("hta_terre", "HTA - Terre (BT shuntée à la terre)", isolementFields("hta_terre", classeIsolation)),
-        C("bt_terre", "BT - Terre (HTA shuntée à la terre)", isolementFields("bt_terre", classeIsolation)),
-        C("hta_bt", "HTA - BT (enroulements court-circuités entre eux)", isolementFields("hta_bt", classeIsolation)),
+        C("bt_terre", "BT" + (deuxSecondaires ? "1" : "") + " - Terre (HTA shuntée à la terre)", isolementFields("bt_terre", classeIsolation)),
+        C("hta_bt", "HTA - BT" + (deuxSecondaires ? "1" : "") + " (enroulements court-circuités entre eux)", isolementFields("hta_bt", classeIsolation)),
+        ...(deuxSecondaires ? [
+          C("bt2_terre", "BT2 - Terre (HTA et BT1 shuntées à la terre)", isolementFields("bt_terre", classeIsolation)),
+          C("hta_bt2", "HTA - BT2 (enroulements court-circuités entre eux)", isolementFields("hta_bt", classeIsolation)),
+          C("bt_bt2", "BT1 - BT2 (entre les deux enroulements secondaires)", isolementFields("hta_bt", classeIsolation)),
+        ] : []),
       ]},
     ],
   };
@@ -2852,7 +2863,7 @@ function getSchema(eq) {
     const r = (eq.controles && eq.controles.regimes_reseaux) || {};
     return buildInverseurSchema({ source1Mono: r.source1 === "Monophasé", source2Mono: r.source2 === "Monophasé", utilisationMono: r.utilisation === "Monophasé" });
   }
-  if (eq.type === "Transformateur") return buildTransformateurSchema({ sec: eq.identification?.typeIsolation === "Sec (résine/enrobé)", classeIsolation: eq.identification?.classeIsolation });
+  if (eq.type === "Transformateur") return buildTransformateurSchema({ sec: eq.identification?.typeIsolation === "Sec (résine/enrobé)", classeIsolation: eq.identification?.classeIsolation, deuxSecondaires: eq.identification?.deuxEnroulementsSecondaires === "Oui" });
   if (eq.type === "Interrupteur HTA") return buildInterrupteurHTASchema({ avecRelais: eq.identification?.presenceRelais === "Oui" });
   if (eq.type === "Interrupteur Fusible HTA") return buildInterrupteurFusibleHTASchema({ avecRelais: eq.identification?.presenceRelais === "Oui" });
   return SCHEMAS[eq.type];
