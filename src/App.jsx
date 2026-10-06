@@ -104,8 +104,8 @@ function descriptionIP(code) {
   const parties = [IP_DESCRIPTION_1ER_CHIFFRE[c1] && `1er chiffre (${c1}) : ${IP_DESCRIPTION_1ER_CHIFFRE[c1]}`, IP_DESCRIPTION_2E_CHIFFRE[c2] && `2e chiffre (${c2}) : ${IP_DESCRIPTION_2E_CHIFFRE[c2]}`, lettre && IP_DESCRIPTION_LETTRE_ACCES[lettre] && `lettre additionnelle (${lettre}) : ${IP_DESCRIPTION_LETTRE_ACCES[lettre]}`].filter(Boolean);
   return parties.length ? parties.join(" · ") : null;
 }
-const REMARQUE_STANDARD_EQUIPEMENT = "Équipement contrôlé, en bon état de fonctionnement. Aucune anomalie relevée lors de cette intervention.";
-const REMARQUE_STANDARD_INSTALLATION = "Installation en bon état général. Aucune anomalie majeure relevée lors de cette intervention.";
+const REMARQUE_STANDARD_EQUIPEMENT = "Constats :\n• L'équipement a été contrôlé et se trouve en bon état de fonctionnement.\n• Aucune anomalie n'a été relevée lors de cette intervention.\n\nPréconisations :\n• Aucune action corrective n'est nécessaire ; poursuivre la maintenance préventive selon la périodicité prévue.";
+const REMARQUE_STANDARD_INSTALLATION = "Synthèse générale :\nL'installation est en bon état général : aucune anomalie majeure n'a été relevée lors de cette intervention. Aucune action corrective n'est à prévoir ; la maintenance préventive est à poursuivre selon la périodicité prévue.";
 const LISTE_MARQUES = ["ABB", "AREVA", "ALSTOM", "ALSTHOM", "BBC", "CALOR EMAG", "CEM GARDY", "DELLE", "EATON", "EIB", "FELTEN et GUILLAUME", "MAGRINI GALILEO", "MERLIN GERIN", "ORMAZABAL", "POMMIER", "SCHNEIDER ELECTRIC", "SIEMENS"];
 const LISTE_COURANT_ASSIGNE = ["200", "400", "630", "1250", "2500"];
 const LISTE_TENSION_ASSIGNEE = ["12", "24", "36"];
@@ -3202,7 +3202,7 @@ function prefillInterventionFromSite(site, eqOrList, numeroRI) {
       localisation: (site.locaux || []).find((l) => l.id === eq.localId)?.nom || site.local || "",
       reference: idf.repere || "",
       etat: eq.etatFinal || "Conforme",
-      remarque: eq.remarques || "",
+      remarque: aplatirRemarques(eq.remarques),
     };
   });
   return {
@@ -5189,18 +5189,9 @@ function RapportTab({ site, update }) {
     set("fonctionnementEtat", LISTE_ETAT_INSTALLATION[rang]);
   }
   function compilerRemarques() {
-    const lignes = site.equipements
-      .filter((e) => e.remarques && e.remarques.trim())
-      .map((e) => {
-        // Plusieurs anomalies pour un même équipement sont déjà séparées par des retours à la
-        // ligne (collectAnomalies) — remplacées ici par " ; " pour que cet équipement ne produise
-        // qu'une seule ligne globale, indispensable pour le regroupement par équipement du tableau
-        // du rapport Word (sinon une anomalie sans le préfixe "Équipement :" se retrouvait traitée
-        // à tort comme un équipement séparé).
-        const remarquesUneLigne = e.remarques.trim().split("\n").filter((l) => l.trim()).join(" ; ");
-        return `${e.type}${e.identification.repere ? " (" + e.identification.repere + ")" : ""} : ${remarquesUneLigne}`;
-      });
-    set("syntheseRemarques", lignes.length ? lignes.join("\n") : "Aucune remarque particulière relevée sur les équipements.");
+    // Synthèse structurée : paragraphe de synthèse générale (phrases complètes), puis un bloc
+    // « Constats / Préconisations » par équipement, les plus sévères en premier.
+    set("syntheseRemarques", genererSyntheseSite(site));
   }
 
   const nbIntervenantsAuto = [r.intervenant, ...(r.intervenantsSupplementaires || [])].filter(Boolean).length;
@@ -5372,8 +5363,8 @@ function RapportTab({ site, update }) {
 
       <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#5B6B7D", letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 10 }}>Synthèse des remarques et préconisations</label>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
-        <button onClick={compilerRemarques} style={{ ...btnGhost(BRAND.blue), flex: "1 1 220px", justifyContent: "center" }} title="Reprend les remarques saisies sur chaque équipement">
-          <RotateCcw size={13} /> Compiler les remarques des équipements
+        <button onClick={compilerRemarques} style={{ ...btnGhost(BRAND.blue), flex: "1 1 220px", justifyContent: "center" }} title="Rédige la synthèse générale (phrases complètes) et reprend les constats et préconisations de chaque équipement, les plus sévères en premier">
+          <RotateCcw size={13} /> Compiler la synthèse et les préconisations
         </button>
         <button onClick={() => set("syntheseRemarques", REMARQUE_STANDARD_INSTALLATION)} style={{ ...btnGhost("#0F8A5F"), flex: "1 1 220px", justifyContent: "center" }} title="Insère une remarque type pour une installation conforme">
           <CheckCircle2 size={13} /> Remarque standard (conforme)
@@ -7068,10 +7059,14 @@ function BRKReglagePanel({ eq, update, custom, onAddCustom, onChangeCustom, onRe
 // incohérence...) — pour ne plus se limiter à "Nom : Dégradé" sans dire pourquoi. Générique : couvre
 // automatiquement tout nouvel item suivant ces motifs, sans code spécifique par équipement.
 function detailAnomalieItem(item, v) {
-  if (!v || !v.fields) return { detail: "", avertissements: [], horsTolerance: false };
+  if (!v || !v.fields) return { detail: "", avertissements: [], horsTolerance: false, mesures: [] };
   const fields = v.fields;
   const parts = [];
   const avertissements = [];
+  // Mesures hors tolérance sous forme d'objets { nom, mesure, unite, attendu } — sert à rédiger des
+  // phrases complètes (remarques du rapport), en plus de `detail` (texte condensé historique).
+  const mesures = [];
+  const attenduTxt = (min, max) => (min !== null && max !== null ? `${min}–${max}` : max !== null ? `≤ ${max}` : min !== null ? `≥ ${min}` : "");
   let horsTolerance = false;
   const tolMinField = (item.fields || []).find((f) => f.key === "tol_min" && f.compute);
   const tolMaxField = (item.fields || []).find((f) => f.key === "tol_max" && f.compute);
@@ -7089,6 +7084,7 @@ function detailAnomalieItem(item, v) {
           ? ((item.fields || []).find((f) => f.key === key)?.label || "valeur")
           : key.toUpperCase();
         parts.push(`${nomChamp} mesurée ${mesure}${tolMinField.unit ? " " + tolMinField.unit : ""}, attendu ${min !== null ? min + "–" : "≤ "}${max}`);
+        mesures.push({ nom: nomChamp, mesure, unite: tolMinField.unit || "", attendu: attenduTxt(min, max) });
         horsTolerance = true;
       }
     });
@@ -7103,6 +7099,7 @@ function detailAnomalieItem(item, v) {
         const mesure = fields[key];
         if (mesure !== undefined && mesure !== "" && toleranceState(mesure, min, max) === "bad") {
           parts.push(`${key === "valeur" ? "valeur" : key.toUpperCase()} mesurée ${mesure}, tolérance ${min !== null ? min + "–" : "≤ "}${max}`);
+          mesures.push({ nom: key === "valeur" ? "valeur" : key.toUpperCase(), mesure, unite: "", attendu: attenduTxt(min, max) });
           horsTolerance = true;
         }
       });
@@ -7116,6 +7113,7 @@ function detailAnomalieItem(item, v) {
       const mesure = numOf(fields[key]);
       if (mesure !== null && Math.abs(mesure - ref) / ref > 0.2) {
         parts.push(`${key.toUpperCase()} mesuré ${mesure}, écart > 20% par rapport à la référence constructeur (${ref})`);
+        mesures.push({ nom: key.toUpperCase(), mesure, unite: "", attendu: `à moins de 20 % de la référence constructeur (${ref})` });
         horsTolerance = true;
       }
     });
@@ -7127,7 +7125,7 @@ function detailAnomalieItem(item, v) {
     }
   });
   parts.push(...avertissements);
-  return { detail: parts.length ? " (" + parts.join(" ; ") + ")" : "", avertissements, horsTolerance };
+  return { detail: parts.length ? " (" + parts.join(" ; ") + ")" : "", avertissements, horsTolerance, mesures };
 }
 // Statut de tolérance ("ok"/"bad"/null) d'un champ précis d'un item — même 3 motifs que
 // detailAnomalieItem (tolérance calculée, tolérance saisie manuellement, référence constructeur
@@ -7161,26 +7159,93 @@ function champTolStatus(item, fields, key, etat) {
   }
   return null;
 }
-// Parcourt tous les contrôles d'un équipement (y compris seuils dynamiques, essais liés,
-// et analyses d'huile cochées) et relève ceux dont l'état n'est pas "Conforme".
-function collectAnomalies(eq) {
+// ===== Remarques, préconisations et synthèse : phrases complètes, structurées =====
+// Convention de texte (simple, lisible et modifiable à la main dans les zones de saisie) :
+// - une ligne « Constats : » ou « Préconisations : » ouvre une section ;
+// - chaque ligne qui suit commence par « • » ;
+// - la synthèse du site commence par « Synthèse générale : », puis un bloc par équipement
+//   (première ligne = nom de l'équipement). Un texte libre sans ces repères reste accepté tel quel.
+const MOTS_ETAT = { "Dégradé": "dégradé", "Défaillant": "défaillant", "Non conforme": "non conforme", "À corriger": "à corriger", "Conforme avec réserves": "conforme avec réserves", "Dégradé (actions à prévoir)": "dégradé", "Défaillant (actions urgentes)": "défaillant" };
+function motsEtat(etat) { return MOTS_ETAT[etat] || String(etat || "").toLowerCase(); }
+function finPhrase(t) {
+  const s = String(t || "").trim();
+  if (!s) return "";
+  const cap = s.charAt(0).toUpperCase() + s.slice(1);
+  return /[.!?…]$/.test(cap) ? cap : cap + ".";
+}
+function listeFr(arr) {
+  const a = [...new Set((arr || []).filter(Boolean))];
+  if (a.length <= 1) return a.join("");
+  return a.slice(0, -1).join(", ") + " et " + a[a.length - 1];
+}
+const citer = (s) => "« " + s + " »";
+const obsTechnicien = (action) => {
+  const a = String(action || "").trim().replace(/[.\s]+$/, "");
+  return a ? ` Observation du technicien : ${a}.` : "";
+};
+function fmtMesure(m) {
+  const numerique = m.attendu && /^[≤≥]?\s*-?[\d.,]+(–-?[\d.,]+)?$/.test(m.attendu);
+  const attendu = m.attendu ? ` (valeur attendue : ${m.attendu}${numerique && m.unite ? " " + m.unite : ""})` : "";
+  return `${m.nom} = ${m.mesure}${m.unite ? " " + m.unite : ""}${attendu}`;
+}
+// Reformule les avertissements les plus fréquents en vraie phrase ; sinon, repli en point de vigilance.
+function reformulerAvertissement(txt) {
+  const t = String(txt || "").trim();
+  const m = t.match(/^(\d+)\s*ans\s*—\s*durée de vie constructeur\s*\((\d+)\s*ans\)\s*dépassée/i);
+  if (m) return `L'âge constaté (${m[1]} ans) dépasse la durée de vie indiquée par le constructeur (${m[2]} ans) : un remplacement est à envisager.`;
+  return `Point de vigilance : ${t.replace(/[.\s]+$/, "")}.`;
+}
+// Famille de préconisation selon le libellé du contrôle concerné.
+function categorieParLibelle(label) {
+  const l = String(label || "").toLowerCase();
+  if (/fusible/.test(l)) return "fusible";
+  if (/isolement|(hta|bt\d?)\s*-\s*(terre|bt)/.test(l)) return "isolement";
+  if (/mises? à la terre|terre-enveloppe|continuité des masses/.test(l)) return "mise_terre";
+  if (/résistance de contact|jonction/.test(l)) return "contact";
+  if (/rapport de transformation|résistance des enroulements/.test(l)) return "enroulements";
+  if (/serrage|couple|connexion|raccordement/.test(l)) return "serrage";
+  if (/huile|silicagel|diélectrique|acidité|furane/.test(l)) return "huile";
+  if (/relais|protection|déclench|dgpt|buchholz|dégagement|pression|sonde|température t[12]/.test(l)) return "protection";
+  if (/thermograph|échauffement/.test(l)) return "thermique";
+  if (/propreté|nettoyage|encrass|poussière/.test(l)) return "proprete";
+  if (/ventilation|refroidissement|distances/.test(l)) return "ventilation";
+  return "etat";
+}
+// Phrase complète pour un contrôle générique (état dégradé/défaillant, mesure hors tolérance ou avertissement).
+function phraseConstatItem({ label, etat, mesures, avertissements, action, nom = "contrôle" }) {
+  const aEtat = etat !== undefined && RANK_OF[etat] > 0;
+  const phrases = [];
+  const n = mesures.length;
+  const liste = mesures.map(fmtMesure).join(" ; ");
+  if (aEtat) {
+    phrases.push(`Le ${nom} ${citer(label)} est jugé ${motsEtat(etat)}.`);
+    if (n) phrases.push(`${n > 1 ? "Les mesures suivantes sont hors tolérance" : "La mesure suivante est hors tolérance"} : ${liste}.`);
+  } else if (n) {
+    phrases.push(`Le ${nom} ${citer(label)} met en évidence ${n > 1 ? "des mesures hors tolérance" : "une mesure hors tolérance"} : ${liste}.`);
+  } else {
+    phrases.push(`Le ${nom} ${citer(label)} appelle un point de vigilance.`);
+  }
+  avertissements.forEach((a) => phrases.push(reformulerAvertissement(a)));
+  return phrases.join(" ") + obsTechnicien(action);
+}
+// Relève tous les constats d'un équipement sous forme d'objets { phrase, rang, categorie, sujet }.
+function analyserAnomaliesEquipement(eq) {
   const schema = schemaFiltreeParNiveau(getSchema(eq), eq.niveauMaintenance);
   const isRelais = TYPES_AVEC_RELAIS.includes(eq.type);
-  const lines = [];
-  // Rapport de transformation (Transformateur) : mesuré vs théorique ±0,5% CEI 60076-1 — la
-  // tolérance est calculée au niveau de l'équipement (tension primaire/secondaire), pas de l'item
-  // lui-même, donc invisible pour la détection générique de detailAnomalieItem. Précalculé ici (au
-  // lieu d'un bloc séparé plus bas) pour être fusionné dans la même ligne que l'état de l'item
-  // "Rapport de transformation" ci-dessous, plutôt que de produire deux lignes distinctes.
-  let transfoParts = [];
+  const constats = [];
+  const ajouter = (phrase, rang, categorie, sujet) => constats.push({ phrase, rang, categorie, sujet });
+  // Rapport de transformation (Transformateur) : mesuré vs théorique ±0,5 % CEI 60076-1 — tolérance
+  // calculée au niveau de l'équipement (tension primaire/secondaire), fusionnée dans le constat de
+  // l'item "Rapport de transformation" pour ne produire qu'une seule phrase.
+  let transfoMesures = [];
   if (eq.type === "Transformateur") {
     const rTheo = calcRapportTheoriqueTransfo(eq);
     const tolRapport = rTheo !== null ? calcToleranceRapportTransfo(rTheo) : null;
     const fRapport = eq.controles.rapport_transformation?.rapport_par_phase?.fields;
     if (tolRapport && fRapport) {
-      [["L1", "l1"], ["L2", "l2"], ["L3", "l3"]].forEach(([label, key]) => {
+      [["L1", "l1"], ["L2", "l2"], ["L3", "l3"]].forEach(([nom, key]) => {
         if (toleranceState(fRapport[key], tolRapport.min, tolRapport.max) === "bad") {
-          transfoParts.push(`${label} hors tolérance (${fRapport[key]}, attendu ${tolRapport.min}–${tolRapport.max}, ±0,5% CEI 60076-1)`);
+          transfoMesures.push({ nom, mesure: fRapport[key], unite: "", attendu: `${tolRapport.min}–${tolRapport.max} (±0,5 % selon la CEI 60076-1)` });
         }
       });
     }
@@ -7189,54 +7254,49 @@ function collectAnomalies(eq) {
     if (isRelais && sec.key === "parametrage_relais") return;
     if (isRelais && sec.key === "controles_relais") {
       (eq.controles.parametrage_relais_seuils || []).filter((s) => s.label).forEach((s) => {
-        if (s.essai.etat && RANK_OF[s.essai.etat] > 0) lines.push(`Essai de déclenchement — ${s.label} : ${s.essai.etat}${s.essai.action && s.essai.action.trim() ? " — " + s.essai.action.trim() : ""}`);
+        if (s.essai.etat && RANK_OF[s.essai.etat] > 0) {
+          ajouter(`L'essai de déclenchement de la protection ${citer(s.label)} est jugé ${motsEtat(s.essai.etat)}.${obsTechnicien(s.essai.action)}`, RANK_OF[s.essai.etat], "protection", s.label);
+        }
       });
       const circuit = eq.controles.controles_relais.circuit_mesures_commande;
-      if (circuit && circuit.etat && RANK_OF[circuit.etat] > 0) lines.push(`Contrôle du circuit de mesures et commande : ${circuit.etat}${circuit.action && circuit.action.trim() ? " — " + circuit.action.trim() : ""}`);
+      if (circuit && circuit.etat && RANK_OF[circuit.etat] > 0) {
+        ajouter(`Le contrôle du circuit de mesures et de commande est jugé ${motsEtat(circuit.etat)}.${obsTechnicien(circuit.action)}`, RANK_OF[circuit.etat], "protection", "circuit de mesures et de commande");
+      }
       return;
     }
     if (eq.type === "Analyse d'huile" && sec.key === "resultats") {
       sec.items.forEach((item) => {
         const v = eq.controles[sec.key][item.key];
-        if (v.fields.realise === "OUI" && v.etat && RANK_OF[v.etat] > 0) lines.push(`${item.label} : ${v.etat}${detailAnomalieItem(item, v).detail}${v.action && v.action.trim() ? " — " + v.action.trim() : ""}`);
+        if (v.fields.realise === "OUI" && v.etat && RANK_OF[v.etat] > 0) {
+          const info = detailAnomalieItem(item, v);
+          ajouter(phraseConstatItem({ label: item.label, etat: v.etat, mesures: info.mesures, avertissements: info.avertissements, action: v.action, nom: "résultat d'analyse" }), RANK_OF[v.etat], "huile", item.label);
+        }
       });
       return;
     }
     sec.items.forEach((item) => {
       const v = eq.controles[sec.key][item.key];
       if (!v) return;
-      const { detail, avertissements, horsTolerance } = detailAnomalieItem(item, v);
-      // "Rapport de transformation" (rapport_par_phase) : on fusionne ici le détail par phase
-      // précalculé plus haut, pour n'obtenir qu'une seule ligne état + détail au lieu de deux.
+      const info = detailAnomalieItem(item, v);
       const estRapportParPhase = sec.key === "rapport_transformation" && item.key === "rapport_par_phase";
-      const detailComplet = estRapportParPhase && transfoParts.length
-        ? (detail ? detail.slice(0, -1) + " ; " + transfoParts.join(" ; ") + ")" : " (" + transfoParts.join(" ; ") + ")")
-        : detail;
-      const horsToleranceComplet = horsTolerance || (estRapportParPhase && transfoParts.length > 0);
-      // L'action (note libre décrivant ce qui a été constaté, ex. "trace de décharge partielle")
-      // est une information de terrain précieuse — sans elle, la remarque ne dit que "Dégradé" sans
-      // dire pourquoi pour un contrôle sans valeur numérique associée.
-      const actionTexte = v.action && v.action.trim() ? ` — ${v.action.trim()}` : "";
-      if (v.etat !== undefined && RANK_OF[v.etat] > 0) {
-        lines.push(`${item.label} : ${v.etat}${detailComplet}${actionTexte}`);
-      } else if (horsToleranceComplet) {
-        // Valeur mesurée hors tolérance détectée indépendamment de l'état — ne dépend pas du
-        // passage automatique en Dégradé (utile si celui-ci n'a pas encore eu l'occasion de se
-        // déclencher, ex. remarque compilée avant réouverture de la fiche).
-        lines.push(`${item.label} : mesure hors tolérance${detailComplet}${actionTexte}`);
-      } else if (avertissements.length) {
-        // Avertissement présent (ex. durée de vie fusible dépassée) mais état encore "Conforme" —
-        // le technicien n'a pas forcément pensé à le changer manuellement ; on le relève quand même.
-        lines.push(`${item.label} : ${avertissements.join(" ; ")}${actionTexte}`);
+      const mesures = estRapportParPhase ? [...info.mesures, ...transfoMesures] : info.mesures;
+      const aEtat = v.etat !== undefined && RANK_OF[v.etat] > 0;
+      if (aEtat || mesures.length || info.avertissements.length) {
+        let categorie = categorieParLibelle(item.label);
+        if (categorie === "etat" && mesures.length) categorie = "mesure";
+        if (categorie === "etat" && info.avertissements.some((a) => /durée de vie/i.test(a))) categorie = "usure";
+        const rang = aEtat ? RANK_OF[v.etat] : 1;
+        ajouter(phraseConstatItem({ label: item.label, etat: v.etat, mesures, avertissements: info.avertissements, action: v.action }), rang, categorie, item.label);
       }
-      if (estRapportParPhase) transfoParts = []; // consommé — évite le doublon du bloc dédié plus bas
     });
     (eq.controles[sec.key + "__custom"] || []).forEach((c) => {
-      if (c.etat && RANK_OF[c.etat] > 0) lines.push(`${c.label || "(action ajoutée)"} : ${c.etat}`);
+      if (c.etat && RANK_OF[c.etat] > 0) {
+        const label = c.label || "action ajoutée";
+        ajouter(`Le point complémentaire ${citer(label)} est jugé ${motsEtat(c.etat)}.`, RANK_OF[c.etat], "etat", label);
+      }
     });
   });
-  // Éléments de batterie : pas de champ "état" propre (motif "tolérance sur mesure" plutôt que
-  // conformité déclarée), donc invisible pour la boucle générique ci-dessus — vérifié séparément.
+  // Éléments de batterie : pas de champ "état" propre, donc invisibles pour la boucle ci-dessus.
   const elementsBatt = eq.controles.elements_dynamique || [];
   if (elementsBatt.length) {
     const cfg = eq.controles.releve_config || { toleranceBasse: 3, toleranceHaute: 3 };
@@ -7245,71 +7305,194 @@ function collectAnomalies(eq) {
       const moyenne = Math.round((valeurs.reduce((a, b) => a + b, 0) / valeurs.length) * 1000) / 1000;
       elementsBatt.forEach((e) => {
         if (elementBatterieStatus(e.fields.tension, moyenne, cfg.toleranceBasse, cfg.toleranceHaute) === "bad") {
-          lines.push(`Élément de batterie « ${e.label} » : tension hors tolérance (${e.fields.tension} V, moyenne branche ${moyenne} V)`);
+          ajouter(`La tension de l'élément de batterie ${citer(e.label)} (${e.fields.tension} V) s'écarte de la moyenne de la branche (${moyenne} V) au-delà de la tolérance admise.`, 1, "batterie", `élément ${e.label}`);
         }
       });
     }
   }
-  // Gradins de batterie de compensation : pas de champ "état" propre non plus — courant par phase
-  // comparé au courant théorique (Q/U), même logique que gradinsHorsTolerance mais avec le détail
-  // par gradin et par phase, nécessaire pour une remarque exploitable.
+  // Gradins de batterie de compensation : courant par phase comparé au courant théorique (Q/U).
   (eq.controles.gradins_dynamique || []).filter((g) => g.label).forEach((g) => {
     const iTheo = gradinIntensiteTheorique(g.fields.q, g.fields.u);
     if (iTheo === null) return;
     const tolMin = Math.round(iTheo * 0.9 * 100) / 100, tolMax = Math.round(iTheo * 1.1 * 100) / 100;
-    [["I1", "i1"], ["I2", "i2"], ["I3", "i3"]].forEach(([label, key]) => {
+    [["I1", "i1"], ["I2", "i2"], ["I3", "i3"]].forEach(([nom, key]) => {
       if (toleranceState(g.fields[key], tolMin, tolMax) === "bad") {
-        lines.push(`Gradin « ${g.label} » : courant ${label} hors tolérance (${g.fields[key]} A, attendu ${tolMin}–${tolMax} A)`);
+        ajouter(`Le courant ${nom} du gradin ${citer(g.label)} (${g.fields[key]} A) est hors tolérance (valeur attendue : ${tolMin}–${tolMax} A).`, 1, "gradin", `gradin ${g.label}`);
       }
     });
   });
-  // Rapport de transformation hors tolérance déjà pris en compte plus haut, fusionné dans la ligne
-  // de l'item "Rapport de transformation" (voir transfoParts en tête de fonction).
-  // Disjoncteur BT — Court-circuit temporisé : le temps de déclenchement à T réglé doit être
-  // cohérent avec la temporisation tsd effectivement réglée (écart > 20 %, même marge que pour les
-  // temps d'ouverture/fermeture faute de seuil normatif universel unique pour cette comparaison).
   if (eq.type === "Disjoncteur BT") {
-    // Surcharge longue : le déclenchement mesuré ne doit pas dépasser le "Tr max attendu" que le
-    // technicien a lui-même renseigné pour cet essai — comparaison directe, pas de marge
-    // supplémentaire puisque tr_max EST déjà la limite acceptée.
+    // Surcharge longue : déclenchement mesuré comparé au "Tr max attendu" renseigné par le technicien.
     const testSL = eq.controles.tests_disjoncteur?.test_surcharge_longue?.fields;
     if (testSL) {
       const trMax = numOf(testSL.tr_max);
       const decl = numOf(testSL.declenchement);
       if (trMax && decl !== null && decl > trMax) {
-        lines.push(`Surcharge longue : déclenchement mesuré (${decl} s) supérieur au Tr max attendu (${trMax} s)`);
+        ajouter(`Lors de l'essai de surcharge longue, le déclenchement a été mesuré à ${decl} s, soit au-delà du temps maximal attendu (${trMax} s).`, 1, "disjoncteur", "essai de surcharge longue");
       }
     }
+    // Court-circuit temporisé : écart > 20 % entre déclenchement à T réglé et temporisation réglée.
     const reglageCC = eq.controles.reglage_disjoncteur?.cc_temporise?.fields;
     const testCC = eq.controles.tests_disjoncteur?.test_cc_temporise?.fields;
     if (reglageCC && testCC) {
       const tsd = numOf(reglageCC.tsd);
       const treg = numOf(testCC.declenchement_treg);
       if (tsd && treg !== null && Math.abs(treg - tsd) / tsd > 0.2) {
-        lines.push(`Court-circuit temporisé : déclenchement mesuré à T réglé (${treg} ms) s'écarte de plus de 20% de la temporisation réglée (tsd = ${tsd} ms)`);
+        ajouter(`Lors de l'essai de court-circuit temporisé, le déclenchement à T réglé (${treg} ms) s'écarte de plus de 20 % de la temporisation réglée (tsd = ${tsd} ms).`, 1, "disjoncteur", "essai de court-circuit temporisé");
       }
     }
-    // Instantané : temps de coupure maximum courant du marché ≈ 50 ms pour I > 1,5×Ii (donnée
-    // constructeur, ex. Schneider ComPacT NSXm — pas une clause IEC 60947-2 universelle unique,
-    // mais un repère largement représentatif pour détecter un déclenchement anormalement lent).
+    // Instantané : repère usuel ≈ 50 ms (donnée constructeur, pas une clause CEI 60947-2 universelle).
     const testInst = eq.controles.tests_disjoncteur?.test_instantane?.fields;
     if (testInst) {
       const decl = numOf(testInst.declenchement);
       if (decl !== null && decl > 50) {
-        lines.push(`Instantané : temps de coupure mesuré (${decl} ms) supérieur au repère usuel de 50 ms (donnée constructeur, pas une clause IEC 60947-2 universelle)`);
+        ajouter(`Lors de l'essai instantané, le temps de coupure mesuré (${decl} ms) dépasse le repère usuel de 50 ms (donnée constructeur, et non une exigence normative de la CEI 60947-2).`, 1, "disjoncteur", "essai instantané");
       }
     }
   }
-  // Pièces d'usure dont l'échéance de remplacement (année de mise en service + durée de vie
-  // déclarée) est dépassée — même logique que l'avertissement d'âge des fusibles, mais reprise
-  // dans les anomalies de l'équipement puisque ces pièces n'ont pas de champ "état" propre.
+  // Pièces d'usure dont l'échéance de remplacement est dépassée.
   const anneeActuelle = new Date().getFullYear();
   [...calcPiecesUsure(eq), ...calcEcheancesUsureUPS(eq)].forEach((l) => {
     if (l.annee !== null && l.annee < anneeActuelle) {
-      lines.push(`Pièce d'usure « ${l.type} » : échéance de remplacement dépassée (prévue en ${l.annee})`);
+      ajouter(`La pièce d'usure ${citer(l.type)} a dépassé son échéance de remplacement (prévue en ${l.annee}).`, 1, "usure", l.type);
     }
   });
-  return lines;
+  return constats;
+}
+// Compatibilité : liste simple des phrases de constat.
+function collectAnomalies(eq) {
+  return analyserAnomaliesEquipement(eq).map((c) => c.phrase);
+}
+const RECO_PAR_CATEGORIE = {
+  fusible: (s) => `Remplacer les fusibles concernés (${s}) par des fusibles de caractéristiques identiques, par jeu complet de trois.`,
+  serrage: (s) => `Resserrer les connexions concernées (${s}) au couple préconisé, puis vérifier l'absence d'échauffement lors de la prochaine visite.`,
+  contact: (s) => `Contrôler et nettoyer les contacts concernés (${s}) ; remplacer le pôle ou la chambre de coupure si la résistance de contact reste élevée.`,
+  isolement: (s) => `Rechercher l'origine de la baisse d'isolement (${s}) — humidité, encrassement ou vieillissement de l'isolant — et refaire la mesure après traitement.`,
+  enroulements: (s) => `Faire vérifier les enroulements du transformateur (${s}) : contrôler les connexions et le changeur de prises, puis refaire la mesure ; consulter le constructeur si l'écart persiste.`,
+  huile: (s) => `Faire réaliser une analyse complémentaire de l'huile (${s}) et, selon les résultats, procéder à son traitement ou à son remplacement.`,
+  mise_terre: (s) => `Vérifier et reprendre la liaison de mise à la terre concernée (${s}).`,
+  protection: (s) => `Contrôler le réglage et le déclenchement des protections concernées (${s}), puis remplacer le relais ou l'organe défaillant si l'anomalie persiste.`,
+  disjoncteur: (s) => `Contrôler les réglages et le fonctionnement des organes de déclenchement du disjoncteur (${s}), puis corriger l'écart constaté.`,
+  batterie: (s) => `Contrôler la branche de batterie concernée et remplacer les éléments dont la tension est hors tolérance (${s}).`,
+  gradin: (s) => `Contrôler les gradins de la batterie de condensateurs dont le courant est hors tolérance (${s}) et remplacer les condensateurs ou contacteurs défectueux.`,
+  usure: (s) => `Planifier le remplacement des pièces d'usure arrivées à échéance (${s}).`,
+  proprete: (s) => `Procéder au nettoyage de l'équipement (${s}).`,
+  ventilation: (s) => `Rétablir une ventilation et un refroidissement suffisants (${s}).`,
+  thermique: (s) => `Rechercher et corriger la cause des échauffements relevés (${s}) — serrage, contact ou surcharge — puis contrôler à nouveau par thermographie.`,
+  mesure: (s) => `Vérifier les mesures hors tolérance (${s}), en rechercher la cause (connexion, réglage ou composant), puis corriger.`,
+  etat_defaillant: (s) => `Remettre en conformité, par réparation ou remplacement, les points défaillants suivants : ${s}.`,
+  etat_degrade: (s) => `Surveiller lors de la prochaine visite les points dégradés suivants, et planifier une action corrective si la dégradation se confirme : ${s}.`,
+};
+const ORDRE_RECO = ["fusible", "serrage", "contact", "isolement", "enroulements", "huile", "mise_terre", "protection", "disjoncteur", "batterie", "gradin", "usure", "proprete", "ventilation", "thermique", "mesure", "etat_defaillant", "etat_degrade"];
+// Préconisations dédoublonnées, regroupées par famille, les plus urgentes en premier.
+function preconisationsDepuisConstats(constats) {
+  const groupes = {};
+  constats.forEach((c) => {
+    const cle = c.categorie === "etat" ? (c.rang >= 2 ? "etat_defaillant" : "etat_degrade") : c.categorie;
+    if (!groupes[cle]) groupes[cle] = { rang: 0, sujets: [] };
+    groupes[cle].rang = Math.max(groupes[cle].rang, c.rang);
+    groupes[cle].sujets.push(c.sujet);
+  });
+  const recos = Object.keys(groupes)
+    .filter((cle) => RECO_PAR_CATEGORIE[cle])
+    .sort((a, b) => (groupes[b].rang - groupes[a].rang) || (ORDRE_RECO.indexOf(a) - ORDRE_RECO.indexOf(b)))
+    .map((cle) => {
+      const g = groupes[cle];
+      const sujets = listeFr(g.sujets.map(citer));
+      return finPhrase(RECO_PAR_CATEGORIE[cle](sujets)) + (g.rang >= 2 ? " Cette action est à traiter en priorité." : "");
+    });
+  if (recos.length) recos.push("Vérifier lors de la prochaine visite de maintenance préventive que les actions correctives ont bien été réalisées et que les valeurs sont revenues dans les tolérances.");
+  return recos;
+}
+// Texte structuré « Constats / Préconisations » d'un équipement.
+function genererRemarquesEquipement(eq) {
+  const constats = analyserAnomaliesEquipement(eq);
+  if (!constats.length) return "Aucune anomalie relevée sur cet équipement : l'ensemble des contrôles réalisés est conforme.";
+  const tries = [...constats].sort((a, b) => b.rang - a.rang);
+  const recos = preconisationsDepuisConstats(tries);
+  return `Constats :\n${tries.map((c) => "• " + c.phrase).join("\n")}\n\nPréconisations :\n${recos.map((r) => "• " + r).join("\n")}`;
+}
+// ----- Analyse du texte (pour le rendu Word / aperçu) -----
+function remarquesStructurees(texte) { return /^\s*(constats?|préconisations?|synthèse générale)\s*:\s*$/im.test(texte || ""); }
+function parserSectionsRemarques(lignes) {
+  const out = { constats: [], preconisations: [], autres: [] };
+  let courant = "autres";
+  (lignes || []).forEach((l) => {
+    const t = String(l).trim();
+    if (!t) return;
+    const h = t.match(/^(constats?|préconisations?|recommandations?)\s*:?\s*$/i);
+    if (h) { courant = /^constat/i.test(h[1]) ? "constats" : "preconisations"; return; }
+    out[courant].push(t.replace(/^[•\-–*]\s*/, ""));
+  });
+  return out;
+}
+function parserSyntheseSite(texte) {
+  const blocs = String(texte || "").split(/\n\s*\n/).map((b) => b.split("\n").map((l) => l.trim()).filter(Boolean)).filter((b) => b.length);
+  const res = { generale: [], equipements: [] };
+  blocs.forEach((lignes) => {
+    if (/^synthèse générale\s*:?\s*$/i.test(lignes[0])) { res.generale.push(...lignes.slice(1)); return; }
+    if (/^(constats?|préconisations?)\s*:?\s*$/i.test(lignes[0])) {
+      // Bloc sans titre (ex. « Préconisations : » séparé par une ligne vide, texte modifié à la main) :
+      // rattaché à l'équipement précédent plutôt que traité comme un équipement à part.
+      const suite = parserSectionsRemarques(lignes);
+      const prec = res.equipements[res.equipements.length - 1];
+      if (prec) { prec.constats.push(...suite.constats); prec.preconisations.push(...suite.preconisations); prec.autres.push(...suite.autres); }
+      else res.equipements.push({ titre: "", ...suite });
+      return;
+    }
+    res.equipements.push({ titre: lignes[0].replace(/\s*:\s*$/, ""), ...parserSectionsRemarques(lignes.slice(1)) });
+  });
+  return res;
+}
+// Version à plat (une ligne, sans puces) d'un texte de remarques — pour tableaux et exports.
+function aplatirRemarques(texte) {
+  return String(texte || "").replace(/^\s*(constats?|préconisations?|synthèse générale)\s*:\s*$/gim, "").replace(/^\s*[•\-–*]\s*/gm, "").replace(/\s*\n+\s*/g, " ").replace(/\s+/g, " ").trim();
+}
+// Synthèse structurée du site : paragraphe de synthèse générale, puis un bloc par équipement.
+function genererSyntheseSite(site) {
+  const equipements = site.equipements || [];
+  const n = equipements.length;
+  const compteur = { conforme: 0, degrade: 0, defaillant: 0 };
+  equipements.forEach((eq) => {
+    const r = RANK_OF[eq.etatFinal] ?? 0;
+    if (r >= 2) compteur.defaillant++; else if (r === 1) compteur.degrade++; else compteur.conforme++;
+  });
+  const phrases = [];
+  if (!n) {
+    phrases.push("Aucun équipement n'a été renseigné lors de cette intervention.");
+  } else {
+    phrases.push(`Lors de cette intervention de maintenance préventive${site.nom ? " sur le site " + citer(site.nom) : ""}, ${n > 1 ? n + " équipements ont été contrôlés" : "1 équipement a été contrôlé"}.`);
+    if (compteur.conforme === n) {
+      phrases.push(n > 1 ? "Tous les équipements sont conformes." : "Cet équipement est conforme.");
+    } else if (n === 1) {
+      phrases.push(`Cet équipement est ${compteur.defaillant ? "défaillant" : "dégradé"}.`);
+    } else {
+      const parts = [];
+      if (compteur.conforme) parts.push(compteur.conforme > 1 ? `${compteur.conforme} sont conformes` : "1 est conforme");
+      if (compteur.degrade) parts.push(compteur.degrade > 1 ? `${compteur.degrade} sont dégradés` : "1 est dégradé");
+      if (compteur.defaillant) parts.push(compteur.defaillant > 1 ? `${compteur.defaillant} sont défaillants` : "1 est défaillant");
+      phrases.push(`Parmi eux, ${listeFr(parts)}.`);
+    }
+    if (compteur.defaillant) phrases.push("Des défaillances ont été constatées : une remise en conformité rapide est à prévoir sur les équipements concernés (voir le détail ci-dessous).");
+    else if (compteur.degrade) phrases.push("Aucune défaillance n'a été constatée, mais certains équipements présentent une dégradation qu'il convient de surveiller ou de corriger (voir le détail ci-dessous).");
+    else phrases.push("L'installation est en bon état général : aucune anomalie majeure n'a été relevée lors de cette intervention.");
+  }
+  const prochaine = site.rapport && site.rapport.prochaineMaintenance;
+  if (prochaine && /^\d{4}-\d{2}-\d{2}/.test(prochaine)) {
+    const [y, m, d] = prochaine.slice(0, 10).split("-");
+    phrases.push(`La prochaine maintenance préventive est recommandée avant le ${d}/${m}/${y}.`);
+  }
+  const blocs = [...equipements]
+    .filter((e) => e.remarques && e.remarques.trim())
+    .sort((a, b) => (RANK_OF[b.etatFinal] ?? 0) - (RANK_OF[a.etatFinal] ?? 0))
+    .map((e) => {
+      const titre = `${e.type}${e.identification.repere ? " (" + e.identification.repere + ")" : ""}`;
+      // Pas de ligne vide à l'intérieur d'un bloc : une ligne vide sépare deux équipements.
+      if (remarquesStructurees(e.remarques)) return `${titre}\n${e.remarques.trim().replace(/\n\s*\n/g, "\n")}`;
+      const lignes = e.remarques.trim().split("\n").map((l) => l.trim().replace(/^[•\-–*]\s*/, "")).filter(Boolean);
+      return `${titre}\nConstats :\n${lignes.map((l) => "• " + finPhrase(l)).join("\n")}`;
+    });
+  return ["Synthèse générale :\n" + phrases.join(" "), ...blocs].join("\n\n");
 }
 
 const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, removable = true, onDuplicate, locaux = [], allEquipements = [], allSites = [], caracteristiquesLibrary = {}, apprendreCaracteristique }) {
@@ -8194,13 +8377,12 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                     <button
                       onClick={() => {
-                        const anomalies = collectAnomalies(eq);
-                        update({ ...eq, remarques: anomalies.length ? anomalies.join("\n") : "Aucune anomalie relevée." });
+                        update({ ...eq, remarques: genererRemarquesEquipement(eq) });
                       }}
                       style={btnGhost(BRAND.blue)}
-                      title="Reprend les contrôles non conformes de cet équipement"
+                      title="Rédige les constats en phrases complètes et en déduit les préconisations"
                     >
-                      <RotateCcw size={13} /> Compiler les anomalies
+                      <RotateCcw size={13} /> Compiler constats et préconisations
                     </button>
                     <button
                       onClick={() => update({ ...eq, remarques: REMARQUE_STANDARD_EQUIPEMENT })}
@@ -8489,7 +8671,7 @@ function PrintEquipement({ eq, allEquipements = [] }) {
           {agree(eq.etatFinal, equipGender(eq.type), false)}
         </span>
       </div>
-      {eq.remarques && <div style={{ fontSize: 11, marginTop: 6 }}><b>Remarques et préconisations :</b><br />{eq.remarques}</div>}
+      {eq.remarques && <div style={{ fontSize: 11, marginTop: 6, whiteSpace: "pre-line" }}><b>Remarques et préconisations :</b><br />{eq.remarques}</div>}
       <PrintPhotos photos={eq.photos} />
       {eq.type === "Disjoncteur BT" && eq.courbeFiles && eq.courbeFiles.length > 0 && (
         <div style={{ marginTop: 10 }}>
@@ -8583,7 +8765,7 @@ function PrintSynthese({ site }) {
                     {agree(eq.etatFinal, equipGender(eq.type), false)}
                   </span>
                 </td>
-                <td style={{ padding: "6px 0", color: "#666" }}>{truncateText(eq.remarques, 90) || "—"}</td>
+                <td style={{ padding: "6px 0", color: "#666" }}>{truncateText(aplatirRemarques(eq.remarques), 90) || "—"}</td>
               </tr>
             );
           })}
@@ -8641,7 +8823,7 @@ function PrintReport({ site }) {
         <PrintFieldRow label="Fonctionnement de l'installation" value={site.rapport.fonctionnementEtat} />
         {site.rapport.fonctionnementRemarque && <div style={{ fontSize: 10, color: "#666", marginBottom: 6 }}>{site.rapport.fonctionnementRemarque}</div>}
         {site.rapport.syntheseRemarques && (
-          <div style={{ marginTop: 8, fontSize: 11 }}><b>Synthèse des remarques et préconisations :</b><br />{site.rapport.syntheseRemarques}</div>
+          <div style={{ marginTop: 8, fontSize: 11, whiteSpace: "pre-line" }}><b>Synthèse des remarques et préconisations :</b><br />{site.rapport.syntheseRemarques}</div>
         )}
         <PrintPhotos photos={site.rapport.photos} />
       </PrintSection>
@@ -9919,6 +10101,55 @@ function docxHeading(text) {
 }
 // Petite note en italique indiquant la norme/référence appliquée pour un contrôle donné — pour
 // tracer la méthode utilisée sans alourdir le tableau de mesures lui-même.
+// Rendu Word des remarques : sous-titres en couleur, puces avec retrait, texte libre en paragraphes.
+function docxSousTitreRemarques(texte) {
+  return new DOCX.Paragraph({ spacing: { before: 120, after: 70 }, keepNext: true, children: [new DOCX.TextRun({ text: texte, bold: true, size: 18, color: DOCX_BLUE })] });
+}
+function docxPuces(items, size = 18) {
+  return items.map((t) => new DOCX.Paragraph({ spacing: { after: 50 }, indent: { left: 260, hanging: 220 }, children: [new DOCX.TextRun({ text: "•  " + t, size })] }));
+}
+function docxRemarquesEquipement(texte) {
+  const titre = new DOCX.Paragraph({ spacing: { before: 60, after: 40 }, keepNext: true, children: [new DOCX.TextRun({ text: "Remarques et préconisations", bold: true, size: 18, color: DOCX_DARK })] });
+  const paragraphes = (lignes) => lignes.map((l) => new DOCX.Paragraph({ spacing: { after: 60 }, children: [new DOCX.TextRun({ text: l, size: 18 })] }));
+  if (!remarquesStructurees(texte)) {
+    return [titre, ...paragraphes(String(texte).split("\n").map((l) => l.trim()).filter(Boolean))];
+  }
+  const p = parserSectionsRemarques(String(texte).split("\n"));
+  const out = [titre];
+  if (p.autres.length) out.push(...paragraphes(p.autres));
+  if (p.constats.length) out.push(docxSousTitreRemarques("Constats"), ...docxPuces(p.constats));
+  if (p.preconisations.length) out.push(docxSousTitreRemarques("Préconisations"), ...docxPuces(p.preconisations));
+  return out;
+}
+// Synthèse du site : paragraphe de synthèse générale, puis tableau Équipement | Constats | Préconisations.
+function docxSyntheseSiteStructuree(texte) {
+  const p = parserSyntheseSite(texte);
+  const out = [];
+  if (p.generale.length) {
+    out.push(docxSousTitreRemarques("Synthèse générale"));
+    p.generale.forEach((l) => out.push(new DOCX.Paragraph({ spacing: { after: 80 }, children: [new DOCX.TextRun({ text: l, size: 18 })] })));
+  }
+  if (p.equipements.length) {
+    out.push(docxSousTitreRemarques("Détail par équipement"));
+    const marge = { top: 110, bottom: 110, left: 120, right: 110 };
+    const W = [2000, 3900, 3700];
+    const cellule = (i, enfants, entete) => new DOCX.TableCell({ width: { size: W[i], type: DOCX.WidthType.DXA }, margins: marge, shading: entete ? { type: DOCX.ShadingType.CLEAR, fill: DOCX_LIGHT } : undefined, children: enfants });
+    const texte1 = (t, gras) => new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: t, bold: !!gras, size: 17, color: gras ? "555555" : undefined })] });
+    const entete = new DOCX.TableRow({ tableHeader: true, children: [
+      cellule(0, [texte1("Équipement", true)], true), cellule(1, [texte1("Constats", true)], true), cellule(2, [texte1("Préconisations", true)], true),
+    ]});
+    const lignes = p.equipements.map((e) => {
+      const constats = [...e.autres, ...e.constats];
+      return new DOCX.TableRow({ children: [
+        cellule(0, [texte1(e.titre || "—", true)]),
+        cellule(1, constats.length ? docxPuces(constats, 17) : [texte1("—")]),
+        cellule(2, e.preconisations.length ? docxPuces(e.preconisations, 17) : [texte1("—")]),
+      ]});
+    });
+    out.push(new DOCX.Table({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: W, rows: [entete, ...lignes] }));
+  }
+  return out;
+}
 function docxNormeNote(texte) {
   const alerte = typeof texte === "string" && texte.trim().startsWith("⚠");
   const accent = alerte ? "B5730A" : "0A5DA8";
@@ -11438,7 +11669,7 @@ function docxEquipementElements(eq, locaux, allSites) {
     border: { top: { color: DOCX_BLUE, space: 4, style: DOCX.BorderStyle.SINGLE, size: 8 } }, spacing: { before: 120, after: 60 },
     children: [new DOCX.TextRun({ text: "Synthèse de l'état — à l'issue de la maintenance : ", bold: true, size: 18, color: DOCX_DARK }), new DOCX.TextRun({ text: (eq.etatFinal || "").toUpperCase(), bold: true, size: 18, color: docxEtatColor(eq.etatFinal) })],
   }));
-  if (eq.remarques) elements.push(new DOCX.Paragraph({ spacing: { after: 80 }, children: [new DOCX.TextRun({ text: "Remarques : ", bold: true, size: 18 }), new DOCX.TextRun({ text: eq.remarques, size: 18 })] }));
+  if (eq.remarques) elements.push(...docxRemarquesEquipement(eq.remarques));
   { const galerie = docxPhotosCoteACote(eq.photos, 200, 220); if (galerie) { elements.push(docxSpacer(160)); elements.push(galerie); } }
 
   // Courbe de déclenchement (Disjoncteur BT) : image en grand format (≈ moitié de page), suivie
@@ -11825,8 +12056,12 @@ async function generateSiteDocx(site, allSites) {
     // qui précède (tableau "Rapport").
     children.push(new DOCX.Paragraph({ spacing: { before: 700, after: 0 }, children: [] }));
     children.push(new DOCX.Paragraph({ spacing: { before: 0, after: 120 }, children: [new DOCX.TextRun({ text: "Synthèse des remarques et préconisations", bold: true, size: 19, color: DOCX_DARK })] }));
+    if (remarquesStructurees(site.rapport.syntheseRemarques)) {
+      children.push(...docxSyntheseSiteStructuree(site.rapport.syntheseRemarques));
+    } else {
     const lignesRemarques = site.rapport.syntheseRemarques.split("\n").filter((l) => l.trim());
     const margeRemarque = { top: 130, bottom: 130, left: 130, right: 120 };
+    const auMoinsUnEquipement = lignesRemarques.some((l) => l.includes(" : "));
     const remarquesTable = new DOCX.Table({
       width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: [2600, 7000],
       rows: [
@@ -11847,7 +12082,9 @@ async function generateSiteDocx(site, allSites) {
         }),
       ],
     });
-    children.push(remarquesTable);
+    if (auMoinsUnEquipement) children.push(remarquesTable);
+    else lignesRemarques.forEach((l) => children.push(new DOCX.Paragraph({ spacing: { after: 80 }, children: [new DOCX.TextRun({ text: l, size: 18 })] })));
+    }
   }
   else children.push(docxSpacer());
   // Photos générales du site (ajoutées depuis l'onglet Rapport) — absentes du rapport principal
