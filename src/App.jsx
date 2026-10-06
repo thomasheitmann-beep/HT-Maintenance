@@ -8414,39 +8414,6 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
   return prev.eq === next.eq && prev.locaux === next.locaux && prev.caracteristiquesLibrary === next.caracteristiquesLibrary && prev.removable === next.removable;
 });
 
-function EquipementTypeTab({ type, site, allSites, update, caracteristiquesLibrary, apprendreCaracteristique }) {
-  const items = equipementsTries(site.equipements.filter((e) => e.type === type));
-  const updateItem = (id, next) => update((d) => ({ ...d, equipements: d.equipements.map((e) => (e.id === id ? next : e)) }));
-  const removeItem = (id) => update((d) => ({ ...d, equipements: d.equipements.filter((e) => e.id !== id) }));
-  const addItem = () => {
-    const eq = emptyEquipement(type);
-    if (site.locaux && site.locaux.length) eq.localId = site.locaux[0].id;
-    eq.ordre = (site.equipements.length + 1) * 10;
-    update((d) => ({ ...d, equipements: [...d.equipements, eq] }));
-  };
-  const duplicateItem = (eq) => {
-    const copy = JSON.parse(JSON.stringify(eq));
-    copy.id = uid();
-    copy.ordre = (site.equipements.length + 1) * 10;
-    update((d) => ({ ...d, equipements: [...d.equipements, copy] }));
-  };
-
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      <div style={{ display: "flex", justifyContent: "flex-end" }}>
-        <button onClick={addItem} style={btnGhost("#FFC107")}><Plus size={13} /> Ajouter un {type.toLowerCase()}</button>
-      </div>
-      {items.length === 0 ? (
-        <div style={{ textAlign: "center", padding: 40, background: "#FFFFFF", border: "1px dashed #D8DEE5", borderRadius: 14, color: "#8B96A3", fontSize: 13 }}>
-          Aucun équipement de type « {type} » enregistré pour ce site.
-        </div>
-      ) : (
-        items.map((eq) => <EquipementCard key={eq.id} eq={eq} update={(next) => updateItem(eq.id, next)} remove={() => removeItem(eq.id)} onDuplicate={() => duplicateItem(eq)} locaux={site.locaux} allEquipements={site.equipements} allSites={allSites} caracteristiquesLibrary={caracteristiquesLibrary} apprendreCaracteristique={apprendreCaracteristique} />)
-      )}
-    </div>
-  );
-}
-
 /* =========================================================================
    Fiche site (onglets)
    ========================================================================= */
@@ -8967,27 +8934,49 @@ function PrintIntervention({ iv }) {
 function SiteDetail({ site, allSites, update, onBack, onDelete, onPrint, onPrintAnnexe, onCreateIntervention, clientsRegistry, contactsRegistry, caracteristiquesLibrary, apprendreCaracteristique }) {
   const [reprendreOpen, setReprendreOpen] = useState(false);
   const [reprendreSelection, setReprendreSelection] = useState([]);
-  const presentTypes = useMemo(() => EQUIPMENT_TYPES.filter((t) => site.equipements.some((e) => e.type === t)), [site.equipements]);
+  // Un onglet par équipement, nommé d'après l'équipement (son repère) et classé selon l'ordre
+  // renseigné (champ "Ordre", le même que dans le rapport Word). Sans repère, l'onglet reprend le
+  // type de l'équipement ; deux libellés identiques sont numérotés pour rester distinguables.
+  const ongletsEquipements = useMemo(() => {
+    const tries = equipementsTries(site.equipements);
+    const bases = tries.map((eq) => ((eq.identification && eq.identification.repere) || "").trim() || eq.type);
+    const total = {}, vus = {};
+    bases.forEach((n) => { total[n] = (total[n] || 0) + 1; });
+    return tries.map((eq, i) => {
+      const n = bases[i];
+      vus[n] = (vus[n] || 0) + 1;
+      return { eq, label: total[n] > 1 ? `${n} ${vus[n]}` : n };
+    });
+  }, [site.equipements]);
   const [activeTab, setActiveTab] = useState("rapport");
   const [addMenuOpenHTA, setAddMenuOpenHTA] = useState(false);
   const [addMenuOpenConv, setAddMenuOpenConv] = useState(false);
 
   useEffect(() => {
-    if (activeTab !== "rapport" && !presentTypes.includes(activeTab)) setActiveTab("rapport");
-  }, [presentTypes, activeTab]);
+    if (activeTab !== "rapport" && !site.equipements.some((e) => e.id === activeTab)) setActiveTab("rapport");
+  }, [site.equipements, activeTab]);
 
-  const remainingHTA = EQUIPMENT_TYPES_HTABT.filter((t) => !presentTypes.includes(t));
-  const remainingConv = EQUIPMENT_TYPES_CONVERSION.filter((t) => !presentTypes.includes(t));
+  // Un onglet par équipement : on peut ajouter autant d'équipements d'un même type que nécessaire
+  // (plusieurs transformateurs, plusieurs disjoncteurs…), donc tous les types restent proposés.
+  const remainingHTA = EQUIPMENT_TYPES_HTABT;
+  const remainingConv = EQUIPMENT_TYPES_CONVERSION;
 
   function addEquipmentType(type) {
     const eq = emptyEquipement(type);
     if (site.locaux && site.locaux.length) eq.localId = site.locaux[0].id;
-    eq.ordre = (site.equipements.length + 1) * 10;
-    update((d) => ({ ...d, equipements: [...d.equipements, eq] }));
-    setActiveTab(type);
+    update((d) => ({ ...d, equipements: [...d.equipements, { ...eq, ordre: (d.equipements.length + 1) * 10 }] }));
+    setActiveTab(eq.id);
     setAddMenuOpenHTA(false);
     setAddMenuOpenConv(false);
   }
+  const updateEquipement = (id, next) => update((d) => ({ ...d, equipements: d.equipements.map((e) => (e.id === id ? next : e)) }));
+  const removeEquipement = (id) => update((d) => ({ ...d, equipements: d.equipements.filter((e) => e.id !== id) }));
+  const dupliquerEquipement = (eq) => {
+    const copy = JSON.parse(JSON.stringify(eq));
+    copy.id = uid();
+    update((d) => ({ ...d, equipements: [...d.equipements, { ...copy, ordre: (d.equipements.length + 1) * 10 }] }));
+    setActiveTab(copy.id);
+  };
   function reprendreEquipementsSelectionnes() {
     const sources = equipementsMemeSite.filter(({ eq }) => reprendreSelection.includes(eq.id)).map(({ eq }) => eq);
     if (!sources.length) return;
@@ -8998,7 +8987,7 @@ function SiteDetail({ site, allSites, update, onBack, onDelete, onPrint, onPrint
       return eq;
     });
     update((d) => ({ ...d, equipements: [...d.equipements, ...nouveaux] }));
-    setActiveTab(nouveaux[0].type);
+    setActiveTab(nouveaux[0].id);
     setReprendreOpen(false);
     setReprendreSelection([]);
   }
@@ -9020,8 +9009,9 @@ function SiteDetail({ site, allSites, update, onBack, onDelete, onPrint, onPrint
   const rank = overallRank(site);
   const tabs = [
     { key: "rapport", label: "Rapport", icon: FileText },
-    ...presentTypes.map((t) => ({ key: t, label: t, icon: t === "Sécurité" ? ShieldCheck : Settings2 })),
+    ...ongletsEquipements.map(({ eq, label }) => ({ key: eq.id, label, icon: eq.type === "Sécurité" ? ShieldCheck : Settings2, type: eq.type, etat: eq.etatFinal })),
   ];
+  const equipementActif = site.equipements.find((e) => e.id === activeTab);
 
   function envoyerRapportParMail() {
     const numeroOffre = site.rapport?.offre?.numero;
@@ -9140,16 +9130,15 @@ function SiteDetail({ site, allSites, update, onBack, onDelete, onPrint, onPrint
             const Icon = t.icon;
             const active = activeTab === t.key;
             return (
-              <button key={t.key} onClick={() => setActiveTab(t.key)} style={{
+              <button key={t.key} onClick={() => setActiveTab(t.key)} title={t.type || undefined} style={{
                 display: "flex", alignItems: "center", gap: 6, padding: "8px 14px", borderRadius: 999, flexShrink: 0,
                 border: active ? "1px solid #FFC10755" : "1px solid #D8DEE5", background: active ? "rgba(245,166,35,0.12)" : "transparent",
                 color: active ? "#FFC107" : "#5B6B7D", fontSize: 12.5, fontWeight: 600, cursor: "pointer",
               }}>
-                <Icon size={13} /> {t.label}
+                <Icon size={13} />
+                <span style={{ maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.label}</span>
                 {t.key !== "rapport" && (
-                  <span style={{ fontSize: 10.5, color: active ? "#FFC107" : "#8B96A3" }}>
-                    ({site.equipements.filter((e) => e.type === t.key).length})
-                  </span>
+                  <span title={t.etat} style={{ width: 8, height: 8, borderRadius: 999, background: printEtatColor(t.etat), flexShrink: 0 }} />
                 )}
               </button>
             );
@@ -9228,7 +9217,20 @@ function SiteDetail({ site, allSites, update, onBack, onDelete, onPrint, onPrint
       </div>
 
       {activeTab === "rapport" && <RapportTab site={site} update={update} />}
-      {presentTypes.includes(activeTab) && <EquipementTypeTab type={activeTab} site={site} allSites={allSites} update={update} caracteristiquesLibrary={caracteristiquesLibrary} apprendreCaracteristique={apprendreCaracteristique} />}
+      {equipementActif && (
+        <EquipementCard
+          key={equipementActif.id}
+          eq={equipementActif}
+          update={(next) => updateEquipement(equipementActif.id, next)}
+          remove={() => removeEquipement(equipementActif.id)}
+          onDuplicate={() => dupliquerEquipement(equipementActif)}
+          locaux={site.locaux}
+          allEquipements={site.equipements}
+          allSites={allSites}
+          caracteristiquesLibrary={caracteristiquesLibrary}
+          apprendreCaracteristique={apprendreCaracteristique}
+        />
+      )}
     </div>
   );
 }
