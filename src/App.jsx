@@ -3117,7 +3117,7 @@ function emptyLocal(nom) {
 function worstRank(labels) { return labels.reduce((worst, l) => Math.max(worst, RANK_OF[l] ?? 0), 0); }
 
 /* =========================================================================
-   Rapport d'intervention (document client, indépendant du suivi de maintenance)
+   Clôture d'intervention (document client, indépendant du suivi de maintenance)
    ========================================================================= */
 const ACTIONS_INTERVENTION = [
   "Contrôle visuel", "Nettoyage", "Resserrage des connexions", "Contrôle des mesures de sécurité",
@@ -8808,129 +8808,6 @@ function PrintReport({ site }) {
   );
 }
 
-/* =========================================================================
-   Rapport d'intervention — export Word (document client)
-   ========================================================================= */
-function PrintIntervention({ iv }) {
-  const natureLabels = NATURE_INTERVENTION.filter((n) => iv.nature[n.key]).map((n) => n.label);
-  const duree = dureeIntervention(iv.heureDebut, iv.heureFin);
-  return (
-    <div style={{ background: "#fff", color: "#111", fontFamily: "Arial, Helvetica, sans-serif", maxWidth: 800, margin: "0 auto" }}>
-      <div style={{ height: 6, background: `linear-gradient(90deg, ${BRAND.blue}, ${BRAND.amber})` }} />
-      <div style={{ padding: "18px 24px 12px", display: "flex", justifyContent: "space-between", alignItems: "flex-start", background: BRAND.dark, color: "#fff" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <img src={LOGO_WHITE} alt="HT Maintenance" style={{ width: 78, height: 39, objectFit: "contain", borderRadius: 6 }} />
-          <div>
-            <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: 1.2, color: BRAND.silver }}>Rapport d'intervention</div>
-            <div style={{ fontSize: 20, fontWeight: 800 }}>{iv.numeroRI}</div>
-            <div style={{ fontSize: 13, color: BRAND.silver }}>{iv.client}{iv.site ? " — " + iv.site : ""}</div>
-          </div>
-        </div>
-        <div style={{ textAlign: "right", fontSize: 11 }}>
-          <span style={{
-            display: "inline-block", fontSize: 10.5, fontWeight: 700, color: "#fff", background: printEtatColor(iv.conclusion),
-            padding: "3px 12px", borderRadius: 999, textTransform: "uppercase", letterSpacing: 0.3, marginBottom: 6,
-          }}>
-            {iv.conclusion}
-          </span>
-          <div style={{ color: BRAND.silver }}>Date : {iv.date}</div>
-          <div style={{ color: BRAND.silver }}>Technicien : {iv.technicien || "—"}</div>
-        </div>
-      </div>
-
-      <div style={{ padding: "20px 24px 24px" }}>
-        <PrintSection title="Informations générales">
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "2px 24px" }}>
-            <PrintFieldRow label="Client" value={iv.client} />
-            <PrintFieldRow label="Site" value={iv.site} />
-            <PrintFieldRow label="Heure début" value={iv.heureDebut} />
-            <PrintFieldRow label="Heure fin" value={iv.heureFin} />
-            <PrintFieldRow label="Durée" value={duree} />
-            <PrintFieldRow label="Nature de l'intervention" value={natureLabels.join(", ")} />
-          </div>
-        </PrintSection>
-
-        {(repairIntervention(iv).equipements || []).map((eq, i) => (
-          <PrintSection key={eq.id} title={`Équipement${(iv.equipements.length > 1) ? " " + (i + 1) : ""}`}>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "2px 24px" }}>
-              <PrintFieldRow label="Type" value={eq.type} />
-              <PrintFieldRow label="Constructeur" value={eq.constructeur} />
-              <PrintFieldRow label="Modèle" value={eq.modele} />
-              <PrintFieldRow label="N° de série" value={eq.numeroSerie} />
-              <PrintFieldRow label="Localisation" value={eq.localisation} />
-              <PrintFieldRow label="Référence" value={eq.reference} />
-              <PrintFieldRow label="Statut" value={eq.etat} />
-            </div>
-            {eq.remarque && <div style={{ marginTop: 6, fontSize: 12, color: "#3E4A5C" }}><strong>Remarque :</strong> {eq.remarque}</div>}
-          </PrintSection>
-        ))}
-
-        <PrintSection title="Travaux réalisés">
-          {iv.travauxActions && iv.travauxActions.length > 0 && (
-            <div style={{ marginBottom: 8 }}>
-              {iv.travauxActions.map((a, i) => (
-                <div key={a.id || i} style={{ display: "flex", gap: 10, fontSize: 11, padding: "3px 0", borderBottom: "1px solid #e5e5e5" }}>
-                  <div style={{ width: 200, fontWeight: 600, color: BRAND.dark, flexShrink: 0 }}>{a.action || "—"}</div>
-                  <div style={{ color: "#666" }}>{a.detail || ""}</div>
-                </div>
-              ))}
-            </div>
-          )}
-          {iv.travauxRealises && <div style={{ fontSize: 11, whiteSpace: "pre-wrap", marginTop: iv.travauxActions && iv.travauxActions.length > 0 ? 8 : 0 }}>{iv.travauxRealises}</div>}
-          {(!iv.travauxActions || iv.travauxActions.length === 0) && !iv.travauxRealises && <div style={{ fontSize: 11, color: "#666" }}>—</div>}
-        </PrintSection>
-
-        <PrintSection title="Mesures / Contrôles">
-          <PrintFieldRow label="Isolement" value={iv.mesures.isolement} />
-          <PrintFieldRow label="Résistance de contact" value={iv.mesures.resistanceContact} />
-          <PrintFieldRow label="Temps de manœuvre" value={iv.mesures.tempsManoeuvre} />
-          <PrintFieldRow label="Essais fonctionnels" value={iv.mesures.essaisFonctionnels} />
-          <PrintFieldRow label="Observations" value={iv.mesures.observations} />
-        </PrintSection>
-
-        <PrintSection title="Anomalies et recommandations">
-          <div style={{ fontSize: 11, whiteSpace: "pre-wrap" }}>{iv.anomaliesRecommandations || "—"}</div>
-        </PrintSection>
-
-        <div style={{ marginTop: 6, marginBottom: 18, display: "flex", justifyContent: "flex-end" }}>
-          <span style={{
-            fontSize: 11, fontWeight: 700, color: "#fff", background: printEtatColor(iv.conclusion),
-            padding: "4px 14px", borderRadius: 999, textTransform: "uppercase", letterSpacing: 0.3,
-          }}>
-            Conclusion : {iv.conclusion}
-          </span>
-        </div>
-
-        <PrintSection title="Validation">
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
-            <div>
-              <div style={{ fontSize: 11, color: "#666", marginBottom: 4 }}>Nom client : <b style={{ color: BRAND.dark }}>{iv.validation.nomClient || "—"}</b></div>
-              {iv.validation.signatureClient ? (
-                <img src={iv.validation.signatureClient} alt="Signature client" style={{ width: 220, height: 80, objectFit: "contain", border: "1px solid #ccc" }} />
-              ) : (
-                <div style={{ width: 220, height: 80, border: "1px solid #ccc" }} />
-              )}
-            </div>
-            <div>
-              <div style={{ fontSize: 11, color: "#666", marginBottom: 4 }}>Technicien HT Maintenance : <b style={{ color: BRAND.dark }}>{iv.validation.technicienHT || iv.technicien || "—"}</b></div>
-              {iv.validation.signatureHT ? (
-                <img src={iv.validation.signatureHT} alt="Signature technicien" style={{ width: 220, height: 80, objectFit: "contain", border: "1px solid #ccc" }} />
-              ) : (
-                <div style={{ width: 220, height: 80, border: "1px solid #ccc" }} />
-              )}
-            </div>
-          </div>
-        </PrintSection>
-
-        <div style={{ marginTop: 24, paddingTop: 10, borderTop: `1px solid ${BRAND.silver}`, display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 9, color: "#888" }}>
-          <span>HT Maintenance — Maintenance électrique HTA / BT</span>
-          <span>Rapport généré le {todayISO()}</span>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function SiteDetail({ site, allSites, update, onBack, onDelete, onPrint, onPrintAnnexe, onCreateIntervention, clientsRegistry, contactsRegistry, caracteristiquesLibrary, apprendreCaracteristique }) {
   const [reprendreOpen, setReprendreOpen] = useState(false);
   const [reprendreSelection, setReprendreSelection] = useState([]);
@@ -9116,8 +8993,8 @@ function SiteDetail({ site, allSites, update, onBack, onDelete, onPrint, onPrint
             <button onClick={() => onPrintAnnexe(site)} style={btnGhost("#0F8A5F")} title="Génère un fichier Word séparé regroupant toutes les photos du site, classées par équipement et par contrôle">
               <ImagePlus size={13} /> Annexe photos
             </button>
-            <button onClick={() => onCreateIntervention(site, site.equipements)} style={btnGhost(BRAND.blue)} title="Crée un rapport d'intervention pré-rempli avec tous les équipements de ce site">
-              <ClipboardList size={13} /> Rapport d'intervention
+            <button onClick={() => onCreateIntervention(site, site.equipements)} style={btnGhost(BRAND.blue)} title="Crée une clôture d'intervention pré-remplie avec tous les équipements de ce site">
+              <ClipboardList size={13} /> Clôture d'intervention
             </button>
             <InlineConfirmButton icon={Trash2} label="Supprimer le site" onConfirm={() => onDelete(site.id)} />
           </div>
@@ -9236,7 +9113,7 @@ function SiteDetail({ site, allSites, update, onBack, onDelete, onPrint, onPrint
 }
 
 /* =========================================================================
-   Rapport d'intervention — édition
+   Clôture d'intervention — édition
    ========================================================================= */
 function IvField({ label, children, span }) {
   return (
@@ -9268,9 +9145,9 @@ function InterventionEditor({ iv, update, onBack, onDelete, onPrint }) {
   const duree = dureeIntervention(iv.heureDebut, iv.heureFin);
 
   function envoyerParMail() {
-    const subject = encodeURIComponent(`Rapport d'intervention ${iv.numeroRI} — ${iv.client || ""}`);
+    const subject = encodeURIComponent(`Clôture d'intervention ${iv.numeroRI} — ${iv.client || ""}`);
     const body = encodeURIComponent(
-      `Bonjour,\n\nVeuillez trouver ci-joint le rapport d'intervention ${iv.numeroRI} du ${iv.date} concernant le site ${iv.site || ""}.\n\n(Pensez à joindre le document Word généré via le bouton « Rapport Word » avant l'envoi.)\n\nCordialement,\n${iv.technicien || "HT Maintenance"}`
+      `Bonjour,\n\nVeuillez trouver ci-joint la clôture d'intervention ${iv.numeroRI} du ${dateFrIso(iv.date)} concernant le site ${iv.site || ""}.\n\n(Pensez à joindre le document Word généré via le bouton « Clôture Word » avant l'envoi.)\n\nCordialement,\n${iv.technicien || "HT Maintenance"}`
     );
     const to = iv.emailClient || "";
     window.open(`mailto:${to}?subject=${subject}&body=${body}`, "_blank");
@@ -9278,7 +9155,7 @@ function InterventionEditor({ iv, update, onBack, onDelete, onPrint }) {
 
   return (
     <div>
-      <button onClick={onBack} style={{ ...btnGhost(), marginBottom: 16 }}><ArrowLeft size={14} /> Retour aux rapports d'intervention</button>
+      <button onClick={onBack} style={{ ...btnGhost(), marginBottom: 16 }}><ArrowLeft size={14} /> Retour aux clôtures d'intervention</button>
 
       <Card style={{ marginBottom: 18 }}>
         <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
@@ -9296,7 +9173,7 @@ function InterventionEditor({ iv, update, onBack, onDelete, onPrint }) {
             ) : (
               <button onClick={() => set("statut", "Clôturée")} style={btnGhost(BRAND.blue)}><CheckCircle2 size={13} /> Clôturer</button>
             )}
-            <button onClick={() => onPrint(iv)} style={btnGhost("#FFC107")}><FileText size={13} /> Rapport Word</button>
+            <button onClick={() => onPrint(iv)} style={btnGhost("#FFC107")}><FileText size={13} /> Clôture Word</button>
             <button onClick={envoyerParMail} style={btnGhost("#FFC107")}><Mail size={13} /> Préparer l'email</button>
             <InlineConfirmButton icon={Trash2} label="Supprimer" onConfirm={() => onDelete(iv.id)} />
           </div>
@@ -9779,7 +9656,7 @@ function InterventionsOverview({ interventions, sites, onOpen, onCreate, onPlani
         <div style={{ textAlign: "center", padding: "60px 20px", background: "#FFFFFF", border: "1px dashed #D8DEE5", borderRadius: 14 }}>
           <ClipboardList size={28} color="#9AA5B1" style={{ marginBottom: 10 }} />
           <div style={{ fontSize: 14, fontWeight: 600, color: "#3E4A5C", marginBottom: 4 }}>
-            {interventions.length === 0 ? "Aucun rapport d'intervention" : "Aucun résultat pour cette recherche"}
+            {interventions.length === 0 ? "Aucune clôture d'intervention" : "Aucun résultat pour cette recherche"}
           </div>
           <div style={{ fontSize: 12.5, color: "#8B96A3" }}>Créez votre premier rapport à transmettre au client.</div>
         </div>
@@ -9870,7 +9747,7 @@ function DayDetailPanel({ dateISO, events, onOpenSite, onOpenIntervention, onCre
         <SectionTitle>{label}</SectionTitle>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button onClick={() => onCreateForDate(dateISO)} style={btnGhost(BRAND.amber)}><Plus size={13} /> Préparer un rapport ce jour</button>
-          <button onClick={() => onCreateInterventionForDate(dateISO)} style={btnGhost(BRAND.blue)}><ClipboardList size={13} /> Créer un rapport d'intervention</button>
+          <button onClick={() => onCreateInterventionForDate(dateISO)} style={btnGhost(BRAND.blue)}><ClipboardList size={13} /> Créer une clôture d'intervention</button>
         </div>
       </div>
       {events.length === 0 ? (
@@ -9885,7 +9762,7 @@ function DayDetailPanel({ dateISO, events, onOpenSite, onOpenIntervention, onCre
               {ev.kind === "site" ? <Building2 size={14} color="#5B6B7D" /> : <ClipboardList size={14} color="#5B6B7D" />}
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 13, fontWeight: 600, color: "#1A1F26", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{ev.label}</div>
-                <div style={{ fontSize: 11, color: "#5B6B7D" }}>{ev.kind === "site" ? "Site" : "Rapport d'intervention"} {ev.sub ? "· " + ev.sub : ""}</div>
+                <div style={{ fontSize: 11, color: "#5B6B7D" }}>{ev.kind === "site" ? "Site" : "Clôture d'intervention"} {ev.sub ? "· " + ev.sub : ""}</div>
               </div>
               <StatusBadge label={ev.statusLabel} size="sm" />
             </div>
@@ -10094,9 +9971,10 @@ function docxEtatColor(label) {
   if (rank === -1) return "7A8794";
   return DOCX_GREEN;
 }
-function docxHeading(text) {
+function docxHeading(text, avant = 380, apres = 180) {
   return new DOCX.Paragraph({
-    spacing: { before: 380, after: 180 },
+    spacing: { before: avant, after: apres },
+    keepNext: true,
     border: { bottom: { color: DOCX_BLUE, space: 4, style: DOCX.BorderStyle.SINGLE, size: 12 } },
     children: [new DOCX.TextRun({ text: "  ", color: DOCX_AMBER }), new DOCX.TextRun({ text: (text || "").toUpperCase(), bold: true, color: DOCX_DARK, size: 22 })],
   });
@@ -10107,8 +9985,8 @@ function docxHeading(text) {
 function docxSousTitreRemarques(texte) {
   return new DOCX.Paragraph({ spacing: { before: 120, after: 70 }, keepNext: true, children: [new DOCX.TextRun({ text: texte, bold: true, size: 18, color: DOCX_BLUE })] });
 }
-function docxPuces(items, size = 18) {
-  return items.map((t) => new DOCX.Paragraph({ spacing: { after: 50 }, indent: { left: 260, hanging: 220 }, children: [new DOCX.TextRun({ text: "•  " + t, size })] }));
+function docxPuces(items, size = 18, espace = 50) {
+  return items.map((t) => new DOCX.Paragraph({ spacing: { after: espace }, indent: { left: 260, hanging: 220 }, children: [new DOCX.TextRun({ text: "•  " + t, size })] }));
 }
 function docxRemarquesEquipement(texte) {
   const titre = new DOCX.Paragraph({ spacing: { before: 60, after: 40 }, keepNext: true, children: [new DOCX.TextRun({ text: "Remarques et préconisations", bold: true, size: 18, color: DOCX_DARK })] });
@@ -12117,110 +11995,197 @@ async function generateSiteDocx(site, allSites) {
   return DOCX.Packer.toBlob(doc);
 }
 
+// ===== Clôture d'intervention (Word) =====
+// Document court remis au client à la fin de l'intervention : ce n'est PAS un rapport détaillé (le
+// rapport de maintenance du site reste le document de référence), mais une clôture — synthèse de
+// l'intervention, équipements contrôlés et leur état, points importants, conclusion et signatures.
+function dateFrIso(iso) {
+  const m = String(iso || "").match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : String(iso || "");
+}
+function cleEtatDocx(etat) {
+  const r = RANK_OF[etat];
+  if (r >= 2) return "bad";
+  if (r === 1) return "warning";
+  if (r === 0) return "ok";
+  return null;
+}
+// Case d'état : bordure foncée et fond clair, comme dans le rapport de maintenance.
+function docxCelluleEtat(etat, largeur) {
+  const c = DOCX_ETAT_COULEURS[cleEtatDocx(etat)];
+  const bord = (couleur) => ({ style: DOCX.BorderStyle.SINGLE, size: 6, color: couleur });
+  return new DOCX.TableCell({
+    width: { size: largeur, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, verticalAlign: DOCX.VerticalAlign.CENTER,
+    shading: { type: DOCX.ShadingType.CLEAR, fill: c ? c.fond : DOCX_LIGHT },
+    borders: c ? { top: bord(c.bord), bottom: bord(c.bord), left: bord(c.bord), right: bord(c.bord) } : undefined,
+    children: [new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, children: [new DOCX.TextRun({ text: (etat || "—").toUpperCase(), bold: true, size: 16, color: c ? c.texte : "555555" })] })],
+  });
+}
+// Synthèse minimale en deux phrases : ce qui a été fait, puis le bilan des équipements contrôlés.
+function phraseSyntheseIntervention(iv, tousTechniciens) {
+  const natures = NATURE_INTERVENTION.filter((n) => iv.nature && iv.nature[n.key]).map((n) => n.label.toLowerCase());
+  const dates = iv.dateFin ? ` du ${dateFrIso(iv.date)} au ${dateFrIso(iv.dateFin)}` : iv.date ? ` le ${dateFrIso(iv.date)}` : "";
+  const phrases = [`Intervention ${natures.length ? listeFr(natures) : "de maintenance"} réalisée${dates}${iv.site ? " sur le site " + citer(iv.site) : ""}${tousTechniciens ? " par " + tousTechniciens : ""}.`];
+  const liste = iv.equipements || [];
+  const c = { conforme: 0, degrade: 0, defaillant: 0 };
+  liste.forEach((e) => { const r = RANK_OF[e.etat || "Conforme"]; if (r >= 2) c.defaillant++; else if (r === 1) c.degrade++; else if (r === 0) c.conforme++; });
+  if (!liste.length) phrases.push("Aucun équipement n'a été renseigné.");
+  else if (liste.length === 1) phrases.push(`1 équipement a été contrôlé : il est jugé ${motsEtat(liste[0].etat || "Conforme")}.`);
+  else {
+    const parts = [];
+    if (c.conforme) parts.push(`${c.conforme} conforme${c.conforme > 1 ? "s" : ""}`);
+    if (c.degrade) parts.push(`${c.degrade} dégradé${c.degrade > 1 ? "s" : ""}`);
+    if (c.defaillant) parts.push(`${c.defaillant} défaillant${c.defaillant > 1 ? "s" : ""}`);
+    phrases.push(`${liste.length} équipements ont été contrôlés${parts.length ? " : " + listeFr(parts) : ""}.`);
+  }
+  return phrases.join(" ");
+}
+
 async function generateInterventionDocx(iv) {
   await ensureDocx();
   iv = repairIntervention(iv);
   iv = await resolvePhotosForDocx(iv);
   const duree = dureeIntervention(iv.heureDebut, iv.heureFin);
   const logoImg = docxImage(LOGO_DARK, 46, 35);
-  // Même logique visuelle que le rapport de site : une bordure colorée à gauche de l'en-tête,
-  // reprenant ici le statut de l'intervention plutôt qu'un état d'équipement.
   const couleurStatutRI = iv.statut === "Clôturée" ? DOCX_GREEN : DOCX_ORANGE;
-  const headerTable = new DOCX.Table({ width: { size: 8800, type: DOCX.WidthType.DXA }, columnWidths: [8800], rows: [new DOCX.TableRow({ children: [new DOCX.TableCell({
-    width: { size: 8800, type: DOCX.WidthType.DXA }, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_DARK },
+  const headerTable = new DOCX.Table({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: [TABLE_WIDTH], rows: [new DOCX.TableRow({ children: [new DOCX.TableCell({
+    width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_DARK },
     borders: { left: { style: DOCX.BorderStyle.SINGLE, size: 36, color: couleurStatutRI } },
     children: [
-      new DOCX.Paragraph({ spacing: { before: 160, after: 20 }, indent: { left: 60 }, children: [...(logoImg ? [logoImg] : []), new DOCX.TextRun({ text: "   RAPPORT D'INTERVENTION", color: DOCX_SILVER, size: 16 })] }),
+      new DOCX.Paragraph({ spacing: { before: 110, after: 20 }, indent: { left: 60 }, children: [...(logoImg ? [logoImg] : []), new DOCX.TextRun({ text: "   CLÔTURE D'INTERVENTION", color: DOCX_SILVER, size: 16 })] }),
       new DOCX.Paragraph({ spacing: { after: 10 }, indent: { left: 60 }, children: [new DOCX.TextRun({ text: iv.numeroRI || "", bold: true, color: DOCX_WHITE, size: 30 })] }),
-      new DOCX.Paragraph({ spacing: { after: 160 }, indent: { left: 60 }, children: [new DOCX.TextRun({ text: `${iv.client || ""} — ${iv.site || ""}`, color: DOCX_SILVER, size: 20 })] }),
+      new DOCX.Paragraph({ spacing: { after: 110 }, indent: { left: 60 }, children: [new DOCX.TextRun({ text: `${iv.client || ""} — ${iv.site || ""}`, color: DOCX_SILVER, size: 20 })] }),
     ],
   })] })] });
 
   const tousTechniciens = [iv.technicien, ...(iv.techniciensSupplementaires || [])].filter(Boolean).join(", ");
-  const ivToutesJournees = [
-    { date: iv.date, heureDebut: iv.heureDebut, heureFin: iv.heureFin },
-    ...(iv.journeesSupplementaires || []),
-  ].filter((j) => j.date);
-  const ivJourneesTexte = ivToutesJournees.map((j) => `${j.date}${j.heureDebut || j.heureFin ? ` (${j.heureDebut || "?"} – ${j.heureFin || "?"})` : ""}`).join(" · ");
-  const infoRows = [
+  const toutesJournees = [{ date: iv.date, heureDebut: iv.heureDebut, heureFin: iv.heureFin }, ...(iv.journeesSupplementaires || [])].filter((j) => j.date);
+  const journeesTexte = toutesJournees.map((j) => `${dateFrIso(j.date)}${j.heureDebut || j.heureFin ? ` (${j.heureDebut || "?"} – ${j.heureFin || "?"})` : ""}`).join(" · ");
+  const natureText = NATURE_INTERVENTION.filter((n) => iv.nature && iv.nature[n.key]).map((n) => n.label).join(", ");
+  const para = (texte, opts = {}) => new DOCX.Paragraph({ spacing: { after: opts.after ?? 80 }, children: [new DOCX.TextRun({ text: texte, size: opts.size ?? 18, bold: !!opts.bold, color: opts.color })] });
+
+  const children = [headerTable, docxSpacer(60)];
+
+  // 1. Synthèse de l'intervention
+  children.push(docxHeading("Synthèse de l'intervention", 150, 80));
+  children.push(para(phraseSyntheseIntervention(iv, tousTechniciens)));
+  const infos = [
     ["Client", iv.client], ["Site", iv.site],
-    ["Date(s) d'intervention", ivJourneesTexte || iv.date],
+    ["Date(s)", (journeesTexte || dateFrIso(iv.date)) + (toutesJournees.length <= 1 && duree ? " — " + duree : "")],
     ["Technicien(s)", tousTechniciens],
-    ["Durée totale (journée 1)", duree],
-    ["Statut", iv.statut === "Clôturée" ? "Clôturée" : "En cours"],
-    ["Offre / Devis", iv.offre?.numero ? "N° " + iv.offre.numero : ""],
-  ];
-  const natureText = NATURE_INTERVENTION.filter((n) => iv.nature[n.key]).map((n) => n.label).join(", ") || "—";
-  const mesuresRows = [
-    ["Isolement", iv.mesures.isolement], ["Résistance de contact", iv.mesures.resistanceContact],
-    ["Temps de manœuvre", iv.mesures.tempsManoeuvre], ["Essais fonctionnels", iv.mesures.essaisFonctionnels], ["Observations", iv.mesures.observations],
-  ];
-
-  const children = [headerTable, docxSpacer(160)];
-  children.push(docxHeading("Informations générales"));
-  const infoTable = docxFieldTable(infoRows);
-  if (infoTable) children.push(infoTable);
-  children.push(docxSpacer());
-
-  const listeEquip = iv.equipements || [];
-  if (listeEquip.length) {
-    children.push(docxHeading(listeEquip.length > 1 ? `Équipements (${listeEquip.length})` : "Équipement"));
-    listeEquip.forEach((eq, i) => {
-      if (listeEquip.length > 1) {
-        children.push(new DOCX.Paragraph({ spacing: { before: i > 0 ? 120 : 0, after: 40 }, children: [new DOCX.TextRun({ text: `Équipement ${i + 1}`, bold: true, size: 18, color: DOCX_DARK })] }));
-      }
-      const equipRows = [
-        ["Type", eq.type], ["Constructeur", eq.constructeur], ["Modèle", eq.modele],
-        ["N° de série", eq.numeroSerie], ["Localisation", eq.localisation], ["Référence", eq.reference],
-      ];
-      const t = docxFieldTable(equipRows);
-      if (t) children.push(t);
-      children.push(new DOCX.Paragraph({ spacing: { before: 60, after: 40 }, children: [
-        new DOCX.TextRun({ text: "Statut : ", bold: true, size: 18, color: DOCX_DARK }),
-        new DOCX.TextRun({ text: (eq.etat || "Conforme").toUpperCase(), bold: true, size: 18, color: docxEtatColor(eq.etat || "Conforme") }),
-      ]}));
-      if (eq.remarque && eq.remarque.trim()) {
-        children.push(new DOCX.Paragraph({ spacing: { after: 60 }, children: [
-          new DOCX.TextRun({ text: "Remarque : ", bold: true, size: 18, color: DOCX_DARK }),
-          new DOCX.TextRun({ text: eq.remarque, size: 18, color: "3E4A5C" }),
-        ]}));
-      }
-      children.push(docxSpacer());
-    });
+    ...(toutesJournees.length > 1 ? [["Durée (journée 1)", duree]] : []),
+    ["Nature", natureText], ["Offre / Devis", iv.offre?.numero ? "N° " + iv.offre.numero : ""],
+  ].filter(([, v]) => v);
+  if (infos.length) {
+    const Wi = [1500, 3300, 1500, 3300];
+    const margeInfo = { top: 50, bottom: 50, left: 110, right: 100 };
+    const celLibelle = (i, t) => new DOCX.TableCell({ width: { size: Wi[i], type: DOCX.WidthType.DXA }, margins: margeInfo, shading: t ? { type: DOCX.ShadingType.CLEAR, fill: DOCX_LIGHT } : undefined, children: [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: t || "", size: 16, color: "555555" })] })] });
+    const celValeur = (i, t) => new DOCX.TableCell({ width: { size: Wi[i], type: DOCX.WidthType.DXA }, margins: margeInfo, children: [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: t || "", size: 17, bold: true, color: DOCX_DARK })] })] });
+    const lignesInfo = [];
+    for (let i = 0; i < infos.length; i += 2) {
+      const [l1, v1] = infos[i];
+      const [l2, v2] = infos[i + 1] || ["", ""];
+      lignesInfo.push(new DOCX.TableRow({ children: [celLibelle(0, l1), celValeur(1, v1), celLibelle(2, l2), celValeur(3, v2)] }));
+    }
+    children.push(new DOCX.Table({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: Wi, rows: lignesInfo }));
   }
+  children.push(docxSpacer(50));
 
-  children.push(docxHeading("Nature de l'intervention"));
-  children.push(new DOCX.Paragraph({ spacing: { after: 80 }, children: [new DOCX.TextRun({ text: natureText, size: 18 })] }));
+  // 2. Équipements contrôlés et leur état
+  const liste = iv.equipements || [];
+  children.push(docxHeading(liste.length > 1 ? `Équipements contrôlés (${liste.length})` : "Équipement contrôlé", 150, 80));
+  if (!liste.length) {
+    children.push(para("Aucun équipement renseigné.", { color: "666666" }));
+  } else {
+    const W = [4800, 2600, 2200];
+    const cellule = (i, enfants, entete) => new DOCX.TableCell({ width: { size: W[i], type: DOCX.WidthType.DXA }, margins: { top: 50, bottom: 50, left: 120, right: 110 }, verticalAlign: DOCX.VerticalAlign.CENTER, shading: entete ? { type: DOCX.ShadingType.CLEAR, fill: DOCX_LIGHT } : undefined, children: enfants });
+    const texteCellule = (t, o = {}) => new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: t, size: o.size ?? 18, bold: !!o.bold, color: o.color })] });
+    const entete = new DOCX.TableRow({ tableHeader: true, children: ["Équipement", "Localisation", "État"].map((t, i) => cellule(i, [texteCellule(t, { bold: true, size: 17, color: "555555" })], true)) });
+    const lignes = liste.map((eq) => {
+      const nom = [eq.type, eq.reference].filter(Boolean).join(" — ") || "Équipement";
+      const detail = [[eq.constructeur, eq.modele].filter(Boolean).join(" "), eq.numeroSerie ? "N° " + eq.numeroSerie : ""].filter(Boolean).join(" · ");
+      return new DOCX.TableRow({ cantSplit: true, children: [
+        cellule(0, [texteCellule(nom, { bold: true }), ...(detail ? [texteCellule(detail, { size: 15, color: "777777" })] : [])]),
+        cellule(1, [texteCellule(eq.localisation || "—", { size: 17 })]),
+        docxCelluleEtat(eq.etat || "Conforme", W[2]),
+      ]});
+    });
+    children.push(new DOCX.Table({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: W, rows: [entete, ...lignes] }));
+  }
+  children.push(docxSpacer(50));
 
-  children.push(docxHeading("Travaux réalisés"));
-  (iv.travauxActions || []).forEach((a) => {
-    children.push(new DOCX.Paragraph({ spacing: { after: 20 }, children: [new DOCX.TextRun({ text: "• " + (a.action || "(action)") + (a.detail ? " — " + a.detail : ""), size: 18 })] }));
+  // 3. Points importants : travaux, mesures notables, équipements à surveiller, anomalies et recommandations
+  children.push(docxHeading("Points importants", 150, 80));
+  const bloc = [];
+  const ajouterPuces = (titre, items) => { if (items.length) bloc.push(docxSousTitreRemarques(titre), ...docxPuces(items, 18, 30)); };
+  const lignesUtiles = (t) => String(t || "").split("\n").map((l) => l.trim().replace(/^[•\-–*]\s*/, "")).filter(Boolean);
+  ajouterPuces("Travaux réalisés", [
+    ...(iv.travauxActions || []).map((a) => (a.action || "") + (a.detail ? " — " + a.detail : "")).filter(Boolean),
+    ...lignesUtiles(iv.travauxRealises),
+  ]);
+  const m = iv.mesures || {};
+  ajouterPuces("Mesures et contrôles notables", [
+    ["Isolement", m.isolement], ["Résistance de contact", m.resistanceContact], ["Temps de manœuvre", m.tempsManoeuvre],
+    ["Essais fonctionnels", m.essaisFonctionnels], ["Observations", m.observations],
+  ].filter(([, v]) => v && String(v).trim()).map(([l, v]) => `${l} : ${String(v).replace(/\s*\n+\s*/g, " ").trim()}`));
+  const anomalies = (iv.anomaliesRecommandations || "").trim();
+  if (!anomalies) {
+    ajouterPuces("Équipements nécessitant une attention", liste.filter((e) => RANK_OF[e.etat || "Conforme"] >= 1 && e.remarque && String(e.remarque).trim()).map((e) => {
+      const nom = [e.type, e.reference].filter(Boolean).join(" — ") || "Équipement";
+      return `${nom} (${motsEtat(e.etat)}) : ${truncateText(aplatirRemarques(e.remarque), 220)}`;
+    }));
+  }
+  if (anomalies) {
+    if (remarquesStructurees(anomalies)) {
+      const p = parserSectionsRemarques(anomalies.split("\n"));
+      ajouterPuces("Anomalies constatées", [...p.autres, ...p.constats]);
+      ajouterPuces("Recommandations", p.preconisations);
+    } else {
+      ajouterPuces("Anomalies et recommandations", lignesUtiles(anomalies));
+    }
+  }
+  if (!bloc.length) bloc.push(para("Aucun point particulier à signaler.", { color: "666666" }));
+  children.push(...bloc);
+  children.push(docxSpacer(40));
+
+  // 4. Conclusion
+  const concl = iv.conclusion || "Conforme";
+  const cc = DOCX_ETAT_COULEURS[cleEtatDocx(concl)] || { bord: "7A8794", fond: DOCX_LIGHT, texte: "555555" };
+  const phraseConcl = concl === "Non conforme"
+    ? "Au terme de l'intervention, l'installation est jugée non conforme : des actions correctives sont à prévoir (voir les points importants ci-dessus)."
+    : concl === "Conforme avec réserves"
+      ? "Au terme de l'intervention, l'installation est jugée conforme avec réserves : les points signalés ci-dessus sont à traiter ou à surveiller."
+      : "Au terme de l'intervention, l'installation est jugée conforme : aucune anomalie nécessitant une action n'a été relevée.";
+  const bordC = { style: DOCX.BorderStyle.SINGLE, size: 6, color: cc.bord };
+  children.push(new DOCX.Table({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: [TABLE_WIDTH], rows: [new DOCX.TableRow({ children: [new DOCX.TableCell({
+    width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, margins: { top: 90, bottom: 90, left: 160, right: 160 },
+    shading: { type: DOCX.ShadingType.CLEAR, fill: cc.fond }, borders: { top: bordC, bottom: bordC, left: bordC, right: bordC },
+    children: [
+      new DOCX.Paragraph({ spacing: { after: 40 }, children: [new DOCX.TextRun({ text: "CONCLUSION : " + concl.toUpperCase(), bold: true, size: 20, color: cc.texte })] }),
+      new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: phraseConcl, size: 18, color: DOCX_DARK })] }),
+    ],
+  })] })] }));
+  children.push(docxSpacer(50));
+
+  // 5. Signatures (client | technicien) — cadre vide conservé si non signé, pour signature sur papier
+  children.push(docxHeading("Validation", 150, 80));
+  const sigClient = iv.validation?.signatureClient ? docxImage(iv.validation.signatureClient, 190, 75) : null;
+  const sigHT = iv.validation?.signatureHT ? docxImage(iv.validation.signatureHT, 190, 75) : null;
+  const bordSig = { style: DOCX.BorderStyle.SINGLE, size: 4, color: "C0C6CE" };
+  const celluleSignature = (titre, nom, image) => new DOCX.TableCell({
+    width: { size: 4800, type: DOCX.WidthType.DXA }, margins: { top: 80, bottom: 80, left: 140, right: 140 },
+    borders: { top: bordSig, bottom: bordSig, left: bordSig, right: bordSig },
+    children: [
+      new DOCX.Paragraph({ spacing: { after: 40 }, children: [new DOCX.TextRun({ text: titre, bold: true, size: 17, color: "555555" }), new DOCX.TextRun({ text: nom ? " — " + nom : "", size: 18, color: DOCX_DARK })] }),
+      image ? new DOCX.Paragraph({ children: [image] }) : new DOCX.Paragraph({ spacing: { before: 520, after: 30 }, children: [new DOCX.TextRun({ text: "Signature :", size: 15, color: "999999" })] }),
+    ],
   });
-  if (iv.travauxRealises) children.push(new DOCX.Paragraph({ spacing: { before: 60, after: 80 }, children: [new DOCX.TextRun({ text: iv.travauxRealises, size: 18 })] }));
-  else children.push(docxSpacer());
+  children.push(new DOCX.Table({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: [4800, 4800], rows: [new DOCX.TableRow({ cantSplit: true, children: [
+    celluleSignature("Client", iv.validation?.nomClient, sigClient),
+    celluleSignature("Technicien HT Maintenance", iv.validation?.technicienHT || iv.technicien, sigHT),
+  ]})] }));
 
-  children.push(docxHeading("Mesures / Contrôles"));
-  const mesuresTable = docxFieldTable(mesuresRows);
-  if (mesuresTable) children.push(mesuresTable);
-  children.push(docxSpacer());
-
-  children.push(docxHeading("Anomalies et recommandations"));
-  children.push(new DOCX.Paragraph({ spacing: { after: 80 }, children: [new DOCX.TextRun({ text: iv.anomaliesRecommandations || "—", size: 18 })] }));
-
-  children.push(docxHeading("Conclusion"));
-  children.push(new DOCX.Paragraph({ spacing: { after: 80 }, children: [new DOCX.TextRun({ text: (iv.conclusion || "").toUpperCase(), bold: true, size: 20, color: docxEtatColor(iv.conclusion) })] }));
-
-  children.push(docxHeading("Validation"));
-  const validationRows = [["Nom client", iv.validation.nomClient], ["Technicien HT Maintenance", iv.validation.technicienHT]];
-  const validationTable = docxFieldTable(validationRows);
-  if (validationTable) children.push(validationTable);
-  children.push(docxSpacer(80));
-  const sigClient = iv.validation.signatureClient ? docxImage(iv.validation.signatureClient, 220, 90) : null;
-  const sigHT = iv.validation.signatureHT ? docxImage(iv.validation.signatureHT, 220, 90) : null;
-  if (sigClient) { children.push(new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: "Signature client :", size: 16, color: "666666" })] })); children.push(new DOCX.Paragraph({ spacing: { after: 80 }, children: [sigClient] })); }
-  if (sigHT) { children.push(new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: "Signature technicien :", size: 16, color: "666666" })] })); children.push(new DOCX.Paragraph({ spacing: { after: 80 }, children: [sigHT] })); }
-
-  const doc = new DOCX.Document({ features: { updateFields: true }, sections: [{ properties: { page: { margin: { top: 500, bottom: 500, left: 600, right: 600 } } }, footers: { default: docxFooterPagination() }, children } ] });
+  const doc = new DOCX.Document({ features: { updateFields: true }, sections: [{ properties: { page: { margin: { top: 420, bottom: 420, left: 600, right: 600 } } }, footers: { default: docxFooterPagination() }, children }] });
   return DOCX.Packer.toBlob(doc);
 }
 
@@ -12819,7 +12784,7 @@ export default function App({ currentUser, onLogout }) {
     });
   };
 
-  // Génère le rapport (Rapport ou Rapport d'intervention) et le télécharge en .docx
+  // Génère le document (rapport de maintenance ou clôture d'intervention) et le télécharge en .docx
   // réel (compatible Microsoft Word ET Pages sur Mac), entièrement modifiable.
   useEffect(() => {
     if (!printSite && !printIv && !printAnnexeSite) return;
@@ -12831,7 +12796,7 @@ export default function App({ currentUser, onLogout }) {
           if (!cancelled) downloadBlob(blob, `Rapport_${(printSite.nom || printSite.local || "site").replace(/[^a-z0-9]+/gi, "_")}.docx`);
         } else if (printIv) {
           const blob = await generateInterventionDocx(printIv);
-          if (!cancelled) downloadBlob(blob, `RI_${(printIv.numeroRI || "intervention").replace(/[^a-z0-9]+/gi, "_")}.docx`);
+          if (!cancelled) downloadBlob(blob, `Cloture_${(printIv.numeroRI || "intervention").replace(/[^a-z0-9]+/gi, "_")}.docx`);
         } else if (printAnnexeSite) {
           const blob = await generateAnnexePhotosDocx(printAnnexeSite);
           if (!cancelled) downloadBlob(blob, `Annexe_photos_${(printAnnexeSite.nom || printAnnexeSite.local || "site").replace(/[^a-z0-9]+/gi, "_")}.docx`);
@@ -12926,7 +12891,7 @@ export default function App({ currentUser, onLogout }) {
     setSelectedIvId(null);
   }
 
-  // Sauvegarde manuelle : exporte toutes les données (sites + rapports d'intervention) dans un
+  // Sauvegarde manuelle : exporte toutes les données (sites + clôtures d'intervention) dans un
   // fichier téléchargeable, et permet de les recharger ensuite (autre appareil, restauration…).
   const importInputRef = useRef(null);
   const [importError, setImportError] = useState(false);
@@ -12992,7 +12957,7 @@ export default function App({ currentUser, onLogout }) {
                   HT <span style={{ color: BRAND.amber }}>Maintenance</span>
                 </h1>
                 <div style={{ fontSize: 12, color: "#5B6B7D" }}>
-                  {selected ? "Fiche site" : selectedIv ? "Rapport d'intervention" : view === "sites" ? "Suivi des interventions de maintenance préventive HT" : view === "interventions" ? "Rapports d'intervention" : "Calendrier des interventions"}
+                  {selected ? "Fiche site" : selectedIv ? "Clôture d'intervention" : view === "sites" ? "Suivi des interventions de maintenance préventive HT" : view === "interventions" ? "Clôtures d'intervention" : "Calendrier des interventions"}
                 </div>
               </div>
             </div>
@@ -13075,7 +13040,7 @@ export default function App({ currentUser, onLogout }) {
                 border: view === "interventions" ? "1px solid #FFC10755" : "1px solid #D8DEE5", background: view === "interventions" ? "rgba(255,193,7,0.12)" : "transparent",
                 color: view === "interventions" ? BRAND.amber : "#5B6B7D", fontSize: 12.5, fontWeight: 600, cursor: "pointer",
               }}>
-                <ClipboardList size={13} /> Rapports d'intervention
+                <ClipboardList size={13} /> Clôtures d'intervention
               </button>
               <button onClick={() => setView("calendrier")} style={{
                 display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: 999,
