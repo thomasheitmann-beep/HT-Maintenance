@@ -11,7 +11,7 @@ import {
   Plus, Search, AlertTriangle, CheckCircle2, AlertOctagon,
   Trash2, ArrowLeft, Building2, Clock, ChevronRight, ChevronDown,
   MapPin, ShieldCheck, FileText, Settings2, Printer, ImagePlus,
-  Mail, PenLine, RotateCcw, ClipboardList, X, MinusCircle, Download, Upload, Copy, RefreshCw, Users,
+  Mail, PenLine, RotateCcw, ClipboardList, X, MinusCircle, Download, Upload, Copy, RefreshCw, Users, Phone,
 } from "lucide-react";
 
 /* =========================================================================
@@ -3325,6 +3325,7 @@ function TelephonesEditor({ telephones, onChange }) {
         <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}>
           <span style={{ color: "#8B96A3", minWidth: 46 }}>{t.type} :</span>
           <span style={{ flex: 1 }}>{t.numero}</span>
+          <BoutonAppel numero={t.numero} petit />
           <button onClick={() => retirer(i)} style={{ background: "none", border: "none", color: "#C0392B", cursor: "pointer", padding: 2 }} title="Retirer ce numéro"><Trash2 size={12} /></button>
         </div>
       ))}
@@ -3687,8 +3688,8 @@ function GererClientsEtContactsModal({ clientsRegistry, setClientsRegistry, cont
                   <TextInput value={c.nom || ""} onChange={(e) => modifierContact(c.id, { nom: e.target.value })} placeholder="Nom" style={{ fontSize: 12 }} />
                   <TextInput value={c.organisation || ""} onChange={(e) => modifierContact(c.id, { organisation: e.target.value })} placeholder="Organisation" style={{ fontSize: 12 }} />
                   <TextInput value={c.email || ""} onChange={(e) => modifierContact(c.id, { email: e.target.value })} placeholder="E-mail" type="email" style={{ fontSize: 12 }} />
-                  <TextInput value={c.fixe || ""} onChange={(e) => modifierContact(c.id, { fixe: e.target.value })} placeholder="Fixe" style={{ fontSize: 12 }} />
-                  <TextInput value={c.portable || ""} onChange={(e) => modifierContact(c.id, { portable: e.target.value })} placeholder="Portable" style={{ fontSize: 12 }} />
+                  <ChampTelephone value={c.fixe} onChange={(e) => modifierContact(c.id, { fixe: e.target.value })} placeholder="Fixe" style={{ fontSize: 12 }} />
+                  <ChampTelephone value={c.portable} onChange={(e) => modifierContact(c.id, { portable: e.target.value })} placeholder="Portable" style={{ fontSize: 12 }} />
                   <button onClick={() => supprimerContact(c.id)} style={{ background: "none", border: "none", color: "#C0392B", cursor: "pointer", padding: 4, justifySelf: "start" }} title="Retirer"><Trash2 size={14} /></button>
                 </div>
               ))
@@ -3868,8 +3869,8 @@ function ContactPersonneAutocomplete({ contact, onChangeContact, clientNom, site
         </div>
         <TextInput value={contact.nom || ""} onChange={(e) => { setField("nom", e.target.value); setChamp((contact.prenom || "") + " " + e.target.value); setOpen(true); }} placeholder="Nom" />
         <TextInput type="email" value={contact.email || ""} onChange={(e) => setField("email", e.target.value)} placeholder="E-mail" />
-        <TextInput value={contact.fixe || ""} onChange={(e) => setField("fixe", e.target.value)} placeholder="Téléphone fixe" />
-        <TextInput value={contact.portable || ""} onChange={(e) => setField("portable", e.target.value)} placeholder="Téléphone portable" />
+        <ChampTelephone value={contact.fixe} onChange={(e) => setField("fixe", e.target.value)} placeholder="Téléphone fixe" />
+        <ChampTelephone value={contact.portable} onChange={(e) => setField("portable", e.target.value)} placeholder="Téléphone portable" />
       </div>
     </div>
   );
@@ -4653,6 +4654,52 @@ function btnPrimary() {
 }
 function btnGhost(color) {
   return { display: "inline-flex", alignItems: "center", gap: 6, background: "#E2E6EB", border: "1px solid #D8DEE5", color: color || "#3E4A5C", borderRadius: 8, padding: "7px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer" };
+}
+
+// ---- Appel téléphonique et ouverture d'adresse ----
+// Numéro prêt pour un lien tel: : on garde les chiffres et un "+" initial, "00" international devient
+// "+", et le "(0)" de la notation « +33 (0)6… » est retiré (sinon il serait composé à tort).
+function numeroPourAppel(numero) {
+  let s = String(numero || "").replace(/\(0\)/g, "").replace(/[^\d+]/g, "");
+  if (s.startsWith("00")) s = "+" + s.slice(2);
+  s = s.replace(/(?!^)\+/g, "");
+  return s.replace(/\D/g, "").length >= 3 ? s : "";
+}
+// Lien Google Maps (s'ouvre dans le navigateur, ou dans l'appli Cartes/Maps si installée).
+function lienAdresse(adresse) {
+  const a = String(adresse || "").replace(/\s*\n+\s*/g, ", ").trim();
+  return a ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(a)}` : "";
+}
+// Bouton d'appel : n'apparaît que si le numéro est exploitable ; un appui lance l'appel sur téléphone.
+function BoutonAppel({ numero, petit = false, avecTexte = false }) {
+  const tel = numeroPourAppel(numero);
+  if (!tel) return null;
+  return (
+    <a href={`tel:${tel}`} title={`Appeler le ${numero}`} aria-label={`Appeler le ${numero}`}
+      style={{ ...btnGhost("#0F8A5F"), padding: petit ? "4px 8px" : avecTexte ? "7px 12px" : "7px 10px", textDecoration: "none", flexShrink: 0 }}>
+      <Phone size={petit ? 12 : 14} />{avecTexte ? " Appeler" : null}
+    </a>
+  );
+}
+// Bouton « adresse » : ouvre l'adresse dans la carte (nouvel onglet / appli de cartes).
+function BoutonAdresse({ adresse }) {
+  const url = lienAdresse(adresse);
+  if (!url) return null;
+  return (
+    <a href={url} target="_blank" rel="noopener noreferrer" title="Ouvrir l'adresse sur la carte"
+      style={{ ...btnGhost(BRAND.blue), textDecoration: "none", flexShrink: 0 }}>
+      <MapPin size={14} /> Voir sur la carte
+    </a>
+  );
+}
+// Champ téléphone : clavier numérique sur mobile + bouton d'appel à côté quand le numéro est valide.
+function ChampTelephone({ value, onChange, placeholder, style }) {
+  return (
+    <div style={{ display: "flex", gap: 6, alignItems: "center", minWidth: 0 }}>
+      <TextInput type="tel" inputMode="tel" value={value || ""} onChange={onChange} placeholder={placeholder} style={{ flex: 1, minWidth: 0, ...(style || {}) }} />
+      <BoutonAppel numero={value} petit />
+    </div>
+  );
 }
 
 function KpiCard({ icon: Icon, label, value, accent }) {
@@ -8930,7 +8977,12 @@ function SiteDetail({ site, allSites, update, onBack, onDelete, onPrint, onPrint
               />
             </Field>
             <Field label="Local"><TextInput value={site.local} onChange={(e) => update((d) => ({ ...d, local: e.target.value }))} placeholder="Local / emplacement" /></Field>
-            <Field label="Adresse du site"><TextInput value={site.adresse || ""} onChange={(e) => update((d) => ({ ...d, adresse: e.target.value }))} placeholder="Rue, code postal, ville" /></Field>
+            <Field label="Adresse du site">
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <TextInput value={site.adresse || ""} onChange={(e) => update((d) => ({ ...d, adresse: e.target.value }))} placeholder="Rue, code postal, ville" style={{ flex: "1 1 200px", minWidth: 0 }} />
+                <BoutonAdresse adresse={site.adresse} />
+              </div>
+            </Field>
           </div>
           <div style={{ marginTop: 4 }}>
             <Field label="Contact client">
@@ -12240,6 +12292,67 @@ let CURRENT_USER_FOR_STORAGE = null;
 // place (writeInFlight, comparaison avec le dernier état connu comme synchronisé) qui empêchent
 // normalement un sondage d'écraser une saisie non encore enregistrée.
 const REST_POLL_INTERVAL_MS = 20000;
+// Écriture différée SANS PERTE : regroupe les modifications rapprochées (saisie au clavier) en une
+// seule écriture 500 ms après la dernière, puis garantit que cette dernière modification est bien
+// enregistrée. Trois protections contre ce qui faisait « revenir en arrière » un texte long :
+// - `pendingRef` reste vrai de la modification jusqu'à la fin de son écriture, et `versionRef`
+//   compte les modifications locales : la relecture périodique du serveur les consulte pour ne
+//   JAMAIS remplacer l'état local par une version serveur périmée (voir les sondages ci-dessous) ;
+// - si une écriture précédente est encore en cours, on attend puis on réessaie (avant, la
+//   modification était abandonnée en silence et la fin du texte n'était jamais enregistrée) ;
+// - si l'écriture échoue (renvoie false), nouvelle tentative automatique toutes les 5 s, tant
+//   qu'aucune modification plus récente ne la remplace.
+// Écritures en attente, à vider immédiatement quand l'app passe en arrière-plan ou se ferme : sur
+// téléphone, les minuteries sont suspendues dès qu'on change d'application — la toute dernière
+// frappe (moins de 500 ms avant) pouvait donc ne jamais partir.
+const ECRITURES_EN_ATTENTE = new Map();
+function viderEcrituresEnAttente() { Array.from(ECRITURES_EN_ATTENTE.values()).forEach((f) => f()); }
+if (typeof document !== "undefined" && typeof window !== "undefined") {
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") viderEcrituresEnAttente(); });
+  window.addEventListener("pagehide", viderEcrituresEnAttente);
+}
+function planifierEcritureDifferee({ timerRef, inFlightRef, pendingRef, versionRef }, ecrire, delai = 500) {
+  versionRef.current += 1;
+  const version = versionRef.current;
+  pendingRef.current = true;
+  if (timerRef.current) clearTimeout(timerRef.current);
+  const lancer = async () => {
+    if (inFlightRef.current) { timerRef.current = setTimeout(lancer, 400); return; }
+    inFlightRef.current = true;
+    let ok = true;
+    try {
+      ok = (await ecrire()) !== false;
+    } catch (e) {
+      console.error("[Écriture différée] erreur inattendue :", e);
+      ok = false;
+    } finally {
+      inFlightRef.current = false;
+    }
+    if (!ok && versionRef.current === version) { timerRef.current = setTimeout(lancer, 5000); return; }
+    if (versionRef.current === version) { pendingRef.current = false; ECRITURES_EN_ATTENTE.delete(timerRef); }
+  };
+  ECRITURES_EN_ATTENTE.set(timerRef, () => {
+    if (inFlightRef.current || !pendingRef.current) return;
+    if (timerRef.current) clearTimeout(timerRef.current);
+    lancer();
+  });
+  timerRef.current = setTimeout(lancer, delai);
+}
+// Remplace, dans une structure quelconque, les photos « dataUrl » base64 par leur URL de stockage —
+// sans toucher au reste : sert à la migration des photos, qui ne doit surtout pas réécrire un état
+// complet capturé quelques secondes plus tôt (cela effaçait la saisie faite entre-temps).
+function remplacerDataUrls(node, correspondances) {
+  if (Array.isArray(node)) return node.map((n) => remplacerDataUrls(n, correspondances));
+  if (node && typeof node === "object") {
+    const out = {};
+    Object.keys(node).forEach((k) => {
+      const v = node[k];
+      out[k] = k === "dataUrl" && typeof v === "string" && correspondances.has(v) ? correspondances.get(v) : remplacerDataUrls(v, correspondances);
+    });
+    return out;
+  }
+  return node;
+}
 async function firestoreRestGet(docPath, idToken) {
   const res = await fetch(`${FIRESTORE_REST_BASE}/${docPath}`, { headers: { Authorization: `Bearer ${idToken}` } });
   if (res.status === 404) return null;
@@ -12332,6 +12445,13 @@ export default function App({ currentUser, onLogout }) {
   const writeInFlight = useRef(false); // verrou dur : empêche toute nouvelle écriture tant que la précédente n'est pas terminée
   const saveErrorRef = useRef(false); // miroir synchrone de saveError, lu par le poll (les refs sont à jour immédiatement, contrairement au state)
   const pendingRetrySites = useRef(null); // dernier JSON qui a échoué à l'écriture, à retenter automatiquement
+  // Suivi des modifications locales pas encore enregistrées (voir planifierEcritureDifferee) : lu par
+  // les relectures périodiques pour ne jamais écraser une saisie en cours par une version périmée.
+  const editVersionSites = useRef(0), savePendingSites = useRef(false);
+  const editVersionIv = useRef(0), ivSavePending = useRef(false);
+  const editVersionClients = useRef(0), clientsSavePending = useRef(false), lastWrittenClients = useRef(null);
+  const editVersionContacts = useRef(0), contactsSavePending = useRef(false);
+  const editVersionCarac = useRef(0), caracSavePending = useRef(false);
 
   const [view, setView] = useState("sites"); // "sites" | "interventions" | "calendrier"
   const [interventions, setInterventions] = useState([]);
@@ -12387,14 +12507,18 @@ export default function App({ currentUser, onLogout }) {
     let intervalId = null;
     async function poll() {
       if (!currentUser) return;
-      if (writeInFlight.current) return; // n'écrase pas l'état local pendant une écriture en cours
+      if (writeInFlight.current || savePendingSites.current) return; // n'écrase pas l'état local pendant une écriture en cours ni avant que la dernière saisie soit enregistrée
       if (saveErrorRef.current) return; // la dernière écriture a échoué : l'état local est "en avance"
       // sur le serveur (ex. une photo tout juste ajoutée) — ne jamais l'écraser tant que la
       // sauvegarde n'a pas réussi, sous peine de faire disparaître silencieusement les changements.
       try {
+        const versionDepart = editVersionSites.current;
         const idToken = await currentUser.getIdToken();
         const data = await firestoreRestGet("app-data/sites", idToken);
         if (cancelled) return;
+        // Une modification locale a pu survenir PENDANT la lecture réseau : la réponse du serveur est
+        // alors périmée, et l'appliquer ferait revenir en arrière le texte tout juste saisi.
+        if (editVersionSites.current !== versionDepart || savePendingSites.current || writeInFlight.current) { setLoaded(true); return; }
         if (!data || !data.fields) {
           if (lastSyncedSites.current === null) lastSyncedSites.current = "[]";
           setLoaded(true);
@@ -12451,25 +12575,29 @@ export default function App({ currentUser, onLogout }) {
       migrating = true;
       try {
         const idToken = await currentUser.getIdToken();
-        const next = JSON.parse(JSON.stringify(sitesRefForPoll.current));
-        const pending = [];
+        const aMigrer = new Set();
         (function walk(node) {
           if (Array.isArray(node)) { node.forEach(walk); return; }
           if (node && typeof node === "object") {
-            if (typeof node.dataUrl === "string" && node.dataUrl.startsWith("data:image")) pending.push(node);
+            if (typeof node.dataUrl === "string" && node.dataUrl.startsWith("data:image")) aMigrer.add(node.dataUrl);
             Object.values(node).forEach(walk);
           }
-        })(next);
-        if (pending.length === 0 || cancelled) return;
-        for (const node of pending.slice(0, 5)) {
+        })(sitesRefForPoll.current);
+        if (aMigrer.size === 0 || cancelled) return;
+        const correspondances = new Map();
+        for (const dataUrl of [...aMigrer].slice(0, 5)) {
           try {
-            const blob = dataUrlToBlob(node.dataUrl);
-            node.dataUrl = await firebaseStorageUpload(`photos/${uid()}.jpg`, blob, idToken);
+            const blob = dataUrlToBlob(dataUrl);
+            correspondances.set(dataUrl, await firebaseStorageUpload(`photos/${uid()}.jpg`, blob, idToken));
           } catch (e) {
             console.error("[Migration photo] échec pour une photo :", e);
           }
         }
-        if (!cancelled) setSites(next);
+        if (cancelled || correspondances.size === 0) return;
+        // Mise à jour FONCTIONNELLE : seules les photos migrées sont remplacées dans l'état courant.
+        // Avant, l'état entier capturé avant les envois (qui durent plusieurs secondes) était
+        // réécrit par-dessus, et effaçait tout texte saisi pendant ce temps.
+        setSites((cur) => remplacerDataUrls(cur, correspondances));
       } catch (e) {
         console.error("[Migration photo] erreur générale :", e);
       } finally {
@@ -12510,21 +12638,17 @@ export default function App({ currentUser, onLogout }) {
     if (!loaded || !currentUser) return;
     const serialized = JSON.stringify(sites);
     if (serialized === lastSyncedSites.current) return;
-    if (writeInFlight.current) return;
-    // Filet de sécurité supplémentaire (indépendant du correctif de chargement) : si des sites non
-    // vides ont déjà été chargés depuis le serveur dans cette session, on refuse d'écrire une liste
-    // vide automatiquement — un futur bug de chargement ne pourra plus jamais écraser les données
-    // réelles de cette façon. Une suppression volontaire de TOUS les sites nécessite de recharger
-    // la page pour confirmer (cas extrêmement rare, sans commune mesure avec le risque inverse).
+    // Filet de sécurité : si des sites non vides ont déjà été chargés depuis le serveur dans cette
+    // session, on refuse d'écrire une liste vide automatiquement — un futur bug de chargement ne
+    // pourra plus jamais écraser les données réelles de cette façon. Une suppression volontaire de
+    // TOUS les sites nécessite de recharger la page pour confirmer (cas extrêmement rare).
     if (sites.length === 0 && aDejaChargeDesSites.current) {
       console.error("[Sécurité] Écriture bloquée : la liste de sites est vide alors que des sites avaient déjà été chargés — probable bug plutôt qu'une suppression volontaire. Rechargez la page pour confirmer si c'est intentionnel.");
       return;
     }
     if (sites.length > 0) aDejaChargeDesSites.current = true;
     lastSyncedSites.current = serialized;
-    if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(async () => {
-      writeInFlight.current = true;
+    planifierEcritureDifferee({ timerRef: saveTimer, inFlightRef: writeInFlight, pendingRef: savePendingSites, versionRef: editVersionSites }, async () => {
       try {
         const idToken = await currentUser.getIdToken();
         await firestoreRestSet("app-data/sites", serialized, Date.now(), currentUser?.email, idToken);
@@ -12538,11 +12662,9 @@ export default function App({ currentUser, onLogout }) {
         saveErrorRef.current = true;
         pendingRetrySites.current = serialized;
         setSaveError(tropVolumineux ? "taille" : true);
-      } finally {
-        writeInFlight.current = false;
       }
-    }, 500);
-    return () => clearTimeout(saveTimer.current);
+      return true; // l'échec est géré ci-dessus (indicateur d'erreur + nouvelle tentative automatique dédiée)
+    });
   }, [sites, loaded, currentUser]);
 
   useEffect(() => {
@@ -12550,11 +12672,13 @@ export default function App({ currentUser, onLogout }) {
     let intervalId = null;
     async function poll() {
       if (!currentUser) return;
-      if (ivWriteInFlight.current) return;
+      if (ivWriteInFlight.current || ivSavePending.current) return;
       try {
+        const versionDepart = editVersionIv.current;
         const idToken = await currentUser.getIdToken();
         const data = await firestoreRestGet("app-data/interventions", idToken);
         if (cancelled) return;
+        if (editVersionIv.current !== versionDepart || ivSavePending.current || ivWriteInFlight.current) { setIvLoaded(true); return; }
         if (!data || !data.fields) { if (lastSyncedIv.current === null) lastSyncedIv.current = "[]"; setIvLoaded(true); return; }
         const rawValue = (data.fields.value && data.fields.value.stringValue) || "[]";
         if (rawValue === lastSyncedIv.current) { setIvLoaded(true); return; }
@@ -12578,26 +12702,22 @@ export default function App({ currentUser, onLogout }) {
     if (!ivLoaded || !currentUser) return;
     const serialized = JSON.stringify(interventions);
     if (serialized === lastSyncedIv.current) return;
-    if (ivWriteInFlight.current) return;
     if (interventions.length === 0 && aDejaChargeDesIv.current) {
       console.error("[Sécurité] Écriture bloquée : liste d'interventions vide alors que des interventions avaient déjà été chargées.");
       return;
     }
     if (interventions.length > 0) aDejaChargeDesIv.current = true;
     lastSyncedIv.current = serialized;
-    if (ivSaveTimer.current) clearTimeout(ivSaveTimer.current);
-    ivSaveTimer.current = setTimeout(async () => {
-      ivWriteInFlight.current = true;
+    planifierEcritureDifferee({ timerRef: ivSaveTimer, inFlightRef: ivWriteInFlight, pendingRef: ivSavePending, versionRef: editVersionIv }, async () => {
       try {
         const idToken = await currentUser.getIdToken();
         await firestoreRestSet("app-data/interventions", serialized, Date.now(), currentUser?.email, idToken);
+        return true;
       } catch (e) {
-        lastSyncedIv.current = null;
-      } finally {
-        ivWriteInFlight.current = false;
+        console.error("[Firestore REST] Échec d'écriture (interventions) :", e);
+        return false; // nouvelle tentative automatique
       }
-    }, 500);
-    return () => clearTimeout(ivSaveTimer.current);
+    });
   }, [interventions, ivLoaded, currentUser]);
 
   useEffect(() => {
@@ -12609,6 +12729,7 @@ export default function App({ currentUser, onLogout }) {
         if (cancelled) return;
         if (partages.length > 0) {
           lastSyncedClients.current = JSON.stringify(partages);
+          lastWrittenClients.current = lastSyncedClients.current;
           aDejaChargeDesClients.current = true;
           setClientsRegistry(partages);
           setClientsLoaded(true);
@@ -12625,10 +12746,12 @@ export default function App({ currentUser, onLogout }) {
           await syncContactsToShared(anciens, []);
           if (cancelled) return;
           lastSyncedClients.current = JSON.stringify(anciens);
+          lastWrittenClients.current = lastSyncedClients.current;
           aDejaChargeDesClients.current = true;
           setClientsRegistry(anciens);
         } else {
           lastSyncedClients.current = "[]";
+          lastWrittenClients.current = "[]";
         }
         setClientsLoaded(true);
       } catch (e) {
@@ -12642,26 +12765,25 @@ export default function App({ currentUser, onLogout }) {
     if (!clientsLoaded || !currentUser) return;
     const serialized = JSON.stringify(clientsRegistry);
     if (serialized === lastSyncedClients.current) return;
-    if (clientsWriteInFlight.current) return;
     if (clientsRegistry.length === 0 && aDejaChargeDesClients.current) {
       console.error("[Sécurité] Écriture bloquée : liste de clients vide alors que des clients avaient déjà été chargés.");
       return;
     }
-    const precedents = lastSyncedClients.current ? JSON.parse(lastSyncedClients.current) : [];
     if (clientsRegistry.length > 0) aDejaChargeDesClients.current = true;
     lastSyncedClients.current = serialized;
-    if (clientsSaveTimer.current) clearTimeout(clientsSaveTimer.current);
-    clientsSaveTimer.current = setTimeout(async () => {
-      clientsWriteInFlight.current = true;
+    planifierEcritureDifferee({ timerRef: clientsSaveTimer, inFlightRef: clientsWriteInFlight, pendingRef: clientsSavePending, versionRef: editVersionClients }, async () => {
+      // Le diff est fait contre la dernière version réellement écrite (et non la précédente version
+      // « prévue » : une modification regroupée avec la suivante n'aurait alors jamais été envoyée).
+      const precedents = lastWrittenClients.current ? JSON.parse(lastWrittenClients.current) : [];
       try {
         await syncContactsToShared(clientsRegistry, precedents);
+        lastWrittenClients.current = serialized;
+        return true;
       } catch (e) {
-        lastSyncedClients.current = null;
-      } finally {
-        clientsWriteInFlight.current = false;
+        console.error("[Firestore] Échec de synchronisation des clients :", e);
+        return false; // nouvelle tentative automatique
       }
-    }, 500);
-    return () => clearTimeout(clientsSaveTimer.current);
+    });
   }, [clientsRegistry, clientsLoaded, currentUser]);
 
   useEffect(() => {
@@ -12669,11 +12791,13 @@ export default function App({ currentUser, onLogout }) {
     let intervalId = null;
     async function poll() {
       if (!currentUser) return;
-      if (contactsWriteInFlight.current) return;
+      if (contactsWriteInFlight.current || contactsSavePending.current) return;
       try {
+        const versionDepart = editVersionContacts.current;
         const idToken = await currentUser.getIdToken();
         const data = await firestoreRestGet("app-data/contacts", idToken);
         if (cancelled) return;
+        if (editVersionContacts.current !== versionDepart || contactsSavePending.current || contactsWriteInFlight.current) { setContactsLoaded(true); return; }
         if (!data || !data.fields) { if (lastSyncedContacts.current === null) lastSyncedContacts.current = "[]"; setContactsLoaded(true); return; }
         const rawValue = (data.fields.value && data.fields.value.stringValue) || "[]";
         if (rawValue === lastSyncedContacts.current) { setContactsLoaded(true); return; }
@@ -12696,26 +12820,22 @@ export default function App({ currentUser, onLogout }) {
     if (!contactsLoaded || !currentUser) return;
     const serialized = JSON.stringify(contactsRegistry);
     if (serialized === lastSyncedContacts.current) return;
-    if (contactsWriteInFlight.current) return;
     if (contactsRegistry.length === 0 && aDejaChargeDesContacts.current) {
       console.error("[Sécurité] Écriture bloquée : liste de contacts vide alors que des contacts avaient déjà été chargés.");
       return;
     }
     if (contactsRegistry.length > 0) aDejaChargeDesContacts.current = true;
     lastSyncedContacts.current = serialized;
-    if (contactsSaveTimer.current) clearTimeout(contactsSaveTimer.current);
-    contactsSaveTimer.current = setTimeout(async () => {
-      contactsWriteInFlight.current = true;
+    planifierEcritureDifferee({ timerRef: contactsSaveTimer, inFlightRef: contactsWriteInFlight, pendingRef: contactsSavePending, versionRef: editVersionContacts }, async () => {
       try {
         const idToken = await currentUser.getIdToken();
         await firestoreRestSet("app-data/contacts", serialized, Date.now(), currentUser?.email, idToken);
+        return true;
       } catch (e) {
-        lastSyncedContacts.current = null;
-      } finally {
-        contactsWriteInFlight.current = false;
+        console.error("[Firestore REST] Échec d'écriture (contacts) :", e);
+        return false;
       }
-    }, 500);
-    return () => clearTimeout(contactsSaveTimer.current);
+    });
   }, [contactsRegistry, contactsLoaded, currentUser]);
 
   useEffect(() => {
@@ -12723,11 +12843,13 @@ export default function App({ currentUser, onLogout }) {
     let intervalId = null;
     async function poll() {
       if (!currentUser) return;
-      if (caracWriteInFlight.current) return;
+      if (caracWriteInFlight.current || caracSavePending.current) return;
       try {
+        const versionDepart = editVersionCarac.current;
         const idToken = await currentUser.getIdToken();
         const data = await firestoreRestGet("app-data/caracteristiques", idToken);
         if (cancelled) return;
+        if (editVersionCarac.current !== versionDepart || caracSavePending.current || caracWriteInFlight.current) { setCaracLoaded(true); return; }
         if (!data || !data.fields) { if (lastSyncedCarac.current === null) lastSyncedCarac.current = "{}"; setCaracLoaded(true); return; }
         const rawValue = (data.fields.value && data.fields.value.stringValue) || "{}";
         if (rawValue === lastSyncedCarac.current) { setCaracLoaded(true); return; }
@@ -12750,26 +12872,22 @@ export default function App({ currentUser, onLogout }) {
     if (!caracLoaded || !currentUser) return;
     const serialized = JSON.stringify(caracteristiquesLibrary);
     if (serialized === lastSyncedCarac.current) return;
-    if (caracWriteInFlight.current) return;
     if (Object.keys(caracteristiquesLibrary).length === 0 && aDejaChargeDesCarac.current) {
       console.error("[Sécurité] Écriture bloquée : bibliothèque de caractéristiques vide alors qu'elle avait déjà été chargée.");
       return;
     }
     if (Object.keys(caracteristiquesLibrary).length > 0) aDejaChargeDesCarac.current = true;
     lastSyncedCarac.current = serialized;
-    if (caracSaveTimer.current) clearTimeout(caracSaveTimer.current);
-    caracSaveTimer.current = setTimeout(async () => {
-      caracWriteInFlight.current = true;
+    planifierEcritureDifferee({ timerRef: caracSaveTimer, inFlightRef: caracWriteInFlight, pendingRef: caracSavePending, versionRef: editVersionCarac }, async () => {
       try {
         const idToken = await currentUser.getIdToken();
         await firestoreRestSet("app-data/caracteristiques", serialized, Date.now(), currentUser?.email, idToken);
+        return true;
       } catch (e) {
-        lastSyncedCarac.current = null;
-      } finally {
-        caracWriteInFlight.current = false;
+        console.error("[Firestore REST] Échec d'écriture (caractéristiques) :", e);
+        return false;
       }
-    }, 500);
-    return () => clearTimeout(caracSaveTimer.current);
+    });
   }, [caracteristiquesLibrary, caracLoaded, currentUser]);
 
   // Ajoute une valeur à la bibliothèque pour un type d'équipement + champ donné, si elle n'y est
