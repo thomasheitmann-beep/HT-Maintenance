@@ -4110,6 +4110,33 @@ function compressImageToBlob(file, maxDim = 1100, quality = 0.68) {
   });
 }
 
+function blobToDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => resolve(e.target.result);
+    reader.onerror = () => reject(new Error("lecture impossible"));
+    reader.readAsDataURL(blob);
+  });
+}
+// Prépare une photo à ajouter : compression, puis envoi vers le stockage si le réseau le permet.
+// Hors connexion (ou si l'envoi échoue), la photo n'est PAS perdue : elle est conservée telle quelle
+// dans les données (data: URL) et la migration en tâche de fond l'enverra automatiquement dès le
+// retour du réseau. Avant, l'échec de l'envoi faisait ignorer la photo en silence.
+async function preparerPhoto(file) {
+  const blob = await compressImageToBlob(file); // échoue seulement si le fichier est illisible
+  if (CURRENT_USER_FOR_STORAGE && !(typeof navigator !== "undefined" && navigator.onLine === false)) {
+    try {
+      const idToken = await CURRENT_USER_FOR_STORAGE.getIdToken();
+      return await firebaseStorageUpload(`photos/${uid()}.jpg`, blob, idToken);
+    } catch (e) {
+      console.warn("[Photo] envoi impossible pour l'instant, conservée localement :", e);
+    }
+  }
+  return blobToDataUrl(blob);
+}
+// Photo encore stockée localement (pas encore envoyée vers le stockage).
+const photoEnAttente = (dataUrl) => typeof dataUrl === "string" && dataUrl.startsWith("data:image");
+
 // Convertit la première page d'un PDF en image (Blob JPEG), pour qu'un document importé en PDF
 // (ex. courbe de décharge exportée depuis Numbers/Excel) s'affiche réellement dans le rapport Word
 // au lieu d'une simple mention textuelle "Pièce jointe (PDF)". Nécessite la dépendance pdfjs-dist
@@ -4179,9 +4206,7 @@ function FileGallery({ files, onChange, idPrefix }) {
             dataUrl = await readFileAsDataUrl(file);
           }
         } else if (CURRENT_USER_FOR_STORAGE) {
-          const blob = await compressImageToBlob(file);
-          const idToken = await CURRENT_USER_FOR_STORAGE.getIdToken();
-          dataUrl = await firebaseStorageUpload(`photos/${uid()}.jpg`, blob, idToken);
+          dataUrl = await preparerPhoto(file); // conservée localement si le réseau est indisponible
         } else {
           dataUrl = await compressImage(file); // repli si utilisateur non encore disponible
         }
@@ -4313,29 +4338,27 @@ function FileGallery({ files, onChange, idPrefix }) {
 function PhotoGallery({ photos, onChange, idPrefix }) {
   const inputRef = useRef(null);
   const [busy, setBusy] = useState(false);
+  const [erreur, setErreur] = useState("");
   const list = photos || [];
   const listRef = useRef(list);
   useEffect(() => { listRef.current = list; }, [list]);
 
   async function handleFiles(fileList) {
     setBusy(true);
+    setErreur("");
     const files = Array.from(fileList);
     const added = [];
+    let illisibles = 0;
     for (const file of files) {
       try {
-        let dataUrl;
-        if (CURRENT_USER_FOR_STORAGE) {
-          const blob = await compressImageToBlob(file);
-          const idToken = await CURRENT_USER_FOR_STORAGE.getIdToken();
-          dataUrl = await firebaseStorageUpload(`photos/${uid()}.jpg`, blob, idToken);
-        } else {
-          dataUrl = await compressImage(file);
-        }
+        const dataUrl = CURRENT_USER_FOR_STORAGE ? await preparerPhoto(file) : await compressImage(file);
         added.push({ id: uid(), dataUrl, caption: "" });
       } catch (e) {
-        // fichier ignoré si illisible
+        illisibles++;
+        console.error("[PhotoGallery] fichier ignoré :", file && file.name, e);
       }
     }
+    if (illisibles > 0) setErreur(`${illisibles} fichier(s) n'ont pas pu être ajoutés (image illisible ou format non pris en charge).`);
     onChange([...listRef.current, ...added]);
     setBusy(false);
   }
@@ -4375,6 +4398,7 @@ function PhotoGallery({ photos, onChange, idPrefix }) {
           }}
         />
       </div>
+      {erreur && <div style={{ fontSize: 11.5, color: "#B91C1C", marginBottom: 8 }}>{erreur}</div>}
       {list.length === 0 ? (
         <div style={{ textAlign: "center", padding: 22, color: "#8B96A3", fontSize: 12.5, border: "1px dashed #D8DEE5", borderRadius: 10 }}>
           Aucune photo — ou cliquez ici puis Ctrl+V pour coller une image copiée
@@ -4385,6 +4409,9 @@ function PhotoGallery({ photos, onChange, idPrefix }) {
             <div key={p.id}>
               <div style={{ position: "relative" }}>
                 <img src={p.dataUrl} alt="" style={{ width: "100%", height: 96, objectFit: "cover", borderRadius: 8, border: "1px solid #D8DEE5", display: "block" }} />
+                {photoEnAttente(p.dataUrl) && (
+                  <span title="Photo conservée sur cet appareil : elle sera envoyée automatiquement dès que le réseau sera disponible" style={{ position: "absolute", left: 4, bottom: 4, background: "rgba(146,64,14,0.92)", color: "#fff", borderRadius: 6, padding: "2px 6px", fontSize: 9.5, fontWeight: 700 }}>⏳ en attente d'envoi</span>
+                )}
                 <button
                   onClick={() => onChange(list.filter((x) => x.id !== p.id))}
                   style={{ position: "absolute", top: 4, right: 4, background: "rgba(10,15,25,0.85)", border: "none", borderRadius: 6, padding: 3, cursor: "pointer", color: "#EF4444", display: "flex" }}
@@ -12241,6 +12268,19 @@ async function generateInterventionDocx(iv) {
   return DOCX.Packer.toBlob(doc);
 }
 
+// Nom des fichiers Word : <PRÉFIXE>_<date>_<site>.docx — RI pour une clôture d'intervention, RMP pour
+// un rapport de maintenance. Date au format AAAA-MM-JJ (classement chronologique) ; accents retirés
+// pour rester lisible sur tous les systèmes. Sans site, on prend le client, puis « site ».
+function morceauNomFichier(texte) {
+  return String(texte || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/gi, "_").replace(/^_+|_+$/g, "");
+}
+function nomFichierDocument(prefixe, dateISO, ...candidatsSite) {
+  const date = /^\d{4}-\d{2}-\d{2}/.test(dateISO || "") ? dateISO.slice(0, 10) : todayISO();
+  const site = candidatsSite.map(morceauNomFichier).find(Boolean) || "site";
+  return `${prefixe}_${date}_${site}.docx`;
+}
+function nomFichierIntervention(iv) { return nomFichierDocument("RI", iv.date, iv.site, iv.client); }
+function nomFichierMaintenance(site) { return nomFichierDocument("RMP", site.rapport && site.rapport.date, site.nom, site.local, site.client); }
 function downloadBlob(blob, filename) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -12262,14 +12302,24 @@ const FIRESTORE_REST_BASE = "https://firestore.googleapis.com/v1/projects/ht-mai
 // d'être stockées en base64 dans le document Firestore, qui plafonne à 1 Mo par document et ne
 // peut absorber que quelques photos avant d'échouer silencieusement.
 const STORAGE_BUCKET = "ht-maintenance.firebasestorage.app";
-async function firebaseStorageUpload(path, blob, idToken) {
+async function firebaseStorageUpload(path, blob, idToken, delaiMs = 30000) {
   const encodedPath = encodeURIComponent(path);
   const url = `https://firebasestorage.googleapis.com/v0/b/${STORAGE_BUCKET}/o?uploadType=media&name=${encodedPath}`;
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": blob.type || "application/octet-stream", Authorization: `Bearer ${idToken}` },
-    body: blob,
-  });
+  // Délai maximal : sur un réseau très faible l'envoi pouvait rester bloqué indéfiniment ; on
+  // l'abandonne alors (la photo reste conservée localement et sera renvoyée plus tard).
+  const controleur = typeof AbortController !== "undefined" ? new AbortController() : null;
+  const minuteur = controleur ? setTimeout(() => controleur.abort(), delaiMs) : null;
+  let res;
+  try {
+    res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": blob.type || "application/octet-stream", Authorization: `Bearer ${idToken}` },
+      body: blob,
+      ...(controleur ? { signal: controleur.signal } : {}),
+    });
+  } finally {
+    if (minuteur) clearTimeout(minuteur);
+  }
   if (!res.ok) throw new Error(`Firebase Storage upload ${res.status}`);
   const data = await res.json();
   return `https://firebasestorage.googleapis.com/v0/b/${STORAGE_BUCKET}/o/${encodedPath}?alt=media&token=${data.downloadTokens}`;
@@ -12306,7 +12356,7 @@ const REST_POLL_INTERVAL_MS = 20000;
 // téléphone, les minuteries sont suspendues dès qu'on change d'application — la toute dernière
 // frappe (moins de 500 ms avant) pouvait donc ne jamais partir.
 const ECRITURES_EN_ATTENTE = new Map();
-function viderEcrituresEnAttente() { Array.from(ECRITURES_EN_ATTENTE.values()).forEach((f) => f()); }
+function viderEcrituresEnAttente() { Array.from(ECRITURES_EN_ATTENTE.values()).forEach((f) => f()); if (typeof viderCacheEnAttente === "function") viderCacheEnAttente(); }
 if (typeof document !== "undefined" && typeof window !== "undefined") {
   document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") viderEcrituresEnAttente(); });
   window.addEventListener("pagehide", viderEcrituresEnAttente);
@@ -12424,6 +12474,175 @@ async function syncContactsToShared(newClients, previousClients) {
   }
 }
 
+// ===== Mode hors connexion : copie locale des données (IndexedDB) et fusion au retour du réseau =====
+// Principe : chaque jeu de données (sites, interventions, contacts, caractéristiques, clients) est
+// recopié dans l'appareil à chaque modification, avec la dernière version CONFIRMÉE par le serveur
+// (« base »). Au démarrage, l'app s'ouvre immédiatement sur cette copie, même sans réseau ; au retour
+// du réseau, ce qui a été saisi hors connexion est fusionné avec les changements faits entre-temps
+// par un collègue (fusion à trois voies par identifiant : base / local / serveur) avant d'être envoyé.
+const CACHE_DB_NOM = "ht-maintenance-cache";
+const CACHE_STORE_NOM = "donnees";
+let cacheDbPromesse = null;
+function cacheOuvrir() {
+  if (cacheDbPromesse) return cacheDbPromesse;
+  cacheDbPromesse = new Promise((resolve, reject) => {
+    if (typeof indexedDB === "undefined") { reject(new Error("IndexedDB indisponible")); return; }
+    const requete = indexedDB.open(CACHE_DB_NOM, 1);
+    requete.onupgradeneeded = () => { requete.result.createObjectStore(CACHE_STORE_NOM); };
+    requete.onsuccess = () => resolve(requete.result);
+    requete.onerror = () => reject(requete.error || new Error("ouverture IndexedDB impossible"));
+  });
+  cacheDbPromesse.catch(() => { cacheDbPromesse = null; });
+  return cacheDbPromesse;
+}
+async function cacheLire(cle) {
+  const db = await cacheOuvrir();
+  return new Promise((resolve, reject) => {
+    const r = db.transaction(CACHE_STORE_NOM, "readonly").objectStore(CACHE_STORE_NOM).get(cle);
+    r.onsuccess = () => resolve(r.result || null);
+    r.onerror = () => reject(r.error);
+  });
+}
+async function cacheEcrire(cle, valeur) {
+  const db = await cacheOuvrir();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(CACHE_STORE_NOM, "readwrite");
+    tx.objectStore(CACHE_STORE_NOM).put(valeur, cle);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error);
+  });
+}
+// Effacement complet : à la déconnexion, pour qu'un autre utilisateur du même appareil ne voie jamais ces données.
+async function cacheEffacerTout() {
+  const db = await cacheOuvrir();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(CACHE_STORE_NOM, "readwrite");
+    tx.objectStore(CACHE_STORE_NOM).clear();
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+// Écriture de la copie locale regroupée (400 ms après la dernière modification) : `produire` est
+// appelée au dernier moment, donc une seule sérialisation par rafale de frappes.
+const CACHE_PROGRAMME = new Map();
+function programmerCache(cle, produire, delai = 400) {
+  const precedent = CACHE_PROGRAMME.get(cle);
+  if (precedent) clearTimeout(precedent.minuteur);
+  const lancer = () => {
+    CACHE_PROGRAMME.delete(cle);
+    try {
+      const valeur = produire();
+      if (valeur) cacheEcrire(cle, valeur).catch((e) => console.warn("[Cache local] écriture impossible :", e));
+    } catch (e) { console.warn("[Cache local] erreur :", e); }
+  };
+  CACHE_PROGRAMME.set(cle, { minuteur: setTimeout(lancer, delai), lancer });
+}
+function viderCacheEnAttente() {
+  Array.from(CACHE_PROGRAMME.values()).forEach(({ minuteur, lancer }) => { clearTimeout(minuteur); lancer(); });
+}
+// Reconstitue l'état de départ à partir d'une copie locale ; `sale` = des modifications locales n'ont
+// jamais été confirmées par le serveur. Renvoie null si la copie est absente, inutilisable ou d'un autre utilisateur.
+function etatDepuisCache(cache, uidUtilisateur, normaliser = (x) => x) {
+  if (!cache || typeof cache.json !== "string" || cache.uid !== uidUtilisateur) return null;
+  try {
+    const etat = normaliser(JSON.parse(cache.json));
+    const jsonEtat = JSON.stringify(etat);
+    const baseJson = typeof cache.base === "string" ? cache.base : null;
+    const baseNormalisee = baseJson === null ? null : JSON.stringify(normaliser(JSON.parse(baseJson)));
+    return { etat, jsonEtat, baseJson, sale: baseNormalisee === null || baseNormalisee !== jsonEtat };
+  } catch (e) {
+    return null;
+  }
+}
+// Fusion à trois voies d'une liste d'éléments identifiés (sites, interventions, contacts, clients) :
+// `base` = dernière version confirmée par le serveur, `local` = ce qui a été saisi ici, `distant` =
+// version actuelle du serveur (modifiée entre-temps par quelqu'un d'autre).
+//  - supprimé ici → supprimé ; créé ou modifié ici → version d'ici ;
+//  - sinon (inchangé ici) → version du serveur (modifiée, nouvelle, ou disparue si supprimée là-bas).
+function fusionnerParId(base, local, distant) {
+  const liste = (l) => (Array.isArray(l) ? l : []);
+  const indexer = (l) => new Map(liste(l).filter((x) => x && x.id !== undefined).map((x) => [x.id, x]));
+  const b = indexer(base), l = indexer(local), d = indexer(distant);
+  const signature = (x) => JSON.stringify(x);
+  const retenus = new Map();
+  new Set([...b.keys(), ...l.keys(), ...d.keys()]).forEach((id) => {
+    const eB = b.get(id), eL = l.get(id), eD = d.get(id);
+    if (eB !== undefined && eL === undefined) return;
+    if (eL !== undefined && (eB === undefined || signature(eL) !== signature(eB))) { retenus.set(id, eL); return; }
+    if (eD !== undefined) retenus.set(id, eD);
+  });
+  const resultat = [];
+  const deja = new Set();
+  [...liste(distant), ...liste(local)].forEach((x) => {
+    if (!x) return;
+    if (x.id === undefined) { if (liste(local).includes(x)) resultat.push(x); return; } // sans identifiant : conservé tel quel (venant d'ici)
+    if (retenus.has(x.id) && !deja.has(x.id)) { resultat.push(retenus.get(x.id)); deja.add(x.id); }
+  });
+  return resultat;
+}
+// Bibliothèque { type: { champ: [valeurs] } } : on ne fait que l'enrichir, donc la fusion est une union.
+function fusionnerCaracteristiques(base, local, distant) {
+  const resultat = JSON.parse(JSON.stringify(distant || {}));
+  Object.keys(local || {}).forEach((type) => Object.keys(local[type] || {}).forEach((champ) => {
+    resultat[type] = resultat[type] || {};
+    const valeurs = resultat[type][champ] || [];
+    (local[type][champ] || []).forEach((v) => {
+      if (!valeurs.some((x) => String(x).trim().toLowerCase() === String(v).trim().toLowerCase())) valeurs.push(v);
+    });
+    resultat[type][champ] = valeurs;
+  }));
+  return resultat;
+}
+// Écrit `serialized` sur le serveur. Si `aReconcilierRef` est levé (écritures reportées hors connexion,
+// ou en échec), le serveur est relu d'abord : si quelqu'un d'autre l'a modifié depuis la dernière
+// synchronisation, on fusionne avant d'écrire plutôt que d'écraser son travail.
+// `appliquerFusion(fusion, fusionJson)` met à jour l'état de l'app (sans perdre ce qui a été tapé pendant la lecture).
+async function ecrireEnFusionnant({ lireDistant, ecrireDistant, serialized, baseRef, aReconcilierRef, fusionner, appliquerFusion, valeurVide }) {
+  let aEcrire = serialized;
+  if (aReconcilierRef.current) {
+    const distantJson = (await lireDistant()) ?? valeurVide;
+    const baseJson = baseRef.current ?? valeurVide;
+    if (distantJson === serialized) {
+      baseRef.current = serialized;
+      aReconcilierRef.current = false;
+      return serialized; // le serveur a déjà exactement ce contenu : rien à envoyer
+    }
+    if (distantJson !== baseJson) {
+      const fusion = fusionner(JSON.parse(baseJson), JSON.parse(serialized), JSON.parse(distantJson));
+      aEcrire = JSON.stringify(fusion);
+      appliquerFusion(fusion, aEcrire, serialized);
+    }
+  }
+  await ecrireDistant(aEcrire);
+  baseRef.current = aEcrire;
+  aReconcilierRef.current = false;
+  return aEcrire;
+}
+// Lit le contenu JSON (texte) d'un document partagé ; null si le document n'existe pas encore.
+async function lireJsonDistant(docPath, idToken) {
+  const data = await firestoreRestGet(docPath, idToken);
+  return (data && data.fields && data.fields.value && data.fields.value.stringValue) || null;
+}
+// Mise à niveau des anciens enregistrements de sites (anciens types d'onduleur, champs manquants) :
+// factorisée pour servir à la lecture du serveur comme à la copie locale et à la fusion.
+const REGIMES_PAR_ANCIEN_TYPE_ONDULEUR = {
+  "Onduleur 3/3": { normal: "Triphasé", secours: "Triphasé", utilisation: "Triphasé", onduleur: "Triphasé" },
+  "Onduleur 3/1": { normal: "Triphasé", secours: "Monophasé", utilisation: "Monophasé", onduleur: "Monophasé" },
+  "Onduleur 1/1": { normal: "Monophasé", secours: "Monophasé", utilisation: "Monophasé", onduleur: "Monophasé" },
+};
+function normaliserSites(parsed) {
+  parsed.forEach((s) => (s.equipements || []).forEach((e) => {
+    if (REGIMES_PAR_ANCIEN_TYPE_ONDULEUR[e.type]) {
+      e.controles = e.controles || {};
+      e.controles.regimes_reseaux = REGIMES_PAR_ANCIEN_TYPE_ONDULEUR[e.type];
+      e.type = "Onduleur";
+    }
+  }));
+  parsed.forEach((s) => { s.equipements = (s.equipements || []).map(repairEquipementControles); });
+  return parsed;
+}
+
 export default function App({ currentUser, onLogout }) {
   useEffect(() => { CURRENT_USER_FOR_STORAGE = currentUser; }, [currentUser]);
   const [sites, setSites] = useState([]);
@@ -12437,6 +12656,15 @@ export default function App({ currentUser, onLogout }) {
   const [reprendreSiteOpen, setReprendreSiteOpen] = useState(false);
   const [siteAReprendrePicker, setSiteAReprendrePicker] = useState(null); // site choisi, en attente de sélection des équipements
   const [saveError, setSaveError] = useState(false);
+  // État de la connexion et nombre de photos conservées sur l'appareil en attendant le réseau.
+  const [enLigne, setEnLigne] = useState(typeof navigator === "undefined" ? true : navigator.onLine !== false);
+  const [nbPhotosEnAttente, setNbPhotosEnAttente] = useState(0);
+  useEffect(() => {
+    const maj = () => setEnLigne(navigator.onLine !== false);
+    window.addEventListener("online", maj);
+    window.addEventListener("offline", maj);
+    return () => { window.removeEventListener("online", maj); window.removeEventListener("offline", maj); };
+  }, []);
   const [printSite, setPrintSite] = useState(null);
   const [printAnnexeSite, setPrintAnnexeSite] = useState(null);
   const [exportConfirm, setExportConfirm] = useState(null);
@@ -12452,6 +12680,84 @@ export default function App({ currentUser, onLogout }) {
   const editVersionClients = useRef(0), clientsSavePending = useRef(false), lastWrittenClients = useRef(null);
   const editVersionContacts = useRef(0), contactsSavePending = useRef(false);
   const editVersionCarac = useRef(0), caracSavePending = useRef(false);
+  // Mode hors connexion — `base*` = dernière version CONFIRMÉE par le serveur ; `aReconcilier*` = des
+  // écritures ont été reportées (hors connexion, en échec, ou saisie faite avant un redémarrage) : le
+  // serveur est relu et fusionné avant d'écrire, pour ne jamais écraser le travail d'un collègue.
+  const baseSites = useRef(null), aReconcilierSites = useRef(false), derniereSerialSites = useRef("[]");
+  const baseIv = useRef(null), aReconcilierIv = useRef(false), derniereSerialIv = useRef("[]");
+  const baseContacts = useRef(null), aReconcilierContacts = useRef(false), derniereSerialContacts = useRef("[]");
+  const baseCarac = useRef(null), aReconcilierCarac = useRef(false), derniereSerialCarac = useRef("{}");
+  const derniereSerialClients = useRef("[]");
+  const uidCourant = () => (currentUser && currentUser.uid) || null;
+  const horsConnexion = () => typeof navigator !== "undefined" && navigator.onLine === false;
+  // Envois vers le serveur avec réconciliation (voir ecrireEnFusionnant).
+  const envoyerSites = async (serialized) => {
+    const idToken = await currentUser.getIdToken();
+    return ecrireEnFusionnant({
+      lireDistant: () => lireJsonDistant("app-data/sites", idToken),
+      ecrireDistant: (json) => firestoreRestSet("app-data/sites", json, Date.now(), currentUser?.email, idToken),
+      serialized, baseRef: baseSites, aReconcilierRef: aReconcilierSites, valeurVide: "[]",
+      fusionner: (b, l, d) => normaliserSites(fusionnerParId(b, l, d)),
+      appliquerFusion: (fusion, fusionJson, envoye) => {
+        lastSyncedSites.current = fusionJson;
+        setSites((cur) => normaliserSites(JSON.stringify(cur) === envoye ? fusion : fusionnerParId(JSON.parse(envoye), cur, fusion)));
+      },
+    });
+  };
+  const envoyerIv = async (serialized) => {
+    const idToken = await currentUser.getIdToken();
+    return ecrireEnFusionnant({
+      lireDistant: () => lireJsonDistant("app-data/interventions", idToken),
+      ecrireDistant: (json) => firestoreRestSet("app-data/interventions", json, Date.now(), currentUser?.email, idToken),
+      serialized, baseRef: baseIv, aReconcilierRef: aReconcilierIv, valeurVide: "[]",
+      fusionner: fusionnerParId,
+      appliquerFusion: (fusion, fusionJson, envoye) => {
+        lastSyncedIv.current = fusionJson;
+        setInterventions((cur) => (JSON.stringify(cur) === envoye ? fusion : fusionnerParId(JSON.parse(envoye), cur, fusion)));
+      },
+    });
+  };
+  const envoyerContacts = async (serialized) => {
+    const idToken = await currentUser.getIdToken();
+    return ecrireEnFusionnant({
+      lireDistant: () => lireJsonDistant("app-data/contacts", idToken),
+      ecrireDistant: (json) => firestoreRestSet("app-data/contacts", json, Date.now(), currentUser?.email, idToken),
+      serialized, baseRef: baseContacts, aReconcilierRef: aReconcilierContacts, valeurVide: "[]",
+      fusionner: fusionnerParId,
+      appliquerFusion: (fusion, fusionJson, envoye) => {
+        lastSyncedContacts.current = fusionJson;
+        setContactsRegistry((cur) => (JSON.stringify(cur) === envoye ? fusion : fusionnerParId(JSON.parse(envoye), cur, fusion)));
+      },
+    });
+  };
+  const envoyerCarac = async (serialized) => {
+    const idToken = await currentUser.getIdToken();
+    return ecrireEnFusionnant({
+      lireDistant: () => lireJsonDistant("app-data/caracteristiques", idToken),
+      ecrireDistant: (json) => firestoreRestSet("app-data/caracteristiques", json, Date.now(), currentUser?.email, idToken),
+      serialized, baseRef: baseCarac, aReconcilierRef: aReconcilierCarac, valeurVide: "{}",
+      fusionner: fusionnerCaracteristiques,
+      appliquerFusion: (fusion, fusionJson, envoye) => {
+        lastSyncedCarac.current = fusionJson;
+        setCaracteristiquesLibrary((cur) => (JSON.stringify(cur) === envoye ? fusion : fusionnerCaracteristiques(JSON.parse(envoye), cur, fusion)));
+      },
+    });
+  };
+  // Déconnexion : la copie locale est effacée (un autre utilisateur de l'appareil ne doit jamais la voir),
+  // mais jamais sans prévenir si des modifications n'ont pas encore été envoyées au serveur.
+  async function deconnexion() {
+    const nonEnvoye = () => [savePendingSites, ivSavePending, contactsSavePending, caracSavePending, clientsSavePending,
+      aReconcilierSites, aReconcilierIv, aReconcilierContacts, aReconcilierCarac].some((r) => r.current);
+    if (nonEnvoye() && !horsConnexion()) {
+      viderEcrituresEnAttente(); // tente d'envoyer tout de suite ce qui est en attente…
+      for (let i = 0; i < 15 && nonEnvoye(); i++) await new Promise((r) => setTimeout(r, 200)); // …et attend un court instant
+    }
+    if (nonEnvoye() && !window.confirm("Des modifications n'ont pas encore été envoyées au serveur (réseau indisponible ?). Si vous vous déconnectez maintenant, elles seront supprimées de cet appareil. Se déconnecter quand même ?")) return;
+    try { viderCacheEnAttente(); await cacheEffacerTout(); } catch (e) { console.warn("[Cache local] effacement impossible :", e); }
+    onLogout();
+  }
+  // Demande au navigateur de ne pas purger la copie locale quand l'appareil manque de place.
+  useEffect(() => { try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) { /* facultatif */ } }, []);
 
   const [view, setView] = useState("sites"); // "sites" | "interventions" | "calendrier"
   const [interventions, setInterventions] = useState([]);
@@ -12507,7 +12813,7 @@ export default function App({ currentUser, onLogout }) {
     let intervalId = null;
     async function poll() {
       if (!currentUser) return;
-      if (writeInFlight.current || savePendingSites.current) return; // n'écrase pas l'état local pendant une écriture en cours ni avant que la dernière saisie soit enregistrée
+      if (writeInFlight.current || savePendingSites.current || aReconcilierSites.current) return; // n'écrase pas l'état local pendant une écriture en cours, ni tant que des modifications locales n'ont pas été envoyées (elles seront fusionnées à l'envoi)
       if (saveErrorRef.current) return; // la dernière écriture a échoué : l'état local est "en avance"
       // sur le serveur (ex. une photo tout juste ajoutée) — ne jamais l'écraser tant que la
       // sauvegarde n'a pas réussi, sous peine de faire disparaître silencieusement les changements.
@@ -12521,11 +12827,12 @@ export default function App({ currentUser, onLogout }) {
         if (editVersionSites.current !== versionDepart || savePendingSites.current || writeInFlight.current) { setLoaded(true); return; }
         if (!data || !data.fields) {
           if (lastSyncedSites.current === null) lastSyncedSites.current = "[]";
+          if (baseSites.current === null) baseSites.current = "[]";
           setLoaded(true);
           return;
         }
         const rawValue = (data.fields.value && data.fields.value.stringValue) || "[]";
-        if (rawValue === lastSyncedSites.current) { setLoaded(true); return; }
+        if (rawValue === lastSyncedSites.current) { baseSites.current = rawValue; setLoaded(true); return; }
         const parsed = JSON.parse(rawValue);
         // Filet de sécurité supplémentaire : si l'état local diffère déjà de la dernière version
         // connue comme synchronisée, c'est qu'une saisie est en attente d'enregistrement (le délai
@@ -12536,30 +12843,42 @@ export default function App({ currentUser, onLogout }) {
         // ce filet de sécurité bloquait le tout premier chargement (l'état local vide "[]" au
         // démarrage ne correspondant jamais au repère initial null), empêchant les sites d'apparaître.
         if (lastSyncedSites.current !== null && localActuel !== lastSyncedSites.current) { setLoaded(true); return; }
-        const REGIMES_PAR_ANCIEN_TYPE = {
-          "Onduleur 3/3": { normal: "Triphasé", secours: "Triphasé", utilisation: "Triphasé", onduleur: "Triphasé" },
-          "Onduleur 3/1": { normal: "Triphasé", secours: "Monophasé", utilisation: "Monophasé", onduleur: "Monophasé" },
-          "Onduleur 1/1": { normal: "Monophasé", secours: "Monophasé", utilisation: "Monophasé", onduleur: "Monophasé" },
-        };
-        parsed.forEach((s) => (s.equipements || []).forEach((e) => {
-          if (REGIMES_PAR_ANCIEN_TYPE[e.type]) {
-            e.controles = e.controles || {};
-            e.controles.regimes_reseaux = REGIMES_PAR_ANCIEN_TYPE[e.type];
-            e.type = "Onduleur";
-          }
-        }));
-        parsed.forEach((s) => { s.equipements = (s.equipements || []).map(repairEquipementControles); });
+        normaliserSites(parsed);
         lastSyncedSites.current = rawValue;
+        baseSites.current = rawValue; // le serveur est la référence confirmée
         if (parsed.length > 0) aDejaChargeDesSites.current = true;
         setSites(parsed);
         setLoaded(true);
       } catch (e) {
         console.error("[Firestore REST] Erreur lecture (sites) :", e);
-        setLoaded(true);
+        // Tant qu'aucune lecture n'a réussi (ex. app ouverte hors connexion), on NE marque PAS les
+        // données comme chargées : sinon une liste vide serait enregistrée par-dessus les vraies
+        // données dès le retour du réseau.
+        if (lastSyncedSites.current !== null) setLoaded(true);
       }
     }
-    poll();
-    intervalId = setInterval(poll, REST_POLL_INTERVAL_MS);
+    // Ouverture immédiate sur la copie locale (même sans réseau). Si elle contient des modifications
+    // jamais confirmées par le serveur (« sale »), elles sont envoyées — après fusion — dès que possible.
+    async function restaurerCache() {
+      try {
+        const r = etatDepuisCache(await cacheLire("sites"), uidCourant(), normaliserSites);
+        if (!r || cancelled) return;
+        baseSites.current = r.baseJson;
+        aDejaChargeDesSites.current = r.etat.length > 0;
+        lastSyncedSites.current = r.sale ? (r.baseJson ?? "[]") : r.jsonEtat;
+        aReconcilierSites.current = r.sale;
+        setSites(r.etat);
+        setLoaded(true);
+      } catch (e) {
+        console.warn("[Cache local] lecture impossible (sites) :", e);
+      }
+    }
+    (async () => {
+      await restaurerCache();
+      if (cancelled) return;
+      poll();
+      intervalId = setInterval(poll, REST_POLL_INTERVAL_MS);
+    })();
     return () => { cancelled = true; clearInterval(intervalId); };
   }, [currentUser]);
 
@@ -12574,7 +12893,6 @@ export default function App({ currentUser, onLogout }) {
       if (migrating) return;
       migrating = true;
       try {
-        const idToken = await currentUser.getIdToken();
         const aMigrer = new Set();
         (function walk(node) {
           if (Array.isArray(node)) { node.forEach(walk); return; }
@@ -12583,7 +12901,10 @@ export default function App({ currentUser, onLogout }) {
             Object.values(node).forEach(walk);
           }
         })(sitesRefForPoll.current);
+        setNbPhotosEnAttente(aMigrer.size);
         if (aMigrer.size === 0 || cancelled) return;
+        if (typeof navigator !== "undefined" && navigator.onLine === false) return; // hors connexion : on réessaiera au retour du réseau
+        const idToken = await currentUser.getIdToken();
         const correspondances = new Map();
         for (const dataUrl of [...aMigrer].slice(0, 5)) {
           try {
@@ -12619,9 +12940,8 @@ export default function App({ currentUser, onLogout }) {
       writeInFlight.current = true;
       const toRetry = pendingRetrySites.current;
       try {
-        const idToken = await currentUser.getIdToken();
-        await firestoreRestSet("app-data/sites", toRetry, Date.now(), currentUser?.email, idToken);
-        lastSyncedSites.current = toRetry;
+        await envoyerSites(toRetry);
+        lastSyncedSites.current = baseSites.current ?? toRetry;
         setSaveError(false);
         saveErrorRef.current = false;
         pendingRetrySites.current = null;
@@ -12637,6 +12957,9 @@ export default function App({ currentUser, onLogout }) {
   useEffect(() => {
     if (!loaded || !currentUser) return;
     const serialized = JSON.stringify(sites);
+    // Copie locale (IndexedDB) : à chaque modification, avec la dernière version confirmée par le serveur.
+    derniereSerialSites.current = serialized;
+    programmerCache("sites", () => ({ uid: uidCourant(), json: derniereSerialSites.current, base: baseSites.current }));
     if (serialized === lastSyncedSites.current) return;
     // Filet de sécurité : si des sites non vides ont déjà été chargés depuis le serveur dans cette
     // session, on refuse d'écrire une liste vide automatiquement — un futur bug de chargement ne
@@ -12649,16 +12972,18 @@ export default function App({ currentUser, onLogout }) {
     if (sites.length > 0) aDejaChargeDesSites.current = true;
     lastSyncedSites.current = serialized;
     planifierEcritureDifferee({ timerRef: saveTimer, inFlightRef: writeInFlight, pendingRef: savePendingSites, versionRef: editVersionSites }, async () => {
+      if (horsConnexion()) { aReconcilierSites.current = true; return false; } // reporté : nouvelle tentative automatique
       try {
-        const idToken = await currentUser.getIdToken();
-        await firestoreRestSet("app-data/sites", serialized, Date.now(), currentUser?.email, idToken);
+        await envoyerSites(serialized);
         setSaveError(false);
         saveErrorRef.current = false;
         pendingRetrySites.current = null;
+        programmerCache("sites", () => ({ uid: uidCourant(), json: derniereSerialSites.current, base: baseSites.current }));
       } catch (e) {
         console.error("[Firestore REST] Échec d'écriture (sites) :", e);
         const tropVolumineux = /400|too large|exceeds|maximum size/i.test(String(e && e.message));
         lastSyncedSites.current = null;
+        aReconcilierSites.current = true;
         saveErrorRef.current = true;
         pendingRetrySites.current = serialized;
         setSaveError(tropVolumineux ? "taille" : true);
@@ -12672,35 +12997,58 @@ export default function App({ currentUser, onLogout }) {
     let intervalId = null;
     async function poll() {
       if (!currentUser) return;
-      if (ivWriteInFlight.current || ivSavePending.current) return;
+      if (ivWriteInFlight.current || ivSavePending.current || aReconcilierIv.current) return;
       try {
         const versionDepart = editVersionIv.current;
         const idToken = await currentUser.getIdToken();
         const data = await firestoreRestGet("app-data/interventions", idToken);
         if (cancelled) return;
         if (editVersionIv.current !== versionDepart || ivSavePending.current || ivWriteInFlight.current) { setIvLoaded(true); return; }
-        if (!data || !data.fields) { if (lastSyncedIv.current === null) lastSyncedIv.current = "[]"; setIvLoaded(true); return; }
+        if (!data || !data.fields) { if (lastSyncedIv.current === null) lastSyncedIv.current = "[]"; if (baseIv.current === null) baseIv.current = "[]"; setIvLoaded(true); return; }
         const rawValue = (data.fields.value && data.fields.value.stringValue) || "[]";
-        if (rawValue === lastSyncedIv.current) { setIvLoaded(true); return; }
+        if (rawValue === lastSyncedIv.current) { baseIv.current = rawValue; setIvLoaded(true); return; }
         // Même protection que pour les sites : ne pas écraser une saisie en attente d'enregistrement.
         if (lastSyncedIv.current !== null && JSON.stringify(ivRefForPoll.current) !== lastSyncedIv.current) { setIvLoaded(true); return; }
         lastSyncedIv.current = rawValue;
+        baseIv.current = rawValue; // le serveur est la référence confirmée
         const parsedIv = JSON.parse(rawValue);
         if (parsedIv.length > 0) aDejaChargeDesIv.current = true;
         setInterventions(parsedIv);
         setIvLoaded(true);
       } catch (e) {
-        setIvLoaded(true);
+        if (lastSyncedIv.current !== null) setIvLoaded(true); // voir la remarque sur les sites : jamais « chargé » sans lecture réussie
       }
     }
-    poll();
-    intervalId = setInterval(poll, REST_POLL_INTERVAL_MS);
+    // Ouverture immédiate sur la copie locale (même sans réseau) ; ses modifications jamais confirmées
+    // par le serveur seront envoyées — après fusion — dès que possible.
+    async function restaurerCache() {
+      try {
+        const r = etatDepuisCache(await cacheLire("interventions"), uidCourant());
+        if (!r || cancelled) return;
+        baseIv.current = r.baseJson;
+        aDejaChargeDesIv.current = r.etat.length > 0;
+        lastSyncedIv.current = r.sale ? (r.baseJson ?? "[]") : r.jsonEtat;
+        aReconcilierIv.current = r.sale;
+        setInterventions(r.etat);
+        setIvLoaded(true);
+      } catch (e) {
+        console.warn("[Cache local] lecture impossible (interventions) :", e);
+      }
+    }
+    (async () => {
+      await restaurerCache();
+      if (cancelled) return;
+      poll();
+      intervalId = setInterval(poll, REST_POLL_INTERVAL_MS);
+    })();
     return () => { cancelled = true; clearInterval(intervalId); };
   }, [currentUser]);
 
   useEffect(() => {
     if (!ivLoaded || !currentUser) return;
     const serialized = JSON.stringify(interventions);
+    derniereSerialIv.current = serialized;
+    programmerCache("interventions", () => ({ uid: uidCourant(), json: derniereSerialIv.current, base: baseIv.current }));
     if (serialized === lastSyncedIv.current) return;
     if (interventions.length === 0 && aDejaChargeDesIv.current) {
       console.error("[Sécurité] Écriture bloquée : liste d'interventions vide alors que des interventions avaient déjà été chargées.");
@@ -12709,12 +13057,14 @@ export default function App({ currentUser, onLogout }) {
     if (interventions.length > 0) aDejaChargeDesIv.current = true;
     lastSyncedIv.current = serialized;
     planifierEcritureDifferee({ timerRef: ivSaveTimer, inFlightRef: ivWriteInFlight, pendingRef: ivSavePending, versionRef: editVersionIv }, async () => {
+      if (horsConnexion()) { aReconcilierIv.current = true; return false; } // reporté : nouvelle tentative automatique
       try {
-        const idToken = await currentUser.getIdToken();
-        await firestoreRestSet("app-data/interventions", serialized, Date.now(), currentUser?.email, idToken);
+        await envoyerIv(serialized);
+        programmerCache("interventions", () => ({ uid: uidCourant(), json: derniereSerialIv.current, base: baseIv.current }));
         return true;
       } catch (e) {
         console.error("[Firestore REST] Échec d'écriture (interventions) :", e);
+        aReconcilierIv.current = true;
         return false; // nouvelle tentative automatique
       }
     });
@@ -12724,14 +13074,38 @@ export default function App({ currentUser, onLogout }) {
     let cancelled = false;
     (async () => {
       if (!currentUser) return;
+      // 1. Copie locale : ouverture immédiate (suggestions et saisies disponibles même sans réseau).
+      let local = null;
+      try {
+        local = etatDepuisCache(await cacheLire("clients"), uidCourant());
+        if (local && !cancelled) {
+          aDejaChargeDesClients.current = local.etat.length > 0;
+          lastWrittenClients.current = local.baseJson ?? "[]"; // dernière version réellement écrite sur le serveur
+          lastSyncedClients.current = local.sale ? (local.baseJson ?? "[]") : local.jsonEtat;
+          setClientsRegistry(local.etat);
+          setClientsLoaded(true);
+        }
+      } catch (e) {
+        console.warn("[Cache local] lecture impossible (clients) :", e);
+      }
+      // 2. Serveur : version à jour, fusionnée avec ce qui a été saisi ici (hors connexion ou pendant le chargement).
       try {
         const partages = await loadContactsShared();
         if (cancelled) return;
         if (partages.length > 0) {
-          lastSyncedClients.current = JSON.stringify(partages);
-          lastWrittenClients.current = lastSyncedClients.current;
+          const distantJson = JSON.stringify(partages);
+          const base = local && local.baseJson ? JSON.parse(local.baseJson) : [];
+          lastWrittenClients.current = distantJson;
+          lastSyncedClients.current = distantJson; // l'effet d'écriture n'enverra que l'écart avec le serveur
           aDejaChargeDesClients.current = true;
-          setClientsRegistry(partages);
+          setClientsRegistry((cur) => fusionnerParId(base, cur, partages));
+          setClientsLoaded(true);
+          return;
+        }
+        if (local) {
+          // Serveur vide : on garde la copie locale, qui sera renvoyée en entier si elle contient quelque chose.
+          lastWrittenClients.current = "[]";
+          lastSyncedClients.current = "[]";
           setClientsLoaded(true);
           return;
         }
@@ -12764,6 +13138,8 @@ export default function App({ currentUser, onLogout }) {
   useEffect(() => {
     if (!clientsLoaded || !currentUser) return;
     const serialized = JSON.stringify(clientsRegistry);
+    derniereSerialClients.current = serialized;
+    programmerCache("clients", () => ({ uid: uidCourant(), json: derniereSerialClients.current, base: lastWrittenClients.current }));
     if (serialized === lastSyncedClients.current) return;
     if (clientsRegistry.length === 0 && aDejaChargeDesClients.current) {
       console.error("[Sécurité] Écriture bloquée : liste de clients vide alors que des clients avaient déjà été chargés.");
@@ -12772,12 +13148,14 @@ export default function App({ currentUser, onLogout }) {
     if (clientsRegistry.length > 0) aDejaChargeDesClients.current = true;
     lastSyncedClients.current = serialized;
     planifierEcritureDifferee({ timerRef: clientsSaveTimer, inFlightRef: clientsWriteInFlight, pendingRef: clientsSavePending, versionRef: editVersionClients }, async () => {
+      if (typeof navigator !== "undefined" && navigator.onLine === false) return false; // hors connexion : reporté, nouvelle tentative automatique
       // Le diff est fait contre la dernière version réellement écrite (et non la précédente version
       // « prévue » : une modification regroupée avec la suivante n'aurait alors jamais été envoyée).
       const precedents = lastWrittenClients.current ? JSON.parse(lastWrittenClients.current) : [];
       try {
         await syncContactsToShared(clientsRegistry, precedents);
         lastWrittenClients.current = serialized;
+        programmerCache("clients", () => ({ uid: uidCourant(), json: derniereSerialClients.current, base: lastWrittenClients.current }));
         return true;
       } catch (e) {
         console.error("[Firestore] Échec de synchronisation des clients :", e);
@@ -12791,34 +13169,57 @@ export default function App({ currentUser, onLogout }) {
     let intervalId = null;
     async function poll() {
       if (!currentUser) return;
-      if (contactsWriteInFlight.current || contactsSavePending.current) return;
+      if (contactsWriteInFlight.current || contactsSavePending.current || aReconcilierContacts.current) return;
       try {
         const versionDepart = editVersionContacts.current;
         const idToken = await currentUser.getIdToken();
         const data = await firestoreRestGet("app-data/contacts", idToken);
         if (cancelled) return;
         if (editVersionContacts.current !== versionDepart || contactsSavePending.current || contactsWriteInFlight.current) { setContactsLoaded(true); return; }
-        if (!data || !data.fields) { if (lastSyncedContacts.current === null) lastSyncedContacts.current = "[]"; setContactsLoaded(true); return; }
+        if (!data || !data.fields) { if (lastSyncedContacts.current === null) lastSyncedContacts.current = "[]"; if (baseContacts.current === null) baseContacts.current = "[]"; setContactsLoaded(true); return; }
         const rawValue = (data.fields.value && data.fields.value.stringValue) || "[]";
-        if (rawValue === lastSyncedContacts.current) { setContactsLoaded(true); return; }
+        if (rawValue === lastSyncedContacts.current) { baseContacts.current = rawValue; setContactsLoaded(true); return; }
         if (lastSyncedContacts.current !== null && JSON.stringify(contactsRefForPoll.current) !== lastSyncedContacts.current) { setContactsLoaded(true); return; }
         lastSyncedContacts.current = rawValue;
+        baseContacts.current = rawValue;
         const parsedContacts = JSON.parse(rawValue);
         if (parsedContacts.length > 0) aDejaChargeDesContacts.current = true;
         setContactsRegistry(parsedContacts);
         setContactsLoaded(true);
       } catch (e) {
-        setContactsLoaded(true);
+        if (lastSyncedContacts.current !== null) setContactsLoaded(true);
       }
     }
-    poll();
-    intervalId = setInterval(poll, REST_POLL_INTERVAL_MS);
+    // Ouverture immédiate sur la copie locale (même sans réseau) ; ses modifications jamais confirmées
+    // par le serveur seront envoyées — après fusion — dès que possible.
+    async function restaurerCache() {
+      try {
+        const r = etatDepuisCache(await cacheLire("contacts"), uidCourant());
+        if (!r || cancelled) return;
+        baseContacts.current = r.baseJson;
+        aDejaChargeDesContacts.current = r.etat.length > 0;
+        lastSyncedContacts.current = r.sale ? (r.baseJson ?? "[]") : r.jsonEtat;
+        aReconcilierContacts.current = r.sale;
+        setContactsRegistry(r.etat);
+        setContactsLoaded(true);
+      } catch (e) {
+        console.warn("[Cache local] lecture impossible (contacts) :", e);
+      }
+    }
+    (async () => {
+      await restaurerCache();
+      if (cancelled) return;
+      poll();
+      intervalId = setInterval(poll, REST_POLL_INTERVAL_MS);
+    })();
     return () => { cancelled = true; clearInterval(intervalId); };
   }, [currentUser]);
 
   useEffect(() => {
     if (!contactsLoaded || !currentUser) return;
     const serialized = JSON.stringify(contactsRegistry);
+    derniereSerialContacts.current = serialized;
+    programmerCache("contacts", () => ({ uid: uidCourant(), json: derniereSerialContacts.current, base: baseContacts.current }));
     if (serialized === lastSyncedContacts.current) return;
     if (contactsRegistry.length === 0 && aDejaChargeDesContacts.current) {
       console.error("[Sécurité] Écriture bloquée : liste de contacts vide alors que des contacts avaient déjà été chargés.");
@@ -12827,12 +13228,14 @@ export default function App({ currentUser, onLogout }) {
     if (contactsRegistry.length > 0) aDejaChargeDesContacts.current = true;
     lastSyncedContacts.current = serialized;
     planifierEcritureDifferee({ timerRef: contactsSaveTimer, inFlightRef: contactsWriteInFlight, pendingRef: contactsSavePending, versionRef: editVersionContacts }, async () => {
+      if (horsConnexion()) { aReconcilierContacts.current = true; return false; } // reporté : nouvelle tentative automatique
       try {
-        const idToken = await currentUser.getIdToken();
-        await firestoreRestSet("app-data/contacts", serialized, Date.now(), currentUser?.email, idToken);
+        await envoyerContacts(serialized);
+        programmerCache("contacts", () => ({ uid: uidCourant(), json: derniereSerialContacts.current, base: baseContacts.current }));
         return true;
       } catch (e) {
         console.error("[Firestore REST] Échec d'écriture (contacts) :", e);
+        aReconcilierContacts.current = true;
         return false;
       }
     });
@@ -12843,34 +13246,57 @@ export default function App({ currentUser, onLogout }) {
     let intervalId = null;
     async function poll() {
       if (!currentUser) return;
-      if (caracWriteInFlight.current || caracSavePending.current) return;
+      if (caracWriteInFlight.current || caracSavePending.current || aReconcilierCarac.current) return;
       try {
         const versionDepart = editVersionCarac.current;
         const idToken = await currentUser.getIdToken();
         const data = await firestoreRestGet("app-data/caracteristiques", idToken);
         if (cancelled) return;
         if (editVersionCarac.current !== versionDepart || caracSavePending.current || caracWriteInFlight.current) { setCaracLoaded(true); return; }
-        if (!data || !data.fields) { if (lastSyncedCarac.current === null) lastSyncedCarac.current = "{}"; setCaracLoaded(true); return; }
+        if (!data || !data.fields) { if (lastSyncedCarac.current === null) lastSyncedCarac.current = "{}"; if (baseCarac.current === null) baseCarac.current = "{}"; setCaracLoaded(true); return; }
         const rawValue = (data.fields.value && data.fields.value.stringValue) || "{}";
-        if (rawValue === lastSyncedCarac.current) { setCaracLoaded(true); return; }
+        if (rawValue === lastSyncedCarac.current) { baseCarac.current = rawValue; setCaracLoaded(true); return; }
         if (lastSyncedCarac.current !== null && JSON.stringify(caracRefForPoll.current) !== lastSyncedCarac.current) { setCaracLoaded(true); return; }
         lastSyncedCarac.current = rawValue;
+        baseCarac.current = rawValue;
         const parsedCarac = JSON.parse(rawValue);
         if (Object.keys(parsedCarac).length > 0) aDejaChargeDesCarac.current = true;
         setCaracteristiquesLibrary(parsedCarac);
         setCaracLoaded(true);
       } catch (e) {
-        setCaracLoaded(true);
+        if (lastSyncedCarac.current !== null) setCaracLoaded(true);
       }
     }
-    poll();
-    intervalId = setInterval(poll, REST_POLL_INTERVAL_MS);
+    // Ouverture immédiate sur la copie locale (même sans réseau) ; ses modifications jamais confirmées
+    // par le serveur seront envoyées — après fusion — dès que possible.
+    async function restaurerCache() {
+      try {
+        const r = etatDepuisCache(await cacheLire("caracteristiques"), uidCourant());
+        if (!r || cancelled) return;
+        baseCarac.current = r.baseJson;
+        aDejaChargeDesCarac.current = Object.keys(r.etat).length > 0;
+        lastSyncedCarac.current = r.sale ? (r.baseJson ?? "{}") : r.jsonEtat;
+        aReconcilierCarac.current = r.sale;
+        setCaracteristiquesLibrary(r.etat);
+        setCaracLoaded(true);
+      } catch (e) {
+        console.warn("[Cache local] lecture impossible (caractéristiques) :", e);
+      }
+    }
+    (async () => {
+      await restaurerCache();
+      if (cancelled) return;
+      poll();
+      intervalId = setInterval(poll, REST_POLL_INTERVAL_MS);
+    })();
     return () => { cancelled = true; clearInterval(intervalId); };
   }, [currentUser]);
 
   useEffect(() => {
     if (!caracLoaded || !currentUser) return;
     const serialized = JSON.stringify(caracteristiquesLibrary);
+    derniereSerialCarac.current = serialized;
+    programmerCache("caracteristiques", () => ({ uid: uidCourant(), json: derniereSerialCarac.current, base: baseCarac.current }));
     if (serialized === lastSyncedCarac.current) return;
     if (Object.keys(caracteristiquesLibrary).length === 0 && aDejaChargeDesCarac.current) {
       console.error("[Sécurité] Écriture bloquée : bibliothèque de caractéristiques vide alors qu'elle avait déjà été chargée.");
@@ -12879,12 +13305,14 @@ export default function App({ currentUser, onLogout }) {
     if (Object.keys(caracteristiquesLibrary).length > 0) aDejaChargeDesCarac.current = true;
     lastSyncedCarac.current = serialized;
     planifierEcritureDifferee({ timerRef: caracSaveTimer, inFlightRef: caracWriteInFlight, pendingRef: caracSavePending, versionRef: editVersionCarac }, async () => {
+      if (horsConnexion()) { aReconcilierCarac.current = true; return false; } // reporté : nouvelle tentative automatique
       try {
-        const idToken = await currentUser.getIdToken();
-        await firestoreRestSet("app-data/caracteristiques", serialized, Date.now(), currentUser?.email, idToken);
+        await envoyerCarac(serialized);
+        programmerCache("caracteristiques", () => ({ uid: uidCourant(), json: derniereSerialCarac.current, base: baseCarac.current }));
         return true;
       } catch (e) {
         console.error("[Firestore REST] Échec d'écriture (caractéristiques) :", e);
+        aReconcilierCarac.current = true;
         return false;
       }
     });
@@ -12911,10 +13339,10 @@ export default function App({ currentUser, onLogout }) {
       try {
         if (printSite) {
           const blob = await generateSiteDocx(printSite, sites);
-          if (!cancelled) downloadBlob(blob, `Rapport_${(printSite.nom || printSite.local || "site").replace(/[^a-z0-9]+/gi, "_")}.docx`);
+          if (!cancelled) downloadBlob(blob, nomFichierMaintenance(printSite));
         } else if (printIv) {
           const blob = await generateInterventionDocx(printIv);
-          if (!cancelled) downloadBlob(blob, `Cloture_${(printIv.numeroRI || "intervention").replace(/[^a-z0-9]+/gi, "_")}.docx`);
+          if (!cancelled) downloadBlob(blob, nomFichierIntervention(printIv));
         } else if (printAnnexeSite) {
           const blob = await generateAnnexePhotosDocx(printAnnexeSite);
           if (!cancelled) downloadBlob(blob, `Annexe_photos_${(printAnnexeSite.nom || printAnnexeSite.local || "site").replace(/[^a-z0-9]+/gi, "_")}.docx`);
@@ -13083,7 +13511,7 @@ export default function App({ currentUser, onLogout }) {
               {currentUser && (
                 <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "#8B96A3", marginRight: 4 }}>
                   <span className="hide-mobile">{currentUser.email}</span>
-                  <button onClick={onLogout} style={{ ...btnGhost(), padding: "6px 10px" }} title="Se déconnecter">
+                  <button onClick={deconnexion} style={{ ...btnGhost(), padding: "6px 10px" }} title="Se déconnecter">
                     Déconnexion
                   </button>
                 </div>
@@ -13170,7 +13598,14 @@ export default function App({ currentUser, onLogout }) {
             </div>
           )}
 
-          {saveError && (
+          {(!enLigne || nbPhotosEnAttente > 0) && (
+            <div style={{ background: "rgba(245,158,11,0.12)", border: "1px solid rgba(245,158,11,0.45)", color: "#92400E", borderRadius: 10, padding: "10px 14px", fontSize: 12.5, marginBottom: 14, lineHeight: 1.5 }}>
+              {!enLigne
+                ? <>📡 <b>Hors connexion</b> — vous pouvez continuer à saisir et à ajouter des photos : tout sera envoyé automatiquement au retour du réseau. Tout est conservé sur cet appareil, même si vous fermez l'application.{nbPhotosEnAttente > 0 && <> ({nbPhotosEnAttente} photo{nbPhotosEnAttente > 1 ? "s" : ""} en attente d'envoi.)</>}</>
+                : <>⏳ Envoi de {nbPhotosEnAttente} photo{nbPhotosEnAttente > 1 ? "s" : ""} conservée{nbPhotosEnAttente > 1 ? "s" : ""} sur cet appareil en cours — l'enregistrement reprendra automatiquement.</>}
+            </div>
+          )}
+          {saveError && enLigne && !(saveError === "taille" && nbPhotosEnAttente > 0) && (
             <div style={{ background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)", color: "#B91C1C", borderRadius: 10, padding: "10px 14px", fontSize: 12.5, marginBottom: 14, fontWeight: saveError === "taille" ? 700 : 400 }}>
               {saveError === "taille"
                 ? "⚠ Sauvegarde impossible : trop de photos accumulées sur vos sites (limite de taille dépassée). Supprimez quelques anciennes photos pour débloquer l'enregistrement — nouvelle tentative automatique en cours."
@@ -13183,11 +13618,11 @@ export default function App({ currentUser, onLogout }) {
           ) : selectedIv ? (
             <InterventionEditor iv={selectedIv} update={(updater) => updateIntervention(selectedIv.id, updater)} onBack={() => setSelectedIvId(null)} onDelete={deleteIntervention} onPrint={requestPrintIv} />
           ) : view === "sites" ? (
-            !loaded ? <div style={{ textAlign: "center", padding: 60, color: "#8B96A3", fontSize: 13 }}>Chargement…</div> : <Overview sites={sites} interventions={interventions} onOpen={setSelectedId} onNew={addSite} onOpenIntervention={setSelectedIvId} />
+            !loaded ? <div style={{ textAlign: "center", padding: 60, color: "#8B96A3", fontSize: 13 }}>{enLigne ? "Chargement…" : "Hors connexion — les données se chargeront dès le retour du réseau."}</div> : <Overview sites={sites} interventions={interventions} onOpen={setSelectedId} onNew={addSite} onOpenIntervention={setSelectedIvId} />
           ) : view === "interventions" ? (
-            !ivLoaded ? <div style={{ textAlign: "center", padding: 60, color: "#8B96A3", fontSize: 13 }}>Chargement…</div> : <InterventionsOverview interventions={interventions} sites={sites} onOpen={setSelectedIvId} onCreate={createIntervention} onPlanifier={planifierIntervention} />
+            !ivLoaded ? <div style={{ textAlign: "center", padding: 60, color: "#8B96A3", fontSize: 13 }}>{enLigne ? "Chargement…" : "Hors connexion — les données se chargeront dès le retour du réseau."}</div> : <InterventionsOverview interventions={interventions} sites={sites} onOpen={setSelectedIvId} onCreate={createIntervention} onPlanifier={planifierIntervention} />
           ) : (
-            !loaded || !ivLoaded ? <div style={{ textAlign: "center", padding: 60, color: "#8B96A3", fontSize: 13 }}>Chargement…</div> : (
+            !loaded || !ivLoaded ? <div style={{ textAlign: "center", padding: 60, color: "#8B96A3", fontSize: 13 }}>{enLigne ? "Chargement…" : "Hors connexion — les données se chargeront dès le retour du réseau."}</div> : (
               <CalendarView sites={sites} interventions={interventions} onOpenSite={setSelectedId} onOpenIntervention={setSelectedIvId} onCreateForDate={addSiteForDate} onCreateInterventionForDate={addInterventionForDate} />
             )
           )}
