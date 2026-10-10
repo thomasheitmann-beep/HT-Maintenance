@@ -80,6 +80,37 @@ const REGIME_NEUTRE_DESCRIPTIONS = {
   "TN-C-S (BT)": "Combine TN-C en amont (conducteur PEN commun) et TN-S en aval (neutre N et protection PE séparés) — la séparation PEN→N+PE ne doit jamais être inversée.",
   "IT (BT)": "Neutre isolé de la terre (ou via forte impédance) ; masses reliées à la terre — un premier défaut n'entraîne pas de coupure, surveillé par un contrôleur permanent d'isolement (CPI).",
 };
+// Schéma de liaison à la terre BT reconnu dans le régime de neutre d'un local (liste ou saisie libre).
+function regimeBTDuLocal(regimeNeutre) {
+  const r = String(regimeNeutre || "");
+  if (/TN-?C-?S/i.test(r)) return "TN-C-S";
+  if (/TN-?C(?![-A-Za-z])/i.test(r)) return "TN-C";
+  if (/TN-?S/i.test(r)) return "TN-S";
+  if (/\bTT\b/.test(r)) return "TT";
+  if (/\bIT\b/.test(r)) return "IT";
+  return null;
+}
+// Points de contrôle du tableau BT selon le schéma de liaison à la terre ; la norme choisie sur le
+// local (comme la « Norme du poste » côté HTA) ne change que la référence rappelée à la suite.
+const POINTS_CONTROLE_REGIME_BT = {
+  "TT": "Schéma TT : protection contre les contacts indirects par dispositifs différentiels (DDR) — vérifier la résistance de la prise de terre des masses (RA × IΔn ≤ 50 V) et le déclenchement des DDR (bouton test, seuil et temps).",
+  "TN-S": "Schéma TN-S : coupure automatique par les protections contre les surintensités (ou DDR) — vérifier la continuité du conducteur PE et des liaisons équipotentielles, et l'impédance de boucle (Zs × Ia ≤ U0).",
+  "TN-C": "Schéma TN-C : conducteur PEN commun (section minimale usuelle 10 mm² cuivre / 16 mm² aluminium), sans DDR possible sur le PEN — vérifier la continuité du PEN et l'impédance de boucle.",
+  "TN-C-S": "Schéma TN-C-S : séparation PEN → N + PE réalisée une seule fois et jamais inversée, DDR possible seulement en aval de la séparation — vérifier la continuité du PE/PEN et l'impédance de boucle.",
+  "IT": "Schéma IT : contrôleur permanent d'isolement (CPI) obligatoire avec signalisation du premier défaut — vérifier le fonctionnement du CPI et organiser la recherche et l'élimination rapide du premier défaut (le second défaut provoque la coupure).",
+};
+const REFERENCE_NORME_REGIME_BT = {
+  "NF C 15-100": " (NF C 15-100, article 411 : protection contre les contacts indirects).",
+  "NF EN 61439": " Tableau selon NF EN 61439 : le schéma de liaison à la terre fait partie des données d'entrée du constructeur du tableau — vérifier que son circuit de protection (barres PE/PEN, continuité) est conforme à ce schéma.",
+  "NF EN 60439 (ancienne)": " Tableau selon NF EN 60439 (remplacée par la NF EN 61439) : vérifier que son circuit de protection (barres PE/PEN, continuité) correspond bien au schéma de liaison à la terre de l'installation.",
+  "NF C 14-100": " NF C 14-100 (branchement) : en distribution publique, le schéma de liaison à la terre est imposé par le distributeur (en général TT) — s'y référer.",
+  "DIN": " Norme DIN (VDE 0100-410) : même principe de protection contre les contacts indirects selon le schéma.",
+};
+function pointsControleRegimeBT(regimeNeutre, normeTableau) {
+  const regime = regimeBTDuLocal(regimeNeutre);
+  if (!regime) return null;
+  return POINTS_CONTROLE_REGIME_BT[regime] + (REFERENCE_NORME_REGIME_BT[normeTableau || "NF C 15-100"] || "");
+}
 // Codes IP courants sur l'appareillage HTA/BT (cellules, coffrets, armoires) — CEI 60529.
 const LISTE_INDICE_PROTECTION = ["IP2X", "IP3X", "IP4X", "IPXXB", "IPXXC", "IPXXD", "IP20", "IP21", "IP23", "IP30", "IP31", "IP40", "IP44", "IP54", "IP55", "IP65", "IP66", "IP67", "IP68"];
 const IP_DESCRIPTION_1ER_CHIFFRE = {
@@ -2435,6 +2466,7 @@ const SCHEMAS = {
       { key: "marque", label: "Marque", options: LISTE_MARQUE_APPAREILLAGE_BT },
       { key: "modele", label: "Modèle", options: LISTE_MODELE_BT_OPTIONS },
       { key: "nomTGBT", label: "Nom du TGBT" }, { key: "utilisation", label: "Utilisation" },
+      { key: "transformateurAssocie", label: "Transformateur amont (repère, pour le contrôle du pouvoir de coupure)" },
       { key: "typeDisjoncteur", label: "Type disjoncteur", options: LISTE_TYPE_DISJONCTEUR_BT_OPTIONS }, { key: "numeroSerieDisjoncteur", label: "Numéro de série" },
       { key: "marqueRelais", label: "Marque de l'unité de déclenchement", options: LISTE_MARQUE_RELAIS_BT }, { key: "referenceRelais", label: "Référence de l'unité de déclenchement", options: LISTE_REFERENCE_RELAIS_BT_OPTIONS }, { key: "numeroSerieRelais", label: "Numéro de série (relais)" },
       { key: "intensiteNominale", label: "Intensité nominale (A)", numeric: true }, { key: "debrochable", label: "Débrochable", options: OUI_NON_LIST },
@@ -2755,6 +2787,7 @@ const SCHEMAS = {
       { key: "repere", label: "Repère / Nom de l'équipement" },
       { key: "type", label: "Type", options: LISTE_TYPE_JDB }, { key: "marque", label: "Fabricant / Marque", options: LISTE_MARQUE_JDB },
       { key: "tensionAssignee", label: "Tension assignée (kV)", numeric: true }, { key: "courantAssigne", label: "Courant assigné (A)", numeric: true },
+      { key: "transformateurAssocie", label: "Transformateur amont (repère, pour le contrôle du courant assigné — jeu de barre BT)" },
       { key: "nombrePhases", label: "Nombre de phases", options: ["3", "4"] }, { key: "longueur", label: "Longueur (m)", numeric: true },
       { key: "anneeMiseEnService", label: "Année de mise en service", numeric: true },
     ],
@@ -3110,8 +3143,10 @@ function emptySite() {
     equipements: [],
   };
 }
+// Normes applicables au tableau basse tension d'un local (pendant, côté BT, de « Norme du poste » côté HTA).
+const LISTE_NORME_TABLEAU_BT = ["NF C 15-100", "NF EN 61439", "NF EN 60439 (ancienne)", "NF C 14-100", "DIN"];
 function emptyLocal(nom) {
-  return { id: uid(), nom: nom || "", typeDePoste: "", regimeNeutre: "", marque: "", anneeMiseEnService: "", normeFusible: "", typeDecouplage: "" };
+  return { id: uid(), nom: nom || "", typeDePoste: "", regimeNeutre: "", marque: "", anneeMiseEnService: "", normeFusible: "", normeTableauBT: "", typeDecouplage: "" };
 }
 
 function worstRank(labels) { return labels.reduce((worst, l) => Math.max(worst, RANK_OF[l] ?? 0), 0); }
@@ -5393,6 +5428,13 @@ function RapportTab({ site, update }) {
                 </Select>
                 <div style={{ fontSize: 10.5, color: "#8B96A3", marginTop: 4 }}>Caractéristique générale du poste — utilisée actuellement pour le contrôle du calibre fusible HTA.</div>
               </Field>
+              <Field label="Norme du tableau BT">
+                <Select value={l.normeTableauBT || ""} onChange={(e) => setLocalField(l.id, "normeTableauBT", e.target.value)}>
+                  <option value="">—</option>
+                  {LISTE_NORME_TABLEAU_BT.map((n) => <option key={n} value={n}>{n}</option>)}
+                </Select>
+                <div style={{ fontSize: 10.5, color: "#8B96A3", marginTop: 4 }}>Norme applicable au tableau basse tension de ce local — utilisée pour le contrôle du pouvoir de coupure des disjoncteurs BT rattachés à un transformateur (à défaut : NF C 15-100).</div>
+              </Field>
               <Field label="Type de protection de découplage (UTE/NF C15-400)">
                 <Select value={l.typeDecouplage || ""} onChange={(e) => setLocalField(l.id, "typeDecouplage", e.target.value)}>
                   <option value="">—</option>
@@ -5407,6 +5449,11 @@ function RapportTab({ site, update }) {
                 <Combo value={l.regimeNeutre} onChange={(v) => setLocalField(l.id, "regimeNeutre", v)} options={LISTE_REGIME_NEUTRE} listId={`${l.id}-regimeneutre`} placeholder="HTA et/ou BT" />
                 {l.regimeNeutre && REGIME_NEUTRE_DESCRIPTIONS[l.regimeNeutre] && (
                   <div style={{ fontSize: 11, color: "#8B96A3", marginTop: 6, lineHeight: 1.4 }}>{REGIME_NEUTRE_DESCRIPTIONS[l.regimeNeutre]}</div>
+                )}
+                {pointsControleRegimeBT(l.regimeNeutre, l.normeTableauBT) && (
+                  <div style={{ fontSize: 11, color: "#0A5DA8", background: "#EEF2F6", borderRadius: 6, padding: "6px 8px", marginTop: 6, lineHeight: 1.45 }}>
+                    <b>Tableau BT de ce local — points de contrôle :</b> {pointsControleRegimeBT(l.regimeNeutre, l.normeTableauBT)}
+                  </div>
                 )}
               </Field>
             </div>
@@ -6298,6 +6345,123 @@ function texteVerificationFusibleTransfo(v) {
   if (v.norme === "DIN") texte += " Fusibles DIN : calibres plus élevés disponibles (80/100/125 A) — étude et accord du constructeur de la cellule nécessaires pour valider ce calibre.";
   if (!v.ibTropEleve && !v.sousCalibre && v.inFusible !== null && v.norme === "NF C13-100") texte += " Cohérent avec la règle générale.";
   return texte;
+}
+// Contrôle du pouvoir de coupure d'un disjoncteur BT par rapport au courant de court-circuit présumé
+// aux bornes secondaires du transformateur qui l'alimente (association choisie sur le disjoncteur).
+// Règle de fond commune à toutes les normes : le pouvoir de coupure d'un dispositif de protection ne
+// doit pas être inférieur au courant de court-circuit présumé là où il est installé ; la norme du
+// tableau (choisie sur le LOCAL, comme celle du poste côté HTA) ne change que la référence citée.
+// Icc = In2 x 100 / Ucc, avec In2 = Sn / (√3 x U2) — source amont supposée infinie et câbles ignorés :
+// c'est donc un MAXIMUM (cas d'un disjoncteur d'arrivée) ; un départ en aval voit un courant plus
+// faible. Repère indicatif, jamais un verdict. Non calculé si les données manquent (aucune valeur
+// inventée) ni pour un transformateur à deux secondaires (répartition de la puissance inconnue).
+function calcVerificationPouvoirCoupure(eq, allEquipements, locaux) {
+  if (eq.type !== "Disjoncteur BT") return null;
+  const repere = (eq.identification?.transformateurAssocie || "").trim();
+  if (!repere) return null;
+  const transfo = (allEquipements || []).find((e) => e.type === "Transformateur" && (e.identification?.repere || "").trim() === repere);
+  if (!transfo) return null;
+  const local = (locaux || []).find((l) => l.id === eq.localId);
+  const norme = (local && local.normeTableauBT) || "NF C 15-100";
+  const icu = numOf(eq.controles?.reglage_disjoncteur?.pouvoir_coupure?.fields?.icu); // kA
+  const base = { transfoRepere: transfo.identification.repere || repere, norme, icu };
+  if (transfo.identification?.deuxEnroulementsSecondaires === "Oui") {
+    return { ...base, manque: "transformateur à deux enroulements secondaires : la répartition de la puissance entre les deux n'étant pas connue, le courant de court-circuit n'est pas calculé" };
+  }
+  const sn = numOf(transfo.identification.puissance); // kVA
+  const u2 = numOf(transfo.identification.tensionSecondaire); // V
+  const ucc = numOf(transfo.identification.ucc); // %
+  if (sn === null || !u2 || !ucc) {
+    return { ...base, manque: "renseigner la puissance, la tension secondaire et l'Ucc du transformateur pour calculer son courant de court-circuit" };
+  }
+  const i2n = (sn * 1000) / (Math.sqrt(3) * u2); // A
+  const iccKa = Math.round(((i2n * 100) / ucc / 1000) * 100) / 100;
+  return { ...base, sn, u2, ucc, i2n: Math.round(i2n), iccKa, insuffisant: icu !== null && icu < iccKa };
+}
+const REFERENCE_NORME_POUVOIR_COUPURE = {
+  "NF C 15-100": " NF C 15-100 (article 434) : le pouvoir de coupure d'un dispositif de protection ne doit pas être inférieur au courant de court-circuit présumé à l'endroit où il est installé.",
+  "NF EN 61439": " NF EN 61439 : l'ensemble doit supporter le courant de court-circuit présumé à son point d'installation (tenue assignée Icw / Icc) — le pouvoir de coupure de ses appareils de protection ne doit pas lui être inférieur.",
+  "NF EN 60439 (ancienne)": " NF EN 60439 (remplacée par la NF EN 61439) : l'ensemble doit supporter le courant de court-circuit présumé à son point d'installation — le pouvoir de coupure de ses appareils de protection ne doit pas lui être inférieur.",
+  "NF C 14-100": " NF C 14-100 (branchement) : le pouvoir de coupure du dispositif de protection de branchement est fixé par les prescriptions du distributeur — s'y référer.",
+  "DIN": " Norme DIN : même principe (pouvoir de coupure au moins égal au courant de court-circuit présumé) — se référer aux prescriptions applicables au tableau.",
+};
+function texteVerificationPouvoirCoupure(v) {
+  if (v.manque) return `Contrôle du pouvoir de coupure / transformateur « ${v.transfoRepere} » : ${v.manque}.`;
+  // Le « ⚠ » en tête de texte fait passer l'encart Word en orange (voir docxNormeNote).
+  let t = `${v.insuffisant ? "⚠ " : ""}Contrôle du pouvoir de coupure / transformateur « ${v.transfoRepere} » (${v.norme}) : courant de court-circuit triphasé maximal aux bornes secondaires Icc ≈ ${v.iccKa} kA (${v.sn} kVA, ${v.u2} V, Ucc ${v.ucc} %, courant nominal ${v.i2n} A, source amont supposée infinie).`;
+  t += v.icu !== null ? ` Pouvoir de coupure installé : Icu = ${v.icu} kA.` : " Pouvoir de coupure (Icu) non renseigné dans « Réglage du disjoncteur ».";
+  if (v.insuffisant) {
+    t += " Icu inférieur à l'Icc maximal : à confirmer selon la position du disjoncteur (un départ en aval voit un courant plus faible, atténué par les câbles) — sinon remplacer l'appareil ou justifier une filiation avec la protection amont (tableau du constructeur).";
+  } else if (v.icu !== null) {
+    t += " Cohérent : Icu ≥ Icc maximal.";
+  }
+  return t + (REFERENCE_NORME_POUVOIR_COUPURE[v.norme] || "");
+}
+// Équipements du site auquel appartient `eq` (rapport Word : on reçoit tous les sites, pas seulement le courant).
+function equipementsDuSiteDe(eq, allSites) {
+  const site = (allSites || []).find((s) => (s.equipements || []).some((e) => e.id === eq.id));
+  return (site && site.equipements) || [];
+}
+// Contrôle du courant assigné d'un jeu de barre / gaine à barre BT par rapport au courant nominal
+// secondaire du transformateur qui l'alimente : In2 = Sn / (√3 x U2). Un jeu de barre principal doit
+// pouvoir écouler le courant du transformateur ; mais il peut être légitimement plus petit s'il est
+// protégé par un disjoncteur de calibre inférieur ou n'alimente qu'une partie de la charge — d'où un
+// repère indicatif, jamais un verdict. Réservé aux jeux de barres BT (tension assignée ≤ 1 kV, ou
+// non renseignée) ; non calculé pour un transformateur à deux secondaires ni si des données manquent.
+function calcVerificationJeuDeBarre(eq, allEquipements, locaux) {
+  if (eq.type !== "Jeu de barre / Gaine à barre") return null;
+  const repere = (eq.identification?.transformateurAssocie || "").trim();
+  if (!repere) return null;
+  const transfo = (allEquipements || []).find((e) => e.type === "Transformateur" && (e.identification?.repere || "").trim() === repere);
+  if (!transfo) return null;
+  const local = (locaux || []).find((l) => l.id === eq.localId);
+  const norme = (local && local.normeTableauBT) || "NF C 15-100";
+  const iAssigne = numOf(eq.identification?.courantAssigne); // A
+  const tension = numOf(eq.identification?.tensionAssignee); // kV
+  const base = { transfoRepere: transfo.identification.repere || repere, norme, iAssigne };
+  if (tension !== null && tension > 1) return { ...base, manque: "jeu de barre HTA (tension assignée supérieure à 1 kV) : ce contrôle ne concerne que les jeux de barres basse tension alimentés par le secondaire d'un transformateur" };
+  if (transfo.identification?.deuxEnroulementsSecondaires === "Oui") return { ...base, manque: "transformateur à deux enroulements secondaires : la répartition de la puissance entre les deux n'étant pas connue, le courant nominal n'est pas calculé" };
+  const sn = numOf(transfo.identification.puissance); // kVA
+  const u2 = numOf(transfo.identification.tensionSecondaire); // V
+  if (sn === null || !u2) return { ...base, manque: "renseigner la puissance et la tension secondaire du transformateur pour calculer son courant nominal" };
+  const i2n = Math.round((sn * 1000) / (Math.sqrt(3) * u2)); // A
+  return { ...base, sn, u2, i2n, insuffisant: iAssigne !== null && iAssigne < i2n };
+}
+const REFERENCE_NORME_JEU_DE_BARRE = {
+  "NF C 15-100": " NF C 15-100 (article 433) : le courant admissible d'une canalisation doit être au moins égal au courant d'emploi et au calibre de la protection placée en amont.",
+  "NF EN 61439": " NF EN 61439 : le courant assigné du jeu de barres (vérifié par essai d'échauffement) doit être au moins égal au courant qui le traverse ; il dépend de la température ambiante et des conditions d'installation.",
+  "NF EN 60439 (ancienne)": " NF EN 60439 (remplacée par la NF EN 61439) : le courant assigné du jeu de barres doit être au moins égal au courant qui le traverse, dans ses conditions d'installation.",
+  "NF C 14-100": " NF C 14-100 (branchement) : les caractéristiques de la canalisation de branchement sont fixées par la puissance de raccordement — s'y référer.",
+  "DIN": " Norme DIN : même principe (courant assigné au moins égal au courant d'emploi) — se référer aux prescriptions applicables au tableau.",
+};
+function texteVerificationJeuDeBarre(v) {
+  if (v.manque) return `Contrôle du courant assigné / transformateur « ${v.transfoRepere} » : ${v.manque}.`;
+  // Le « ⚠ » en tête de texte fait passer l'encart Word en orange (voir docxNormeNote).
+  let t = `${v.insuffisant ? "⚠ " : ""}Contrôle du courant assigné / transformateur « ${v.transfoRepere} » (${v.norme}) : courant nominal secondaire In2 ≈ ${v.i2n} A (${v.sn} kVA sous ${v.u2} V).`;
+  t += v.iAssigne !== null ? ` Courant assigné du jeu de barre : ${v.iAssigne} A.` : " Courant assigné du jeu de barre non renseigné dans l'identification.";
+  if (v.insuffisant) t += " Courant assigné inférieur au courant nominal du transformateur : à vérifier — cohérent seulement si le jeu de barre est protégé par un disjoncteur de calibre inférieur ou n'alimente qu'une partie de la charge, sinon il est sous-dimensionné.";
+  else if (v.iAssigne !== null) t += " Cohérent : courant assigné ≥ courant nominal du transformateur.";
+  return t + (REFERENCE_NORME_JEU_DE_BARRE[v.norme] || "");
+}
+function VerificationJeuDeBarre({ eq, allEquipements, locaux }) {
+  const v = calcVerificationJeuDeBarre(eq, allEquipements, locaux);
+  if (!v) return null;
+  const alerte = !!v.insuffisant;
+  return (
+    <div style={{ background: alerte ? "#FDF3E3" : "#EEF2F6", borderRadius: 8, padding: "10px 12px", fontSize: 12, color: alerte ? "#8A5A0A" : "#0A5DA8", margin: "8px 0", lineHeight: 1.5 }}>
+      {texteVerificationJeuDeBarre(v)}
+    </div>
+  );
+}
+function VerificationPouvoirCoupure({ eq, allEquipements, locaux }) {
+  const v = calcVerificationPouvoirCoupure(eq, allEquipements, locaux);
+  if (!v) return null;
+  const alerte = !!v.insuffisant;
+  return (
+    <div style={{ background: alerte ? "#FDF3E3" : "#EEF2F6", borderRadius: 8, padding: "10px 12px", fontSize: 12, color: alerte ? "#8A5A0A" : "#0A5DA8", margin: "8px 0", lineHeight: 1.5 }}>
+      {texteVerificationPouvoirCoupure(v)}
+    </div>
+  );
 }
 function VerificationFusibleTransfo({ eq, allEquipements, locaux }) {
   const v = calcVerificationFusibleTransfo(eq, allEquipements, locaux);
@@ -7755,7 +7919,7 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
                       </Field>
                     );
                   }
-                  if (eq.type === "Interrupteur Fusible HTA" && f.key === "transformateurAssocie") {
+                  if ((eq.type === "Interrupteur Fusible HTA" || eq.type === "Disjoncteur BT" || eq.type === "Jeu de barre / Gaine à barre") && f.key === "transformateurAssocie") {
                     const transfosCell = allEquipements.filter((e) => e.type === "Transformateur" && e.id !== eq.id);
                     return (
                       <Field key={f.key} label={f.label}>
@@ -7924,6 +8088,24 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
                 </React.Fragment>
               );
             }
+            if (eq.type === "Jeu de barre / Gaine à barre" && sec.key === "electriques") {
+              return (
+                <React.Fragment key={sec.key}>
+                  <SectionBlock
+                    title={sec.title}
+                    items={sec.items}
+                    values={eq.controles[sec.key]}
+                    onChangeItem={(itemKey, v) => setControleItem(sec.key, itemKey, v)}
+                    idPrefix={`${eq.id}-${sec.key}`}
+                    custom={eq.controles[sec.key + "__custom"] || []}
+                    onAddCustom={() => addCustomAction(sec.key)}
+                    onChangeCustom={(id, patch) => changeCustomAction(sec.key, id, patch)}
+                    onRemoveCustom={(id) => removeCustomAction(sec.key, id)}
+                  />
+                  <VerificationJeuDeBarre eq={eq} allEquipements={allEquipements} locaux={locaux} />
+                </React.Fragment>
+              );
+            }
             if (eq.type === "Interrupteur Fusible HTA" && sec.key === "electriques") {
               return (
                 <React.Fragment key={sec.key}>
@@ -7997,16 +8179,18 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
             }
             if (eq.type === "Disjoncteur BT" && sec.key === "reglage_disjoncteur") {
               return (
-                <BRKReglagePanel
-                  key="brk-reglage"
-                  eq={eq}
-                  update={update}
-                  custom={eq.controles["tests_disjoncteur__custom"] || []}
-                  onAddCustom={() => addCustomAction("tests_disjoncteur")}
-                  onChangeCustom={(id, patch) => changeCustomAction("tests_disjoncteur", id, patch)}
-                  onRemoveCustom={(id) => removeCustomAction("tests_disjoncteur", id)}
-                  idPrefix={`${eq.id}-brk`}
-                />
+                <React.Fragment key="brk-reglage">
+                  <BRKReglagePanel
+                    eq={eq}
+                    update={update}
+                    custom={eq.controles["tests_disjoncteur__custom"] || []}
+                    onAddCustom={() => addCustomAction("tests_disjoncteur")}
+                    onChangeCustom={(id, patch) => changeCustomAction("tests_disjoncteur", id, patch)}
+                    onRemoveCustom={(id) => removeCustomAction("tests_disjoncteur", id)}
+                    idPrefix={`${eq.id}-brk`}
+                  />
+                  <VerificationPouvoirCoupure eq={eq} allEquipements={allEquipements} locaux={locaux} />
+                </React.Fragment>
               );
             }
             if (eq.type === "Disjoncteur BT" && sec.key === "tests_disjoncteur") {
@@ -11637,10 +11821,18 @@ function docxEquipementElements(eq, locaux, allSites) {
     const courbeSuit = sec.key === "courbe_declenchement" && eq.type === "Disjoncteur BT" && (eq.courbeFiles || []).length > 0;
     const t = docxControlTable(rows, courbeSuit);
     if (t) elements.push(t);
+    if (sec.key === "reglage_disjoncteur" && eq.type === "Disjoncteur BT") {
+      const v = calcVerificationPouvoirCoupure(eq, equipementsDuSiteDe(eq, allSites), locaux);
+      if (v && !v.manque) elements.push(docxNormeNote(texteVerificationPouvoirCoupure(v)));
+    }
     if (sec.key === "courbe_declenchement" && eq.type === "Disjoncteur BT") {
       // La courbe s'affiche ici, sous son titre, et non plus à la fin de l'équipement avec les photos.
       elements.push(...docxCourbeDeclenchement(eq));
       courbeIntegree = true;
+    }
+    if (sec.key === "electriques" && eq.type === "Jeu de barre / Gaine à barre") {
+      const v = calcVerificationJeuDeBarre(eq, equipementsDuSiteDe(eq, allSites), locaux);
+      if (v && !v.manque) elements.push(docxNormeNote(texteVerificationJeuDeBarre(v)));
     }
     if (sec.key === "electriques" && eq.type === "Interrupteur Fusible HTA") {
       const transfosSite = (allSites || []).flatMap((s) => s.equipements || []);
@@ -11995,16 +12187,16 @@ async function generateSiteDocx(site, allSites) {
   ];
   const locauxRows = (site.locaux || []).map((l) => ({
     nom: l.nom || "Local sans nom",
-    resume: [l.typeDePoste && `Type de poste : ${l.typeDePoste}`, l.regimeNeutre && `Régime de neutre : ${l.regimeNeutre}`, l.marque && `Marque : ${l.marque}`, l.anneeMiseEnService && `Mise en service : ${l.anneeMiseEnService}`].filter(Boolean).join(" · "),
-    definition: l.regimeNeutre ? REGIME_NEUTRE_DESCRIPTIONS[l.regimeNeutre] : null,
+    resume: [l.typeDePoste && `Type de poste : ${l.typeDePoste}`, l.regimeNeutre && `Régime de neutre : ${l.regimeNeutre}`, l.normeFusible && `Norme du poste : ${l.normeFusible}`, l.normeTableauBT && `Norme du tableau BT : ${l.normeTableauBT}`, l.marque && `Marque : ${l.marque}`, l.anneeMiseEnService && `Mise en service : ${l.anneeMiseEnService}`].filter(Boolean).join(" · "),
+    definitions: [l.regimeNeutre ? REGIME_NEUTRE_DESCRIPTIONS[l.regimeNeutre] : null, pointsControleRegimeBT(l.regimeNeutre, l.normeTableauBT)].filter(Boolean),
   }));
   const locauxTable = locauxRows.length && locauxRows.some((l) => l.resume) ? new DOCX.Table({
     width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: [3400, 6200],
     rows: locauxRows.filter((l) => l.resume).map((l) => new DOCX.TableRow({ children: [
       new DOCX.TableCell({ width: { size: 3400, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_LIGHT }, children: [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: l.nom, size: 18, color: "555555" })] })] }),
       new DOCX.TableCell({ width: { size: 6200, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, children: [
-        new DOCX.Paragraph({ spacing: { after: l.definition ? 40 : 0 }, children: [new DOCX.TextRun({ text: l.resume, size: 18, bold: true, color: DOCX_DARK })] }),
-        ...(l.definition ? [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: l.definition, size: 15, italics: true, color: "666666" })] })] : []),
+        new DOCX.Paragraph({ spacing: { after: l.definitions.length ? 40 : 0 }, children: [new DOCX.TextRun({ text: l.resume, size: 18, bold: true, color: DOCX_DARK })] }),
+        ...l.definitions.map((d, i) => new DOCX.Paragraph({ spacing: { after: i < l.definitions.length - 1 ? 40 : 0 }, children: [new DOCX.TextRun({ text: d, size: 15, italics: true, color: "666666" })] })),
       ]}),
     ]})),
   }) : null;
