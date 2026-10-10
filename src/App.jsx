@@ -2351,6 +2351,9 @@ function buildInterrupteurFusibleHTASchema({ avecRelais = false } = {}) {
       { key: "presenceRelais", label: "Présence d'un relais de protection", options: ["Non", "Oui"] },
       ...(avecRelais ? [{ key: "rapportTPProtection", label: "Rapport TP de protection", options: LISTE_RAPPORT_TP }] : []),
       { key: "transformateurAssocie", label: "Transformateur associé (repère, pour le contrôle du calibre fusible)" },
+      { key: "transfoManuel", label: "Transformateur saisi manuellement", options: ["Non", "Oui"] },
+      { key: "transfoSnManuel", label: "Puissance du transformateur (kVA) — saisie manuelle", numeric: true },
+      { key: "transfoU1Manuel", label: "Tension primaire du transformateur (kV) — saisie manuelle", numeric: true },
     ],
     sections: [
       { key: "mecaniques", title: "Contrôles mécaniques", items: [
@@ -2467,6 +2470,10 @@ const SCHEMAS = {
       { key: "modele", label: "Modèle", options: LISTE_MODELE_BT_OPTIONS },
       { key: "nomTGBT", label: "Nom du TGBT" }, { key: "utilisation", label: "Utilisation" },
       { key: "transformateurAssocie", label: "Transformateur amont (repère, pour le contrôle du pouvoir de coupure)" },
+      { key: "transfoManuel", label: "Transformateur saisi manuellement", options: ["Non", "Oui"] },
+      { key: "transfoSnManuel", label: "Puissance du transformateur (kVA) — saisie manuelle", numeric: true },
+      { key: "transfoU2Manuel", label: "Tension secondaire du transformateur (V) — saisie manuelle", numeric: true },
+      { key: "transfoUccManuel", label: "Ucc du transformateur (%) — saisie manuelle", numeric: true },
       { key: "typeDisjoncteur", label: "Type disjoncteur", options: LISTE_TYPE_DISJONCTEUR_BT_OPTIONS }, { key: "numeroSerieDisjoncteur", label: "Numéro de série" },
       { key: "marqueRelais", label: "Marque de l'unité de déclenchement", options: LISTE_MARQUE_RELAIS_BT }, { key: "referenceRelais", label: "Référence de l'unité de déclenchement", options: LISTE_REFERENCE_RELAIS_BT_OPTIONS }, { key: "numeroSerieRelais", label: "Numéro de série (relais)" },
       { key: "intensiteNominale", label: "Intensité nominale (A)", numeric: true }, { key: "debrochable", label: "Débrochable", options: OUI_NON_LIST },
@@ -2788,6 +2795,9 @@ const SCHEMAS = {
       { key: "type", label: "Type", options: LISTE_TYPE_JDB }, { key: "marque", label: "Fabricant / Marque", options: LISTE_MARQUE_JDB },
       { key: "tensionAssignee", label: "Tension assignée (kV)", numeric: true }, { key: "courantAssigne", label: "Courant assigné (A)", numeric: true },
       { key: "transformateurAssocie", label: "Transformateur amont (repère, pour le contrôle du courant assigné — jeu de barre BT)" },
+      { key: "transfoManuel", label: "Transformateur saisi manuellement", options: ["Non", "Oui"] },
+      { key: "transfoSnManuel", label: "Puissance du transformateur (kVA) — saisie manuelle", numeric: true },
+      { key: "transfoU2Manuel", label: "Tension secondaire du transformateur (V) — saisie manuelle", numeric: true },
       { key: "nombrePhases", label: "Nombre de phases", options: ["3", "4"] }, { key: "longueur", label: "Longueur (m)", numeric: true },
       { key: "anneeMiseEnService", label: "Année de mise en service", numeric: true },
     ],
@@ -6303,6 +6313,24 @@ function RapportTheoriqueCalcule({ eq }) {
     </Card>
   );
 }
+// Données du transformateur auquel un équipement est rattaché : transformateur suivi dans l'app (choisi par
+// son repère) ou, à défaut et si l'utilisateur l'a demandé, caractéristiques saisies à la main sur l'équipement.
+// Renvoie null si aucun des deux (aucun contrôle, aucune valeur inventée).
+function donneesTransformateurAssocie(eq, allEquipements) {
+  const repere = (eq.identification?.transformateurAssocie || "").trim();
+  if (repere) {
+    const t = (allEquipements || []).find((e) => e.type === "Transformateur" && (e.identification?.repere || "").trim() === repere);
+    if (!t) return null;
+    const id = t.identification || {};
+    return { source: "suivi", repere: id.repere || repere, sn: numOf(id.puissance), u1: numOf(id.tensionPrimaire), u2: numOf(id.tensionSecondaire), ucc: numOf(id.ucc), deuxSecondaires: id.deuxEnroulementsSecondaires === "Oui" };
+  }
+  if (transfoManuelActif(eq)) {
+    const id = eq.identification;
+    return { source: "manuel", repere: "", sn: numOf(id.transfoSnManuel), u1: numOf(id.transfoU1Manuel), u2: numOf(id.transfoU2Manuel), ucc: numOf(id.transfoUccManuel), deuxSecondaires: false };
+  }
+  return null;
+}
+const libelleTransfo = (v) => (v.manuel ? "transformateur (caractéristiques saisies manuellement)" : `transformateur « ${v.transfoRepere} »`);
 // Vérifie la cohérence entre le calibre du fusible HTA installé et la puissance du transformateur
 // associé — la règle applicable dépend de la norme choisie sur le LOCAL de l'équipement (chaque
 // équipement est rattaché à un local, et la norme de protection est une caractéristique du poste,
@@ -6320,12 +6348,10 @@ function RapportTheoriqueCalcule({ eq }) {
 // un transformateur est bien associé et que puissance + tension primaire sont renseignées.
 function calcVerificationFusibleTransfo(eq, allEquipements, locaux) {
   if (eq.type !== "Interrupteur Fusible HTA") return null;
-  const repereTransfo = (eq.identification?.transformateurAssocie || "").trim();
-  if (!repereTransfo) return null;
-  const transfo = (allEquipements || []).find((e) => e.type === "Transformateur" && (e.identification.repere || "").trim() === repereTransfo);
-  if (!transfo) return null;
-  const sn = numOf(transfo.identification.puissance); // kVA
-  const u = numOf(transfo.identification.tensionPrimaire); // kV
+  const tr = donneesTransformateurAssocie(eq, allEquipements);
+  if (!tr) return null;
+  const sn = tr.sn; // kVA
+  const u = tr.u1; // kV
   if (sn === null || !u) return null;
   const ib = Math.round((sn / (Math.sqrt(3) * u)) * 100) / 100; // A
   const inFusible = numOf(eq.controles?.electriques?.fusibles_installes?.fields?.in);
@@ -6334,10 +6360,10 @@ function calcVerificationFusibleTransfo(eq, allEquipements, locaux) {
   const ibTropEleve = norme === "NF C13-100" && ib > 45;
   const seuilMin = Math.round(1.4 * ib * 100) / 100;
   const sousCalibre = inFusible !== null && inFusible < seuilMin;
-  return { transfoRepere: transfo.identification.repere || repereTransfo, sn, u, ib, inFusible, seuilMin, ibTropEleve, sousCalibre, norme };
+  return { transfoRepere: tr.repere, manuel: tr.source === "manuel", sn, u, ib, inFusible, seuilMin, ibTropEleve, sousCalibre, norme };
 }
 function texteVerificationFusibleTransfo(v) {
-  let texte = `Contrôle calibre fusible / transformateur « ${v.transfoRepere} » (${v.norme}) : Ib (courant de base primaire, ${v.sn} kVA sous ${v.u} kV) = ${v.ib} A — repère de bon sens In ≥ 1,4 × Ib = ${v.seuilMin} A.`;
+  let texte = `Contrôle calibre fusible / ${libelleTransfo(v)} (${v.norme}) : Ib (courant de base primaire, ${v.sn} kVA sous ${v.u} kV) = ${v.ib} A — repère de bon sens In ≥ 1,4 × Ib = ${v.seuilMin} A.`;
   if (v.inFusible !== null) texte += ` Calibre installé : ${v.inFusible} A.`;
   if (v.ibTropEleve) texte += " ⚠ Ib > 45 A : au-delà de ce seuil, la protection par fusible n'est normalement plus valable en NF C13-100 pour un poste à un seul transformateur — un disjoncteur HTA est requis à la place.";
   if (v.sousCalibre) texte += " ⚠ Calibre installé inférieur au seuil recommandé (risque de fusion intempestive à l'enclenchement) — à vérifier.";
@@ -6357,20 +6383,18 @@ function texteVerificationFusibleTransfo(v) {
 // inventée) ni pour un transformateur à deux secondaires (répartition de la puissance inconnue).
 function calcVerificationPouvoirCoupure(eq, allEquipements, locaux) {
   if (eq.type !== "Disjoncteur BT") return null;
-  const repere = (eq.identification?.transformateurAssocie || "").trim();
-  if (!repere) return null;
-  const transfo = (allEquipements || []).find((e) => e.type === "Transformateur" && (e.identification?.repere || "").trim() === repere);
-  if (!transfo) return null;
+  const tr = donneesTransformateurAssocie(eq, allEquipements);
+  if (!tr) return null;
   const local = (locaux || []).find((l) => l.id === eq.localId);
   const norme = (local && local.normeTableauBT) || "NF C 15-100";
   const icu = numOf(eq.controles?.reglage_disjoncteur?.pouvoir_coupure?.fields?.icu); // kA
-  const base = { transfoRepere: transfo.identification.repere || repere, norme, icu };
-  if (transfo.identification?.deuxEnroulementsSecondaires === "Oui") {
+  const base = { transfoRepere: tr.repere, manuel: tr.source === "manuel", norme, icu };
+  if (tr.deuxSecondaires) {
     return { ...base, manque: "transformateur à deux enroulements secondaires : la répartition de la puissance entre les deux n'étant pas connue, le courant de court-circuit n'est pas calculé" };
   }
-  const sn = numOf(transfo.identification.puissance); // kVA
-  const u2 = numOf(transfo.identification.tensionSecondaire); // V
-  const ucc = numOf(transfo.identification.ucc); // %
+  const sn = tr.sn; // kVA
+  const u2 = tr.u2; // V
+  const ucc = tr.ucc; // %
   if (sn === null || !u2 || !ucc) {
     return { ...base, manque: "renseigner la puissance, la tension secondaire et l'Ucc du transformateur pour calculer son courant de court-circuit" };
   }
@@ -6386,9 +6410,9 @@ const REFERENCE_NORME_POUVOIR_COUPURE = {
   "DIN": " Norme DIN : même principe (pouvoir de coupure au moins égal au courant de court-circuit présumé) — se référer aux prescriptions applicables au tableau.",
 };
 function texteVerificationPouvoirCoupure(v) {
-  if (v.manque) return `Contrôle du pouvoir de coupure / transformateur « ${v.transfoRepere} » : ${v.manque}.`;
+  if (v.manque) return `Contrôle du pouvoir de coupure / ${libelleTransfo(v)} : ${v.manque}.`;
   // Le « ⚠ » en tête de texte fait passer l'encart Word en orange (voir docxNormeNote).
-  let t = `${v.insuffisant ? "⚠ " : ""}Contrôle du pouvoir de coupure / transformateur « ${v.transfoRepere} » (${v.norme}) : courant de court-circuit triphasé maximal aux bornes secondaires Icc ≈ ${v.iccKa} kA (${v.sn} kVA, ${v.u2} V, Ucc ${v.ucc} %, courant nominal ${v.i2n} A, source amont supposée infinie).`;
+  let t = `${v.insuffisant ? "⚠ " : ""}Contrôle du pouvoir de coupure / ${libelleTransfo(v)} (${v.norme}) : courant de court-circuit triphasé maximal aux bornes secondaires Icc ≈ ${v.iccKa} kA (${v.sn} kVA, ${v.u2} V, Ucc ${v.ucc} %, courant nominal ${v.i2n} A, source amont supposée infinie).`;
   t += v.icu !== null ? ` Pouvoir de coupure installé : Icu = ${v.icu} kA.` : " Pouvoir de coupure (Icu) non renseigné dans « Réglage du disjoncteur ».";
   if (v.insuffisant) {
     t += " Icu inférieur à l'Icc maximal : à confirmer selon la position du disjoncteur (un départ en aval voit un courant plus faible, atténué par les câbles) — sinon remplacer l'appareil ou justifier une filiation avec la protection amont (tableau du constructeur).";
@@ -6410,19 +6434,17 @@ function equipementsDuSiteDe(eq, allSites) {
 // non renseignée) ; non calculé pour un transformateur à deux secondaires ni si des données manquent.
 function calcVerificationJeuDeBarre(eq, allEquipements, locaux) {
   if (eq.type !== "Jeu de barre / Gaine à barre") return null;
-  const repere = (eq.identification?.transformateurAssocie || "").trim();
-  if (!repere) return null;
-  const transfo = (allEquipements || []).find((e) => e.type === "Transformateur" && (e.identification?.repere || "").trim() === repere);
-  if (!transfo) return null;
+  const tr = donneesTransformateurAssocie(eq, allEquipements);
+  if (!tr) return null;
   const local = (locaux || []).find((l) => l.id === eq.localId);
   const norme = (local && local.normeTableauBT) || "NF C 15-100";
   const iAssigne = numOf(eq.identification?.courantAssigne); // A
   const tension = numOf(eq.identification?.tensionAssignee); // kV
-  const base = { transfoRepere: transfo.identification.repere || repere, norme, iAssigne };
+  const base = { transfoRepere: tr.repere, manuel: tr.source === "manuel", norme, iAssigne };
   if (tension !== null && tension > 1) return { ...base, manque: "jeu de barre HTA (tension assignée supérieure à 1 kV) : ce contrôle ne concerne que les jeux de barres basse tension alimentés par le secondaire d'un transformateur" };
-  if (transfo.identification?.deuxEnroulementsSecondaires === "Oui") return { ...base, manque: "transformateur à deux enroulements secondaires : la répartition de la puissance entre les deux n'étant pas connue, le courant nominal n'est pas calculé" };
-  const sn = numOf(transfo.identification.puissance); // kVA
-  const u2 = numOf(transfo.identification.tensionSecondaire); // V
+  if (tr.deuxSecondaires) return { ...base, manque: "transformateur à deux enroulements secondaires : la répartition de la puissance entre les deux n'étant pas connue, le courant nominal n'est pas calculé" };
+  const sn = tr.sn; // kVA
+  const u2 = tr.u2; // V
   if (sn === null || !u2) return { ...base, manque: "renseigner la puissance et la tension secondaire du transformateur pour calculer son courant nominal" };
   const i2n = Math.round((sn * 1000) / (Math.sqrt(3) * u2)); // A
   return { ...base, sn, u2, i2n, insuffisant: iAssigne !== null && iAssigne < i2n };
@@ -6435,9 +6457,9 @@ const REFERENCE_NORME_JEU_DE_BARRE = {
   "DIN": " Norme DIN : même principe (courant assigné au moins égal au courant d'emploi) — se référer aux prescriptions applicables au tableau.",
 };
 function texteVerificationJeuDeBarre(v) {
-  if (v.manque) return `Contrôle du courant assigné / transformateur « ${v.transfoRepere} » : ${v.manque}.`;
+  if (v.manque) return `Contrôle du courant assigné / ${libelleTransfo(v)} : ${v.manque}.`;
   // Le « ⚠ » en tête de texte fait passer l'encart Word en orange (voir docxNormeNote).
-  let t = `${v.insuffisant ? "⚠ " : ""}Contrôle du courant assigné / transformateur « ${v.transfoRepere} » (${v.norme}) : courant nominal secondaire In2 ≈ ${v.i2n} A (${v.sn} kVA sous ${v.u2} V).`;
+  let t = `${v.insuffisant ? "⚠ " : ""}Contrôle du courant assigné / ${libelleTransfo(v)} (${v.norme}) : courant nominal secondaire In2 ≈ ${v.i2n} A (${v.sn} kVA sous ${v.u2} V).`;
   t += v.iAssigne !== null ? ` Courant assigné du jeu de barre : ${v.iAssigne} A.` : " Courant assigné du jeu de barre non renseigné dans l'identification.";
   if (v.insuffisant) t += " Courant assigné inférieur au courant nominal du transformateur : à vérifier — cohérent seulement si le jeu de barre est protégé par un disjoncteur de calibre inférieur ou n'alimente qu'une partie de la charge, sinon il est sous-dimensionné.";
   else if (v.iAssigne !== null) t += " Cohérent : courant assigné ≥ courant nominal du transformateur.";
@@ -7857,6 +7879,9 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
                   if (eq.type === "Bilan de puissance" && ["transfo_id", "transfo_reference", "puissanceKVA", "disj_id", "disj_reference", "calibreDisjoncteur", "tgbt_reference", "tgbt_calibre", "tgbt_departs"].includes(f.key)) {
                     return null;
                   }
+                  if (TYPES_TRANSFO_MANUEL.includes(eq.type) && CHAMPS_TRANSFO_MANUEL.includes(f.key) && champIdentificationMasque(eq, f.key)) {
+                    return null; // saisie manuelle du transformateur : visible seulement si demandée (boutons Oui / Non)
+                  }
                   if (f.multi) {
                     const valeurs = eq.identification[f.key] || [];
                     const toggle = (opt) => {
@@ -7927,7 +7952,19 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
                           <option value="">— Choisir un transformateur —</option>
                           {transfosCell.map((t) => <option key={t.id} value={t.identification.repere || t.id}>{t.identification.repere || "Transformateur sans repère"}</option>)}
                         </Select>
-                        {transfosCell.length === 0 && <div style={{ fontSize: 10.5, color: "#8B96A3", marginTop: 4 }}>Aucun transformateur créé sur ce site pour l'instant.</div>}
+                        {!(eq.identification[f.key] || "").trim() && (
+                          <div style={{ marginTop: 8, padding: "8px 10px", borderRadius: 8, background: "#F4F6F9", border: "1px solid #E2E6EB" }}>
+                            <div style={{ fontSize: 11.5, color: "#3E4A5C", lineHeight: 1.45, marginBottom: 6 }}>
+                              {transfosCell.length === 0 ? "Aucun transformateur créé sur ce site pour l'instant." : "Transformateur non suivi dans l'app ?"} <b>Renseigner ses caractéristiques manuellement ?</b>
+                            </div>
+                            <div style={{ display: "flex", gap: 6 }}>
+                              {["Oui", "Non"].map((o) => {
+                                const actif = (eq.identification.transfoManuel || "") === o;
+                                return <button key={o} type="button" onClick={() => setIdentification("transfoManuel", o)} style={{ ...btnGhost(actif ? "#FFFFFF" : "#3E4A5C"), background: actif ? BRAND.blue : "#E2E6EB", padding: "4px 14px" }}>{o}</button>;
+                              })}
+                            </div>
+                          </div>
+                        )}
                       </Field>
                     );
                   }
@@ -8818,7 +8855,7 @@ function PrintEquipement({ eq, allEquipements = [] }) {
         <span style={{ width: 26, height: 4, background: BRAND.amber, borderRadius: 2 }} />
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "2px 20px", marginBottom: 12 }}>
-        {schema.identification.filter((f) => !IDENTIFICATION_CHAMPS_TECHNIQUES.includes(f.key)).map((f) => <PrintFieldRow key={f.key} label={f.label} value={formatIdentificationValue(identificationAffichee[f.key])} />)}
+        {schema.identification.filter((f) => !champIdentificationMasque(eq, f.key)).map((f) => <PrintFieldRow key={f.key} label={f.label} value={formatIdentificationValue(identificationAffichee[f.key])} />)}
       </div>
       {schema.sections.map((sec) => (
         <PrintSection key={sec.key} title={sec.title}>
@@ -8975,7 +9012,7 @@ function PrintSynthese({ site }) {
         <tbody>
           {items.map((eq, i) => {
             const schema = getSchema(eq);
-            const idLabel = schema.identification.filter((f) => f.key !== "repere" && !IDENTIFICATION_CHAMPS_TECHNIQUES.includes(f.key)).map((f) => formatIdentificationValue(eq.identification[f.key])).filter(Boolean).join(" · ");
+            const idLabel = schema.identification.filter((f) => f.key !== "repere" && !champIdentificationMasque(eq, f.key)).map((f) => formatIdentificationValue(eq.identification[f.key])).filter(Boolean).join(" · ");
             const repere = eq.identification.repere;
             return (
               <tr key={i} style={{ borderBottom: "1px solid #e5e5e5" }}>
@@ -11332,6 +11369,21 @@ function identificationBilanPuissanceAffichee(eq, allSites) {
   };
 }
 const IDENTIFICATION_CHAMPS_TECHNIQUES = ["transfo_id", "disj_id"];
+// Équipements dont les contrôles s'appuient sur un transformateur : suivi dans l'app (choisi par son
+// repère) ou, à défaut, caractéristiques saisies à la main sur l'équipement lui-même.
+const TYPES_TRANSFO_MANUEL = ["Interrupteur Fusible HTA", "Disjoncteur BT", "Jeu de barre / Gaine à barre"];
+const CHAMPS_TRANSFO_MANUEL = ["transfoManuel", "transfoSnManuel", "transfoU1Manuel", "transfoU2Manuel", "transfoUccManuel"];
+// La saisie manuelle n'est active que si l'utilisateur l'a demandée ET qu'aucun transformateur suivi n'est choisi.
+function transfoManuelActif(eq) {
+  return TYPES_TRANSFO_MANUEL.includes(eq.type) && eq.identification?.transfoManuel === "Oui" && !(eq.identification?.transformateurAssocie || "").trim();
+}
+// Champ d'identification à ne pas afficher : liste technique, ou saisie manuelle du transformateur non activée
+// (le drapeau « saisi manuellement » lui-même n'est jamais affiché : il se règle avec les boutons Oui / Non).
+function champIdentificationMasque(eq, key) {
+  if (IDENTIFICATION_CHAMPS_TECHNIQUES.includes(key)) return true;
+  if (TYPES_TRANSFO_MANUEL.includes(eq.type) && CHAMPS_TRANSFO_MANUEL.includes(key)) return key === "transfoManuel" || !transfoManuelActif(eq);
+  return false;
+}
 // Courbe de déclenchement (Disjoncteur BT) : image(s) en grand format (≈ moitié de page), suivie(s)
 // d'une phrase indiquant si les essais du disjoncteur sont conformes ou non. Renvoie une liste vide
 // s'il n'y a aucune pièce jointe.
@@ -11376,7 +11428,7 @@ function docxEquipementElements(eq, locaux, allSites) {
   else elements.push(docxSpacer(40));
   if (schema.identification.length) {
     const identificationAffichee = identificationBilanPuissanceAffichee(eq, allSites);
-    const t = docxFieldTable(schema.identification.filter((f) => !IDENTIFICATION_CHAMPS_TECHNIQUES.includes(f.key)).map((f) => [f.label, formatIdentificationValue(identificationAffichee[f.key])]));
+    const t = docxFieldTable(schema.identification.filter((f) => !champIdentificationMasque(eq, f.key)).map((f) => [f.label, formatIdentificationValue(identificationAffichee[f.key])]));
     if (t) { elements.push(t); elements.push(docxSpacer()); }
   }
   if (eq.type === "Transformateur" && eq.identification?.typeRefroidissement && DESCRIPTION_REFROIDISSEMENT_TRANSFO[eq.identification.typeRefroidissement]) {
