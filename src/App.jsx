@@ -10271,6 +10271,22 @@ function docxEtatColor(label) {
   if (rank === -1) return "7A8794";
   return DOCX_GREEN;
 }
+// Bloc d'une seule ligne de tableau, sans bordure ni marge : ce qu'il contient (titre + image, par
+// exemple) ne peut JAMAIS être séparé par un saut de page, quel que soit le logiciel — une ligne de
+// tableau ne se coupe pas entre deux pages. Le réglage « garder avec le suivant » seul ne suffit pas :
+// Word et LibreOffice le respectent, mais Pages l'ignore.
+function docxBlocInsecable(enfants) {
+  const aucune = { style: DOCX.BorderStyle.NONE, size: 0, color: "FFFFFF" };
+  const bordures = { top: aucune, bottom: aucune, left: aucune, right: aucune };
+  return new DOCX.Table({
+    width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: [TABLE_WIDTH],
+    borders: { ...bordures, insideHorizontal: aucune, insideVertical: aucune },
+    rows: [new DOCX.TableRow({ cantSplit: true, children: [new DOCX.TableCell({
+      width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, margins: { top: 0, bottom: 0, left: 0, right: 0 }, borders: bordures,
+      children: enfants,
+    })] })],
+  });
+}
 function docxHeading(text, avant = 380, apres = 180) {
   return new DOCX.Paragraph({
     spacing: { before: avant, after: apres },
@@ -10503,7 +10519,7 @@ function docxBuildMesuresTable(rows, headers) {
     width: { size: width, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_LIGHT },
     children: [new DOCX.Paragraph({ keepNext: true, alignment: DOCX.AlignmentType.CENTER, children: [new DOCX.TextRun({ text, size: 17, bold: true, color: "555555" })] })],
   });
-  const header = new DOCX.TableRow({ cantSplit: true, children: [headCell("Grandeur", 2800), headCell(h[0], 1600), headCell(h[1], 1600), headCell(h[2], 1600), headCell("Moyenne des valeurs", 2000)] });
+  const header = new DOCX.TableRow({ cantSplit: true, tableHeader: true, children: [headCell("Grandeur", 2800), headCell(h[0], 1600), headCell(h[1], 1600), headCell(h[2], 1600), headCell("Moyenne des valeurs", 2000)] });
   const body = rows.map((r, idx) => { const garder = garderLigne(idx); const etats = r[5] || [null, null, null]; return new DOCX.TableRow({ cantSplit: true, children: [
     new DOCX.TableCell({ width: { size: 2800, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_LIGHT }, children: [new DOCX.Paragraph({ keepNext: garder, children: [new DOCX.TextRun({ text: r[0], size: 17, bold: true, color: "555555" })] })] }),
     docxValCell(r[1], etats[0], garder), docxValCell(r[2], etats[1], garder), docxValCell(r[3], etats[2], garder),
@@ -10584,7 +10600,7 @@ function docxPhaseTable(rows, headers, colors) {
   // rows: [ [label, v1, v2, v3], ... ] ; headers: ex. ["L1","L2","L3"] ou ["U12","U23","U31"]
   // colors (optionnel) : [ [c1,c2,c3], ... ] même longueur que rows — couleur hex DOCX par valeur, ou null pour la couleur par défaut.
   const h = headers || ["L1", "L2", "L3"];
-  const header = new DOCX.TableRow({ cantSplit: true, children: [docxPhaseCell("", false, true, null, true), docxPhaseCell(h[0], true, true, null, true), docxPhaseCell(h[1], true, true, null, true), docxPhaseCell(h[2], true, true, null, true)] });
+  const header = new DOCX.TableRow({ cantSplit: true, tableHeader: true, children: [docxPhaseCell("", false, true, null, true), docxPhaseCell(h[0], true, true, null, true), docxPhaseCell(h[1], true, true, null, true), docxPhaseCell(h[2], true, true, null, true)] });
   const body = rows.map((r, i) => {
     const rc = (colors && colors[i]) || [null, null, null];
     const garder = rows.length <= 14 ? i < rows.length - 1 : i < 2; // tableau court : d'un seul tenant
@@ -11453,17 +11469,14 @@ function champIdentificationMasque(eq, key) {
 // Courbe de déclenchement (Disjoncteur BT) : image(s) en grand format (≈ moitié de page), suivie(s)
 // d'une phrase indiquant si les essais du disjoncteur sont conformes ou non. Renvoie une liste vide
 // s'il n'y a aucune pièce jointe.
-function docxCourbeDeclenchement(eq) {
+function docxCourbeDeclenchement(eq, titre) {
   const elements = [];
   if (!(eq.courbeFiles || []).length) return elements;
-  eq.courbeFiles.forEach((f) => {
-    if (f.isPdf) {
-      elements.push(new DOCX.Paragraph({ spacing: { after: 40 }, children: [new DOCX.TextRun({ text: "Pièce jointe (PDF) : " + (f.name || "document.pdf"), size: 16, color: DOCX_BLUE, italics: true })] }));
-    } else {
-      const img = docxImage(f.dataUrl, 520, 400);
-      if (img) elements.push(new DOCX.Paragraph({ keepNext: true, alignment: DOCX.AlignmentType.CENTER, spacing: { before: 60, after: 40 }, children: [img] }));
-    }
-  });
+  const contenus = eq.courbeFiles.map((f) => {
+    if (f.isPdf) return new DOCX.Paragraph({ spacing: { after: 40 }, children: [new DOCX.TextRun({ text: "Pièce jointe (PDF) : " + (f.name || "document.pdf"), size: 16, color: DOCX_BLUE, italics: true })] });
+    const img = docxImage(f.dataUrl, 520, 400);
+    return img ? new DOCX.Paragraph({ keepNext: true, alignment: DOCX.AlignmentType.CENTER, spacing: { before: 60, after: 40 }, children: [img] }) : null;
+  }).filter(Boolean);
   const tests = eq.controles.tests_disjoncteur;
   const testEntries = [
     ["Surcharge longue", tests.test_surcharge_longue.etat],
@@ -11474,7 +11487,14 @@ function docxCourbeDeclenchement(eq) {
   const phrase = nonConformes.length === 0
     ? "Tous les essais de déclenchement sont conformes."
     : "Essai(s) non conforme(s) : " + nonConformes.map(([label, etat]) => `${label} (${etat})`).join(", ") + ".";
-  elements.push(new DOCX.Paragraph({ spacing: { after: 80 }, children: [new DOCX.TextRun({ text: phrase, bold: true, size: 18, color: nonConformes.length === 0 ? DOCX_GREEN : DOCX_RED })] }));
+  const paragraphePhrase = new DOCX.Paragraph({ spacing: { after: 80 }, children: [new DOCX.TextRun({ text: phrase, bold: true, size: 18, color: nonConformes.length === 0 ? DOCX_GREEN : DOCX_RED })] });
+  // Le titre, la première image et (s'il n'y en a qu'une) la phrase de conformité forment un seul bloc.
+  const enTete = titre ? [docxHeading(titre, 240, 140)] : [];
+  if (contenus.length <= 1) {
+    elements.push(docxBlocInsecable([...enTete, ...contenus, paragraphePhrase]));
+  } else {
+    elements.push(docxBlocInsecable([...enTete, contenus[0]]), ...contenus.slice(1), paragraphePhrase);
+  }
   return elements;
 }
 
@@ -11483,15 +11503,13 @@ function docxCourbeDeclenchement(eq) {
 function docxCourbeDecharge(eq) {
   const elements = [];
   if (!TYPES_AVEC_BRANCHES_UPS.includes(eq.type) || !(eq.courbeDechargeFiles || []).length) return elements;
-  elements.push(docxHeading("Courbe de décharge batterie"));
-  eq.courbeDechargeFiles.forEach((f) => {
-    if (f.isPdf) {
-      elements.push(new DOCX.Paragraph({ spacing: { after: 40 }, children: [new DOCX.TextRun({ text: "Pièce jointe (PDF) : " + (f.name || "document.pdf"), size: 16, color: DOCX_BLUE, italics: true })] }));
-    } else {
-      const img = docxImage(f.dataUrl, 520, 400);
-      if (img) elements.push(new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, spacing: { after: 80 }, children: [img] }));
-    }
-  });
+  const contenus = eq.courbeDechargeFiles.map((f) => {
+    if (f.isPdf) return new DOCX.Paragraph({ spacing: { after: 40 }, children: [new DOCX.TextRun({ text: "Pièce jointe (PDF) : " + (f.name || "document.pdf"), size: 16, color: DOCX_BLUE, italics: true })] });
+    const img = docxImage(f.dataUrl, 520, 400);
+    return img ? new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, spacing: { after: 80 }, children: [img] }) : null;
+  }).filter(Boolean);
+  // Le titre et la première image ne forment qu'un bloc : le titre ne peut pas rester seul en bas de page.
+  elements.push(docxBlocInsecable([docxHeading("Courbe de décharge batterie", 240, 140), ...(contenus.length ? [contenus[0]] : [])]), ...contenus.slice(1));
   return elements;
 }
 function docxEquipementElements(eq, locaux, allSites) {
@@ -11526,8 +11544,7 @@ function docxEquipementElements(eq, locaux, allSites) {
       else { imgW = 400; imgH = 208; }
       const img = docxImage(schemaImg, imgW, imgH);
       if (img) {
-        elements.push(docxHeading("Schéma synoptique"));
-        elements.push(new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, spacing: { after: 100 }, children: [img] }));
+        elements.push(docxBlocInsecable([docxHeading("Schéma synoptique", 240, 140), new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, spacing: { after: 100 }, children: [img] })]));
       }
     }
   }
@@ -11604,40 +11621,43 @@ function docxEquipementElements(eq, locaux, allSites) {
       return;
     }
     if (sec.key === "releve_tensions" && TYPES_AVEC_BRANCHES_UPS.includes(eq.type)) {
-      elements.push(docxHeading(sec.title));
       const cfg = eq.controles.releve_config || { mode: "Floating", toleranceBasse: 3, toleranceHaute: 3 };
-      if (cfg.avecResistance) elements.push(docxNormeNote("Résistance interne par élément : IEEE 1188 (VRLA) / IEEE 450 — indicateur complémentaire à la tension, souvent plus précoce pour détecter une dégradation."));
       const entries = eq.controles.elements_dynamique || [];
       const groupes = grouperElementsParBranche(entries);
       const plusieursBranches = groupes.length > 1;
       const tb = numOf(cfg.toleranceBasse) ?? 3, th = numOf(cfg.toleranceHaute) ?? 3;
       const fr = (v) => String(Math.round(v * 100) / 100).replace(".", ",");
       const modeTitre = !cfg.mode || /floating/i.test(cfg.mode) ? "DE FLOATING" : `(${String(cfg.mode).toUpperCase()})`;
-      groupes.forEach((groupe) => {
+      groupes.forEach((groupe, indexGroupe) => {
         const valeursB = groupe.items.map((e) => numOf(e.fields.tension)).filter((v) => v !== null);
         const moyenneB = valeursB.length ? Math.round((valeursB.reduce((a, b) => a + b, 0) / valeursB.length) * 1000) / 1000 : null;
         const sousTitre = [plusieursBranches ? groupe.label : "", eq.identification && eq.identification.repere].filter(Boolean).join(" · ");
         const titreGraphique = `TENSION ${modeTitre} PAR BLOC (V)${sousTitre ? " · " + sousTitre : ""}`.toUpperCase();
         const graph = genererGraphiqueElementsBatterie(groupe.items, moyenneB, cfg.toleranceBasse, cfg.toleranceHaute, titreGraphique);
         const imgGraph = graph ? docxImage(graph.dataUrl, graph.largeur, graph.hauteur) : null;
-        if (imgGraph) {
-          elements.push(new DOCX.Paragraph({ keepNext: true, alignment: DOCX.AlignmentType.CENTER, spacing: { before: 140, after: 60 }, children: [imgGraph] }));
-        } else if (plusieursBranches) {
-          // Repli sans dessin possible : l'intitulé de la branche reste affiché.
-          elements.push(new DOCX.Paragraph({ keepNext: true, spacing: { before: 140, after: 40 }, children: [new DOCX.TextRun({ text: `${groupe.label}${moyenneB !== null ? ` — Moyenne : ${fr(moyenneB)} V` : ""}`, bold: true, size: 17, color: DOCX_DARK })] }));
-        }
         const evalues = groupe.items.filter((e) => e.fields.tension);
         const defaillants = evalues.filter((e) => elementBatterieStatus(e.fields.tension, moyenneB, cfg.toleranceBasse, cfg.toleranceHaute) === "bad");
+        // Le titre de la section (pour la première branche), le graphique et sa légende ne forment qu'un
+        // seul bloc : le titre ne peut pas rester seul en bas d'une page, avec le graphique page suivante.
+        const bloc = [];
+        if (indexGroupe === 0) bloc.push(docxHeading(sec.title, 240, 100));
+        if (imgGraph) {
+          bloc.push(new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, spacing: { before: 140, after: 60 }, children: [imgGraph] }));
+        } else if (plusieursBranches) {
+          // Repli sans dessin possible : l'intitulé de la branche reste affiché.
+          bloc.push(new DOCX.Paragraph({ spacing: { before: 140, after: 40 }, children: [new DOCX.TextRun({ text: `${groupe.label}${moyenneB !== null ? ` — Moyenne : ${fr(moyenneB)} V` : ""}`, bold: true, size: 17, color: DOCX_DARK })] }));
+        }
         if (evalues.length) {
           const legende = moyenneB !== null ? `Moyenne ${fr(moyenneB)} V  ·  tolérance −${tb} % / +${th} % (${fr(moyenneB * (1 - tb / 100))} – ${fr(moyenneB * (1 + th / 100))} V)  ·  ` : "";
           const compte = defaillants.length === 0
             ? `${evalues.length} élément(s) contrôlé(s) — tous conformes à la tolérance déclarée.`
             : `${evalues.length} élément(s) contrôlé(s) — ${defaillants.length} hors tolérance (détail ci-dessous).`;
-          elements.push(new DOCX.Paragraph({ keepNext: defaillants.length > 0, spacing: { after: defaillants.length ? 60 : 160 }, children: [
+          bloc.push(new DOCX.Paragraph({ spacing: { after: defaillants.length ? 60 : 160 }, children: [
             new DOCX.TextRun({ text: legende, size: 16, color: "666666" }),
             new DOCX.TextRun({ text: compte, bold: defaillants.length > 0, size: 17, color: defaillants.length ? "C0392B" : DOCX_DARK }),
           ] }));
         }
+        if (bloc.length) elements.push(docxBlocInsecable(bloc));
         if (defaillants.length) {
           const rows3 = defaillants.map((e) => {
             const detail = [`${e.fields.tension} V`, cfg.avecResistance && e.fields.resistance && `${e.fields.resistance} mΩ`].filter(Boolean).join(" · ");
@@ -11648,6 +11668,8 @@ function docxEquipementElements(eq, locaux, allSites) {
           elements.push(docxSpacer(120));
         }
       });
+      if (!groupes.length) elements.push(docxHeading(sec.title));
+      if (cfg.avecResistance) elements.push(docxNormeNote("Résistance interne par élément : IEEE 1188 (VRLA) / IEEE 450 — indicateur complémentaire à la tension, souvent plus précoce pour détecter une dégradation."));
       elements.push(docxSpacer());
       return;
     }
@@ -11941,7 +11963,8 @@ function docxEquipementElements(eq, locaux, allSites) {
         })
       : sec.items;
     if (itemsAffiches.length === 0) return;
-    elements.push(docxHeading(sec.title));
+    const courbeAvecFichiers = sec.key === "courbe_declenchement" && eq.type === "Disjoncteur BT" && (eq.courbeFiles || []).length > 0;
+    if (!courbeAvecFichiers) elements.push(docxHeading(sec.title));
     if (sec.key === "mesure_isolement" && sec.items.some((it) => it.key === "pi" || it.fields?.some((f) => f.key === "pi"))) {
       elements.push(docxNormeNote("CEI 60076-3 / IEEE 43. Tension d'injection identique du début à la fin de l'essai — le type de mesure indique jusqu'où il est poussé : Standard (lecture instantanée), PI = R(10 min)/R(1 min), DAR = R(60 s)/R(10 s). L'enroulement non testé doit être court-circuité (shunté) et relié à la terre."));
     } else if (["resistance_contact_chambres", "resistances_contacts", "resistance_jonctions"].some((k) => sec.items.some((it) => it.key === k))) {
@@ -11964,17 +11987,13 @@ function docxEquipementElements(eq, locaux, allSites) {
         rows.push(["Contrôle TC — " + tc.label, parts, tc.action, tc.etat]);
       });
     }
-    const courbeSuit = sec.key === "courbe_declenchement" && eq.type === "Disjoncteur BT" && (eq.courbeFiles || []).length > 0;
-    const t = docxControlTable(rows, courbeSuit);
+    // Courbe de déclenchement : titre + image (+ phrase) d'un seul bloc, puis le tableau de référence.
+    if (courbeAvecFichiers) { elements.push(...docxCourbeDeclenchement(eq, sec.title)); courbeIntegree = true; }
+    const t = docxControlTable(rows);
     if (t) elements.push(t);
     if (sec.key === "reglage_disjoncteur" && eq.type === "Disjoncteur BT") {
       const v = calcVerificationPouvoirCoupure(eq, equipementsDuSiteDe(eq, allSites), locaux);
       if (v && !v.manque) elements.push(docxNormeNote(texteVerificationPouvoirCoupure(v)));
-    }
-    if (sec.key === "courbe_declenchement" && eq.type === "Disjoncteur BT") {
-      // La courbe s'affiche ici, sous son titre, et non plus à la fin de l'équipement avec les photos.
-      elements.push(...docxCourbeDeclenchement(eq));
-      courbeIntegree = true;
     }
     if (sec.key === "electriques" && eq.type === "Jeu de barre / Gaine à barre") {
       const v = calcVerificationJeuDeBarre(eq, equipementsDuSiteDe(eq, allSites), locaux);
@@ -12008,7 +12027,7 @@ function docxEquipementElements(eq, locaux, allSites) {
   // Courbe de déclenchement (Disjoncteur BT) : normalement insérée dans sa propre section (voir la boucle
   // des sections ci-dessus). Repli : si cette section n'a pas été affichée (ex. niveau de maintenance qui
   // l'exclut) mais que des fichiers de courbe existent, on les place ici, comme auparavant.
-  if (eq.type === "Disjoncteur BT" && !courbeIntegree) elements.push(...docxCourbeDeclenchement(eq));
+  if (eq.type === "Disjoncteur BT" && !courbeIntegree) elements.push(...docxCourbeDeclenchement(eq, "Courbe de déclenchement"));
 
   // Courbe de décharge batterie : normalement insérée sous l'essai de décharge (boucle des sections). Repli :
   // si cette section n'a pas été affichée (niveau de maintenance qui l'exclut) mais qu'une courbe est
