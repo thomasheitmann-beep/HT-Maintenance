@@ -10289,7 +10289,7 @@ function docxPuces(items, size = 18, espace = 50) {
   return items.map((t) => new DOCX.Paragraph({ spacing: { after: espace }, indent: { left: 260, hanging: 220 }, children: [new DOCX.TextRun({ text: "•  " + t, size })] }));
 }
 function docxRemarquesEquipement(texte) {
-  const titre = new DOCX.Paragraph({ spacing: { before: 60, after: 40 }, keepNext: true, children: [new DOCX.TextRun({ text: "Remarques et préconisations", bold: true, size: 18, color: DOCX_DARK })] });
+  const titre = new DOCX.Paragraph({ spacing: { before: 140, after: 60 }, keepNext: true, children: [new DOCX.TextRun({ text: "Remarques et préconisations", bold: true, size: 18, color: DOCX_DARK })] });
   const paragraphes = (lignes) => lignes.map((l) => new DOCX.Paragraph({ spacing: { after: 60 }, children: [new DOCX.TextRun({ text: l, size: 18 })] }));
   if (!remarquesStructurees(texte)) {
     return [titre, ...paragraphes(String(texte).split("\n").map((l) => l.trim()).filter(Boolean))];
@@ -10299,6 +10299,7 @@ function docxRemarquesEquipement(texte) {
   if (p.autres.length) out.push(...paragraphes(p.autres));
   if (p.constats.length) out.push(docxSousTitreRemarques("Constats"), ...docxPuces(p.constats));
   if (p.preconisations.length) out.push(docxSousTitreRemarques("Préconisations"), ...docxPuces(p.preconisations));
+  out.push(docxSpacer(100)); // espace avant ce qui suit (photos, courbes…)
   return out;
 }
 // Synthèse du site : paragraphe de synthèse générale, puis tableau Équipement | Constats | Préconisations.
@@ -10459,7 +10460,7 @@ function docxControlRow(label, detail, action, etat, isAlternate, garderAvecSuit
 // `garderAvecSuite` : le tableau reste sur la même page que l'élément qui le suit (ex. une courbe).
 function docxControlTable(rows, garderAvecSuite = false) {
   if (rows.length === 0) return null;
-  return new DOCX.Table({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: [7600, 2000], rows: rows.map((r, i) => docxControlRow(r[0], r[1], r[2], r[3], i % 2 === 1, garderAvecSuite)) });
+  return new DOCX.Table({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: [7600, 2000], rows: rows.map((r, i) => docxControlRow(r[0], r[1], r[2], r[3], i % 2 === 1, garderAvecSuite || (rows.length <= 8 ? i < rows.length - 1 : i < 2))) });
 }
 // Tableau de mesures par phase : une ligne par grandeur (I, C, Q…), une colonne par phase — bien
 // plus lisible qu'un bloc de texte pour les mesures complètes (gradins, réseau amont/aval…).
@@ -10479,7 +10480,7 @@ const DOCX_ETAT_COULEURS = {
   warning: { bord: "B5730A", fond: "FDF3E3", texte: "8A5A0A" },
   bad: { bord: "C0392B", fond: "FDF1F0", texte: "9A2E22" },
 };
-function docxValCell(text, state) {
+function docxValCell(text, state, garder = false) {
   const t = text === null || text === undefined || text === "" ? "—" : String(text);
   const c = state && DOCX_ETAT_COULEURS[state];
   return new DOCX.TableCell({
@@ -10489,7 +10490,7 @@ function docxValCell(text, state) {
       top: { style: DOCX.BorderStyle.SINGLE, size: 6, color: c.bord }, bottom: { style: DOCX.BorderStyle.SINGLE, size: 6, color: c.bord },
       left: { style: DOCX.BorderStyle.SINGLE, size: 6, color: c.bord }, right: { style: DOCX.BorderStyle.SINGLE, size: 6, color: c.bord },
     } : undefined,
-    children: [new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, children: [new DOCX.TextRun({ text: t, size: 17, bold: !!c, color: c ? c.texte : DOCX_DARK })] })],
+    children: [new DOCX.Paragraph({ keepNext: garder, alignment: DOCX.AlignmentType.CENTER, children: [new DOCX.TextRun({ text: t, size: 17, bold: !!c, color: c ? c.texte : DOCX_DARK })] })],
   });
 }
 // Constructeur générique : lignes [Grandeur, val1, val2, val3, Moyenne] → un seul tableau,
@@ -10497,15 +10498,16 @@ function docxValCell(text, state) {
 function docxBuildMesuresTable(rows, headers) {
   if (!rows.length) return null;
   const h = headers || ["L1", "L2", "L3"];
+  const garderLigne = (idx) => (rows.length <= 14 ? idx < rows.length - 1 : idx < 2); // tableau court : d'un seul tenant
   const headCell = (text, width) => new DOCX.TableCell({
     width: { size: width, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_LIGHT },
-    children: [new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, children: [new DOCX.TextRun({ text, size: 17, bold: true, color: "555555" })] })],
+    children: [new DOCX.Paragraph({ keepNext: true, alignment: DOCX.AlignmentType.CENTER, children: [new DOCX.TextRun({ text, size: 17, bold: true, color: "555555" })] })],
   });
-  const header = new DOCX.TableRow({ children: [headCell("Grandeur", 2800), headCell(h[0], 1600), headCell(h[1], 1600), headCell(h[2], 1600), headCell("Moyenne des valeurs", 2000)] });
-  const body = rows.map((r) => { const etats = r[5] || [null, null, null]; return new DOCX.TableRow({ children: [
-    new DOCX.TableCell({ width: { size: 2800, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_LIGHT }, children: [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: r[0], size: 17, bold: true, color: "555555" })] })] }),
-    docxValCell(r[1], etats[0]), docxValCell(r[2], etats[1]), docxValCell(r[3], etats[2]),
-    new DOCX.TableCell({ width: { size: 2000, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, children: [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: (r[4] === "" || r[4] === null || r[4] === undefined) ? "—" : String(r[4]), size: 16, color: "0A5DA8", bold: true })] })] }),
+  const header = new DOCX.TableRow({ cantSplit: true, children: [headCell("Grandeur", 2800), headCell(h[0], 1600), headCell(h[1], 1600), headCell(h[2], 1600), headCell("Moyenne des valeurs", 2000)] });
+  const body = rows.map((r, idx) => { const garder = garderLigne(idx); const etats = r[5] || [null, null, null]; return new DOCX.TableRow({ cantSplit: true, children: [
+    new DOCX.TableCell({ width: { size: 2800, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_LIGHT }, children: [new DOCX.Paragraph({ keepNext: garder, children: [new DOCX.TextRun({ text: r[0], size: 17, bold: true, color: "555555" })] })] }),
+    docxValCell(r[1], etats[0], garder), docxValCell(r[2], etats[1], garder), docxValCell(r[3], etats[2], garder),
+    new DOCX.TableCell({ width: { size: 2000, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, children: [new DOCX.Paragraph({ keepNext: garder, children: [new DOCX.TextRun({ text: (r[4] === "" || r[4] === null || r[4] === undefined) ? "—" : String(r[4]), size: 16, color: "0A5DA8", bold: true })] })] }),
   ]}); });
   return new DOCX.Table({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: [2800, 1600, 1600, 1600, 2000], rows: [header, ...body] });
 }
@@ -10564,7 +10566,7 @@ function docxTableauMesures(items, controlesSection) {
 // Correspondance couleur hex (héritée de l'appelant, ex. DOCX_ORANGE) -> état, pour réutiliser le
 // même rendu case colorée (fond clair + bordure foncée) que docxValCell.
 const DOCX_COULEUR_VERS_ETAT = { [DOCX_GREEN]: "ok", [DOCX_ORANGE]: "warning", [DOCX_RED]: "bad" };
-function docxPhaseCell(text, header, shaded, color) {
+function docxPhaseCell(text, header, shaded, color, garder = false) {
   const t = text === null || text === undefined || text === "" ? "—" : String(text);
   const etat = color && DOCX_COULEUR_VERS_ETAT[color];
   const c = etat && DOCX_ETAT_COULEURS[etat];
@@ -10575,19 +10577,20 @@ function docxPhaseCell(text, header, shaded, color) {
       top: { style: DOCX.BorderStyle.SINGLE, size: 6, color: c.bord }, bottom: { style: DOCX.BorderStyle.SINGLE, size: 6, color: c.bord },
       left: { style: DOCX.BorderStyle.SINGLE, size: 6, color: c.bord }, right: { style: DOCX.BorderStyle.SINGLE, size: 6, color: c.bord },
     } : undefined,
-    children: [new DOCX.Paragraph({ alignment: header || c ? DOCX.AlignmentType.CENTER : DOCX.AlignmentType.LEFT, children: [new DOCX.TextRun({ text: t, size: 17, bold: header || !!c, color: header ? "555555" : (c ? c.texte : (color || DOCX_DARK)) })] })],
+    children: [new DOCX.Paragraph({ keepNext: garder, alignment: header || c ? DOCX.AlignmentType.CENTER : DOCX.AlignmentType.LEFT, children: [new DOCX.TextRun({ text: t, size: 17, bold: header || !!c, color: header ? "555555" : (c ? c.texte : (color || DOCX_DARK)) })] })],
   });
 }
 function docxPhaseTable(rows, headers, colors) {
   // rows: [ [label, v1, v2, v3], ... ] ; headers: ex. ["L1","L2","L3"] ou ["U12","U23","U31"]
   // colors (optionnel) : [ [c1,c2,c3], ... ] même longueur que rows — couleur hex DOCX par valeur, ou null pour la couleur par défaut.
   const h = headers || ["L1", "L2", "L3"];
-  const header = new DOCX.TableRow({ children: [docxPhaseCell("", false, true), docxPhaseCell(h[0], true, true), docxPhaseCell(h[1], true, true), docxPhaseCell(h[2], true, true)] });
+  const header = new DOCX.TableRow({ cantSplit: true, children: [docxPhaseCell("", false, true, null, true), docxPhaseCell(h[0], true, true, null, true), docxPhaseCell(h[1], true, true, null, true), docxPhaseCell(h[2], true, true, null, true)] });
   const body = rows.map((r, i) => {
     const rc = (colors && colors[i]) || [null, null, null];
-    return new DOCX.TableRow({ children: [
-      new DOCX.TableCell({ width: { size: 3600, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_LIGHT }, children: [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: r[0], size: 17, bold: true, color: "555555" })] })] }),
-      docxPhaseCell(r[1], false, false, rc[0]), docxPhaseCell(r[2], false, false, rc[1]), docxPhaseCell(r[3], false, false, rc[2]),
+    const garder = rows.length <= 14 ? i < rows.length - 1 : i < 2; // tableau court : d'un seul tenant
+    return new DOCX.TableRow({ cantSplit: true, children: [
+      new DOCX.TableCell({ width: { size: 3600, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_LIGHT }, children: [new DOCX.Paragraph({ keepNext: garder, children: [new DOCX.TextRun({ text: r[0], size: 17, bold: true, color: "555555" })] })] }),
+      docxPhaseCell(r[1], false, false, rc[0], garder), docxPhaseCell(r[2], false, false, rc[1], garder), docxPhaseCell(r[3], false, false, rc[2], garder),
     ]});
   });
   return new DOCX.Table({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: [3600, 2000, 2000, 2000], rows: [header, ...body] });
@@ -10677,49 +10680,112 @@ function grouperElementsParBranche(entries) {
   });
   return Array.from(groupes.entries()).map(([label, items]) => ({ label, items }));
 }
-function genererGraphiqueElementsBatterie(entries, moyenne, toleranceBasse, toleranceHaute) {
+// Graphique des tensions par bloc (relevé batterie), dans le style de la présentation commerciale :
+// barres bleues, seuils de tolérance en pointillés rouges, blocs hors tolérance en ambre avec leur
+// valeur, repères 1 / 6 / 11… en abscisse (les blocs hors tolérance en gras). Dessiné en double
+// résolution pour rester net à l'impression. Renvoie { dataUrl, largeur, hauteur } (taille d'affichage
+// en px) ou null si le dessin est impossible (hors navigateur, aucune valeur).
+function genererGraphiqueElementsBatterie(entries, moyenne, toleranceBasse, toleranceHaute, titre) {
   if (typeof document === "undefined" || !document.createElement || !entries.length) return null;
   try {
-    const w = Math.min(560, Math.max(280, entries.length * 22 + 60));
-    const h = 170;
-    const canvas = document.createElement("canvas");
-    canvas.width = w; canvas.height = h;
-    const ctx = canvas.getContext("2d");
-    ctx.fillStyle = "#FFFFFF"; ctx.fillRect(0, 0, w, h);
     const valeurs = entries.map((e) => numOf(e.fields.tension));
     const valides = valeurs.filter((v) => v !== null);
     if (!valides.length) return null;
-    const vMin = Math.min(...valides) * 0.95, vMax = Math.max(...valides) * 1.05;
-    const chartTop = 28, chartBottom = h - 26, chartLeft = 40, chartRight = w - 10;
-    const chartH = chartBottom - chartTop, chartW = chartRight - chartLeft;
-    const barW = Math.max(4, chartW / entries.length - 4);
-    const yFor = (v) => chartBottom - ((v - vMin) / (vMax - vMin || 1)) * chartH;
-    if (moyenne !== null) {
-      // Étiquette fixe tout en haut à gauche, hors de la zone des barres — ne recouvre jamais rien.
-      ctx.fillStyle = "#0A5DA8"; ctx.font = "bold 11px Arial, sans-serif"; ctx.textBaseline = "top"; ctx.textAlign = "left";
-      ctx.fillText(`moyenne ${moyenne} V`, 2, 2);
+    const n = entries.length;
+    const W = 560, H = 270, ECHELLE = 2;
+    const canvas = document.createElement("canvas");
+    canvas.width = W * ECHELLE; canvas.height = H * ECHELLE;
+    const ctx = canvas.getContext("2d");
+    ctx.scale(ECHELLE, ECHELLE);
+    const SANS = "Arial, Helvetica, sans-serif", SERIF = "Georgia, 'Times New Roman', serif";
+    const fr = (v) => String(Math.round(v * 100) / 100).replace(".", ",");
+    // Fond blanc et cadre arrondi léger (effet « carte »).
+    ctx.fillStyle = "#FFFFFF"; ctx.fillRect(0, 0, W, H);
+    const r = 10;
+    ctx.strokeStyle = "#E2E6EB"; ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(r + 0.5, 0.5); ctx.lineTo(W - r - 0.5, 0.5); ctx.arc(W - r - 0.5, r + 0.5, r, -Math.PI / 2, 0);
+    ctx.lineTo(W - 0.5, H - r - 0.5); ctx.arc(W - r - 0.5, H - r - 0.5, r, 0, Math.PI / 2);
+    ctx.lineTo(r + 0.5, H - 0.5); ctx.arc(r + 0.5, H - r - 0.5, r, Math.PI / 2, Math.PI);
+    ctx.lineTo(0.5, r + 0.5); ctx.arc(r + 0.5, r + 0.5, r, Math.PI, Math.PI * 1.5);
+    ctx.closePath(); ctx.stroke();
+    // Seuils de tolérance (autour de la moyenne de la branche, comme le contrôle de conformité).
+    const tb = numOf(toleranceBasse) ?? 3, th = numOf(toleranceHaute) ?? 3;
+    const seuilBas = moyenne !== null && moyenne !== undefined ? moyenne * (1 - tb / 100) : null;
+    const seuilHaut = moyenne !== null && moyenne !== undefined && th > 0 ? moyenne * (1 + th / 100) : null;
+    // Échelle verticale « propre » (pas de 0,1 / 0,2 / 0,5 / 1 / 2 / 5…), axe qui ne part pas de zéro :
+    // les écarts de quelques dixièmes de volt resteraient sinon invisibles.
+    const bornes = [...valides, ...(seuilBas !== null ? [seuilBas] : []), ...(seuilHaut !== null ? [seuilHaut] : [])];
+    let lo = Math.min(...bornes), hi = Math.max(...bornes);
+    const marge = (hi - lo) * 0.2 || 0.5;
+    lo -= marge; hi += marge * 0.9;
+    const brut = (hi - lo) / 4;
+    const pas = [0.05, 0.1, 0.2, 0.25, 0.5, 1, 2, 2.5, 5, 10, 20, 50, 100].find((p) => p >= brut) || 200;
+    const axeMin = Math.floor(lo / pas + 1e-9) * pas, axeMax = Math.ceil(hi / pas - 1e-9) * pas;
+    const decimales = pas >= 1 ? 0 : pas >= 0.1 ? 1 : 2;
+    const left = 54, right = W - 104, top = 62, bottom = H - 36; // marge droite : étiquettes des seuils
+    const yFor = (v) => bottom - ((v - axeMin) / (axeMax - axeMin || 1)) * (bottom - top);
+    // Titre (bleu, gras, majuscules), réduit si trop long pour la largeur disponible.
+    ctx.fillStyle = "#0A5DA8"; ctx.textBaseline = "top"; ctx.textAlign = "left";
+    let taille = 13;
+    ctx.font = `bold ${taille}px ${SANS}`;
+    while (taille > 9 && ctx.measureText(titre || "").width > W - 36) { taille -= 0.5; ctx.font = `bold ${taille}px ${SANS}`; }
+    ctx.fillText(titre || "", 18, 18);
+    // Grille horizontale et valeurs de l'axe vertical.
+    ctx.font = `12px ${SERIF}`; ctx.fillStyle = "#5B6B7D"; ctx.textAlign = "right"; ctx.textBaseline = "middle";
+    for (let k = 0; k <= Math.round((axeMax - axeMin) / pas); k++) {
+      const v = axeMin + k * pas, y = yFor(v);
+      ctx.strokeStyle = k === 0 ? "#C5CCD5" : "#E9EDF1"; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(left, y); ctx.lineTo(right, y); ctx.stroke();
+      ctx.fillText(v.toFixed(decimales).replace(".", ","), left - 8, y);
     }
-    ctx.strokeStyle = "#D8DEE5"; ctx.beginPath(); ctx.moveTo(chartLeft, chartTop); ctx.lineTo(chartLeft, chartBottom); ctx.lineTo(chartRight, chartBottom); ctx.stroke();
-    entries.forEach((e, i) => {
-      const v = numOf(e.fields.tension);
+    // Barres : bleues, ou ambre pour un bloc hors tolérance.
+    const fente = (right - left) / n, largeurBarre = fente * 0.62;
+    const statuts = valeurs.map((v) => (v === null ? null : elementBatterieStatus(v, moyenne, toleranceBasse, toleranceHaute)));
+    valeurs.forEach((v, i) => {
       if (v === null) return;
-      const x = chartLeft + i * (chartW / entries.length) + 2;
-      const y = yFor(v);
-      const statut = elementBatterieStatus(v, moyenne, toleranceBasse, toleranceHaute);
-      ctx.fillStyle = statut === "bad" ? "#C0392B" : "#0F8A5F";
-      ctx.fillRect(x, y, barW, chartBottom - y);
+      const x = left + i * fente + (fente - largeurBarre) / 2, y = yFor(v);
+      ctx.fillStyle = statuts[i] === "bad" ? "#FFC02E" : "#1560A8";
+      ctx.fillRect(x, y, largeurBarre, Math.max(1, bottom - y));
     });
-    if (moyenne !== null) {
-      // Ligne de repère par-dessus les barres (épaisse) — le texte, lui, est déjà affiché en haut à gauche.
-      const yMoy = yFor(moyenne);
-      ctx.strokeStyle = "#0A5DA8"; ctx.lineWidth = 2; ctx.setLineDash([6, 4]);
-      ctx.beginPath(); ctx.moveTo(chartLeft, yMoy); ctx.lineTo(chartRight, yMoy); ctx.stroke();
-      ctx.setLineDash([]); ctx.lineWidth = 1;
+    // Seuils en pointillés rouges, avec leur étiquette (halo blanc pour rester lisible sur les barres).
+    ctx.setLineDash([7, 5]); ctx.lineWidth = 1.6; ctx.strokeStyle = "#B02A2A";
+    [seuilBas, seuilHaut].forEach((s) => { if (s === null) return; const y = yFor(s); ctx.beginPath(); ctx.moveTo(left, y); ctx.lineTo(right, y); ctx.stroke(); });
+    ctx.setLineDash([]); ctx.lineWidth = 1;
+    // Étiquettes des seuils dans la marge de droite (jamais par-dessus les barres), sur deux lignes,
+    // écartées l'une de l'autre si les deux seuils sont proches.
+    const etiquettes = [];
+    if (seuilHaut !== null) etiquettes.push({ l1: "seuil haut", l2: `${fr(seuilHaut)} V`, y: yFor(seuilHaut) });
+    if (seuilBas !== null) etiquettes.push({ l1: "seuil bas", l2: `${fr(seuilBas)} V`, y: yFor(seuilBas) });
+    if (etiquettes.length === 2) {
+      const manque = 32 - (etiquettes[1].y - etiquettes[0].y);
+      if (manque > 0) { etiquettes[0].y -= manque / 2; etiquettes[1].y += manque / 2; }
     }
-    ctx.fillStyle = "#5B6B7D"; ctx.font = "10px Arial, sans-serif"; ctx.textBaseline = "middle";
-    ctx.save(); ctx.translate(10, (chartTop + chartBottom) / 2); ctx.rotate(-Math.PI / 2); ctx.textAlign = "center";
-    ctx.fillText("Tension (V)", 0, 0); ctx.restore();
-    return canvas.toDataURL("image/png");
+    ctx.font = `italic 12px ${SERIF}`; ctx.fillStyle = "#B02A2A"; ctx.textAlign = "left"; ctx.textBaseline = "middle";
+    etiquettes.forEach((e) => { ctx.fillText(e.l1, right + 10, e.y - 8); ctx.fillText(e.l2, right + 10, e.y + 8); });
+    // Valeur des blocs hors tolérance, en gras au-dessus de leur barre.
+    ctx.font = `bold 14px ${SERIF}`; ctx.fillStyle = "#1A1F26"; ctx.textAlign = "center"; ctx.textBaseline = "bottom";
+    valeurs.forEach((v, i) => {
+      if (statuts[i] !== "bad") return;
+      ctx.fillText(fr(v), left + i * fente + fente / 2, Math.max(top - 2, yFor(v) - 6));
+    });
+    // Repères en abscisse : 1, puis tous les 5 blocs (6, 11, 16…), le dernier et chaque bloc hors
+    // tolérance (en gras) ; un repère courant trop proche d'un repère prioritaire est omis.
+    const prioritaires = new Set([0, n - 1]);
+    statuts.forEach((s, i) => { if (s === "bad") prioritaires.add(i); });
+    const ecartMini = Math.max(1, Math.ceil(30 / fente));
+    const repères = new Set(prioritaires);
+    for (let i = 5; i < n - 1; i += 5) {
+      if (![...prioritaires].some((p) => p !== i && Math.abs(p - i) < ecartMini)) repères.add(i);
+    }
+    ctx.textBaseline = "top"; ctx.textAlign = "center";
+    repères.forEach((i) => {
+      const gras = statuts[i] === "bad";
+      ctx.font = `${gras ? "bold " : ""}13px ${SERIF}`;
+      ctx.fillStyle = gras ? "#1A1F26" : "#5B6B7D";
+      ctx.fillText(String(i + 1), left + i * fente + fente / 2, bottom + 8);
+    });
+    return { dataUrl: canvas.toDataURL("image/png"), largeur: W, hauteur: H };
   } catch (e) {
     return null;
   }
@@ -11412,6 +11478,22 @@ function docxCourbeDeclenchement(eq) {
   return elements;
 }
 
+// Courbe de décharge batterie (onduleurs / chargeurs) : image(s) en grand format, sous leur propre titre.
+// Renvoie une liste vide s'il n'y a aucune pièce jointe.
+function docxCourbeDecharge(eq) {
+  const elements = [];
+  if (!TYPES_AVEC_BRANCHES_UPS.includes(eq.type) || !(eq.courbeDechargeFiles || []).length) return elements;
+  elements.push(docxHeading("Courbe de décharge batterie"));
+  eq.courbeDechargeFiles.forEach((f) => {
+    if (f.isPdf) {
+      elements.push(new DOCX.Paragraph({ spacing: { after: 40 }, children: [new DOCX.TextRun({ text: "Pièce jointe (PDF) : " + (f.name || "document.pdf"), size: 16, color: DOCX_BLUE, italics: true })] }));
+    } else {
+      const img = docxImage(f.dataUrl, 520, 400);
+      if (img) elements.push(new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, spacing: { after: 80 }, children: [img] }));
+    }
+  });
+  return elements;
+}
 function docxEquipementElements(eq, locaux, allSites) {
   // Filet de sécurité : quelle que soit l'origine des données (ancien format, migration, edge case),
   // on s'assure que la structure de contrôles est complète avant de générer le rapport — évite un
@@ -11451,6 +11533,7 @@ function docxEquipementElements(eq, locaux, allSites) {
   }
   const isRelais = TYPES_AVEC_RELAIS.includes(eq.type);
   let courbeIntegree = false; // la courbe de déclenchement a-t-elle été placée dans sa propre section ?
+  let courbeDechargeIntegree = false; // idem pour la courbe de décharge batterie
   schema.sections.forEach((sec) => {
     if (isRelais && sec.key === "parametrage_relais") {
       elements.push(docxHeading(sec.title));
@@ -11525,29 +11608,35 @@ function docxEquipementElements(eq, locaux, allSites) {
       const cfg = eq.controles.releve_config || { mode: "Floating", toleranceBasse: 3, toleranceHaute: 3 };
       if (cfg.avecResistance) elements.push(docxNormeNote("Résistance interne par élément : IEEE 1188 (VRLA) / IEEE 450 — indicateur complémentaire à la tension, souvent plus précoce pour détecter une dégradation."));
       const entries = eq.controles.elements_dynamique || [];
-      elements.push(new DOCX.Paragraph({ spacing: { after: 60 }, children: [new DOCX.TextRun({ text: `Mode : ${cfg.mode}  ·  Tolérance : -${cfg.toleranceBasse}% / +${cfg.toleranceHaute}%`, size: 16, color: "666666", italics: true })] }));
       const groupes = grouperElementsParBranche(entries);
       const plusieursBranches = groupes.length > 1;
+      const tb = numOf(cfg.toleranceBasse) ?? 3, th = numOf(cfg.toleranceHaute) ?? 3;
+      const fr = (v) => String(Math.round(v * 100) / 100).replace(".", ",");
+      const modeTitre = !cfg.mode || /floating/i.test(cfg.mode) ? "DE FLOATING" : `(${String(cfg.mode).toUpperCase()})`;
       groupes.forEach((groupe) => {
         const valeursB = groupe.items.map((e) => numOf(e.fields.tension)).filter((v) => v !== null);
         const moyenneB = valeursB.length ? Math.round((valeursB.reduce((a, b) => a + b, 0) / valeursB.length) * 1000) / 1000 : null;
-        if (plusieursBranches) {
-          elements.push(new DOCX.Paragraph({ spacing: { before: 60, after: 20 }, children: [new DOCX.TextRun({ text: `${groupe.label}${moyenneB !== null ? ` — Moyenne : ${moyenneB} V` : ""}`, bold: true, size: 17, color: DOCX_DARK })] }));
+        const sousTitre = [plusieursBranches ? groupe.label : "", eq.identification && eq.identification.repere].filter(Boolean).join(" · ");
+        const titreGraphique = `TENSION ${modeTitre} PAR BLOC (V)${sousTitre ? " · " + sousTitre : ""}`.toUpperCase();
+        const graph = genererGraphiqueElementsBatterie(groupe.items, moyenneB, cfg.toleranceBasse, cfg.toleranceHaute, titreGraphique);
+        const imgGraph = graph ? docxImage(graph.dataUrl, graph.largeur, graph.hauteur) : null;
+        if (imgGraph) {
+          elements.push(new DOCX.Paragraph({ keepNext: true, alignment: DOCX.AlignmentType.CENTER, spacing: { before: 140, after: 60 }, children: [imgGraph] }));
+        } else if (plusieursBranches) {
+          // Repli sans dessin possible : l'intitulé de la branche reste affiché.
+          elements.push(new DOCX.Paragraph({ keepNext: true, spacing: { before: 140, after: 40 }, children: [new DOCX.TextRun({ text: `${groupe.label}${moyenneB !== null ? ` — Moyenne : ${fr(moyenneB)} V` : ""}`, bold: true, size: 17, color: DOCX_DARK })] }));
         }
-        const graphElts = genererGraphiqueElementsBatterie(groupe.items, moyenneB, cfg.toleranceBasse, cfg.toleranceHaute);
-        if (graphElts) {
-          const imgElts = docxImage(graphElts, 460, 140);
-          if (imgElts) elements.push(new DOCX.Paragraph({ spacing: { after: 40 }, children: [imgElts] }));
-        }
-        // Allégé : le graphique donne déjà la vue d'ensemble — le tableau ne détaille que les
-        // éléments hors tolérance, avec un simple compte-rendu chiffré pour le reste.
         const evalues = groupe.items.filter((e) => e.fields.tension);
         const defaillants = evalues.filter((e) => elementBatterieStatus(e.fields.tension, moyenneB, cfg.toleranceBasse, cfg.toleranceHaute) === "bad");
         if (evalues.length) {
-          const texteSynthese = defaillants.length === 0
+          const legende = moyenneB !== null ? `Moyenne ${fr(moyenneB)} V  ·  tolérance −${tb} % / +${th} % (${fr(moyenneB * (1 - tb / 100))} – ${fr(moyenneB * (1 + th / 100))} V)  ·  ` : "";
+          const compte = defaillants.length === 0
             ? `${evalues.length} élément(s) contrôlé(s) — tous conformes à la tolérance déclarée.`
             : `${evalues.length} élément(s) contrôlé(s) — ${defaillants.length} hors tolérance (détail ci-dessous).`;
-          elements.push(new DOCX.Paragraph({ spacing: { after: defaillants.length ? 40 : 60 }, children: [new DOCX.TextRun({ text: texteSynthese, bold: defaillants.length > 0, size: 17, color: defaillants.length ? "C0392B" : DOCX_DARK })] }));
+          elements.push(new DOCX.Paragraph({ keepNext: defaillants.length > 0, spacing: { after: defaillants.length ? 60 : 160 }, children: [
+            new DOCX.TextRun({ text: legende, size: 16, color: "666666" }),
+            new DOCX.TextRun({ text: compte, bold: defaillants.length > 0, size: 17, color: defaillants.length ? "C0392B" : DOCX_DARK }),
+          ] }));
         }
         if (defaillants.length) {
           const rows3 = defaillants.map((e) => {
@@ -11556,6 +11645,7 @@ function docxEquipementElements(eq, locaux, allSites) {
           });
           const t3 = docxControlTable(rows3);
           if (t3) elements.push(t3);
+          elements.push(docxSpacer(120));
         }
       });
       elements.push(docxSpacer());
@@ -11744,13 +11834,17 @@ function docxEquipementElements(eq, locaux, allSites) {
       const totalI = calcCourantDechargeTotal(eq);
       const puissanceD = calcPuissanceDecharge(eq);
       if (totalI !== null) {
-        elements.push(new DOCX.Paragraph({ spacing: { before: 40, after: 4 }, children: [new DOCX.TextRun({ text: "Courant de décharge par branche", bold: true, size: 17, color: DOCX_DARK })] }));
-        if (detailBranches) elements.push(new DOCX.Paragraph({ spacing: { after: 4 }, children: [new DOCX.TextRun({ text: detailBranches, size: 16, color: "666666" })] }));
-        elements.push(new DOCX.Paragraph({ spacing: { after: 40 }, children: [new DOCX.TextRun({ text: `Total : ${totalI} A${puissanceD !== null ? `  ·  Puissance de décharge (calculée) : ${puissanceD} kW` : ""}`, bold: true, size: 17, color: DOCX_DARK })] }));
+        elements.push(new DOCX.Paragraph({ keepNext: true, spacing: { before: 160, after: 40 }, children: [new DOCX.TextRun({ text: "Courant de décharge par branche", bold: true, size: 17, color: DOCX_DARK })] }));
+        if (detailBranches) elements.push(new DOCX.Paragraph({ keepNext: true, spacing: { after: 30 }, children: [new DOCX.TextRun({ text: detailBranches, size: 16, color: "666666" })] }));
+        elements.push(new DOCX.Paragraph({ keepNext: true, spacing: { after: 40 }, children: [new DOCX.TextRun({ text: `Total : ${totalI} A${puissanceD !== null ? `  ·  Puissance de décharge (calculée) : ${puissanceD} kW` : ""}`, bold: true, size: 17, color: DOCX_DARK })] }));
       }
       const a = calcAutonomieTheorique(eq);
-      if (a !== null) elements.push(new DOCX.Paragraph({ spacing: { before: 20, after: 60 }, children: [new DOCX.TextRun({ text: `Autonomie avec la charge mesurée (calculée) : ${a} min`, bold: true, size: 17, color: DOCX_DARK })] }));
+      if (a !== null) elements.push(new DOCX.Paragraph({ spacing: { before: 40, after: 60 }, children: [new DOCX.TextRun({ text: `Autonomie avec la charge mesurée (calculée) : ${a} min`, bold: true, size: 17, color: DOCX_DARK })] }));
       else elements.push(docxSpacer());
+      // La courbe de décharge s'affiche ici, juste sous l'essai de décharge, avec son propre titre
+      // (comme à l'écran), et non plus à la fin de l'équipement.
+      const courbeD = docxCourbeDecharge(eq);
+      if (courbeD.length) { elements.push(docxSpacer(80), ...courbeD, docxSpacer()); courbeDechargeIntegree = true; }
       return;
     }
     if (sec.key === "pieces_usure_ups" && TYPES_AVEC_PIECES_USURE.includes(eq.type)) {
@@ -11899,13 +11993,13 @@ function docxEquipementElements(eq, locaux, allSites) {
   });
   if (eq.type === "Disjoncteur BT") {
     const brk = computeBRKValues(eq);
-    elements.push(new DOCX.Paragraph({ spacing: { after: 60 }, children: [new DOCX.TextRun({ text: `Ir (calculé) : ${brk.Ir || "—"} A · Im (calculé) : ${brk.Im || "—"} A`, size: 18, bold: true })] }));
+    elements.push(new DOCX.Paragraph({ keepNext: true, spacing: { before: 160, after: 60 }, children: [new DOCX.TextRun({ text: `Ir (calculé) : ${brk.Ir || "—"} A · Im (calculé) : ${brk.Im || "—"} A`, size: 18, bold: true })] }));
     elements.push(new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: `Surcharge longue — Valise STR : ${brk.valiseSTR_SL} mA · Valise IS : ${brk.valiseIS_SL} A`, size: 16 })] }));
     elements.push(new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: `Court-circuit temporisé — Valise STR : ${brk.valiseSTR_CC} mA · Valise IS : ${brk.valiseIS_CC} A`, size: 16 })] }));
     elements.push(new DOCX.Paragraph({ spacing: { after: 80 }, children: [new DOCX.TextRun({ text: `Instantané — Valise IS : ${brk.valiseIS_Inst} A`, size: 16 })] }));
   }
   elements.push(new DOCX.Paragraph({
-    border: { top: { color: DOCX_BLUE, space: 4, style: DOCX.BorderStyle.SINGLE, size: 8 } }, spacing: { before: 120, after: 60 },
+    border: { top: { color: DOCX_BLUE, space: 4, style: DOCX.BorderStyle.SINGLE, size: 8 } }, spacing: { before: 240, after: 80 },
     children: [new DOCX.TextRun({ text: "Synthèse de l'état — à l'issue de la maintenance : ", bold: true, size: 18, color: DOCX_DARK }), new DOCX.TextRun({ text: (eq.etatFinal || "").toUpperCase(), bold: true, size: 18, color: docxEtatColor(eq.etatFinal) })],
   }));
   if (eq.remarques) elements.push(...docxRemarquesEquipement(eq.remarques));
@@ -11916,19 +12010,10 @@ function docxEquipementElements(eq, locaux, allSites) {
   // l'exclut) mais que des fichiers de courbe existent, on les place ici, comme auparavant.
   if (eq.type === "Disjoncteur BT" && !courbeIntegree) elements.push(...docxCourbeDeclenchement(eq));
 
-  // Courbe de décharge batterie (Onduleur) : même principe que la courbe de déclenchement — image
-  // en grand format (≈ moitié de page).
-  if (TYPES_AVEC_BRANCHES_UPS.includes(eq.type) && (eq.courbeDechargeFiles || []).length) {
-    elements.push(new DOCX.Paragraph({ spacing: { before: 60, after: 40 }, children: [new DOCX.TextRun({ text: "Courbe de décharge batterie", bold: true, size: 19, color: DOCX_DARK })] }));
-    eq.courbeDechargeFiles.forEach((f) => {
-      if (f.isPdf) {
-        elements.push(new DOCX.Paragraph({ spacing: { after: 40 }, children: [new DOCX.TextRun({ text: "Pièce jointe (PDF) : " + (f.name || "document.pdf"), size: 16, color: DOCX_BLUE, italics: true })] }));
-      } else {
-        const img = docxImage(f.dataUrl, 520, 400);
-        if (img) elements.push(new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, spacing: { after: 40 }, children: [img] }));
-      }
-    });
-  }
+  // Courbe de décharge batterie : normalement insérée sous l'essai de décharge (boucle des sections). Repli :
+  // si cette section n'a pas été affichée (niveau de maintenance qui l'exclut) mais qu'une courbe est
+  // jointe, elle est placée ici, comme auparavant — elle ne disparaît jamais du rapport.
+  if (!courbeDechargeIntegree) elements.push(...docxCourbeDecharge(eq));
 
   // Rapport de laboratoire (Analyse d'huile) : taille standard.
   (eq.rapportLaboFiles || []).forEach((f) => {
