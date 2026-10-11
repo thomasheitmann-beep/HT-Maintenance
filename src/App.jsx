@@ -7850,7 +7850,7 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
       {open && (
         <div style={{ marginTop: 16 }}>
           <div style={{ marginBottom: 16, display: "flex", gap: 16, flexWrap: "wrap" }}>
-            {locaux.length > 1 && (
+            {schema.identification.length === 0 && locaux.length > 1 && (
               <div style={{ maxWidth: 260 }}>
                 <Field label="Local">
                   <Select value={eq.localId} onChange={(e) => update({ ...eq, localId: e.target.value })}>
@@ -7988,7 +7988,7 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
                     );
                   }
                   const optsAvecBibliotheque = optionsFusionnees[f.key] || null;
-                  return (
+                  const champ = (
                   <Field key={f.key} label={f.label}>
                     {optsAvecBibliotheque ? (
                       <Combo
@@ -8005,6 +8005,20 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
                     )}
                   </Field>
                   );
+                  // Le local se choisit juste à côté du nom / repère de l'équipement (même ligne de la grille).
+                  if (f.key === "repere" && locaux.length > 0) {
+                    return (
+                      <React.Fragment key={f.key}>
+                        {champ}
+                        <Field label="Local">
+                          <Select value={eq.localId} onChange={(e) => update({ ...eq, localId: e.target.value })}>
+                            {locaux.map((l) => <option key={l.id} value={l.id}>{l.nom || "Local sans nom"}</option>)}
+                          </Select>
+                        </Field>
+                      </React.Fragment>
+                    );
+                  }
+                  return champ;
                 })}
               </div>
             </div>
@@ -8828,8 +8842,9 @@ function computeBRKValues(eq) {
   };
 }
 
-function PrintEquipement({ eq, allEquipements = [] }) {
+function PrintEquipement({ eq, allEquipements = [], locaux = [] }) {
   eq = repairEquipementControles(eq); // filet de sécurité, même principe que côté Word
+  const localEq = (locaux || []).find((l) => l.id === eq.localId);
   const schema = schemaFiltreeParNiveau(getSchema(eq), eq.niveauMaintenance);
   const isRelaisSeuils = TYPES_AVEC_RELAIS.includes(eq.type);
   const brk = eq.type === "Disjoncteur BT" ? computeBRKValues(eq) : null;
@@ -8855,7 +8870,12 @@ function PrintEquipement({ eq, allEquipements = [] }) {
         <span style={{ width: 26, height: 4, background: BRAND.amber, borderRadius: 2 }} />
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "2px 20px", marginBottom: 12 }}>
-        {schema.identification.filter((f) => !champIdentificationMasque(eq, f.key)).map((f) => <PrintFieldRow key={f.key} label={f.label} value={formatIdentificationValue(identificationAffichee[f.key])} />)}
+        {schema.identification.filter((f) => !champIdentificationMasque(eq, f.key)).map((f) => (
+          <React.Fragment key={f.key}>
+            <PrintFieldRow label={f.label} value={formatIdentificationValue(identificationAffichee[f.key])} />
+            {f.key === "repere" && localEq && <PrintFieldRow label="Local" value={localEq.nom || "Local sans nom"} />}
+          </React.Fragment>
+        ))}
       </div>
       {schema.sections.map((sec) => (
         <PrintSection key={sec.key} title={sec.title}>
@@ -9092,7 +9112,7 @@ function PrintReport({ site }) {
 
       <PrintSynthese site={site} />
 
-      {site.equipements.map((eq) => <PrintEquipement key={eq.id} eq={eq} allEquipements={site.equipements} />)}
+      {site.equipements.map((eq) => <PrintEquipement key={eq.id} eq={eq} allEquipements={site.equipements} locaux={site.locaux} />)}
 
       <div style={{ marginTop: 24, paddingTop: 10, borderTop: `1px solid ${BRAND.silver}`, display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 9, color: "#888" }}>
         <span>HT Maintenance — Maintenance électrique HTA / BT</span>
@@ -11524,11 +11544,19 @@ function docxEquipementElements(eq, locaux, allSites) {
   }
   const localNom = (locaux || []).find((l) => l.id === eq.localId);
   const elements = [new DOCX.Paragraph({ children: [new DOCX.PageBreak()] }), docxEquipHeader(eq.type + (eq.identification.repere ? " — " + eq.identification.repere : ""), docxBookmarkId(eq), eq.etatFinal), docxSpacer(40)];
-  if (localNom) elements.push(new DOCX.Paragraph({ spacing: { after: 60 }, children: [new DOCX.TextRun({ text: "Local : " + (localNom.nom || "Local sans nom"), size: 16, color: "666666", italics: true })] }));
+  // Le local est une ligne du tableau d'identification, juste sous le nom / repère. Un équipement sans
+  // tableau d'identification (ex. « Sécurité ») garde l'ancienne mention discrète au-dessus.
+  if (localNom && !schema.identification.length) elements.push(new DOCX.Paragraph({ spacing: { after: 60 }, children: [new DOCX.TextRun({ text: "Local : " + (localNom.nom || "Local sans nom"), size: 16, color: "666666", italics: true })] }));
   else elements.push(docxSpacer(40));
   if (schema.identification.length) {
     const identificationAffichee = identificationBilanPuissanceAffichee(eq, allSites);
-    const t = docxFieldTable(schema.identification.filter((f) => !champIdentificationMasque(eq, f.key)).map((f) => [f.label, formatIdentificationValue(identificationAffichee[f.key])]));
+    const champsId = schema.identification.filter((f) => !champIdentificationMasque(eq, f.key));
+    const lignesId = champsId.map((f) => [f.label, formatIdentificationValue(identificationAffichee[f.key])]);
+    if (localNom) {
+      const idxRepere = champsId.findIndex((f) => f.key === "repere");
+      lignesId.splice(idxRepere >= 0 ? idxRepere + 1 : 0, 0, ["Local", localNom.nom || "Local sans nom"]);
+    }
+    const t = docxFieldTable(lignesId);
     if (t) { elements.push(t); elements.push(docxSpacer()); }
   }
   if (eq.type === "Transformateur" && eq.identification?.typeRefroidissement && DESCRIPTION_REFROIDISSEMENT_TRANSFO[eq.identification.typeRefroidissement]) {
