@@ -419,6 +419,96 @@ const LISTE_COURBE_RELAIS = ["Constant", "Inverse Normale CEI", "Très Inverse C
 const LISTE_TYPE_RELAIS = ["Indépendant", "Dépendant"];
 const LISTE_TEMPO_UNITE = ["ms", "s"];
 const LISTE_ETAT_SEUIL = ["", "Actif"];
+// ---------------------------------------------------------------------------------------------
+// Bibliothèque des déclencheurs Schneider (Micrologic) — valeurs relevées dans les documents constructeur fournis :
+//  • Micrologic 2.0 / 5.0 / 6.0 — guide d'exploitation 04/2010 (Masterpact NT/NW, Compact NS800-3200)
+//  • Micrologic P — guide d'exploitation (Masterpact NT/NW)
+//  • Micrologic X — Masterpact MTZ, guide utilisateur DOCA0102FR-09
+//  • Compact NSX 100-630 — guide utilisateur DOCA0140EN-03 (Micrologic 2 et 4)
+//  • Compact NSX Micrologic 5/6/7 — guide utilisateur DOCA0141FR-03 (productinfo.se.com)
+// Surcharge longue : le temps de la courbe est un MAXIMUM (précision « 0 à −x % » : le temps réel est entre (1 − x) fois
+// le temps lu et ce temps), à froid (état thermique neutre). Court retard et instantané : temps de non-déclenchement
+// et temps maximal de coupure. Hors de cette liste (autres marques, autres déclencheurs), l'app garde son modèle générique.
+// ---------------------------------------------------------------------------------------------
+// Courbe de surcharge longue : t(I) = tr6 × (36 − c) / ((I/Ir)² − c), tr6 = temporisation à 6 × Ir. Avec c = 0,84375 elle
+// reproduit les tableaux Schneider : × 25 à 1,5 Ir, × 0,689 à 7,2 Ir, × 0,3525 à 10 Ir (tr = 4 s : 100 s, 2,76 s, 1,41 s).
+// Pour le Micrologic 2.2 G (c = 1,0862) : 15 s à 1,5 Ir et 0,35 s à 7,2 Ir pour tr6 = 0,5 s.
+const FENETRES_COURT_RETARD_SCHNEIDER = [ // tsd (s) → temps de non-déclenchement / temps maximal de coupure (s), à 10 × Ir, I²t ON ou OFF
+  { tsd: 0, non: 0.02, max: 0.08 }, { tsd: 0.1, non: 0.08, max: 0.14 }, { tsd: 0.2, non: 0.14, max: 0.20 },
+  { tsd: 0.3, non: 0.23, max: 0.32 }, { tsd: 0.4, non: 0.35, max: 0.50 },
+];
+const II_NSX_PAR_CALIBRE = { 40: 600, 100: 1500, 160: 2400, 250: 3000, 400: 4800, 630: 6930 }; // Compact NSX : seuil Ii fixe (A), ±15 %
+const tolLongRetardNTNW = (tr6, x) => (tr6 <= 0.5 ? 0.6 : x < 3 ? 0.7 : 0.8); // 0 à −30 % à 1,5 Ir ; 0 à −20 % à 6 et 7,2 Ir ; −40 % au plus petit cran
+const tolLongRetardMTZ = (tr6) => (tr6 > 2 ? 0.8 : tr6 === 2 ? 0.75 : 0.7); // −20 % si tr > 2 s ; −25 % ; −30 % si tr < 2 s (trois lignes du guide, lecture retenue)
+const COURT_RETARD_A_TABLE = { precision: 0.10, i2t: true }; // Isd 1,5–10 Ir ±10 %, tsd 0–0,4 s, I²t ON/OFF (valeurs : FENETRES_COURT_RETARD_SCHNEIDER)
+const DECLENCHEURS_SCHNEIDER = {
+  "Micrologic 2.0 (Masterpact NT/NW, Compact NS 800-3200)": {
+    court: "Micrologic 2.0", source: "Micrologic 2.0 / 5.0 / 6.0 — guide d'exploitation 04/2010", c: 0.84375, tr6Fixe: null, tolLong: tolLongRetardNTNW,
+    courtRetard: { precision: 0.10, i2t: false, fixe: { non: 0.02, max: 0.08 } }, instantane: { precision: 0.10, non: 0.02, max: 0.08 },
+  },
+  "Micrologic 5.0 / 6.0 (Masterpact NT/NW, Compact NS 800-3200)": {
+    court: "Micrologic 5.0 / 6.0", source: "Micrologic 2.0 / 5.0 / 6.0 — guide d'exploitation 04/2010", c: 0.84375, tr6Fixe: null, tolLong: tolLongRetardNTNW,
+    courtRetard: COURT_RETARD_A_TABLE, instantane: { precision: 0.10, non: 0.02, max: 0.05 },
+  },
+  "Micrologic 5.0 P / 6.0 P / 7.0 P (Masterpact NT/NW)": {
+    court: "Micrologic 5.0 P / 6.0 P / 7.0 P", source: "Micrologic P — guide d'exploitation (annexe : protections)", c: 0.84375, tr6Fixe: null, tolLong: tolLongRetardNTNW,
+    courtRetard: COURT_RETARD_A_TABLE, instantane: { precision: 0.10, non: 0.02, max: 0.05 },
+  },
+  "Micrologic 2.0 X (Masterpact MTZ)": {
+    court: "Micrologic 2.0 X", source: "MasterPact MTZ — Micrologic X, guide utilisateur DOCA0102FR-09", c: 0.84375, tr6Fixe: null, tolLong: tolLongRetardMTZ,
+    courtRetard: { precision: 0.10, i2t: false, fixe: { non: 0.02, max: 0.08 } }, instantane: { precision: 0.10, non: 0.02, max: 0.08 },
+  },
+  "Micrologic 5.0 X / 6.0 X / 7.0 X (Masterpact MTZ)": {
+    court: "Micrologic 5.0 X / 6.0 X / 7.0 X", source: "MasterPact MTZ — Micrologic X, guide utilisateur DOCA0102FR-09 (mode Ii standard)", c: 0.84375, tr6Fixe: null, tolLong: tolLongRetardMTZ,
+    courtRetard: COURT_RETARD_A_TABLE, instantane: { precision: 0.10, non: 0.02, max: 0.05 },
+  },
+  "Micrologic 2.2 / 2.3 / 4.2 / 4.3 (Compact NSX 100-630)": {
+    court: "Micrologic 2.2 / 2.3 / 4.2 / 4.3", source: "Compact NSX 100-630 — guide utilisateur DOCA0140EN-03", c: 0.84375, tr6Fixe: 16, tolLong: () => 0.8,
+    courtRetard: { precision: 0.15, i2t: false, fixe: { non: 0.02, max: 0.08 } }, instantane: { precision: 0.15, non: 0, max: 0.05, parCalibre: II_NSX_PAR_CALIBRE },
+  },
+  "Micrologic 2.2 G (Compact NSX 100-250)": {
+    court: "Micrologic 2.2 G", source: "Compact NSX 100-630 — guide utilisateur DOCA0140EN-03 (MicroLogic 2 G)", c: 1.0862, tr6Fixe: 0.5, tolLong: () => 0.8,
+    courtRetard: { precision: 0.10, i2t: false, fixe: { non: 0.14, max: 0.20 } }, instantane: { precision: 0.15, non: 0.015, max: 0.05, parCalibre: { 40: 600, 100: 1500, 160: 2400, 250: 3000 } },
+  },
+};
+// Micrologic 5/6/7 des Compact NSX (guide DOCA0141FR-03) : tr à 6 Ir = 0,5 / 1 / 2 / 4 / 8 / 16 s (25 / 50 / 100 / 200 / 400 s à 1,5 Ir, 15 s pour le cran 0,5 s), précision −20 % / +0 ;
+// court retard : Isd 1,5–10 Ir ±10 %, mêmes plages tsd que les autres Micrologic (maintien 20–350 ms, coupure 80–500 ms), I²t ON/OFF ;
+// instantané : Ii réglable (1,5–15 × In pour 100-160 A, 1,5–12 × In pour 250-400 A, 1,5–11 × In pour 630 A) ±10 %, maintien 10 ms, coupure 50 ms.
+DECLENCHEURS_SCHNEIDER["Micrologic 5 / 6 / 7 (Compact NSX 100-630)"] = {
+  court: "Micrologic 5 / 6 / 7 (NSX)", source: "Compact NSX Micrologic 5/6/7 — guide utilisateur DOCA0141FR-03", c: 0.84375, tr6Fixe: null, tolLong: () => 0.8, corrCranMini: 1.2,
+  courtRetard: COURT_RETARD_A_TABLE, instantane: { precision: 0.10, non: 0.01, max: 0.05 },
+};
+const LISTE_DECLENCHEURS_BT = [...Object.keys(DECLENCHEURS_SCHNEIDER), "Autre / non répertorié"];
+function declencheurSchneider(eq) {
+  const nom = eq && eq.identification && eq.identification.declencheur;
+  return nom && DECLENCHEURS_SCHNEIDER[nom] ? { nom, ...DECLENCHEURS_SCHNEIDER[nom] } : null;
+}
+const facteurLongRetard = (d, x) => (36 - d.c) / (x * x - d.c); // t(I) / tr6, avec x = I / Ir
+// tr6 : temporisation à 6 × Ir — fixe pour les Compact NSX, sinon déduite du réglage saisi (à 1,5, 6 ou 7,2 × Ir).
+function tr6DepuisReglage(d, tr, trX) {
+  if (d.tr6Fixe) return d.tr6Fixe;
+  if (!(tr > 0)) return null;
+  return tr / facteurLongRetard(d, trX > 0 ? trX : 6);
+}
+// Le plus petit cran (0,5 s) des Micrologic 5/6/7 NSX donne 15 s à 1,5 Ir (et non 12,5 s) : correction ×1,2 sous 3 × Ir.
+const tempsMaxLongRetard = (d, tr6, x) => tr6 * facteurLongRetard(d, x) * (d.corrCranMini && tr6 <= 0.5 && x < 3 ? d.corrCranMini : 1);
+// Plage de déclenchement du court retard au courant I : [non-déclenchement ; coupure maximale], mise à l'échelle (10 Ir / I)²
+// pour I < 10 Ir si l'essai est fait à I²t ON (la courbe est alors en I²t jusqu'à 10 Ir).
+function fenetreCourtRetardSchneider(d, tsd, I, Ir, i2tActif) {
+  const cr = d.courtRetard;
+  if (!cr) return null;
+  let fen = cr.fixe;
+  if (!fen) {
+    const t = FENETRES_COURT_RETARD_SCHNEIDER, s = Math.min(Math.max(tsd || 0, 0), 0.4);
+    let k = 0;
+    while (k < t.length - 2 && s > t[k + 1].tsd) k++;
+    const f = (s - t[k].tsd) / (t[k + 1].tsd - t[k].tsd);
+    fen = { non: t[k].non + f * (t[k + 1].non - t[k].non), max: t[k].max + f * (t[k + 1].max - t[k].max) };
+  }
+  const echelle = i2tActif && cr.i2t && I < 10 * Ir ? Math.pow((10 * Ir) / I, 2) : 1;
+  return { non: fen.non * echelle, max: fen.max * echelle };
+}
+const iiSchneider = (d, calibre) => (d.instantane && d.instantane.parCalibre && d.instantane.parCalibre[calibre]) || null; // Ii fixe (A) selon le calibre
 const LISTE_TR_MODE = ["Ajustable", "Fixe"];
 const LISTE_TR_CLASSE = ["1.5", "6"];
 // Le relais de protection peut être d'une marque différente de celle de la cellule (ex. cellule
@@ -2474,7 +2564,8 @@ const SCHEMAS = {
       { key: "transfoSnManuel", label: "Puissance du transformateur (kVA) — saisie manuelle", numeric: true },
       { key: "transfoU2Manuel", label: "Tension secondaire du transformateur (V) — saisie manuelle", numeric: true },
       { key: "transfoUccManuel", label: "Ucc du transformateur (%) — saisie manuelle", numeric: true },
-      { key: "typeDisjoncteur", label: "Type disjoncteur", options: LISTE_TYPE_DISJONCTEUR_BT_OPTIONS }, { key: "numeroSerieDisjoncteur", label: "Numéro de série" },
+      { key: "typeDisjoncteur", label: "Type disjoncteur", options: LISTE_TYPE_DISJONCTEUR_BT_OPTIONS },
+      { key: "declencheur", label: "Unité de contrôle / déclencheur (courbe constructeur)", options: LISTE_DECLENCHEURS_BT }, { key: "numeroSerieDisjoncteur", label: "Numéro de série" },
       { key: "marqueRelais", label: "Marque de l'unité de déclenchement", options: LISTE_MARQUE_RELAIS_BT }, { key: "referenceRelais", label: "Référence de l'unité de déclenchement", options: LISTE_REFERENCE_RELAIS_BT_OPTIONS }, { key: "numeroSerieRelais", label: "Numéro de série (relais)" },
       { key: "intensiteNominale", label: "Intensité nominale (A)", numeric: true }, { key: "debrochable", label: "Débrochable", options: OUI_NON_LIST },
     ],
@@ -7663,6 +7754,10 @@ function BRKReglagePanel({ eq, update, custom, onAddCustom, onChangeCustom, onRe
   const valiseIS_CC = Math.round(Ir * n(cc.k) * testACC);
   const valiseIS_Inst = Math.round(n(inst.ii) * 1000 * 1.3);
   const evCC = evaluationEssaiCourtRetard(eq); // temps attendu au court retard selon le mode I²t de l'essai
+  const evSL = evaluationEssaiSurchargeLongue(eq); // temps maximal attendu à la surcharge longue (constructeur ou saisi)
+  const evIn = evaluationEssaiInstantane(eq); // temps maximal de coupure à l'instantané
+  const declencheur = declencheurSchneider(eq);
+  const arrondi = (v, d) => Math.round(v * d) / d;
 
   return (
     <>
@@ -7706,6 +7801,7 @@ function BRKReglagePanel({ eq, update, custom, onAddCustom, onChangeCustom, onRe
             <span style={{ fontSize: 12.5, color: "#3E4A5C", flex: "1 1 160px" }}>Surcharge longue</span>
             <MiniInput label="Test à" unit="x Ir" value={tSL.test_a} onChange={(v) => setT("test_surcharge_longue", "test_a", v)} />
             <MiniInput label="Tr max attendu" unit="s" value={tSL.tr_max} onChange={(v) => setT("test_surcharge_longue", "tr_max", v)} />
+            {evSL && evSL.tMaxDoc !== null && <MiniComputed label="Max constructeur" unit="s" value={arrondi(evSL.tMaxDoc, 10)} />}
             <MiniComputed label="Valise STR" unit="mA" value={valiseSTR_SL} />
             <MiniComputed label="Valise IS" unit="A" value={valiseIS_SL} />
             <MiniInput label="Déclenchement" unit="s" value={tSL.declenchement} onChange={(v) => setT("test_surcharge_longue", "declenchement", v)} />
@@ -7720,12 +7816,18 @@ function BRKReglagePanel({ eq, update, custom, onAddCustom, onChangeCustom, onRe
             <MiniComputed label="Valise IS" unit="A" value={valiseIS_CC} />
             {cc.i2t === "ON" && <MiniSelect label="I²t à l'essai" options={["OFF", "ON"]} value={tCC.i2t_essai || "OFF"} onChange={(v) => setT("test_cc_temporise", "i2t_essai", v)} />}
             <MiniInput label="Décl. à T=0" unit="ms" value={tCC.declenchement_t0} onChange={(v) => setT("test_cc_temporise", "declenchement_t0", v)} />
-            {evCC && <MiniComputed label="Attendu (±20 %)" unit="ms" value={Math.round(evCC.attendu * 1000 * 10) / 10} />}
+            {evCC && evCC.source === "constructeur" && <MiniComputed label="Plage constructeur" unit="ms" value={`${arrondi(evCC.bas * 1000, 1)}–${arrondi(evCC.haut * 1000, 1)}`} />}
+            {evCC && evCC.source !== "constructeur" && evCC.attendu !== null && <MiniComputed label="Attendu (±20 %)" unit="ms" value={Math.round(evCC.attendu * 1000 * 10) / 10} />}
             <MiniInput label="Décl. à T réglé" unit="ms" value={tCC.declenchement_treg} onChange={(v) => setT("test_cc_temporise", "declenchement_treg", v)} />
             <Select value={tests.test_cc_temporise.etat} onChange={(e) => setTEtat("test_cc_temporise", e.target.value)} style={{ width: 130, padding: "5px 7px", fontSize: 12 }}>
               {EQUIP_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
             </Select>
           </div>
+          {declencheur && (
+            <div style={{ fontSize: 11.5, color: "#5B6B7D", lineHeight: 1.5, padding: "0 0 8px", borderBottom: "1px solid #E2E6EB" }}>
+              Valeurs constructeur : <b>{declencheur.court}</b> — {declencheur.source}. Surcharge longue : temps maximum à froid (un temps plus court peut venir de la mémoire thermique) ; court retard et instantané : temps de non-déclenchement et coupure maximale.
+            </div>
+          )}
           {evCC && cc.i2t === "ON" && (
             <div style={{ fontSize: 11.5, color: "#5B6B7D", lineHeight: 1.5, padding: "0 0 8px", borderBottom: "1px solid #E2E6EB" }}>
               {evCC.modeEssai === "OFF"
@@ -7739,6 +7841,7 @@ function BRKReglagePanel({ eq, update, custom, onAddCustom, onChangeCustom, onRe
             <span style={{ fontSize: 12.5, color: "#3E4A5C", flex: "1 1 160px" }}>Instantané</span>
             <MiniInput label="Valise STR" unit="mA" value={tests.test_instantane.fields.valise_str} onChange={(v) => setT("test_instantane", "valise_str", v)} />
             <MiniComputed label="Valise IS" unit="A" value={valiseIS_Inst} />
+            {evIn && evIn.source === "constructeur" && <MiniComputed label="Max constructeur" unit="ms" value={Math.round(evIn.max * 1000)} />}
             <MiniInput label="Déclenchement" unit="ms" value={tests.test_instantane.fields.declenchement} onChange={(v) => setT("test_instantane", "declenchement", v)} />
             <Select value={tests.test_instantane.etat} onChange={(e) => setTEtat("test_instantane", e.target.value)} style={{ width: 130, padding: "5px 7px", fontSize: 12 }}>
               {EQUIP_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
@@ -8020,13 +8123,12 @@ function analyserAnomaliesEquipement(eq) {
   });
   if (eq.type === "Disjoncteur BT") {
     // Surcharge longue : déclenchement mesuré comparé au "Tr max attendu" renseigné par le technicien.
-    const testSL = eq.controles.tests_disjoncteur?.test_surcharge_longue?.fields;
-    if (testSL) {
-      const trMax = numOf(testSL.tr_max);
-      const decl = numOf(testSL.declenchement);
-      if (trMax && decl !== null && decl > trMax) {
-        ajouter(`Lors de l'essai de surcharge longue, le déclenchement a été mesuré à ${decl} s, soit au-delà du temps maximal attendu (${trMax} s).`, 1, "disjoncteur", "essai de surcharge longue");
-      }
+    // Temps maximal : valeur saisie, sinon celle de la courbe constructeur (déclencheur connu) au courant d'essai.
+    const evSL = evaluationEssaiSurchargeLongue(eq);
+    if (evSL && evSL.horsLimites) {
+      const frS = (v) => String(Math.round(v * 10) / 10).replace(".", ",");
+      const doc = evSL.source === "constructeur" ? `, courbe constructeur ${DECLENCHEURS_SCHNEIDER[evSL.declencheur].court} à ${String(evSL.x).replace(".", ",")} Ir` : "";
+      ajouter(`Lors de l'essai de surcharge longue, le déclenchement a été mesuré à ${frS(evSL.mesure)} s, soit au-delà du temps maximal attendu (${frS(evSL.haut)} s${doc}).`, 1, "disjoncteur", "essai de surcharge longue");
     }
     // Court-circuit temporisé : écart > 20 % entre le déclenchement à T réglé et le temps ATTENDU, qui dépend du mode I²t
     // utilisé pendant l'essai (voir evaluationEssaiCourtRetard) : la temporisation réglée (tsd) à I²t OFF — cas courant,
@@ -8037,17 +8139,25 @@ function analyserAnomaliesEquipement(eq) {
       const mesMs = frMs(evCC.mesure, 100);
       const tsdMs = frMs(evCC.tsd, 100);
       const attMs = frMs(evCC.attendu, 10);
-      const reference = evCC.modeEssai === "ON" && Math.abs(evCC.attendu - evCC.tsd) > 1e-9
-        ? `du temps attendu à I²t ON (${attMs} ms à ${String(evCC.x).replace(".", ",")} Im, pour tsd = ${tsdMs} ms)`
-        : `de la temporisation réglée (tsd = ${tsdMs} ms${evCC.reglageI2t ? ", essai à I²t OFF" : ""})`;
-      ajouter(`Lors de l'essai de court-circuit temporisé, le déclenchement à T réglé (${mesMs} ms) s'écarte de plus de 20 % ${reference}.`, 1, "disjoncteur", "essai de court-circuit temporisé");
+      if (evCC.source === "constructeur") {
+        // Déclencheur connu : plage du constructeur (non-déclenchement → coupure maximale), et non ±20 %.
+        const courtNom = DECLENCHEURS_SCHNEIDER[evCC.declencheur].court;
+        ajouter(`Lors de l'essai de court-circuit temporisé, le déclenchement à T réglé (${mesMs} ms) est hors de la plage constructeur (${frMs(evCC.bas, 10)} à ${frMs(evCC.haut, 10)} ms pour un ${courtNom}${evCC.reglageI2t ? `, essai à I²t ${evCC.modeEssai}` : ""}).`, 1, "disjoncteur", "essai de court-circuit temporisé");
+      } else {
+        const reference = evCC.modeEssai === "ON" && Math.abs(evCC.attendu - evCC.tsd) > 1e-9
+          ? `du temps attendu à I²t ON (${attMs} ms à ${String(evCC.x).replace(".", ",")} Im, pour tsd = ${tsdMs} ms)`
+          : `de la temporisation réglée (tsd = ${tsdMs} ms${evCC.reglageI2t ? ", essai à I²t OFF" : ""})`;
+        ajouter(`Lors de l'essai de court-circuit temporisé, le déclenchement à T réglé (${mesMs} ms) s'écarte de plus de 20 % ${reference}.`, 1, "disjoncteur", "essai de court-circuit temporisé");
+      }
     }
 
     // Instantané : repère usuel ≈ 50 ms (donnée constructeur, pas une clause CEI 60947-2 universelle).
-    const testInst = eq.controles.tests_disjoncteur?.test_instantane?.fields;
-    if (testInst) {
-      const decl = numOf(testInst.declenchement);
-      if (decl !== null && decl > 50) {
+    const evIn = evaluationEssaiInstantane(eq);
+    if (evIn && evIn.horsLimites) {
+      const decl = String(Math.round(evIn.mesure * 1000 * 10) / 10).replace(".", ",");
+      if (evIn.source === "constructeur") {
+        ajouter(`Lors de l'essai instantané, le temps de coupure mesuré (${decl} ms) dépasse le temps maximal de coupure de ${Math.round(evIn.max * 1000)} ms indiqué par le constructeur (${DECLENCHEURS_SCHNEIDER[evIn.declencheur].court}).`, 1, "disjoncteur", "essai instantané");
+      } else {
         ajouter(`Lors de l'essai instantané, le temps de coupure mesuré (${decl} ms) dépasse le repère usuel de 50 ms (donnée constructeur, et non une exigence normative de la CEI 60947-2).`, 1, "disjoncteur", "essai instantané");
       }
     }
@@ -11517,18 +11627,63 @@ function evaluationEssaiCourtRetard(eq) {
   const Ir = n(sl.inominal) * n(sl.k1) * n(sl.k2);
   const Im = cc.k ? (cc.im_fonction_de === "In" ? n(sl.inominal) : Ir) * n(cc.k) : 0;
   const tsd = n(cc.tsd) / 1000;
-  if (!(Ir > 0) || !(Im > 0) || !(tsd > 0)) return null;
+  const d = declencheurSchneider(eq);
+  const fenetreFixe = !!(d && d.courtRetard && d.courtRetard.fixe); // déclencheurs sans temporisation réglable : plage constructeur seule
+  if (!(Ir > 0) || !(Im > 0)) return null;
+  if (!(tsd > 0) && !fenetreFixe) return null;
   const x = n(tCC.test_a) || 1.2, I = x * Im;
-  const reglageI2t = cc.i2t === "ON";
+  const reglageI2t = cc.i2t === "ON" && !(d && d.courtRetard && !d.courtRetard.i2t);
   const modeEssai = reglageI2t && tCC.i2t_essai === "ON" ? "ON" : "OFF";
-  const attendu = modeEssai === "ON" && I < 10 * Ir ? tsd * Math.pow((10 * Ir) / I, 2) : tsd;
+  const attendu = tsd > 0 ? (modeEssai === "ON" && I < 10 * Ir ? tsd * Math.pow((10 * Ir) / I, 2) : tsd) : null;
+  let bas = attendu !== null ? 0.8 * attendu : null, haut = attendu !== null ? 1.2 * attendu : null, source = "generique";
+  if (d && d.courtRetard) {
+    // Plage constructeur : temps de non-déclenchement et temps maximal de coupure (et non ±20 %).
+    const fen = fenetreCourtRetardSchneider(d, tsd, I, Ir, modeEssai === "ON");
+    bas = fen.non; haut = fen.max; source = "constructeur";
+  }
   const mesure = n(tCC.declenchement_treg) > 0 ? n(tCC.declenchement_treg) / 1000 : null;
   return {
-    Ir, Im, I, x, tsd, reglageI2t, modeEssai, attendu, bas: 0.8 * attendu, haut: 1.2 * attendu, mesure,
-    horsLimites: mesure !== null && Math.abs(mesure - attendu) / attendu > 0.2,
+    Ir, Im, I, x, tsd, reglageI2t, modeEssai, attendu, bas, haut, source, mesure, declencheur: d ? d.nom : null,
+    horsLimites: mesure !== null && bas !== null && (mesure < bas - 1e-9 || mesure > haut + 1e-9),
     // Les deux modes donnent des temps différents : réglage ON, et court retard (Im) sous 10 Ir.
-    modesDifferent: reglageI2t && Im < 10 * Ir,
+    modesDifferent: reglageI2t && tsd > 0 && Im < 10 * Ir,
   };
+}
+// Essai de surcharge longue : temps maximal attendu. Constructeur (déclencheur connu) : maximum de la courbe au courant d'essai ;
+// la valeur « Tr max attendu » saisie par le technicien, si elle existe, prévaut. Seul le DÉPASSEMENT du maximum est une anomalie :
+// un temps plus court que le minimum de la plage peut venir de la mémoire thermique (essais répétés), il est seulement signalé.
+function evaluationEssaiSurchargeLongue(eq) {
+  const n = (v) => { const x = parseFloat(String(v).replace(",", ".")); return isNaN(x) ? 0 : x; };
+  const rg = eq && eq.controles && eq.controles.reglage_disjoncteur, ts = eq && eq.controles && eq.controles.tests_disjoncteur;
+  if (!rg || !ts || !rg.surcharge_longue || !ts.test_surcharge_longue) return null;
+  const sl = rg.surcharge_longue.fields || {}, tSL = ts.test_surcharge_longue.fields || {};
+  const Ir = n(sl.inominal) * n(sl.k1) * n(sl.k2);
+  if (!(Ir > 0)) return null;
+  const x = n(tSL.test_a) || 1.5;
+  const d = declencheurSchneider(eq);
+  const tr6 = d ? tr6DepuisReglage(d, n(sl.tr), n(sl.tr_classe)) : null;
+  const tMaxDoc = tr6 ? tempsMaxLongRetard(d, tr6, x) : null;
+  const tMinDoc = tMaxDoc !== null ? tMaxDoc * d.tolLong(tr6, x) : null;
+  const saisi = n(tSL.tr_max) > 0 ? n(tSL.tr_max) : null;
+  const haut = saisi !== null ? saisi : tMaxDoc;
+  const mesure = n(tSL.declenchement) > 0 ? n(tSL.declenchement) : null;
+  return {
+    Ir, x, I: x * Ir, mesure, tr6, tMaxDoc, tMinDoc, haut, bas: tMinDoc, declencheur: d ? d.nom : null,
+    source: saisi !== null ? "saisie" : tMaxDoc !== null ? "constructeur" : null,
+    horsLimites: mesure !== null && haut !== null && mesure > haut * 1.0001,
+    sousMinimum: mesure !== null && tMinDoc !== null && mesure < tMinDoc * 0.9999,
+  };
+}
+// Essai instantané : temps maximal de coupure du constructeur si le déclencheur est connu, sinon repère usuel de 50 ms.
+function evaluationEssaiInstantane(eq) {
+  const n = (v) => { const x = parseFloat(String(v).replace(",", ".")); return isNaN(x) ? 0 : x; };
+  const ts = eq && eq.controles && eq.controles.tests_disjoncteur;
+  if (!ts || !ts.test_instantane) return null;
+  const d = declencheurSchneider(eq);
+  const doc = d && d.instantane ? d.instantane : null;
+  const max = doc ? doc.max : LIMITE_INSTANTANE_S, non = doc ? doc.non : 0;
+  const mesure = n(ts.test_instantane.fields && ts.test_instantane.fields.declenchement) > 0 ? n(ts.test_instantane.fields.declenchement) / 1000 : null;
+  return { max, non, mesure, source: doc ? "constructeur" : "generique", declencheur: d ? d.nom : null, horsLimites: mesure !== null && mesure > max + 1e-9 };
 }
 function parametresCourbeDeclenchement(eq) {
   if (!eq || eq.type !== "Disjoncteur BT" || !eq.controles || !eq.controles.reglage_disjoncteur) return null;
@@ -11538,43 +11693,61 @@ function parametresCourbeDeclenchement(eq) {
   const inst = (rg.instantane && rg.instantane.fields) || {}, pdc = (rg.pouvoir_coupure && rg.pouvoir_coupure.fields) || {};
   const Ir = n(sl.inominal) * n(sl.k1) * n(sl.k2);
   if (!(Ir > 0)) return null;
-  const tr = n(sl.tr), trX = n(sl.tr_classe) || 6;
+  // Déclencheur connu (bibliothèque constructeur) : courbe de surcharge longue en temps MAXIMUMS avec sa bande de tolérance,
+  // plages du court retard et de l'instantané ; sinon modèle générique d'après les réglages saisis.
+  const d = declencheurSchneider(eq);
+  const tr6 = d ? tr6DepuisReglage(d, n(sl.tr), n(sl.tr_classe)) : null;
+  const tr = tr6 || n(sl.tr), trX = tr6 ? 6 : (n(sl.tr_classe) || 6);
   const Im = cc.k ? (cc.im_fonction_de === "In" ? n(sl.inominal) : Ir) * n(cc.k) : 0;
-  const tsd = n(cc.tsd) / 1000, i2t = cc.i2t === "ON";
-  const Ii = n(inst.ii) * 1000, Icu = n(pdc.icu) * 1000;
+  const fenetreFixe = !!(d && d.courtRetard && d.courtRetard.fixe);
+  // Sans temporisation réglable (Micrologic 2.x), le trait est tracé au temps maximal de coupure du constructeur.
+  const tsd = fenetreFixe ? d.courtRetard.fixe.max : n(cc.tsd) / 1000;
+  const i2t = cc.i2t === "ON" && !(d && d.courtRetard && !d.courtRetard.i2t);
+  const IiDoc = d ? iiSchneider(d, n(sl.inominal)) : null; // Compact NSX : seuil instantané fixe selon le calibre
+  const Ii = n(inst.ii) * 1000 || IiDoc || 0, Icu = n(pdc.icu) * 1000;
   if (!(tr > 0) && !(Im > 0) && !(Ii > 0)) return null;
   // Points d'essai mesurés, aux courants d'essai de l'app (x Ir, x Im, 1,3 x Ii) ; « bad » reprend les règles d'anomalie du rapport.
   const points = [];
-  const tSL = (ts.test_surcharge_longue && ts.test_surcharge_longue.fields) || {};
-  const tIn = (ts.test_instantane && ts.test_instantane.fields) || {};
-  if (n(tSL.declenchement) > 0) {
-    const x = n(tSL.test_a) || 1.5, limite = n(tSL.tr_max) || null;
-    points.push({ nom: "SL", I: x * Ir, t: n(tSL.declenchement), limites: limite ? { haut: limite } : null, bad: !!(limite && n(tSL.declenchement) > limite), repere: `${String(x).replace(".", ",")} Ir` });
+  const evSL = evaluationEssaiSurchargeLongue(eq);
+  if (evSL && evSL.mesure !== null) {
+    points.push({ nom: "SL", I: evSL.I, t: evSL.mesure, limites: evSL.haut ? { haut: evSL.haut, basDoc: evSL.bas } : null, bad: evSL.horsLimites, repere: `${String(evSL.x).replace(".", ",")} Ir` });
   }
   const evCC = evaluationEssaiCourtRetard(eq);
   if (evCC && evCC.mesure !== null) {
     points.push({ nom: "CC", I: evCC.I, t: evCC.mesure, limites: { bas: evCC.bas, haut: evCC.haut, attendu: evCC.attendu }, bad: evCC.horsLimites, repere: `${String(evCC.x).replace(".", ",")} Im` });
   }
-  if (Ii > 0 && n(tIn.declenchement) > 0) {
-    const t = n(tIn.declenchement) / 1000;
-    points.push({ nom: "INST", I: 1.3 * Ii, t, limites: { haut: LIMITE_INSTANTANE_S }, bad: t > LIMITE_INSTANTANE_S, repere: "1,3 Ii" });
+  const evIn = evaluationEssaiInstantane(eq);
+  if (Ii > 0 && evIn && evIn.mesure !== null) {
+    points.push({ nom: "INST", I: 1.3 * Ii, t: evIn.mesure, limites: { haut: evIn.max, bas: evIn.non > 0 ? evIn.non : null }, bad: evIn.horsLimites, repere: "1,3 Ii" });
   }
   const repere = eq.identification && eq.identification.repere;
   // Réglage ON mais essai du court retard fait à OFF (cas courant) : la mesure se lit sur la ligne tsd, pas sur la courbe I²t.
   const essaiCourtRetardOff = !!(evCC && evCC.modesDifferent && evCC.modeEssai === "OFF");
   const essaiCourtRetardOn = !!(evCC && evCC.modesDifferent && evCC.modeEssai === "ON");
-  return { Ir, tr, trX, Im, tsd, i2t, Ii, Icu, points, essaiCourtRetardOff, essaiCourtRetardOn, titre: ("Courbe de déclenchement" + (repere ? " · " + repere : "")).toUpperCase() };
+  const modeEssaiOn = !!(evCC && evCC.modeEssai === "ON");
+  return {
+    Ir, tr, trX, Im, tsd, i2t, Ii, Icu, points, essaiCourtRetardOff, essaiCourtRetardOn,
+    declencheur: d ? d.nom : null, tr6: tr6 || null,
+    tsdTexte: fenetreFixe ? `coupure ≤ ${Math.round(d.courtRetard.fixe.max * 1000)} ms (fixe)` : null,
+    tLong: d && tr6 ? (I) => tempsMaxLongRetard(d, tr6, I / Ir) : null,
+    bandeLong: d && tr6 ? (x) => d.tolLong(tr6, x) : null,
+    fenCC: d && d.courtRetard && Im > 0 ? (I) => fenetreCourtRetardSchneider(d, n(cc.tsd) / 1000, I, Ir, modeEssaiOn) : null,
+    fenInst: d && d.instantane && Ii > 0 ? { x0: Ii * (1 - d.instantane.precision), non: d.instantane.non, max: d.instantane.max } : null,
+    noteDoc: d ? `Courbe constructeur Schneider — ${d.court} : temps maximums à froid, zones admises d'après la documentation.` : "",
+    titre: ("Courbe de déclenchement" + (repere ? " · " + repere : "")).toUpperCase(),
+  };
 }
+
 // Polyligne (courant en A, temps en s) de la courbe théorique : surcharge longue en I²t, transition verticale vers le
 // court retard (constant, ou en I²t jusqu'à 10 Ir), puis vers l'instantané.
 function pointsCourbeDeclenchement(p, xMax) {
   const pts = [];
   const log = (a, b, k) => Math.exp(Math.log(a) + ((Math.log(b) - Math.log(a)) * k));
-  const tLong = (I) => p.tr * Math.pow((p.trX * p.Ir) / I, 2);
+  const tLong = p.tLong || ((I) => p.tr * Math.pow((p.trX * p.Ir) / I, 2));
   const tCourt = (I) => (p.i2t && I < 10 * p.Ir ? p.tsd * Math.pow((10 * p.Ir) / I, 2) : p.tsd);
   const aCourtRetard = p.Im > 1.05 * p.Ir && p.tsd > 0;
   const finLong = aCourtRetard ? p.Im : (p.Ii > 1.05 * p.Ir ? p.Ii : xMax);
-  if (p.tr > 0 && finLong > 1.05 * p.Ir) {
+  if ((p.tr > 0 || p.tLong) && finLong > 1.05 * p.Ir) {
     for (let k = 0; k <= 80; k++) { const I = log(1.05 * p.Ir, finLong, k / 80); pts.push([I, tLong(I)]); }
   }
   if (aCourtRetard) {
@@ -11639,7 +11812,7 @@ function genererGraphiqueCourbeDeclenchement(p) {
     while (taille > 9 && ctx.measureText(p.titre).width > W - 36) { taille -= 0.5; ctx.font = `bold ${taille}px ${SANS}`; }
     ctx.fillText(p.titre, 18, 16);
     const reglages = [`Ir ${fmtI(p.Ir)}`, p.tr > 0 ? `tr ${fr(p.tr, 1)} s à ${fr(p.trX, 1)} Ir` : null, p.Im > 0 ? `Im ${fmtI(p.Im)}` : null,
-      p.Im > 0 && p.tsd > 0 ? `tsd ${fr(p.tsd * 1000, 0)} ms (I²t ${p.i2t ? "ON" : "OFF"})` : null, p.Ii > 0 ? `Ii ${fmtI(p.Ii)}` : null].filter(Boolean).join("  ·  ");
+      p.Im > 0 && p.tsd > 0 ? (p.tsdTexte || `tsd ${fr(p.tsd * 1000, 0)} ms (I²t ${p.i2t ? "ON" : "OFF"})`) : null, p.Ii > 0 ? `Ii ${fmtI(p.Ii)}` : null].filter(Boolean).join("  ·  ");
     let t2 = 12;
     ctx.font = `${t2}px ${SANS}`;
     while (t2 > 9 && ctx.measureText(reglages).width > W - 36) { t2 -= 0.5; ctx.font = `${t2}px ${SANS}`; }
@@ -11652,6 +11825,34 @@ function genererGraphiqueCourbeDeclenchement(p) {
     decadesX.forEach((e) => { for (let m = 1; m <= 9; m++) { const I = m * Math.pow(10, e); if (I < xMin * 0.999 || I > xMax * 1.001) continue; const x = xFor(I); ctx.strokeStyle = m === 1 ? "#DDE3EA" : "#F0F3F6"; ctx.beginPath(); ctx.moveTo(x, top); ctx.lineTo(x, bottom); ctx.stroke(); } });
     decadesY.forEach((e) => { for (let m = 1; m <= 9; m++) { const t = m * Math.pow(10, e); if (t > yMax * 1.001) continue; const y = yFor(t); ctx.strokeStyle = m === 1 ? "#DDE3EA" : "#F0F3F6"; ctx.beginPath(); ctx.moveTo(left, y); ctx.lineTo(right, y); ctx.stroke(); } });
     ctx.strokeStyle = "#C5CCD5"; ctx.strokeRect(left, top, right - left, bottom - top);
+    // Zones constructeur (déclencheur connu) : bande de tolérance de la surcharge longue, plages admises du court retard
+    // (mode I²t de l'essai) et de l'instantané.
+    const polygone = (pts, couleur) => {
+      if (pts.length < 3) return;
+      ctx.fillStyle = couleur; ctx.beginPath();
+      pts.forEach(([I, t], i) => { const x = xFor(Math.min(Math.max(I, xMin), xMax)), y = yFor(t); if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y); });
+      ctx.closePath(); ctx.fill();
+    };
+    const logLin = (a, b, k) => Math.exp(Math.log(a) + (Math.log(b) - Math.log(a)) * k);
+    const aCourtRetardZone = p.Im > 1.05 * p.Ir && p.tsd > 0;
+    if (p.tLong && p.bandeLong) {
+      const finLongZone = aCourtRetardZone ? p.Im : (p.Ii > 1.05 * p.Ir ? p.Ii : xMax);
+      if (finLongZone > 1.05 * p.Ir) {
+        const hautB = [], basB = [];
+        for (let k = 0; k <= 60; k++) { const I = logLin(1.05 * p.Ir, finLongZone, k / 60), t = p.tLong(I); hautB.push([I, t]); basB.push([I, t * p.bandeLong(I / p.Ir)]); }
+        polygone([...hautB, ...basB.reverse()], "rgba(21,96,168,0.30)");
+      }
+    }
+    if (p.fenCC && aCourtRetardZone) {
+      const finCourtZone = p.Ii > p.Im ? p.Ii : xMax;
+      const hautC = [], basC = [];
+      for (let k = 0; k <= 40; k++) { const I = logLin(p.Im, finCourtZone, k / 40), f = p.fenCC(I); hautC.push([I, f.max]); basC.push([I, Math.max(f.non, yMin)]); }
+      polygone([...hautC, ...basC.reverse()], "rgba(255,192,46,0.42)");
+    }
+    if (p.fenInst && p.Ii > 0) {
+      const basI = Math.max(p.fenInst.non, yMin);
+      polygone([[p.fenInst.x0, p.fenInst.max], [xMax, p.fenInst.max], [xMax, basI], [p.fenInst.x0, basI]], "rgba(176,42,42,0.16)");
+    }
     // Graduations.
     ctx.font = `12px ${SERIF}`; ctx.fillStyle = "#5B6B7D";
     ctx.textAlign = "right"; ctx.textBaseline = "middle";
@@ -11717,6 +11918,12 @@ function genererGraphiqueCourbeDeclenchement(p) {
         ctx.setLineDash([2, 3]); ctx.strokeStyle = "#B02A2A"; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x, yl); ctx.stroke(); ctx.setLineDash([]);
         ctx.fillStyle = "#FFFFFF"; ctx.strokeStyle = "#B02A2A"; ctx.lineWidth = 1.8;
         ctx.beginPath(); ctx.moveTo(x, yl - 5); ctx.lineTo(x + 5, yl); ctx.lineTo(x, yl + 5); ctx.lineTo(x - 5, yl); ctx.closePath(); ctx.fill(); ctx.stroke(); ctx.lineWidth = 1;
+        if (L.basDoc) {
+          // Minimum de la plage constructeur : repère gris, simple information (la mémoire thermique peut raccourcir les essais répétés).
+          const yb2 = yFor(L.basDoc);
+          ctx.setLineDash([2, 3]); ctx.strokeStyle = "#8B96A3"; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x, yb2); ctx.stroke(); ctx.setLineDash([]);
+          ctx.lineWidth = 1.8; ctx.beginPath(); ctx.moveTo(x - 6, yb2); ctx.lineTo(x + 6, yb2); ctx.stroke(); ctx.lineWidth = 1;
+        }
       }
       ctx.fillStyle = pt.bad ? "#C0392B" : "#FFC02E"; ctx.strokeStyle = "#1A1F26"; ctx.lineWidth = 1.5;
       ctx.beginPath(); ctx.arc(x, y, 5.5, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); ctx.lineWidth = 1;
@@ -11727,17 +11934,31 @@ function genererGraphiqueCourbeDeclenchement(p) {
       ctx.lineWidth = 1; ctx.fillStyle = "#1A1F26"; ctx.fillText(texte, aGauche ? x - 10 : x + 10, y - 11);
     });
     // Légende (dans le graphique, en bas à gauche : zone libre) et mention de la nature de la courbe.
-    if (p.points.length) {
+    if (p.points.length || p.declencheur) {
       ctx.font = `11px ${SANS}`; ctx.textBaseline = "middle"; ctx.textAlign = "left";
-      const lx = left + 14, ly1 = bottom - 30, ly2 = bottom - 14;
-      ctx.fillStyle = "rgba(255,255,255,0.85)"; ctx.fillRect(left + 4, ly1 - 11, 168, 40);
-      ctx.fillStyle = "#FFC02E"; ctx.strokeStyle = "#1A1F26"; ctx.beginPath(); ctx.arc(lx, ly1, 4.5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-      ctx.fillStyle = "#5B6B7D"; ctx.fillText("essai mesuré", lx + 10, ly1);
-      ctx.strokeStyle = "#B02A2A"; ctx.fillStyle = "#FFFFFF"; ctx.beginPath(); ctx.moveTo(lx, ly2 - 4.5); ctx.lineTo(lx + 5, ly2); ctx.lineTo(lx, ly2 + 4.5); ctx.lineTo(lx - 5, ly2); ctx.closePath(); ctx.fill(); ctx.stroke();
-      ctx.fillStyle = "#5B6B7D"; ctx.fillText("limites d'acceptation", lx + 10, ly2);
+      const lignes = (p.points.length ? 2 : 0) + (p.declencheur ? 1 : 0);
+      const lx = left + 14;
+      let ly = bottom - 14 - 16 * (lignes - 1);
+      ctx.fillStyle = "rgba(255,255,255,0.85)"; ctx.fillRect(left + 4, ly - 11, 198, 16 * lignes + 8);
+      if (p.declencheur) {
+        ctx.fillStyle = "rgba(21,96,168,0.22)"; ctx.fillRect(lx - 7, ly - 5, 14, 10);
+        ctx.fillStyle = "rgba(255,192,46,0.40)"; ctx.fillRect(lx + 1, ly - 5, 6, 10);
+        ctx.fillStyle = "#5B6B7D"; ctx.fillText("zones admises (constructeur)", lx + 14, ly); ly += 16;
+      }
+      if (p.points.length) {
+        ctx.fillStyle = "#FFC02E"; ctx.strokeStyle = "#1A1F26"; ctx.beginPath(); ctx.arc(lx, ly, 4.5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+        ctx.fillStyle = "#5B6B7D"; ctx.fillText("essai mesuré", lx + 14, ly); ly += 16;
+        ctx.strokeStyle = "#B02A2A"; ctx.fillStyle = "#FFFFFF"; ctx.beginPath(); ctx.moveTo(lx, ly - 4.5); ctx.lineTo(lx + 5, ly); ctx.lineTo(lx, ly + 4.5); ctx.lineTo(lx - 5, ly); ctx.closePath(); ctx.fill(); ctx.stroke();
+        ctx.fillStyle = "#5B6B7D"; ctx.fillText("limites d'acceptation", lx + 14, ly);
+      }
     }
     ctx.font = `italic 10.5px ${SERIF}`; ctx.fillStyle = "#8B96A3"; ctx.textAlign = "left"; ctx.textBaseline = "middle";
-    ctx.fillText("Courbe théorique d'après les réglages relevés, hors tolérances constructeur.", 18, H - 12);
+    {
+      const mention = p.noteDoc || "Courbe théorique d'après les réglages relevés, hors tolérances constructeur.";
+      let tm = 10.5; ctx.font = `italic ${tm}px ${SERIF}`;
+      while (tm > 8 && ctx.measureText(mention).width > W - 36) { tm -= 0.5; ctx.font = `italic ${tm}px ${SERIF}`; }
+      ctx.fillText(mention, 18, H - 12);
+    }
     if (noteEssai) { ctx.fillStyle = p.essaiCourtRetardOff ? "#2E8B57" : "#5B6B7D"; ctx.fillText(noteEssai, 18, H - 28); }
     return { dataUrl: canvas.toDataURL("image/png"), largeur: W, hauteur: H };
   } catch (e) {
@@ -11787,7 +12008,7 @@ function liensOutilsCourbes(eq, liensPerso = lireLiensCourbes()) {
 function CourbeDeclenchementOutils({ eq, update }) {
   const [version, setVersion] = useState(0);
   const p = parametresCourbeDeclenchement(eq);
-  const cle = p ? JSON.stringify([p.Ir, p.tr, p.trX, p.Im, p.tsd, p.i2t, p.Ii, p.Icu, p.points, p.titre]) : "";
+  const cle = p ? JSON.stringify([p.Ir, p.tr, p.trX, p.Im, p.tsd, p.i2t, p.Ii, p.Icu, p.points, p.titre, p.declencheur, p.tr6, p.essaiCourtRetardOff, p.essaiCourtRetardOn]) : "";
   const apercu = useMemo(() => (p ? genererGraphiqueCourbeDeclenchement(p) : null), [cle]);
   const { marque, liens } = useMemo(() => liensOutilsCourbes(eq), [eq.identification && eq.identification.marque, eq.identification && eq.identification.modele, eq.identification && eq.identification.typeDisjoncteur, version]);
   const inclure = eq.courbeDeclenchementAuto !== false;
@@ -11808,7 +12029,9 @@ function CourbeDeclenchementOutils({ eq, update }) {
       {p ? (
         <>
           <div style={{ fontSize: 12, color: "#3E4A5C", lineHeight: 1.5, marginBottom: 8 }}>
-            Tracée automatiquement à partir des réglages (Ir, tr, Im, tsd, Ii) et des essais mesurés. C'est une courbe <b>théorique</b>, sans les zones de tolérance du constructeur.
+            {p.declencheur
+              ? <>Tracée à partir des réglages, des essais mesurés et des <b>valeurs constructeur</b> du déclencheur sélectionné (temps maximums, zones admises).</>
+              : <>Tracée automatiquement à partir des réglages (Ir, tr, Im, tsd, Ii) et des essais mesurés. C'est une courbe <b>théorique</b>, sans les zones de tolérance du constructeur — choisissez l'« Unité de contrôle » dans l'identification pour obtenir la courbe constructeur (Micrologic Schneider).</>}
           </div>
           {apercu && <img src={apercu.dataUrl} alt="Courbe de déclenchement d'après les réglages" style={{ width: "100%", maxWidth: 640, display: "block", margin: "0 auto 8px", border: "1px solid #E2E6EB", borderRadius: 10, background: "#FFFFFF" }} />}
           <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, cursor: "pointer" }}>
