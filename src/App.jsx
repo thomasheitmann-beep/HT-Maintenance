@@ -11,7 +11,7 @@ import {
   Plus, Search, AlertTriangle, CheckCircle2, AlertOctagon,
   Trash2, ArrowLeft, Building2, Clock, ChevronRight, ChevronDown,
   MapPin, ShieldCheck, FileText, Settings2, Printer, ImagePlus,
-  Mail, PenLine, RotateCcw, ClipboardList, X, MinusCircle, Download, Upload, Copy, RefreshCw, Users, Phone,
+  Mail, PenLine, RotateCcw, ClipboardList, X, MinusCircle, Download, Upload, Copy, RefreshCw, Users, Phone, Crop,
 } from "lucide-react";
 
 /* =========================================================================
@@ -3110,6 +3110,7 @@ function emptyEquipement(type) {
     photos: [],
     courbeFiles: [],
     courbeDechargeFiles: [],
+    courbeDechargeDonnees: null, // tensions mesurées pendant l'essai de décharge → courbe tracée par l'app
     rapportLaboFiles: [],
   };
 }
@@ -4187,12 +4188,13 @@ const photoEnAttente = (dataUrl) => typeof dataUrl === "string" && dataUrl.start
 // au lieu d'une simple mention textuelle "Pièce jointe (PDF)". Nécessite la dépendance pdfjs-dist
 // (npm install pdfjs-dist) ; le worker est chargé via l'import Vite ?url pour rester en phase avec
 // la version installée, sans dépendre d'un CDN externe.
-async function pdfFirstPageToBlob(file, maxDim = 1400, quality = 0.82) {
+async function pdfFirstPageToBlob(file, maxDim = 1400, quality = 0.82, infos = null) {
   const pdfjsLib = await import("pdfjs-dist");
   const workerUrl = (await import("pdfjs-dist/build/pdf.worker.min.mjs?url")).default;
   pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
   const buf = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+  if (infos) infos.nbPages = pdf.numPages; // permet de signaler un PDF de plusieurs pages (choix de la page à faire)
   const page = await pdf.getPage(1);
   const baseViewport = page.getViewport({ scale: 1 });
   const scale = Math.min(3, maxDim / Math.max(baseViewport.width, baseViewport.height));
@@ -4210,11 +4212,399 @@ async function pdfFirstPageToBlob(file, maxDim = 1400, quality = 0.82) {
   });
 }
 
+// ---------------------------------------------------------------------------------------------
+// Recadrage d'une pièce jointe : choix de la page d'un PDF et sélection de la zone utile (ex. le
+// graphique d'une courbe de décharge exportée avec son tableau de valeurs), pour que SEUL ce qui est
+// sélectionné figure dans le rapport. Le PDF d'origine reste conservé : on peut recadrer à nouveau.
+// ---------------------------------------------------------------------------------------------
+const FICHIERS_PDF_EN_SESSION = new Map(); // id de pièce jointe → PDF d'origine (évite de le retélécharger juste après l'import)
+async function pdfCharger(source) {
+  const pdfjsLib = await import("pdfjs-dist");
+  const workerUrl = (await import("pdfjs-dist/build/pdf.worker.min.mjs?url")).default;
+  pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
+  return pdfjsLib.getDocument({ data: await source.arrayBuffer() }).promise;
+}
+// Page d'un PDF dessinée sur un canvas, assez fine pour recadrer un graphique sans le dégrader, tout en
+// restant sous les limites des navigateurs (surtout mobiles) : 8000 px de côté, 16 millions de pixels.
+async function pdfRendrePage(pdf, numero, largeurCible = 2400) {
+  const page = await pdf.getPage(numero);
+  const base = page.getViewport({ scale: 1 });
+  let echelle = largeurCible / base.width;
+  echelle = Math.min(echelle, 8000 / base.width, 8000 / base.height, Math.sqrt(16e6 / (base.width * base.height)));
+  const viewport = page.getViewport({ scale: Math.max(echelle, 0.5) });
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.ceil(viewport.width);
+  canvas.height = Math.ceil(viewport.height);
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#FFFFFF"; // fond explicite : un PDF transparent donnerait sinon une image noire
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  await page.render({ canvasContext: ctx, viewport }).promise;
+  return canvas;
+}
+// Image (URL de stockage, ou data:) dessinée sur un canvas — relue en local pour que le canvas puisse ensuite être exporté.
+async function imageVersCanvas(url) {
+  let src = url, objet = null;
+  if (/^https?:/i.test(url)) {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`téléchargement impossible (${res.status})`);
+    objet = URL.createObjectURL(await res.blob());
+    src = objet;
+  }
+  const img = await new Promise((resolve, reject) => {
+    const i = new window.Image();
+    i.onload = () => resolve(i);
+    i.onerror = () => reject(new Error("image illisible"));
+    i.src = src;
+  });
+  const k = Math.min(1, 4096 / Math.max(img.naturalWidth, img.naturalHeight));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(img.naturalWidth * k));
+  canvas.height = Math.max(1, Math.round(img.naturalHeight * k));
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#FFFFFF";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+  if (objet) URL.revokeObjectURL(objet);
+  return canvas;
+}
+// Rectangle (en fractions 0–1 de l'image) entre deux points, borné à l'image, du coin haut-gauche au coin bas-droit.
+function rectangleNormalise(p0, p1) {
+  const borne = (v) => Math.min(1, Math.max(0, v));
+  return { x0: borne(Math.min(p0.x, p1.x)), y0: borne(Math.min(p0.y, p1.y)), x1: borne(Math.max(p0.x, p1.x)), y1: borne(Math.max(p0.y, p1.y)) };
+}
+// Découpe la zone sélectionnée (toute l'image si aucune) sur fond blanc, à 1800 px de large au plus.
+// Un graphique reste net en PNG ; au-delà de 2,5 millions de pixels, JPEG 90 % pour rester léger.
+async function recadrerVersBlob(source, rect, largeurMax = 1800) {
+  const r = rect || { x0: 0, y0: 0, x1: 1, y1: 1 };
+  const sx = Math.min(source.width - 1, Math.max(0, Math.round(r.x0 * source.width)));
+  const sy = Math.min(source.height - 1, Math.max(0, Math.round(r.y0 * source.height)));
+  const sw = Math.max(1, Math.min(source.width - sx, Math.round((r.x1 - r.x0) * source.width)));
+  const sh = Math.max(1, Math.min(source.height - sy, Math.round((r.y1 - r.y0) * source.height)));
+  const k = Math.min(1, largeurMax / sw);
+  const sortie = document.createElement("canvas");
+  sortie.width = Math.max(1, Math.round(sw * k));
+  sortie.height = Math.max(1, Math.round(sh * k));
+  const ctx = sortie.getContext("2d");
+  ctx.fillStyle = "#FFFFFF";
+  ctx.fillRect(0, 0, sortie.width, sortie.height);
+  ctx.drawImage(source, sx, sy, sw, sh, 0, 0, sortie.width, sortie.height);
+  const lourde = sortie.width * sortie.height > 2.5e6;
+  const type = lourde ? "image/jpeg" : "image/png";
+  const blob = await new Promise((resolve, reject) => sortie.toBlob((b) => (b ? resolve(b) : reject(new Error("export de l'image impossible"))), type, 0.9));
+  return { blob, extension: lourde ? "jpg" : "png" };
+}
+// Enregistre une image prête (envoi vers le stockage si possible, sinon conservée localement — comme les photos).
+async function televerserOuGarderBlob(blob, extension = "png") {
+  if (CURRENT_USER_FOR_STORAGE && !(typeof navigator !== "undefined" && navigator.onLine === false)) {
+    try {
+      const idToken = await CURRENT_USER_FOR_STORAGE.getIdToken();
+      return await firebaseStorageUpload(`photos/${uid()}.${extension}`, blob, idToken);
+    } catch (e) {
+      console.warn("[Recadrage] envoi impossible pour l'instant, image conservée localement :", e);
+    }
+  }
+  return blobToDataUrl(blob);
+}
+function RecadrageModal({ fichier, onFermer, onValider }) {
+  const [chargement, setChargement] = useState(true);
+  const [message, setMessage] = useState("");
+  const [nbPages, setNbPages] = useState(fichier.nbPages || 1);
+  const [page, setPage] = useState(fichier.pagePdf || 1);
+  const [zoom, setZoom] = useState(1);
+  const [rect, setRect] = useState(null);
+  const [dimensions, setDimensions] = useState(null);
+  const [modeSelection, setModeSelection] = useState(true);
+  const [enCours, setEnCours] = useState(false);
+  const pdfRef = useRef(null);
+  const canvasRef = useRef(null);
+  const sourceRef = useRef(null);
+  const ancreRef = useRef(null);
+
+  // 1. Ouverture de la source : le PDF d'origine s'il existe, sinon l'image déjà enregistrée.
+  useEffect(() => {
+    let annule = false;
+    (async () => {
+      try {
+        const pdfSession = FICHIERS_PDF_EN_SESSION.get(fichier.id);
+        if (pdfSession || fichier.pdfUrl) {
+          let blob = pdfSession;
+          if (!blob) {
+            const res = await fetch(fichier.pdfUrl);
+            if (!res.ok) throw new Error(`téléchargement impossible (${res.status})`);
+            blob = await res.blob();
+          }
+          const pdf = await pdfCharger(blob);
+          if (annule) return;
+          pdfRef.current = pdf;
+          setNbPages(pdf.numPages);
+        }
+      } catch (e) {
+        console.error("[Recadrage] PDF d'origine illisible, repli sur l'image enregistrée :", e);
+        pdfRef.current = null;
+        if (!annule) setMessage("Le PDF d'origine n'a pas pu être relu : seule l'image déjà enregistrée peut être recadrée.");
+      }
+      if (!annule) setChargement(false);
+    })();
+    return () => { annule = true; };
+  }, [fichier.id]);
+
+  // 2. Dessin de la page choisie (ou de l'image) dans le canvas affiché.
+  useEffect(() => {
+    if (chargement) return;
+    let annule = false;
+    (async () => {
+      try {
+        const source = pdfRef.current ? await pdfRendrePage(pdfRef.current, page) : await imageVersCanvas(fichier.originalUrl || fichier.dataUrl);
+        if (annule) return;
+        sourceRef.current = source;
+        const c = canvasRef.current;
+        if (!c) return;
+        c.width = source.width;
+        c.height = source.height;
+        c.getContext("2d").drawImage(source, 0, 0);
+        setDimensions({ w: source.width, h: source.height });
+        setRect(null);
+      } catch (e) {
+        console.error("[Recadrage] affichage impossible :", e);
+        if (!annule) setMessage("Impossible d'afficher cette page : " + (e && e.message ? e.message : "erreur inconnue") + ".");
+      }
+    })();
+    return () => { annule = true; };
+  }, [chargement, page]);
+
+  const position = (e) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    return { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height };
+  };
+  const rectValide = rect && dimensions && (rect.x1 - rect.x0) * dimensions.w >= 10 && (rect.y1 - rect.y0) * dimensions.h >= 10 ? rect : null;
+
+  async function valider() {
+    if (!sourceRef.current) return;
+    setEnCours(true);
+    try {
+      const { blob, extension } = await recadrerVersBlob(sourceRef.current, rectValide);
+      const dataUrl = await televerserOuGarderBlob(blob, extension);
+      onValider({ dataUrl, page: pdfRef.current ? page : null, nbPages: pdfRef.current ? nbPages : null });
+    } catch (e) {
+      console.error("[Recadrage] enregistrement impossible :", e);
+      setMessage("Le recadrage n'a pas pu être enregistré : " + (e && e.message ? e.message : "erreur inconnue") + ".");
+      setEnCours(false);
+    }
+  }
+
+  const bouton = { ...btnGhost("#3E4A5C"), padding: "5px 10px" };
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(10,15,25,0.62)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 10 }}>
+      <div style={{ background: "#FFFFFF", borderRadius: 12, width: "min(940px, 100%)", maxHeight: "96vh", display: "flex", flexDirection: "column", boxShadow: "0 20px 60px rgba(0,0,0,0.35)" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", borderBottom: "1px solid #E2E6EB" }}>
+          <div style={{ fontWeight: 700, color: "#1A1F26", fontSize: 14 }}>Recadrer la pièce jointe</div>
+          <button onClick={onFermer} style={{ background: "none", border: "none", cursor: "pointer", color: "#5B6B7D", display: "flex" }} title="Fermer"><X size={18} /></button>
+        </div>
+        <div style={{ padding: "8px 16px", display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", borderBottom: "1px solid #E2E6EB" }}>
+          {nbPages > 1 && (
+            <>
+              <button style={bouton} disabled={page <= 1 || chargement} onClick={() => setPage((p) => Math.max(1, p - 1))}>‹ Page préc.</button>
+              <span style={{ fontSize: 12.5, fontWeight: 700, color: "#1A1F26" }}>Page {page} / {nbPages}</span>
+              <button style={bouton} disabled={page >= nbPages || chargement} onClick={() => setPage((p) => Math.min(nbPages, p + 1))}>Page suiv. ›</button>
+              <span style={{ width: 1, height: 20, background: "#D8DEE5" }} />
+            </>
+          )}
+          <button style={bouton} onClick={() => setZoom((z) => Math.max(0.5, Math.round((z - 0.25) * 100) / 100))} title="Réduire">−</button>
+          <span style={{ fontSize: 12, color: "#5B6B7D", minWidth: 38, textAlign: "center" }}>{Math.round(zoom * 100)} %</span>
+          <button style={bouton} onClick={() => setZoom((z) => Math.min(4, Math.round((z + 0.25) * 100) / 100))} title="Agrandir">+</button>
+          <span style={{ width: 1, height: 20, background: "#D8DEE5" }} />
+          <button style={{ ...bouton, background: modeSelection ? BRAND.blue : "#E2E6EB", color: modeSelection ? "#FFFFFF" : "#3E4A5C" }} onClick={() => setModeSelection(true)} title="Tracer la zone à garder">▭ Sélectionner</button>
+          <button style={{ ...bouton, background: !modeSelection ? BRAND.blue : "#E2E6EB", color: !modeSelection ? "#FFFFFF" : "#3E4A5C" }} onClick={() => setModeSelection(false)} title="Faire défiler la page (tactile)">✋ Défiler</button>
+          <button style={bouton} onClick={() => setRect(null)} disabled={!rect}>Page entière</button>
+        </div>
+        {message && <div style={{ padding: "8px 16px", fontSize: 12, color: "#B5730A", background: "#FDF3E3" }}>{message}</div>}
+        <div style={{ flex: 1, minHeight: 200, overflow: "auto", background: "#E9EDF1", padding: 10 }}>
+          {chargement && <div style={{ padding: 30, textAlign: "center", color: "#5B6B7D", fontSize: 13 }}>Chargement du document…</div>}
+          <div style={{ position: "relative", width: `${zoom * 100}%`, margin: "0 auto", display: chargement || !dimensions ? "none" : "block", background: "#FFFFFF", boxShadow: "0 1px 6px rgba(0,0,0,0.25)" }}>
+            <canvas ref={canvasRef} style={{ width: "100%", height: "auto", display: "block" }} />
+            <div
+              style={{ position: "absolute", inset: 0, overflow: "hidden", cursor: modeSelection ? "crosshair" : "grab", touchAction: modeSelection ? "none" : "auto", userSelect: "none" }}
+              onPointerDown={(e) => {
+                if (!modeSelection) return;
+                e.currentTarget.setPointerCapture(e.pointerId);
+                const p = position(e);
+                ancreRef.current = p;
+                setRect(rectangleNormalise(p, p));
+              }}
+              onPointerMove={(e) => { if (ancreRef.current) setRect(rectangleNormalise(ancreRef.current, position(e))); }}
+              onPointerUp={() => { ancreRef.current = null; }}
+              onPointerCancel={() => { ancreRef.current = null; }}
+            >
+              {rect && (
+                <div style={{ position: "absolute", left: `${rect.x0 * 100}%`, top: `${rect.y0 * 100}%`, width: `${(rect.x1 - rect.x0) * 100}%`, height: `${(rect.y1 - rect.y0) * 100}%`, border: "2px dashed #FFC107", boxShadow: "0 0 0 9999px rgba(10,15,25,0.5)", boxSizing: "border-box", pointerEvents: "none" }} />
+              )}
+            </div>
+          </div>
+        </div>
+        <div style={{ padding: "10px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap", borderTop: "1px solid #E2E6EB" }}>
+          <div style={{ fontSize: 11.5, color: "#5B6B7D", maxWidth: 520 }}>
+            {rectValide ? `Zone sélectionnée : ${Math.round((rectValide.x1 - rectValide.x0) * dimensions.w)} × ${Math.round((rectValide.y1 - rectValide.y0) * dimensions.h)} px — seule cette zone ira dans le rapport.` : "Tracez un rectangle autour du graphique à garder (sans sélection, la page entière est conservée)."}
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button style={btnGhost("#3E4A5C")} onClick={onFermer} disabled={enCours}>Annuler</button>
+            <button style={{ ...btnGhost("#FFFFFF"), background: BRAND.blue }} onClick={valider} disabled={enCours || chargement || !dimensions}>{enCours ? "Enregistrement…" : "Valider"}</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Fenêtre de saisie des tensions de décharge : collage depuis Numbers / Excel, fichier texte ou lecture directe du PDF joint,
+// avec aperçu du tracé avant enregistrement.
+function CourbeDechargeModal({ eq, onFermer, onValider }) {
+  const existant = eq.courbeDechargeDonnees;
+  const texteInitial = existant && existant.valeurs
+    ? existant.valeurs.map((v, i) => (existant.temps ? `${String(Math.round(existant.temps[i] * 100) / 100).replace(".", ",")};${String(v).replace(".", ",")}` : String(v).replace(".", ","))).join("\n")
+    : "";
+  const [texte, setTexte] = useState(texteInitial);
+  const [uniteTemps, setUniteTemps] = useState(existant && existant.temps ? "min" : "auto");
+  const [dureeTexte, setDureeTexte] = useState(existant && existant.dureeMin && !existant.temps ? String(existant.dureeMin) : "");
+  const [message, setMessage] = useState("");
+  const [lecturePdf, setLecturePdf] = useState(false);
+  const sourceRef = useRef(existant && existant.source ? existant.source : "collage");
+  const fichierRef = useRef(null);
+  const analyse = useMemo(() => analyserTensionsCollees(texte, uniteTemps === "auto" ? null : uniteTemps), [texte, uniteTemps]);
+  const th = calcTensionsBatterieTheoriques(eq);
+  const nominale = th ? th.nominale : null, seuilBas = th ? th.finDecharge : null;
+  const dureeEssai = numOf(eq.controles && eq.controles.essai_decharge && eq.controles.essai_decharge.duree_decharge && eq.controles.essai_decharge.duree_decharge.fields && eq.controles.essai_decharge.duree_decharge.fields.duree);
+  const dureeMin = analyse.erreur ? null : (analyse.temps ? analyse.dureeMin : (numOf(dureeTexte) || dureeEssai || null));
+  const repere = eq.identification && eq.identification.repere;
+  const titre = ("Courbe de décharge batterie" + (repere ? " · " + repere : "")).toUpperCase();
+  const apercu = useMemo(() => (analyse.erreur ? null : genererGraphiqueCourbeDecharge({ valeurs: analyse.valeurs, temps: analyse.temps, dureeMin, nominale, seuilBas, titre })), [analyse, dureeMin, nominale, seuilBas, titre]);
+  const pdfJoint = (eq.courbeDechargeFiles || []).find((f) => f.pdfUrl || FICHIERS_PDF_EN_SESSION.has(f.id));
+
+  async function lireDepuisPdf() {
+    setLecturePdf(true);
+    setMessage("");
+    try {
+      let blob = FICHIERS_PDF_EN_SESSION.get(pdfJoint.id);
+      if (!blob) {
+        const res = await fetch(pdfJoint.pdfUrl);
+        if (!res.ok) throw new Error(`téléchargement impossible (${res.status})`);
+        blob = await res.blob();
+      }
+      const t = await extraireTensionsDepuisPdf(await pdfCharger(blob));
+      if (!t) setMessage("Aucune colonne de valeurs lisible dans ce PDF (un tableau exporté en image ne peut pas être lu) : collez les valeurs ci-dessous.");
+      else { setTexte(t); setUniteTemps("auto"); sourceRef.current = "pdf"; setMessage(`${t.split("\n").length} lignes lues dans le PDF — vérifiez l'aperçu avant d'enregistrer.`); }
+    } catch (e) {
+      console.error("[Courbe de décharge] lecture du PDF impossible :", e);
+      setMessage("Le PDF n'a pas pu être lu : " + (e && e.message ? e.message : "erreur inconnue") + ". Collez les valeurs ci-dessous.");
+    }
+    setLecturePdf(false);
+  }
+  async function lireFichier(fichier) {
+    try { setTexte(await fichier.text()); setUniteTemps("auto"); sourceRef.current = "fichier"; setMessage(""); }
+    catch (e) { setMessage("Ce fichier n'a pas pu être lu."); }
+  }
+  function enregistrer() {
+    if (analyse.erreur) return;
+    onValider({
+      valeurs: analyse.valeurs,
+      temps: analyse.temps ? analyse.temps.map((t) => Math.round(t * 1000) / 1000) : null,
+      dureeMin: dureeMin || null,
+      source: sourceRef.current,
+    });
+  }
+  const bouton = { ...btnGhost("#3E4A5C"), padding: "5px 10px" };
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(10,15,25,0.62)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 10 }}>
+      <div style={{ background: "#FFFFFF", borderRadius: 12, width: "min(900px, 100%)", maxHeight: "96vh", display: "flex", flexDirection: "column", boxShadow: "0 20px 60px rgba(0,0,0,0.35)" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", borderBottom: "1px solid #E2E6EB" }}>
+          <div style={{ fontWeight: 700, color: "#1A1F26", fontSize: 14 }}>Courbe de décharge — tensions mesurées</div>
+          <button onClick={onFermer} style={{ background: "none", border: "none", cursor: "pointer", color: "#5B6B7D", display: "flex" }} title="Fermer"><X size={18} /></button>
+        </div>
+        <div style={{ overflow: "auto", padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
+          <div style={{ fontSize: 12.5, color: "#3E4A5C", lineHeight: 1.5 }}>
+            Collez la colonne des tensions mesurées pendant la décharge (une valeur par ligne, copiée depuis Numbers ou Excel), ou deux colonnes « temps ; tension ». La courbe est tracée avec la tension nominale et le seuil bas calculés pour cette batterie.
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button style={{ ...bouton, opacity: pdfJoint ? 1 : 0.5 }} disabled={!pdfJoint || lecturePdf} onClick={lireDepuisPdf} title={pdfJoint ? "Lit la colonne de valeurs dans le PDF joint à cette courbe" : "Aucun PDF joint à la courbe de décharge"}>
+              <FileText size={13} /> {lecturePdf ? "Lecture…" : "Lire les valeurs du PDF joint"}
+            </button>
+            <button style={bouton} onClick={() => fichierRef.current && fichierRef.current.click()}><Upload size={13} /> Ouvrir un fichier texte / CSV</button>
+            <input ref={fichierRef} type="file" accept=".txt,.csv,.tsv,text/plain,text/csv" style={{ display: "none" }} onChange={(e) => { if (e.target.files && e.target.files[0]) lireFichier(e.target.files[0]); e.target.value = ""; }} />
+          </div>
+          {message && <div style={{ fontSize: 12, color: "#0A5DA8", background: "#EEF2F6", borderRadius: 6, padding: "6px 10px" }}>{message}</div>}
+          <textarea
+            value={texte}
+            onChange={(e) => { setTexte(e.target.value); sourceRef.current = "collage"; }}
+            placeholder={"532,186\n532,185\n532,185\n…"}
+            rows={7}
+            style={{ ...inputStyle, fontFamily: "ui-monospace, Menlo, monospace", fontSize: 12, resize: "vertical" }}
+          />
+          <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "flex-end" }}>
+            {!analyse.erreur && !analyse.temps && (
+              <div style={{ width: 200 }}>
+                <Field label="Durée de la décharge (min)">
+                  <TextInput type="number" step="any" value={dureeTexte} onChange={(e) => setDureeTexte(e.target.value)} placeholder={dureeEssai !== null ? `${dureeEssai} (essai)` : "ex. 10"} />
+                </Field>
+              </div>
+            )}
+            {!analyse.erreur && analyse.temps && (
+              <div style={{ width: 200 }}>
+                <Field label="Unité du temps (1re colonne)">
+                  <Select value={uniteTemps} onChange={(e) => setUniteTemps(e.target.value)}>
+                    <option value="auto">Automatique ({analyse.uniteTemps === "s" ? "secondes" : "minutes"})</option>
+                    <option value="s">Secondes</option>
+                    <option value="min">Minutes</option>
+                  </Select>
+                </Field>
+              </div>
+            )}
+            <div style={{ fontSize: 12, color: analyse.erreur ? "#B5730A" : "#3E4A5C", flex: 1, minWidth: 220 }}>
+              {analyse.erreur
+                ? (texte.trim() ? analyse.erreur : "En attente des valeurs…")
+                : `${analyse.valeurs.length} valeurs · de ${String(Math.round(analyse.valeurs[0] * 100) / 100).replace(".", ",")} V à ${String(Math.round(analyse.valeurs[analyse.valeurs.length - 1] * 100) / 100).replace(".", ",")} V (minimum ${String(Math.round(analyse.min * 100) / 100).replace(".", ",")} V)${dureeMin ? ` · durée ${String(Math.round(dureeMin * 100) / 100).replace(".", ",")} min` : " · durée non renseignée : l'axe sera gradué en mesures"}`}
+              {!analyse.erreur && analyse.alertes.map((a) => <div key={a} style={{ color: "#B5730A", marginTop: 4 }}>{a}</div>)}
+            </div>
+          </div>
+          {apercu && <img src={apercu.dataUrl} alt="Aperçu de la courbe de décharge" style={{ width: "100%", maxWidth: 640, alignSelf: "center", border: "1px solid #E2E6EB", borderRadius: 10 }} />}
+        </div>
+        <div style={{ padding: "10px 16px", display: "flex", justifyContent: "flex-end", gap: 8, borderTop: "1px solid #E2E6EB" }}>
+          <button style={btnGhost("#3E4A5C")} onClick={onFermer}>Annuler</button>
+          <button style={{ ...btnGhost("#FFFFFF"), background: BRAND.blue, opacity: analyse.erreur ? 0.5 : 1 }} disabled={!!analyse.erreur} onClick={enregistrer}>Enregistrer la courbe</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+// Bloc affiché au-dessus des pièces jointes de la courbe de décharge : tracé à partir des valeurs mesurées.
+function CourbeDechargeDonnees({ eq, update }) {
+  const [ouvert, setOuvert] = useState(false);
+  const p = parametresCourbeDecharge(eq);
+  const apercu = useMemo(() => (p ? genererGraphiqueCourbeDecharge(p) : null), [eq.courbeDechargeDonnees, p && p.nominale, p && p.seuilBas, p && p.dureeMin, p && p.titre]);
+  const d = eq.courbeDechargeDonnees;
+  return (
+    <div style={{ marginBottom: 14, border: "1px solid #E2E6EB", borderRadius: 10, padding: 12, background: "#F7F8FA" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+        <div style={{ fontSize: 12.5, color: "#3E4A5C", lineHeight: 1.45, flex: 1, minWidth: 240 }}>
+          {p
+            ? <>Courbe tracée par l'application à partir de <b>{d.valeurs.length} tensions mesurées</b>{p.dureeMin ? ` sur ${String(Math.round(p.dureeMin * 100) / 100).replace(".", ",")} min` : ""} — elle figure dans le rapport sous « Courbe de décharge batterie ».</>
+            : <><b>Tracer la courbe depuis les valeurs mesurées</b> : collez la colonne des tensions (ou lisez-la dans le PDF joint) — plus besoin de joindre le graphique du tableur.</>}
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={() => setOuvert(true)} style={btnGhost(BRAND.blue)}>{p ? "Modifier les valeurs" : "Saisir les valeurs"}</button>
+          {p && <button onClick={() => update({ ...eq, courbeDechargeDonnees: null })} style={btnGhost("#C0392B")} title="Supprimer la courbe tracée (les pièces jointes sont conservées)"><Trash2 size={13} /></button>}
+        </div>
+      </div>
+      {apercu && <img src={apercu.dataUrl} alt="Courbe de décharge" style={{ width: "100%", maxWidth: 640, display: "block", margin: "12px auto 0", border: "1px solid #E2E6EB", borderRadius: 10, background: "#FFFFFF" }} />}
+      {ouvert && <CourbeDechargeModal eq={eq} onFermer={() => setOuvert(false)} onValider={(donnees) => { update({ ...eq, courbeDechargeDonnees: donnees }); setOuvert(false); }} />}
+    </div>
+  );
+}
+
 // Galerie de pièces jointes générique : photo / capture d'écran (compressée) ou document PDF (stocké tel quel).
 function FileGallery({ files, onChange, idPrefix }) {
   const inputRef = useRef(null);
   const [busy, setBusy] = useState(false);
   const [erreur, setErreur] = useState("");
+  const [recadrageId, setRecadrageId] = useState(null); // pièce jointe en cours de recadrage
   const list = files || [];
   // Toujours lire la liste la plus récente au moment de l'écriture (pas celle capturée à l'ouverture
   // de handleFiles) — évite qu'un deuxième ajout rapide n'écrase le premier avant sa fin.
@@ -4231,11 +4621,14 @@ function FileGallery({ files, onChange, idPrefix }) {
       try {
         const isPdf = file.type === "application/pdf";
         let dataUrl, pdfUrl = null, conversionReussie = false;
+        const idEntree = uid();
+        const infosPdf = {};
         if (isPdf) {
           // Converti en image (1ère page) pour un affichage réel dans le rapport Word, au lieu
-          // d'une simple mention textuelle. Le PDF d'origine reste accessible séparément.
+          // d'une simple mention textuelle. Le PDF d'origine reste accessible séparément — et la page
+          // utile (ex. le graphique d'une courbe) se choisit ensuite avec « Recadrer ».
           try {
-            const imgBlob = await pdfFirstPageToBlob(file);
+            const imgBlob = await pdfFirstPageToBlob(file, 1400, 0.82, infosPdf);
             if (CURRENT_USER_FOR_STORAGE) {
               const idToken = await CURRENT_USER_FOR_STORAGE.getIdToken();
               dataUrl = await firebaseStorageUpload(`photos/${uid()}.jpg`, imgBlob, idToken);
@@ -4255,7 +4648,8 @@ function FileGallery({ files, onChange, idPrefix }) {
         } else {
           dataUrl = await compressImage(file); // repli si utilisateur non encore disponible
         }
-        added.push({ id: uid(), dataUrl, pdfUrl, name: file.name, isPdf: isPdf && !conversionReussie, convertiDepuisPdf: conversionReussie, caption: "" });
+        if (conversionReussie) FICHIERS_PDF_EN_SESSION.set(idEntree, file);
+        added.push({ id: idEntree, dataUrl, pdfUrl, name: file.name, isPdf: isPdf && !conversionReussie, convertiDepuisPdf: conversionReussie, nbPages: infosPdf.nbPages || null, caption: "" });
       } catch (e) {
         echecs++;
         console.error("[FileGallery] Fichier ignoré :", file?.name, e);
@@ -4350,6 +4744,24 @@ function FileGallery({ files, onChange, idPrefix }) {
                 ) : (
                   <img src={f.dataUrl} alt="" style={{ width: "100%", height: 96, objectFit: "cover", borderRadius: 8, border: "1px solid #D8DEE5", display: "block" }} />
                 )}
+                {!f.isPdf && (
+                  <button
+                    onClick={() => setRecadrageId(f.id)}
+                    style={{ position: "absolute", top: 4, right: 30, background: "rgba(10,15,25,0.85)", border: "none", borderRadius: 6, padding: 3, cursor: "pointer", color: "#FFC107", display: "flex" }}
+                    title="Choisir la page et recadrer : ne garder que le graphique dans le rapport"
+                  >
+                    <Crop size={12} />
+                  </button>
+                )}
+                {f.convertiDepuisPdf && f.nbPages > 1 && !f.recadre && (
+                  <button
+                    onClick={() => setRecadrageId(f.id)}
+                    title="Ce PDF compte plusieurs pages : le rapport utilise la page 1. Cliquez pour choisir la page et recadrer."
+                    style={{ position: "absolute", bottom: 4, right: 4, background: "#B5730A", border: "none", borderRadius: 5, padding: "2px 6px", fontSize: 9.5, color: "#FFFFFF", cursor: "pointer", fontWeight: 700 }}
+                  >
+                    {f.nbPages} pages · choisir
+                  </button>
+                )}
                 {f.convertiDepuisPdf && (
                   <a href={f.pdfUrl || f.dataUrl} target="_blank" rel="noreferrer" title="PDF d'origine — page 1 convertie en image ci-dessus" style={{
                     position: "absolute", bottom: 4, left: 4, background: "rgba(10,15,25,0.85)", borderRadius: 5, padding: "2px 6px",
@@ -4375,6 +4787,19 @@ function FileGallery({ files, onChange, idPrefix }) {
             </div>
           ))}
         </div>
+      )}
+      {recadrageId && list.find((x) => x.id === recadrageId) && (
+        <RecadrageModal
+          fichier={list.find((x) => x.id === recadrageId)}
+          onFermer={() => setRecadrageId(null)}
+          onValider={(res) => {
+            // L'image recadrée remplace celle du rapport ; l'image d'origine (ou le PDF) est conservée pour recadrer à nouveau.
+            onChange(list.map((x) => (x.id === recadrageId
+              ? { ...x, dataUrl: res.dataUrl, recadre: true, pagePdf: res.page || x.pagePdf || null, nbPages: res.nbPages || x.nbPages || null, originalUrl: x.convertiDepuisPdf ? x.originalUrl : (x.originalUrl || x.dataUrl) }
+              : x)));
+            setRecadrageId(null);
+          }}
+        />
       )}
     </div>
   );
@@ -8440,6 +8865,7 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
                   <AutonomieCalculee eq={eq} />
                   <Card style={{ marginBottom: 14 }}>
                     <SectionTitle>Courbe de décharge batterie</SectionTitle>
+                    <CourbeDechargeDonnees eq={eq} update={update} />
                     <FileGallery files={eq.courbeDechargeFiles} onChange={(files) => update({ ...eq, courbeDechargeFiles: files })} idPrefix={`${eq.id}-courbe-decharge`} />
                   </Card>
                 </React.Fragment>
@@ -8844,6 +9270,7 @@ function computeBRKValues(eq) {
 
 function PrintEquipement({ eq, allEquipements = [], locaux = [] }) {
   eq = repairEquipementControles(eq); // filet de sécurité, même principe que côté Word
+  const courbeTracee = (() => { const p = parametresCourbeDecharge(eq); return p ? genererGraphiqueCourbeDecharge(p) : null; })();
   const localEq = (locaux || []).find((l) => l.id === eq.localId);
   const schema = schemaFiltreeParNiveau(getSchema(eq), eq.niveauMaintenance);
   const isRelaisSeuils = TYPES_AVEC_RELAIS.includes(eq.type);
@@ -8970,6 +9397,12 @@ function PrintEquipement({ eq, allEquipements = [], locaux = [] }) {
               )
             )}
           </div>
+        </div>
+      )}
+      {TYPES_AVEC_BRANCHES_UPS.includes(eq.type) && courbeTracee && (
+        <div style={{ marginTop: 10 }}>
+          <div style={{ fontSize: 10.5, fontWeight: 700, color: "#555", marginBottom: 6 }}>Courbe de décharge batterie</div>
+          <img src={courbeTracee.dataUrl} alt="" style={{ width: "100%", maxWidth: 520, border: "1px solid #ccc" }} />
         </div>
       )}
       {TYPES_AVEC_BRANCHES_UPS.includes(eq.type) && eq.courbeDechargeFiles && eq.courbeDechargeFiles.length > 0 && (
@@ -10826,6 +11259,217 @@ function genererGraphiqueElementsBatterie(entries, moyenne, toleranceBasse, tole
     return null;
   }
 }
+// ---------------------------------------------------------------------------------------------
+// Courbe de décharge tracée par l'app à partir des tensions mesurées pendant l'essai (colonne de valeurs
+// copiée depuis Numbers / Excel, fichier texte, ou lue directement dans le PDF joint) : plus besoin de
+// joindre le graphique du tableur. Nominale et seuil bas viennent des valeurs théoriques de la batterie.
+// ---------------------------------------------------------------------------------------------
+const RE_NOMBRE_SEUL = /^\s*(-?\d+(?:[.,]\d+)?)\s*(?:V|v)?\s*$/;
+const RE_DEUX_NOMBRES = /^\s*(-?\d+(?:[.,]\d+)?)\s*[;\t ]\s*(-?\d+(?:[.,]\d+)?)\s*$/;
+const versNombreFr = (s) => Number(String(s).replace(",", "."));
+const medianeListe = (a) => { const t = [...a].sort((x, y) => x - y); const m = Math.floor(t.length / 2); return t.length % 2 ? t[m] : (t[m - 1] + t[m]) / 2; };
+// Une colonne = tensions seules ; deux colonnes (temps ; tension) = temps croissant. Les lignes qui ne sont
+// pas des nombres (titre « Tableau 1 », en-têtes) sont ignorées. Le temps est en secondes ou en minutes
+// (déduit de l'étendue, modifiable via `uniteTemps`).
+function analyserTensionsCollees(texte, uniteTemps = null) {
+  const simples = [], doubles = [];
+  String(texte || "").split(/\r?\n/).forEach((l) => {
+    const m1 = l.match(RE_NOMBRE_SEUL);
+    if (m1) { simples.push(versNombreFr(m1[1])); return; }
+    const m2 = l.match(RE_DEUX_NOMBRES);
+    if (m2) doubles.push([versNombreFr(m2[1]), versNombreFr(m2[2])]);
+  });
+  let valeurs = null, temps = null, dureeMin = null, unite = null;
+  if (doubles.length >= 10 && doubles.length >= simples.length) {
+    const croissants = doubles.filter((d, i) => i === 0 || d[0] >= doubles[i - 1][0]).length;
+    if (croissants / doubles.length >= 0.95) {
+      const t0 = doubles[0][0], etendue = doubles[doubles.length - 1][0] - t0;
+      unite = uniteTemps || (etendue > 240 ? "s" : "min");
+      const facteur = unite === "s" ? 60 : 1;
+      temps = doubles.map((d) => (d[0] - t0) / facteur);
+      valeurs = doubles.map((d) => d[1]);
+      dureeMin = Math.round(temps[temps.length - 1] * 100) / 100;
+    }
+  }
+  if (!valeurs && simples.length >= 10) valeurs = simples;
+  if (!valeurs) return { erreur: "Pas assez de valeurs lisibles (10 au moins) : collez une valeur par ligne, ou deux colonnes « temps ; tension »." };
+  const min = Math.min(...valeurs), max = Math.max(...valeurs);
+  const alertes = [];
+  if (min < 1 || max > 2000) alertes.push("Des valeurs semblent hors d'une plage de tensions (1 à 2000 V) : vérifiez que la colonne collée est bien celle des tensions.");
+  return { valeurs, temps, dureeMin, uniteTemps: unite, min, max, alertes };
+}
+// Deux colonnes lues « en vrac » par le PDF (temps, tension, temps, tension…) : on les sépare quand l'une est
+// la colonne du temps — une suite qui croît à pas constant — et pas l'autre (une tension de décharge décroît
+// ou varie irrégulièrement). L'ordre de grandeur ne suffit pas : un temps en secondes (0 à 600) est proche d'une tension.
+function separerColonnesEntrelacees(valeurs) {
+  if (valeurs.length < 20) return null;
+  const pairs = valeurs.filter((_, i) => i % 2 === 0), impairs = valeurs.filter((_, i) => i % 2 === 1);
+  const estTemps = (a) => {
+    const d = a.slice(1).map((v, i) => v - a[i]);
+    const moy = d.reduce((x, y) => x + y, 0) / d.length;
+    return moy > 0 && d.every((x) => Math.abs(x - moy) <= 0.2 * moy);
+  };
+  if (estTemps(pairs) && !estTemps(impairs)) return { temps: pairs, tensions: impairs };
+  if (estTemps(impairs) && !estTemps(pairs)) return { temps: impairs, tensions: pairs };
+  return null;
+}
+// Texte (une valeur par ligne) des tensions lues dans un PDF : on retient la plus longue suite de nombres
+// consécutifs (une colonne de tableau), en rejoignant les suites d'ordre de grandeur voisin des pages suivantes
+// (tableau sur plusieurs pages) ; les graduations d'un graphique (suites courtes) sont ignorées.
+async function extraireTensionsDepuisPdf(pdf) {
+  const suites = [];
+  for (let p = 1; p <= Math.min(pdf.numPages, 40); p++) {
+    const page = await pdf.getPage(p);
+    const contenu = await page.getTextContent();
+    let courante = [];
+    const fermer = () => { if (courante.length >= 20) suites.push({ page: p, valeurs: courante }); courante = []; };
+    for (const it of contenu.items) {
+      const s = (it.str || "").trim();
+      if (!s) continue;
+      const m = s.match(RE_NOMBRE_SEUL);
+      if (m) courante.push(versNombreFr(m[1])); else fermer();
+    }
+    fermer();
+  }
+  if (!suites.length) return "";
+  // Tableau « temps ; tension » : les nombres se suivent en alternance, d'une page à l'autre — on sépare les deux
+  // colonnes sur l'ensemble du flux avant toute autre sélection.
+  const flux = [...suites].sort((a, b) => a.page - b.page).flatMap((s) => s.valeurs);
+  const colonnes = separerColonnesEntrelacees(flux);
+  if (colonnes) return colonnes.temps.map((t, i) => `${String(t).replace(".", ",")};${String(colonnes.tensions[i]).replace(".", ",")}`).join("\n");
+  suites.sort((a, b) => b.valeurs.length - a.valeurs.length);
+  const ref = medianeListe(suites[0].valeurs);
+  const retenues = suites.filter((s) => Math.abs(medianeListe(s.valeurs) - ref) <= 0.3 * ref).sort((a, b) => a.page - b.page);
+  return retenues.flatMap((s) => s.valeurs).map((v) => String(v).replace(".", ",")).join("\n");
+}
+// Paramètres du tracé pour un équipement (écran et rapport) : null s'il n'y a pas de valeurs enregistrées.
+function parametresCourbeDecharge(eq) {
+  const d = eq && eq.courbeDechargeDonnees;
+  if (!d || !Array.isArray(d.valeurs) || d.valeurs.length < 2) return null;
+  const th = calcTensionsBatterieTheoriques(eq);
+  const dureeEssai = numOf(eq.controles && eq.controles.essai_decharge && eq.controles.essai_decharge.duree_decharge && eq.controles.essai_decharge.duree_decharge.fields && eq.controles.essai_decharge.duree_decharge.fields.duree);
+  const repere = eq.identification && eq.identification.repere;
+  return {
+    valeurs: d.valeurs, temps: d.temps || null, dureeMin: d.dureeMin || dureeEssai || null,
+    nominale: th ? th.nominale : null, seuilBas: th ? th.finDecharge : null,
+    titre: ("Courbe de décharge batterie" + (repere ? " · " + repere : "")).toUpperCase(),
+  };
+}
+// Graphique de la courbe de décharge, dans le style des autres graphiques du rapport : courbe bleue, nominale
+// (vert) et seuil bas (rouge) en pointillés avec leurs valeurs dans la marge, instant de passage sous le seuil bas,
+// valeurs de départ / d'arrivée / minimale. Dessiné en double résolution ; renvoie { dataUrl, largeur, hauteur }.
+function genererGraphiqueCourbeDecharge({ valeurs, temps, dureeMin, nominale, seuilBas, titre }) {
+  if (typeof document === "undefined" || !document.createElement || !valeurs || valeurs.length < 2) return null;
+  try {
+    const n = valeurs.length;
+    const W = 640, H = 310, ECHELLE = 2;
+    const canvas = document.createElement("canvas");
+    canvas.width = W * ECHELLE; canvas.height = H * ECHELLE;
+    const ctx = canvas.getContext("2d");
+    ctx.scale(ECHELLE, ECHELLE);
+    const SANS = "Arial, Helvetica, sans-serif", SERIF = "Georgia, 'Times New Roman', serif";
+    const fr = (v, d = 2) => (Math.round(v * Math.pow(10, d)) / Math.pow(10, d)).toString().replace(".", ",");
+    // Fond blanc et cadre arrondi.
+    ctx.fillStyle = "#FFFFFF"; ctx.fillRect(0, 0, W, H);
+    const r = 10;
+    ctx.strokeStyle = "#E2E6EB"; ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(r + 0.5, 0.5); ctx.lineTo(W - r - 0.5, 0.5); ctx.arc(W - r - 0.5, r + 0.5, r, -Math.PI / 2, 0);
+    ctx.lineTo(W - 0.5, H - r - 0.5); ctx.arc(W - r - 0.5, H - r - 0.5, r, 0, Math.PI / 2);
+    ctx.lineTo(r + 0.5, H - 0.5); ctx.arc(r + 0.5, H - r - 0.5, r, Math.PI / 2, Math.PI);
+    ctx.lineTo(0.5, r + 0.5); ctx.arc(r + 0.5, r + 0.5, r, Math.PI, Math.PI * 1.5);
+    ctx.closePath(); ctx.stroke();
+    // Abscisses : temps en minutes (colonne de temps, ou durée répartie sur les mesures) ; sinon numéro de mesure.
+    let ts;
+    if (temps && temps.length === n) ts = temps.map((t) => t - temps[0]);
+    else if (dureeMin) ts = valeurs.map((_, i) => (dureeMin * i) / (n - 1));
+    else ts = valeurs.map((_, i) => i);
+    const enMinutes = !!((temps && temps.length === n) || dureeMin);
+    const tMax = ts[n - 1] > 0 ? ts[n - 1] : 1;
+    const refs = [nominale, seuilBas].filter((v) => typeof v === "number" && isFinite(v) && v > 0);
+    const bornes = [...valeurs, ...refs];
+    let lo = Math.min(...bornes), hi = Math.max(...bornes);
+    const marge = (hi - lo) * 0.12 || 1;
+    lo -= marge; hi += marge;
+    const pasY = [0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 25, 50, 100, 200].find((p) => (hi - lo) / p <= 6) || 500;
+    const axeMin = Math.floor(lo / pasY + 1e-9) * pasY, axeMax = Math.ceil(hi / pasY - 1e-9) * pasY;
+    const decY = pasY >= 1 ? 0 : 1;
+    const left = 62, right = W - 112, top = 74, bottom = H - 48;
+    const xFor = (t) => left + (t / tMax) * (right - left);
+    const yFor = (v) => bottom - ((v - axeMin) / (axeMax - axeMin || 1)) * (bottom - top);
+    // Titre et sous-titre.
+    ctx.fillStyle = "#0A5DA8"; ctx.textBaseline = "top"; ctx.textAlign = "left";
+    let taille = 13;
+    ctx.font = `bold ${taille}px ${SANS}`;
+    while (taille > 9 && ctx.measureText(titre || "").width > W - 36) { taille -= 0.5; ctx.font = `bold ${taille}px ${SANS}`; }
+    ctx.fillText(titre || "", 18, 16);
+    const vMin = Math.min(...valeurs), vDebut = valeurs[0], vFin = valeurs[n - 1];
+    let passage = null; // instant (même unité que l'axe) du premier passage sous le seuil bas
+    if (typeof seuilBas === "number") {
+      const i = valeurs.findIndex((v) => v < seuilBas);
+      if (i === 0) passage = ts[0];
+      else if (i > 0) passage = ts[i - 1] + ((seuilBas - valeurs[i - 1]) / (valeurs[i] - valeurs[i - 1])) * (ts[i] - ts[i - 1]);
+    }
+    const unite = enMinutes ? " min" : "";
+    const sousTitre = [enMinutes ? `${fr(tMax, 1)} min` : `${n} mesures`, `${fr(vDebut, 1)} V → ${fr(vFin, 1)} V`, `minimum ${fr(vMin, 1)} V`,
+      typeof seuilBas === "number" ? (passage !== null ? `seuil bas atteint à ${fr(passage, 1)}${unite}` : "seuil bas non atteint") : null].filter(Boolean).join("  ·  ");
+    ctx.font = `12px ${SANS}`; ctx.fillStyle = "#5B6B7D";
+    ctx.fillText(sousTitre, 18, 38);
+    // Grille et graduations de l'axe vertical.
+    ctx.font = `12px ${SERIF}`; ctx.textAlign = "right"; ctx.textBaseline = "middle";
+    for (let k = 0; k <= Math.round((axeMax - axeMin) / pasY); k++) {
+      const v = axeMin + k * pasY, y = yFor(v);
+      ctx.strokeStyle = k === 0 ? "#C5CCD5" : "#E9EDF1"; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(left, y); ctx.lineTo(right, y); ctx.stroke();
+      ctx.fillStyle = "#5B6B7D"; ctx.fillText(v.toFixed(decY).replace(".", ","), left - 8, y);
+    }
+    // Graduations de l'axe horizontal.
+    const pasX = [0.5, 1, 2, 5, 10, 15, 20, 30, 60, 120, 240, 480].find((p) => tMax / p <= 10) || 960;
+    ctx.textAlign = "center"; ctx.textBaseline = "top"; ctx.font = `12px ${SERIF}`;
+    for (let t = 0; t <= tMax + 1e-9; t += pasX) {
+      const x = xFor(t);
+      ctx.strokeStyle = "#F0F2F5"; ctx.beginPath(); ctx.moveTo(x, top); ctx.lineTo(x, bottom); ctx.stroke();
+      ctx.fillStyle = "#5B6B7D"; ctx.fillText(fr(t, 1), x, bottom + 7);
+    }
+    ctx.font = `italic 11.5px ${SERIF}`; ctx.fillStyle = "#8B96A3";
+    ctx.fillText(enMinutes ? "Temps (min)" : "Mesures", (left + right) / 2, bottom + 25);
+    // Nominale (vert) et seuil bas (rouge) en pointillés, valeurs dans la marge de droite.
+    const lignesRef = [];
+    if (typeof nominale === "number") lignesRef.push({ l1: "nominale", l2: `${fr(nominale, 1)} V`, y: yFor(nominale), couleur: "#2E8B57" });
+    if (typeof seuilBas === "number") lignesRef.push({ l1: "seuil bas", l2: `${fr(seuilBas, 1)} V`, y: yFor(seuilBas), couleur: "#B02A2A" });
+    ctx.setLineDash([7, 5]); ctx.lineWidth = 1.6;
+    lignesRef.forEach((l) => { ctx.strokeStyle = l.couleur; ctx.beginPath(); ctx.moveTo(left, l.y); ctx.lineTo(right, l.y); ctx.stroke(); });
+    ctx.setLineDash([]); ctx.lineWidth = 1;
+    if (lignesRef.length === 2) { const manque = 32 - Math.abs(lignesRef[1].y - lignesRef[0].y); if (manque > 0) { const h = lignesRef[0].y < lignesRef[1].y ? 0 : 1; lignesRef[h].y -= manque / 2; lignesRef[1 - h].y += manque / 2; } }
+    ctx.font = `italic 12px ${SERIF}`; ctx.textAlign = "left"; ctx.textBaseline = "middle";
+    lignesRef.forEach((l) => { ctx.fillStyle = l.couleur; ctx.fillText(l.l1, right + 10, l.y - 8); ctx.fillText(l.l2, right + 10, l.y + 8); });
+    // Instant de passage sous le seuil bas.
+    if (passage !== null) {
+      const x = xFor(passage);
+      ctx.setLineDash([2, 4]); ctx.strokeStyle = "#D9822B"; ctx.lineWidth = 1.4;
+      ctx.beginPath(); ctx.moveTo(x, top); ctx.lineTo(x, bottom); ctx.stroke(); ctx.setLineDash([]); ctx.lineWidth = 1;
+    }
+    // Courbe.
+    ctx.strokeStyle = "#1560A8"; ctx.lineWidth = 2.4; ctx.lineJoin = "round"; ctx.lineCap = "round";
+    ctx.beginPath();
+    valeurs.forEach((v, i) => { const x = xFor(ts[i]), y = yFor(v); if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y); });
+    ctx.stroke(); ctx.lineWidth = 1;
+    // Points et valeurs de départ / d'arrivée.
+    const point = (x, y) => { ctx.fillStyle = "#FFFFFF"; ctx.beginPath(); ctx.arc(x, y, 5, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = "#1560A8"; ctx.beginPath(); ctx.arc(x, y, 3.4, 0, Math.PI * 2); ctx.fill(); };
+    point(xFor(ts[0]), yFor(vDebut)); point(xFor(ts[n - 1]), yFor(vFin));
+    ctx.font = `bold 12.5px ${SERIF}`; ctx.textBaseline = "bottom";
+    const etiquetteValeur = (texte, x, y, alignement) => {
+      ctx.textAlign = alignement;
+      ctx.strokeStyle = "#FFFFFF"; ctx.lineWidth = 4; ctx.strokeText(texte, x, y); // halo : un pointillé ne barre pas la valeur
+      ctx.lineWidth = 1; ctx.fillStyle = "#1A1F26"; ctx.fillText(texte, x, y);
+    };
+    etiquetteValeur(`${fr(vDebut, 1)} V`, xFor(ts[0]) + 7, Math.max(top + 12, yFor(vDebut) - 8), "left");
+    etiquetteValeur(`${fr(vFin, 1)} V`, xFor(ts[n - 1]) - 6, Math.max(top + 12, yFor(vFin) - 10), "right");
+    return { dataUrl: canvas.toDataURL("image/png"), largeur: W, hauteur: H };
+  } catch (e) {
+    return null;
+  }
+}
 // Synthèse visuelle du site (donut) — répartition Conforme / Dégradé / Défaillant, pour un aperçu
 // immédiat de l'état global avant de rentrer dans le détail équipement par équipement.
 // Historique d'un équipement à travers les visites précédentes (même lignageId, sites différents)
@@ -11489,12 +12133,22 @@ function champIdentificationMasque(eq, key) {
 // Courbe de déclenchement (Disjoncteur BT) : image(s) en grand format (≈ moitié de page), suivie(s)
 // d'une phrase indiquant si les essais du disjoncteur sont conformes ou non. Renvoie une liste vide
 // s'il n'y a aucune pièce jointe.
+// Taille d'affichage d'une courbe dans le rapport : le format réel de l'image est conservé (une zone
+// recadrée peut avoir n'importe quelle proportion), dans une boîte de 560 × 460 px au plus. Sans dimensions
+// connues, l'ancien format fixe est conservé.
+function dimensionsCourbe(f, largeurMax = 560, hauteurMax = 460) {
+  if (!f || !f._imgW || !f._imgH) return [520, 400];
+  const ratio = f._imgW / f._imgH;
+  const largeur = Math.min(largeurMax, hauteurMax * ratio);
+  return [Math.round(largeur), Math.round(largeur / ratio)];
+}
 function docxCourbeDeclenchement(eq, titre) {
   const elements = [];
   if (!(eq.courbeFiles || []).length) return elements;
   const contenus = eq.courbeFiles.map((f) => {
     if (f.isPdf) return new DOCX.Paragraph({ spacing: { after: 40 }, children: [new DOCX.TextRun({ text: "Pièce jointe (PDF) : " + (f.name || "document.pdf"), size: 16, color: DOCX_BLUE, italics: true })] });
-    const img = docxImage(f.dataUrl, 520, 400);
+    const [largeur, hauteur] = dimensionsCourbe(f);
+    const img = docxImage(f.dataUrl, largeur, hauteur);
     return img ? new DOCX.Paragraph({ keepNext: true, alignment: DOCX.AlignmentType.CENTER, spacing: { before: 60, after: 40 }, children: [img] }) : null;
   }).filter(Boolean);
   const tests = eq.controles.tests_disjoncteur;
@@ -11522,14 +12176,23 @@ function docxCourbeDeclenchement(eq, titre) {
 // Renvoie une liste vide s'il n'y a aucune pièce jointe.
 function docxCourbeDecharge(eq) {
   const elements = [];
-  if (!TYPES_AVEC_BRANCHES_UPS.includes(eq.type) || !(eq.courbeDechargeFiles || []).length) return elements;
-  const contenus = eq.courbeDechargeFiles.map((f) => {
-    if (f.isPdf) return new DOCX.Paragraph({ spacing: { after: 40 }, children: [new DOCX.TextRun({ text: "Pièce jointe (PDF) : " + (f.name || "document.pdf"), size: 16, color: DOCX_BLUE, italics: true })] });
-    const img = docxImage(f.dataUrl, 520, 400);
-    return img ? new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, spacing: { after: 80 }, children: [img] }) : null;
-  }).filter(Boolean);
+  if (!TYPES_AVEC_BRANCHES_UPS.includes(eq.type)) return elements;
+  // Courbe tracée par l'app depuis les tensions mesurées (si elles ont été saisies) : en premier, puis les pièces jointes.
+  const params = parametresCourbeDecharge(eq);
+  const graphique = params ? genererGraphiqueCourbeDecharge(params) : null;
+  const imgTracee = graphique ? docxImage(graphique.dataUrl, 580, Math.round((580 * graphique.hauteur) / graphique.largeur)) : null;
+  const contenus = [
+    ...(imgTracee ? [new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, spacing: { after: 80 }, children: [imgTracee] })] : []),
+    ...(eq.courbeDechargeFiles || []).map((f) => {
+      if (f.isPdf) return new DOCX.Paragraph({ spacing: { after: 40 }, children: [new DOCX.TextRun({ text: "Pièce jointe (PDF) : " + (f.name || "document.pdf"), size: 16, color: DOCX_BLUE, italics: true })] });
+      const [largeur, hauteur] = dimensionsCourbe(f);
+      const img = docxImage(f.dataUrl, largeur, hauteur);
+      return img ? new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, spacing: { after: 80 }, children: [img] }) : null;
+    }).filter(Boolean),
+  ];
+  if (!contenus.length) return elements;
   // Le titre et la première image ne forment qu'un bloc : le titre ne peut pas rester seul en bas de page.
-  elements.push(docxBlocInsecable([docxHeading("Courbe de décharge batterie", 240, 140), ...(contenus.length ? [contenus[0]] : [])]), ...contenus.slice(1));
+  elements.push(docxBlocInsecable([docxHeading("Courbe de décharge batterie", 240, 140), contenus[0]]), ...contenus.slice(1));
   return elements;
 }
 function docxEquipementElements(eq, locaux, allSites) {
