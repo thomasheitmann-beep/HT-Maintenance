@@ -426,6 +426,7 @@ const LISTE_ETAT_SEUIL = ["", "Actif"];
 //  • Micrologic X — Masterpact MTZ, guide utilisateur DOCA0102FR-09
 //  • Compact NSX 100-630 — guide utilisateur DOCA0140EN-03 (Micrologic 2 et 4)
 //  • Compact NSX Micrologic 5/6/7 — guide utilisateur DOCA0141FR-03 (productinfo.se.com)
+//  • ABB SACE Emax 2 — Ekip Touch, notice 1SDH001316R0002 Rev. C (courbe en temps MOYEN ± tolérance, et non en temps maximum)
 // Surcharge longue : le temps de la courbe est un MAXIMUM (précision « 0 à −x % » : le temps réel est entre (1 − x) fois
 // le temps lu et ce temps), à froid (état thermique neutre). Court retard et instantané : temps de non-déclenchement
 // et temps maximal de coupure. Hors de cette liste (autres marques, autres déclencheurs), l'app garde son modèle générique.
@@ -478,25 +479,72 @@ DECLENCHEURS_SCHNEIDER["Micrologic 5 / 6 / 7 (Compact NSX 100-630)"] = {
   court: "Micrologic 5 / 6 / 7 (NSX)", source: "Compact NSX Micrologic 5/6/7 — guide utilisateur DOCA0141FR-03", c: 0.84375, tr6Fixe: null, tolLong: () => 0.8, corrCranMini: 1.2,
   courtRetard: COURT_RETARD_A_TABLE, instantane: { precision: 0.10, non: 0.01, max: 0.05 },
 };
-const LISTE_DECLENCHEURS_BT = [...Object.keys(DECLENCHEURS_SCHNEIDER), "Autre / non répertorié"];
-function declencheurSchneider(eq) {
-  const nom = eq && eq.identification && eq.identification.declencheur;
-  return nom && DECLENCHEURS_SCHNEIDER[nom] ? { nom, ...DECLENCHEURS_SCHNEIDER[nom] } : null;
+// ABB SACE Emax 2 — Ekip Touch / Hi-Touch / G Touch / G Hi-Touch (notice 1SDH001316R0002 Rev. C) : surcharge longue t = 9·t1 / (If/I1)² (t1 = temps à 3 × I1, 3 à 144 s),
+// temps MOYEN ±10 % (If ≤ 6 In) ou ±20 % (If > 6 In), jamais moins de 1 s ; court retard : seuil I2 en multiple de In (0,6–10 In, ±7 % / ±10 %), t2 0,05–0,8 s à temps constant
+// (±10 % ou ±40 ms, le plus favorable) ou en t = 100·t2 / If² (±15 % / ±20 %) ; instantané : I3 1,5–15 In ±10 %, t ≤ 30 ms. L'Ekip Dip n'est pas couvert.
+DECLENCHEURS_SCHNEIDER["Ekip Touch / Hi-Touch / G Touch / G Hi-Touch (ABB SACE Emax 2)"] = {
+  marque: "ABB", court: "Ekip Touch (Emax 2)", source: "ABB SACE Emax 2 — Ekip Touch, notice 1SDH001316R0002 Rev. C", nature: "moyen",
+  c: 0, refX: 3, trImpose: true, tr6Fixe: null, plancherLong: 1,
+  tolLong: (tr, x, kIr) => (x * kIr <= 6 ? 0.9 : 0.8), tolHautLong: (tr, x, kIr) => (x * kIr <= 6 ? 1.1 : 1.2),
+  courtRetard: { modele: "abb", precision: 0.07, i2t: true, baseIm: "In" },
+  instantane: { precision: 0.10, non: 0, max: 0.03 },
+  texteLong: "Surcharge longue : temps moyen de la courbe avec une tolérance de ±10 % (±20 % au-delà de 6 × In), jamais inférieur à 1 s ; la temporisation tr (t1) est définie à 3 × I1 : le réglage « à (x Ir) » est ignoré. Court retard : seuil en multiple de In, temps constant ±10 % ou ±40 ms (le plus favorable) ou en I²t. Instantané : ≤ 30 ms.",
+};
+// Entrée de la bibliothèque correspondant à la « Marque » et à la « Référence de l'unité de déclenchement » déjà saisies dans
+// l'identification (aucun champ supplémentaire à remplir) ; null si la référence n'est pas documentée → courbe générique.
+// Non couverts : variantes H, moteur (M), 7.0 / 7.x seuls, 2.3 G, Ekip Dip, Ekip Touch hors Emax 2 (le modèle doit indiquer Emax 2).
+function cleDeclencheurBibliotheque(id) {
+  const ref = String((id && id.referenceRelais) || "").trim().toLowerCase().replace(/\s+/g, " ");
+  if (!ref) return null;
+  const marque = String((id && id.marqueRelais) || "").toLowerCase();
+  const disjoncteur = `${(id && id.modele) || ""} ${(id && id.typeDisjoncteur) || ""}`.toLowerCase().replace(/³/g, "3");
+  if (!marque || /schneider|merlin/.test(marque)) {
+    if (/^micrologic 2\.0( a)?$/.test(ref)) return "Micrologic 2.0 (Masterpact NT/NW, Compact NS 800-3200)";
+    if (/^micrologic [56]\.0( a)?$/.test(ref)) return "Micrologic 5.0 / 6.0 (Masterpact NT/NW, Compact NS 800-3200)";
+    if (/^micrologic [567]\.0 p$/.test(ref)) return "Micrologic 5.0 P / 6.0 P / 7.0 P (Masterpact NT/NW)";
+    if (/^micrologic 2\.0 x$/.test(ref)) return "Micrologic 2.0 X (Masterpact MTZ)";
+    if (/^micrologic [567]\.0 x$/.test(ref)) return "Micrologic 5.0 X / 6.0 X / 7.0 X (Masterpact MTZ)";
+    if (/^micrologic (2\.2|2\.3|4\.2|4\.3)$/.test(ref)) return "Micrologic 2.2 / 2.3 / 4.2 / 4.3 (Compact NSX 100-630)";
+    if (/^micrologic [56]\.[23]( a\/e| a| e)?$/.test(ref)) return "Micrologic 5 / 6 / 7 (Compact NSX 100-630)";
+    if (ref === "micrologic 2.2 g") return "Micrologic 2.2 G (Compact NSX 100-250)";
+  }
+  if ((!marque || /abb/.test(marque)) && /^ekip (g )?(hi-)?touch$/.test(ref) && /emax\s*2|e[1-6]\.2/.test(disjoncteur)) {
+    return "Ekip Touch / Hi-Touch / G Touch / G Hi-Touch (ABB SACE Emax 2)";
+  }
+  return null;
 }
-const facteurLongRetard = (d, x) => (36 - d.c) / (x * x - d.c); // t(I) / tr6, avec x = I / Ir
+function declencheurSchneider(eq) {
+  const id = (eq && eq.identification) || {};
+  // `id.declencheur` : ancien champ supprimé (doublon de la référence) — lu seulement pour ne pas perdre une saisie déjà faite.
+  const nom = cleDeclencheurBibliotheque(id) || (id.declencheur && DECLENCHEURS_SCHNEIDER[id.declencheur] ? id.declencheur : null);
+  return nom ? { nom, ...DECLENCHEURS_SCHNEIDER[nom] } : null;
+}
+// t(I) / tr au multiple de référence refX (6 × Ir pour Schneider ; 3 × I1 pour ABB, où t = 9·t1 / (I/I1)²), avec x = I / Ir.
+const facteurLongRetard = (d, x) => (((d.refX || 6) * (d.refX || 6)) - d.c) / (x * x - d.c);
 // tr6 : temporisation à 6 × Ir — fixe pour les Compact NSX, sinon déduite du réglage saisi (à 1,5, 6 ou 7,2 × Ir).
 function tr6DepuisReglage(d, tr, trX) {
   if (d.tr6Fixe) return d.tr6Fixe;
   if (!(tr > 0)) return null;
-  return tr / facteurLongRetard(d, trX > 0 ? trX : 6);
+  // ABB : t1 est toujours défini à 3 × I1 — le réglage « à (x Ir) » est ignoré.
+  return tr / facteurLongRetard(d, d.trImpose ? d.refX : (trX > 0 ? trX : (d.refX || 6)));
 }
 // Le plus petit cran (0,5 s) des Micrologic 5/6/7 NSX donne 15 s à 1,5 Ir (et non 12,5 s) : correction ×1,2 sous 3 × Ir.
-const tempsMaxLongRetard = (d, tr6, x) => tr6 * facteurLongRetard(d, x) * (d.corrCranMini && tr6 <= 0.5 && x < 3 ? d.corrCranMini : 1);
+// Temps de la courbe de surcharge longue (maximum pour Schneider, moyen pour ABB) ; plancher de 1 s pour ABB (la protection L ne déclenche jamais en moins).
+const tempsMaxLongRetard = (d, tr6, x) => Math.max(d.plancherLong || 0, tr6 * facteurLongRetard(d, x) * (d.corrCranMini && tr6 <= 0.5 && x < 3 ? d.corrCranMini : 1));
+// Bande admise autour du temps de la courbe : { bas, haut } en multiples (Schneider : 0 à −x % ; ABB : ± x %). kIr = Ir / In.
+const bandeLongRetard = (d, tr6, x, kIr) => ({ bas: d.tolLong(tr6, x, kIr), haut: d.tolHautLong ? d.tolHautLong(tr6, x, kIr) : 1 });
 // Plage de déclenchement du court retard au courant I : [non-déclenchement ; coupure maximale], mise à l'échelle (10 Ir / I)²
 // pour I < 10 Ir si l'essai est fait à I²t ON (la courbe est alors en I²t jusqu'à 10 Ir).
-function fenetreCourtRetardSchneider(d, tsd, I, Ir, i2tActif) {
+function fenetreCourtRetardSchneider(d, tsd, I, Ir, i2tActif, In) {
   const cr = d.courtRetard;
   if (!cr) return null;
+  if (cr.modele === "abb") {
+    // ABB Ekip Touch : t = k (I²t OFF) → t2 ± le meilleur de 10 % ou 40 ms ; t = k / I² (I²t ON) → t = 100·t2 / (I/In)², ±15 % (±20 % au-delà de 6 In).
+    const x = I / (In || Ir);
+    if (i2tActif) { const t = (100 * tsd) / (x * x), tol = x <= 6 ? 0.15 : 0.20; return { non: t * (1 - tol), max: t * (1 + tol) }; }
+    const tol = Math.max(0.1 * tsd, 0.04);
+    return { non: Math.max(0, tsd - tol), max: tsd + tol };
+  }
   let fen = cr.fixe;
   if (!fen) {
     const t = FENETRES_COURT_RETARD_SCHNEIDER, s = Math.min(Math.max(tsd || 0, 0), 0.4);
@@ -2564,8 +2612,7 @@ const SCHEMAS = {
       { key: "transfoSnManuel", label: "Puissance du transformateur (kVA) — saisie manuelle", numeric: true },
       { key: "transfoU2Manuel", label: "Tension secondaire du transformateur (V) — saisie manuelle", numeric: true },
       { key: "transfoUccManuel", label: "Ucc du transformateur (%) — saisie manuelle", numeric: true },
-      { key: "typeDisjoncteur", label: "Type disjoncteur", options: LISTE_TYPE_DISJONCTEUR_BT_OPTIONS },
-      { key: "declencheur", label: "Unité de contrôle / déclencheur (courbe constructeur)", options: LISTE_DECLENCHEURS_BT }, { key: "numeroSerieDisjoncteur", label: "Numéro de série" },
+      { key: "typeDisjoncteur", label: "Type disjoncteur", options: LISTE_TYPE_DISJONCTEUR_BT_OPTIONS }, { key: "numeroSerieDisjoncteur", label: "Numéro de série" },
       { key: "marqueRelais", label: "Marque de l'unité de déclenchement", options: LISTE_MARQUE_RELAIS_BT }, { key: "referenceRelais", label: "Référence de l'unité de déclenchement", options: LISTE_REFERENCE_RELAIS_BT_OPTIONS }, { key: "numeroSerieRelais", label: "Numéro de série (relais)" },
       { key: "intensiteNominale", label: "Intensité nominale (A)", numeric: true }, { key: "debrochable", label: "Débrochable", options: OUI_NON_LIST },
     ],
@@ -7825,7 +7872,7 @@ function BRKReglagePanel({ eq, update, custom, onAddCustom, onChangeCustom, onRe
           </div>
           {declencheur && (
             <div style={{ fontSize: 11.5, color: "#5B6B7D", lineHeight: 1.5, padding: "0 0 8px", borderBottom: "1px solid #E2E6EB" }}>
-              Valeurs constructeur : <b>{declencheur.court}</b> — {declencheur.source}. Surcharge longue : temps maximum à froid (un temps plus court peut venir de la mémoire thermique) ; court retard et instantané : temps de non-déclenchement et coupure maximale.
+              Valeurs constructeur : <b>{declencheur.court}</b> — {declencheur.source}. {declencheur.texteLong || "Surcharge longue : temps maximum à froid (un temps plus court peut venir de la mémoire thermique) ; court retard et instantané : temps de non-déclenchement et coupure maximale."}
             </div>
           )}
           {evCC && cc.i2t === "ON" && (
@@ -11624,29 +11671,36 @@ function evaluationEssaiCourtRetard(eq) {
   const rg = eq && eq.controles && eq.controles.reglage_disjoncteur, ts = eq && eq.controles && eq.controles.tests_disjoncteur;
   if (!rg || !ts || !rg.surcharge_longue || !rg.cc_temporise || !ts.test_cc_temporise) return null;
   const sl = rg.surcharge_longue.fields || {}, cc = rg.cc_temporise.fields || {}, tCC = ts.test_cc_temporise.fields || {};
-  const Ir = n(sl.inominal) * n(sl.k1) * n(sl.k2);
-  const Im = cc.k ? (cc.im_fonction_de === "In" ? n(sl.inominal) : Ir) * n(cc.k) : 0;
-  const tsd = n(cc.tsd) / 1000;
   const d = declencheurSchneider(eq);
+  const In = n(sl.inominal);
+  const Ir = In * n(sl.k1) * n(sl.k2);
+  // ABB : le seuil de court retard est un multiple de In (et non de Ir), quel que soit le réglage « Im fonction de ».
+  const baseEnIn = !!(d && d.courtRetard && d.courtRetard.baseIm === "In") || cc.im_fonction_de === "In";
+  const Im = cc.k ? (baseEnIn ? In : Ir) * n(cc.k) : 0;
+  const tsd = n(cc.tsd) / 1000;
   const fenetreFixe = !!(d && d.courtRetard && d.courtRetard.fixe); // déclencheurs sans temporisation réglable : plage constructeur seule
   if (!(Ir > 0) || !(Im > 0)) return null;
   if (!(tsd > 0) && !fenetreFixe) return null;
   const x = n(tCC.test_a) || 1.2, I = x * Im;
   const reglageI2t = cc.i2t === "ON" && !(d && d.courtRetard && !d.courtRetard.i2t);
   const modeEssai = reglageI2t && tCC.i2t_essai === "ON" ? "ON" : "OFF";
-  const attendu = tsd > 0 ? (modeEssai === "ON" && I < 10 * Ir ? tsd * Math.pow((10 * Ir) / I, 2) : tsd) : null;
+  const abb = !!(d && d.courtRetard && d.courtRetard.modele === "abb");
+  // Temps nominal : tsd à temps constant ; à I²t ON, Schneider = tsd × (10 Ir / I)² jusqu'à 10 Ir, ABB = 100 × t2 / (I/In)².
+  const attendu = tsd > 0
+    ? (modeEssai === "ON" ? (abb ? (100 * tsd) / Math.pow(I / In, 2) : (I < 10 * Ir ? tsd * Math.pow((10 * Ir) / I, 2) : tsd)) : tsd)
+    : null;
   let bas = attendu !== null ? 0.8 * attendu : null, haut = attendu !== null ? 1.2 * attendu : null, source = "generique";
   if (d && d.courtRetard) {
-    // Plage constructeur : temps de non-déclenchement et temps maximal de coupure (et non ±20 %).
-    const fen = fenetreCourtRetardSchneider(d, tsd, I, Ir, modeEssai === "ON");
+    // Plage constructeur (et non ±20 %) : Schneider = non-déclenchement → coupure maximale ; ABB = tolérance de la notice.
+    const fen = fenetreCourtRetardSchneider(d, tsd, I, Ir, modeEssai === "ON", In);
     bas = fen.non; haut = fen.max; source = "constructeur";
   }
   const mesure = n(tCC.declenchement_treg) > 0 ? n(tCC.declenchement_treg) / 1000 : null;
   return {
     Ir, Im, I, x, tsd, reglageI2t, modeEssai, attendu, bas, haut, source, mesure, declencheur: d ? d.nom : null,
     horsLimites: mesure !== null && bas !== null && (mesure < bas - 1e-9 || mesure > haut + 1e-9),
-    // Les deux modes donnent des temps différents : réglage ON, et court retard (Im) sous 10 Ir.
-    modesDifferent: reglageI2t && tsd > 0 && Im < 10 * Ir,
+    // Les deux modes donnent des temps différents : réglage ON, et (Schneider) Im sous 10 Ir ou (ABB) Im sous 10 In.
+    modesDifferent: reglageI2t && tsd > 0 && (abb ? Im < 10 * In * 0.9999 : Im < 10 * Ir),
   };
 }
 // Essai de surcharge longue : temps maximal attendu. Constructeur (déclencheur connu) : maximum de la courbe au courant d'essai ;
@@ -11662,8 +11716,12 @@ function evaluationEssaiSurchargeLongue(eq) {
   const x = n(tSL.test_a) || 1.5;
   const d = declencheurSchneider(eq);
   const tr6 = d ? tr6DepuisReglage(d, n(sl.tr), n(sl.tr_classe)) : null;
-  const tMaxDoc = tr6 ? tempsMaxLongRetard(d, tr6, x) : null;
-  const tMinDoc = tMaxDoc !== null ? tMaxDoc * d.tolLong(tr6, x) : null;
+  // Schneider : le temps de la courbe est le maximum (bande 0 à −x %) ; ABB : le temps moyen (bande ±x %, kIr = Ir / In).
+  const kIr = n(sl.k1) * n(sl.k2);
+  const bande = tr6 ? bandeLongRetard(d, tr6, x, kIr) : null;
+  const tCourbe = tr6 ? tempsMaxLongRetard(d, tr6, x) : null;
+  const tMaxDoc = tCourbe !== null ? tCourbe * bande.haut : null;
+  const tMinDoc = tCourbe !== null ? tCourbe * bande.bas : null;
   const saisi = n(tSL.tr_max) > 0 ? n(tSL.tr_max) : null;
   const haut = saisi !== null ? saisi : tMaxDoc;
   const mesure = n(tSL.declenchement) > 0 ? n(tSL.declenchement) : null;
@@ -11697,8 +11755,9 @@ function parametresCourbeDeclenchement(eq) {
   // plages du court retard et de l'instantané ; sinon modèle générique d'après les réglages saisis.
   const d = declencheurSchneider(eq);
   const tr6 = d ? tr6DepuisReglage(d, n(sl.tr), n(sl.tr_classe)) : null;
-  const tr = tr6 || n(sl.tr), trX = tr6 ? 6 : (n(sl.tr_classe) || 6);
-  const Im = cc.k ? (cc.im_fonction_de === "In" ? n(sl.inominal) : Ir) * n(cc.k) : 0;
+  const tr = tr6 || n(sl.tr), trX = tr6 ? (d.refX || 6) : (n(sl.tr_classe) || 6);
+  const baseEnIn = !!(d && d.courtRetard && d.courtRetard.baseIm === "In") || cc.im_fonction_de === "In"; // ABB : seuil de court retard en multiple de In
+  const Im = cc.k ? (baseEnIn ? n(sl.inominal) : Ir) * n(cc.k) : 0;
   const fenetreFixe = !!(d && d.courtRetard && d.courtRetard.fixe);
   // Sans temporisation réglable (Micrologic 2.x), le trait est tracé au temps maximal de coupure du constructeur.
   const tsd = fenetreFixe ? d.courtRetard.fixe.max : n(cc.tsd) / 1000;
@@ -11730,10 +11789,12 @@ function parametresCourbeDeclenchement(eq) {
     declencheur: d ? d.nom : null, tr6: tr6 || null,
     tsdTexte: fenetreFixe ? `coupure ≤ ${Math.round(d.courtRetard.fixe.max * 1000)} ms (fixe)` : null,
     tLong: d && tr6 ? (I) => tempsMaxLongRetard(d, tr6, I / Ir) : null,
-    bandeLong: d && tr6 ? (x) => d.tolLong(tr6, x) : null,
-    fenCC: d && d.courtRetard && Im > 0 ? (I) => fenetreCourtRetardSchneider(d, n(cc.tsd) / 1000, I, Ir, modeEssaiOn) : null,
+    bandeLong: d && tr6 ? (x) => bandeLongRetard(d, tr6, x, n(sl.k1) * n(sl.k2)) : null,
+    fenCC: d && d.courtRetard && Im > 0 ? (I) => fenetreCourtRetardSchneider(d, n(cc.tsd) / 1000, I, Ir, modeEssaiOn, n(sl.inominal)) : null,
+    // ABB : à I²t ON la courbe de court retard est t = 100·t2 / (I/In)² sur toute la plage (pas de palier à 10 Ir).
+    tCourt: d && d.courtRetard && d.courtRetard.modele === "abb" ? (I) => (i2t ? (100 * tsd) / Math.pow(I / n(sl.inominal), 2) : tsd) : null,
     fenInst: d && d.instantane && Ii > 0 ? { x0: Ii * (1 - d.instantane.precision), non: d.instantane.non, max: d.instantane.max } : null,
-    noteDoc: d ? `Courbe constructeur Schneider — ${d.court} : temps maximums à froid, zones admises d'après la documentation.` : "",
+    noteDoc: d ? `Courbe constructeur ${d.marque || "Schneider"} — ${d.court} : ${d.nature === "moyen" ? "temps moyens avec tolérance" : "temps maximums à froid"}, zones admises d'après la documentation.` : "",
     titre: ("Courbe de déclenchement" + (repere ? " · " + repere : "")).toUpperCase(),
   };
 }
@@ -11744,7 +11805,7 @@ function pointsCourbeDeclenchement(p, xMax) {
   const pts = [];
   const log = (a, b, k) => Math.exp(Math.log(a) + ((Math.log(b) - Math.log(a)) * k));
   const tLong = p.tLong || ((I) => p.tr * Math.pow((p.trX * p.Ir) / I, 2));
-  const tCourt = (I) => (p.i2t && I < 10 * p.Ir ? p.tsd * Math.pow((10 * p.Ir) / I, 2) : p.tsd);
+  const tCourt = p.tCourt || ((I) => (p.i2t && I < 10 * p.Ir ? p.tsd * Math.pow((10 * p.Ir) / I, 2) : p.tsd));
   const aCourtRetard = p.Im > 1.05 * p.Ir && p.tsd > 0;
   const finLong = aCourtRetard ? p.Im : (p.Ii > 1.05 * p.Ir ? p.Ii : xMax);
   if ((p.tr > 0 || p.tLong) && finLong > 1.05 * p.Ir) {
@@ -11753,9 +11814,9 @@ function pointsCourbeDeclenchement(p, xMax) {
   if (aCourtRetard) {
     const finCourt = p.Ii > p.Im ? p.Ii : xMax;
     pts.push([p.Im, tCourt(p.Im)]); // descente verticale à Im
-    if (p.i2t && p.Im < 10 * p.Ir) {
-      const borne = Math.min(10 * p.Ir, finCourt);
-      for (let k = 1; k <= 30; k++) { const I = log(p.Im, borne, k / 30); pts.push([I, tCourt(I)]); }
+    const borneIncline = p.tCourt ? (p.i2t ? finCourt : 0) : (p.i2t && p.Im < 10 * p.Ir ? Math.min(10 * p.Ir, finCourt) : 0);
+    if (borneIncline > p.Im) {
+      for (let k = 1; k <= 30; k++) { const I = log(p.Im, borneIncline, k / 30); pts.push([I, tCourt(I)]); }
     }
     pts.push([finCourt, tCourt(finCourt)]);
   }
@@ -11839,7 +11900,7 @@ function genererGraphiqueCourbeDeclenchement(p) {
       const finLongZone = aCourtRetardZone ? p.Im : (p.Ii > 1.05 * p.Ir ? p.Ii : xMax);
       if (finLongZone > 1.05 * p.Ir) {
         const hautB = [], basB = [];
-        for (let k = 0; k <= 60; k++) { const I = logLin(1.05 * p.Ir, finLongZone, k / 60), t = p.tLong(I); hautB.push([I, t]); basB.push([I, t * p.bandeLong(I / p.Ir)]); }
+        for (let k = 0; k <= 60; k++) { const I = logLin(1.05 * p.Ir, finLongZone, k / 60), t = p.tLong(I), bande = p.bandeLong(I / p.Ir); hautB.push([I, t * bande.haut]); basB.push([I, t * bande.bas]); }
         polygone([...hautB, ...basB.reverse()], "rgba(21,96,168,0.30)");
       }
     }
@@ -12031,7 +12092,9 @@ function CourbeDeclenchementOutils({ eq, update }) {
           <div style={{ fontSize: 12, color: "#3E4A5C", lineHeight: 1.5, marginBottom: 8 }}>
             {p.declencheur
               ? <>Tracée à partir des réglages, des essais mesurés et des <b>valeurs constructeur</b> du déclencheur sélectionné (temps maximums, zones admises).</>
-              : <>Tracée automatiquement à partir des réglages (Ir, tr, Im, tsd, Ii) et des essais mesurés. C'est une courbe <b>théorique</b>, sans les zones de tolérance du constructeur — choisissez l'« Unité de contrôle » dans l'identification pour obtenir la courbe constructeur (Micrologic Schneider).</>}
+              : <>Tracée automatiquement à partir des réglages (Ir, tr, Im, tsd, Ii) et des essais mesurés. C'est une courbe <b>théorique</b>, sans les zones de tolérance du constructeur. {eq.identification && eq.identification.referenceRelais
+                  ? <>Aucune valeur constructeur n'est encore disponible pour la référence « {eq.identification.referenceRelais} ».</>
+                  : <>Renseignez la « Référence de l'unité de déclenchement » dans l'identification (Micrologic Schneider, Ekip Touch ABB Emax 2) pour obtenir la courbe constructeur.</>}</>}
           </div>
           {apercu && <img src={apercu.dataUrl} alt="Courbe de déclenchement d'après les réglages" style={{ width: "100%", maxWidth: 640, display: "block", margin: "0 auto 8px", border: "1px solid #E2E6EB", borderRadius: 10, background: "#FFFFFF" }} />}
           <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, cursor: "pointer" }}>
