@@ -8694,6 +8694,7 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
                   onRemoveCustom={(id) => removeCustomAction(sec.key, id)}
                   extra={
                     <>
+                      <CourbeDeclenchementOutils eq={eq} update={update} />
                       <FileGallery files={eq.courbeFiles} onChange={(files) => update({ ...eq, courbeFiles: files })} idPrefix={`${eq.id}-courbe`} />
                       <div style={{
                         marginTop: 12, padding: "10px 14px", borderRadius: 8, fontSize: 12.5, fontWeight: 600,
@@ -9271,6 +9272,7 @@ function computeBRKValues(eq) {
 function PrintEquipement({ eq, allEquipements = [], locaux = [] }) {
   eq = repairEquipementControles(eq); // filet de sécurité, même principe que côté Word
   const courbeTracee = (() => { const p = parametresCourbeDecharge(eq); return p ? genererGraphiqueCourbeDecharge(p) : null; })();
+  const courbeDeclenchementAuto = (() => { const p = eq.courbeDeclenchementAuto !== false ? parametresCourbeDeclenchement(eq) : null; return p ? genererGraphiqueCourbeDeclenchement(p) : null; })();
   const localEq = (locaux || []).find((l) => l.id === eq.localId);
   const schema = schemaFiltreeParNiveau(getSchema(eq), eq.niveauMaintenance);
   const isRelaisSeuils = TYPES_AVEC_RELAIS.includes(eq.type);
@@ -9382,6 +9384,12 @@ function PrintEquipement({ eq, allEquipements = [], locaux = [] }) {
       </div>
       {eq.remarques && <div style={{ fontSize: 11, marginTop: 6, whiteSpace: "pre-line" }}><b>Remarques et préconisations :</b><br />{eq.remarques}</div>}
       <PrintPhotos photos={eq.photos} />
+      {eq.type === "Disjoncteur BT" && courbeDeclenchementAuto && (
+        <div style={{ marginTop: 10 }}>
+          <div style={{ fontSize: 10.5, fontWeight: 700, color: "#555", marginBottom: 6 }}>Courbe de déclenchement</div>
+          <img src={courbeDeclenchementAuto.dataUrl} alt="" style={{ width: "100%", maxWidth: 520, border: "1px solid #ccc" }} />
+        </div>
+      )}
       {eq.type === "Disjoncteur BT" && eq.courbeFiles && eq.courbeFiles.length > 0 && (
         <div style={{ marginTop: 10 }}>
           <div style={{ fontSize: 10.5, fontWeight: 700, color: "#555", marginBottom: 6 }}>Courbe de déclenchement — pièces jointes</div>
@@ -11470,6 +11478,283 @@ function genererGraphiqueCourbeDecharge({ valeurs, temps, dureeMin, nominale, se
     return null;
   }
 }
+// ---------------------------------------------------------------------------------------------
+// Courbe de déclenchement d'un disjoncteur BT, tracée par l'app d'après les RÉGLAGES relevés (Ir, tr, Im, tsd,
+// I²t, Ii) avec les points mesurés aux essais. Courbe THÉORIQUE (forme idéalisée, sans les zones de tolérance du
+// constructeur) : elle ne remplace pas la courbe officielle, qui reste joignable en pièce jointe. Valable pour
+// toutes les marques puisqu'elle repose sur les réglages saisis, pas sur une base de données constructeur.
+// ---------------------------------------------------------------------------------------------
+const T_INSTANTANE_S = 0.01; // temps d'ouverture représenté sur la partie instantanée (indicatif)
+function parametresCourbeDeclenchement(eq) {
+  if (!eq || eq.type !== "Disjoncteur BT" || !eq.controles || !eq.controles.reglage_disjoncteur) return null;
+  const n = (v) => { const x = parseFloat(String(v).replace(",", ".")); return isNaN(x) ? 0 : x; };
+  const rg = eq.controles.reglage_disjoncteur, ts = (eq.controles.tests_disjoncteur) || {};
+  const sl = (rg.surcharge_longue && rg.surcharge_longue.fields) || {}, cc = (rg.cc_temporise && rg.cc_temporise.fields) || {};
+  const inst = (rg.instantane && rg.instantane.fields) || {}, pdc = (rg.pouvoir_coupure && rg.pouvoir_coupure.fields) || {};
+  const Ir = n(sl.inominal) * n(sl.k1) * n(sl.k2);
+  if (!(Ir > 0)) return null;
+  const tr = n(sl.tr), trX = n(sl.tr_classe) || 6;
+  const Im = cc.k ? (cc.im_fonction_de === "In" ? n(sl.inominal) : Ir) * n(cc.k) : 0;
+  const tsd = n(cc.tsd) / 1000, i2t = cc.i2t === "ON";
+  const Ii = n(inst.ii) * 1000, Icu = n(pdc.icu) * 1000;
+  if (!(tr > 0) && !(Im > 0) && !(Ii > 0)) return null;
+  // Points d'essai mesurés, aux courants d'essai de l'app (x Ir, x Im, 1,3 x Ii) ; « bad » reprend les règles d'anomalie du rapport.
+  const points = [];
+  const tSL = (ts.test_surcharge_longue && ts.test_surcharge_longue.fields) || {};
+  const tCC = (ts.test_cc_temporise && ts.test_cc_temporise.fields) || {};
+  const tIn = (ts.test_instantane && ts.test_instantane.fields) || {};
+  if (n(tSL.declenchement) > 0) {
+    const x = n(tSL.test_a) || 1.5, limite = n(tSL.tr_max) || null;
+    points.push({ nom: "SL", I: x * Ir, t: n(tSL.declenchement), limite, bad: !!(limite && n(tSL.declenchement) > limite), repere: `${String(x).replace(".", ",")} Ir` });
+  }
+  if (Im > 0 && n(tCC.declenchement_treg) > 0) {
+    const x = n(tCC.test_a) || 1.2, t = n(tCC.declenchement_treg) / 1000;
+    points.push({ nom: "CC", I: x * Im, t, limite: null, bad: !!(tsd > 0 && Math.abs(t - tsd) / tsd > 0.2), repere: `${String(x).replace(".", ",")} Im` });
+  }
+  if (Ii > 0 && n(tIn.declenchement) > 0) {
+    const t = n(tIn.declenchement) / 1000;
+    points.push({ nom: "INST", I: 1.3 * Ii, t, limite: null, bad: t > 0.05, repere: "1,3 Ii" });
+  }
+  const repere = eq.identification && eq.identification.repere;
+  return { Ir, tr, trX, Im, tsd, i2t, Ii, Icu, points, titre: ("Courbe de déclenchement" + (repere ? " · " + repere : "")).toUpperCase() };
+}
+// Polyligne (courant en A, temps en s) de la courbe théorique : surcharge longue en I²t, transition verticale vers le
+// court retard (constant, ou en I²t jusqu'à 10 Ir), puis vers l'instantané.
+function pointsCourbeDeclenchement(p, xMax) {
+  const pts = [];
+  const log = (a, b, k) => Math.exp(Math.log(a) + ((Math.log(b) - Math.log(a)) * k));
+  const tLong = (I) => p.tr * Math.pow((p.trX * p.Ir) / I, 2);
+  const tCourt = (I) => (p.i2t && I < 10 * p.Ir ? p.tsd * Math.pow((10 * p.Ir) / I, 2) : p.tsd);
+  const aCourtRetard = p.Im > 1.05 * p.Ir && p.tsd > 0;
+  const finLong = aCourtRetard ? p.Im : (p.Ii > 1.05 * p.Ir ? p.Ii : xMax);
+  if (p.tr > 0 && finLong > 1.05 * p.Ir) {
+    for (let k = 0; k <= 80; k++) { const I = log(1.05 * p.Ir, finLong, k / 80); pts.push([I, tLong(I)]); }
+  }
+  if (aCourtRetard) {
+    const finCourt = p.Ii > p.Im ? p.Ii : xMax;
+    pts.push([p.Im, tCourt(p.Im)]); // descente verticale à Im
+    if (p.i2t && p.Im < 10 * p.Ir) {
+      const borne = Math.min(10 * p.Ir, finCourt);
+      for (let k = 1; k <= 30; k++) { const I = log(p.Im, borne, k / 30); pts.push([I, tCourt(I)]); }
+    }
+    pts.push([finCourt, tCourt(finCourt)]);
+  }
+  // Partie instantanée : descente verticale à Ii (seulement si Ii est au-delà de ce qui précède).
+  if (p.Ii > (aCourtRetard ? p.Im : 1.05 * p.Ir)) {
+    const dernier = pts.length ? pts[pts.length - 1] : null;
+    if (!dernier) pts.push([p.Ii, 1e4]);
+    else if (dernier[0] < p.Ii) pts.push([p.Ii, dernier[1]]);
+    pts.push([p.Ii, T_INSTANTANE_S]);
+    pts.push([Math.max(xMax, p.Ii), T_INSTANTANE_S]);
+  }
+  return pts;
+}
+// Graphique log-log (courant en A / temps en s) dans le style des autres graphiques du rapport.
+function genererGraphiqueCourbeDeclenchement(p) {
+  if (typeof document === "undefined" || !document.createElement || !p) return null;
+  try {
+    const W = 640, H = 380, ECHELLE = 2;
+    const canvas = document.createElement("canvas");
+    canvas.width = W * ECHELLE; canvas.height = H * ECHELLE;
+    const ctx = canvas.getContext("2d");
+    ctx.scale(ECHELLE, ECHELLE);
+    const SANS = "Arial, Helvetica, sans-serif", SERIF = "Georgia, 'Times New Roman', serif";
+    const fr = (v, d = 1) => (Math.round(v * Math.pow(10, d)) / Math.pow(10, d)).toString().replace(".", ",");
+    const fmtI = (I) => (I >= 1000 ? `${fr(I / 1000, 2)} kA` : `${fr(I, 0)} A`);
+    const fmtT = (t) => (t < 1 ? `${fr(t * 1000, 0)} ms` : `${fr(t, 1)} s`);
+    ctx.fillStyle = "#FFFFFF"; ctx.fillRect(0, 0, W, H);
+    const r = 10;
+    ctx.strokeStyle = "#E2E6EB"; ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(r + 0.5, 0.5); ctx.lineTo(W - r - 0.5, 0.5); ctx.arc(W - r - 0.5, r + 0.5, r, -Math.PI / 2, 0);
+    ctx.lineTo(W - 0.5, H - r - 0.5); ctx.arc(W - r - 0.5, H - r - 0.5, r, 0, Math.PI / 2);
+    ctx.lineTo(r + 0.5, H - 0.5); ctx.arc(r + 0.5, H - r - 0.5, r, Math.PI / 2, Math.PI);
+    ctx.lineTo(0.5, r + 0.5); ctx.arc(r + 0.5, r + 0.5, r, Math.PI, Math.PI * 1.5);
+    ctx.closePath(); ctx.stroke();
+    // Échelles logarithmiques : courant de ~0,5 Ir à l'Icu (ou 20 Ir), arrondies à 1-2-5 ; temps de 1 ms à 10 000 s.
+    const mant = [1, 2, 5, 10];
+    const niceBas = (v) => { const e = Math.pow(10, Math.floor(Math.log10(v))); const m = Math.floor(v / e); return (m >= 5 ? 5 : m >= 2 ? 2 : 1) * e; };
+    const niceHaut = (v) => { const e = Math.pow(10, Math.floor(Math.log10(v))); const m = v / e; return (m <= 1 ? 1 : m <= 2 ? 2 : m <= 5 ? 5 : 10) * e; };
+    const xMin = niceBas(0.6 * p.Ir);
+    const xMax = niceHaut(Math.max(p.Icu || 0, 1.3 * (p.Ii || 0) * 1.4, 20 * p.Ir));
+    const yMin = 1e-3, yMax = 1e4;
+    const left = 62, right = W - 22, top = 78, bottom = H - 54;
+    const xFor = (I) => left + ((Math.log10(I) - Math.log10(xMin)) / (Math.log10(xMax) - Math.log10(xMin))) * (right - left);
+    const yFor = (t) => bottom - ((Math.log10(Math.min(Math.max(t, yMin), yMax)) - Math.log10(yMin)) / (Math.log10(yMax) - Math.log10(yMin))) * (bottom - top);
+    // Titre et sous-titre (réglages).
+    ctx.fillStyle = "#0A5DA8"; ctx.textBaseline = "top"; ctx.textAlign = "left";
+    let taille = 13;
+    ctx.font = `bold ${taille}px ${SANS}`;
+    while (taille > 9 && ctx.measureText(p.titre).width > W - 36) { taille -= 0.5; ctx.font = `bold ${taille}px ${SANS}`; }
+    ctx.fillText(p.titre, 18, 16);
+    const reglages = [`Ir ${fmtI(p.Ir)}`, p.tr > 0 ? `tr ${fr(p.tr, 1)} s à ${fr(p.trX, 1)} Ir` : null, p.Im > 0 ? `Im ${fmtI(p.Im)}` : null,
+      p.Im > 0 && p.tsd > 0 ? `tsd ${fr(p.tsd * 1000, 0)} ms (I²t ${p.i2t ? "ON" : "OFF"})` : null, p.Ii > 0 ? `Ii ${fmtI(p.Ii)}` : null].filter(Boolean).join("  ·  ");
+    let t2 = 12;
+    ctx.font = `${t2}px ${SANS}`;
+    while (t2 > 9 && ctx.measureText(reglages).width > W - 36) { t2 -= 0.5; ctx.font = `${t2}px ${SANS}`; }
+    ctx.fillStyle = "#5B6B7D"; ctx.fillText(reglages, 18, 36);
+    // Grille : décades (traits pleins) et 2 à 9 × décade (traits légers).
+    const decadesX = [], decadesY = [];
+    for (let e = Math.floor(Math.log10(xMin)); e <= Math.ceil(Math.log10(xMax)); e++) decadesX.push(e);
+    for (let e = Math.log10(yMin); e <= Math.log10(yMax); e++) decadesY.push(e);
+    ctx.lineWidth = 1;
+    decadesX.forEach((e) => { for (let m = 1; m <= 9; m++) { const I = m * Math.pow(10, e); if (I < xMin * 0.999 || I > xMax * 1.001) continue; const x = xFor(I); ctx.strokeStyle = m === 1 ? "#DDE3EA" : "#F0F3F6"; ctx.beginPath(); ctx.moveTo(x, top); ctx.lineTo(x, bottom); ctx.stroke(); } });
+    decadesY.forEach((e) => { for (let m = 1; m <= 9; m++) { const t = m * Math.pow(10, e); if (t > yMax * 1.001) continue; const y = yFor(t); ctx.strokeStyle = m === 1 ? "#DDE3EA" : "#F0F3F6"; ctx.beginPath(); ctx.moveTo(left, y); ctx.lineTo(right, y); ctx.stroke(); } });
+    ctx.strokeStyle = "#C5CCD5"; ctx.strokeRect(left, top, right - left, bottom - top);
+    // Graduations.
+    ctx.font = `12px ${SERIF}`; ctx.fillStyle = "#5B6B7D";
+    ctx.textAlign = "right"; ctx.textBaseline = "middle";
+    const libT = { "-3": "1 ms", "-2": "10 ms", "-1": "100 ms", "0": "1 s", "1": "10 s", "2": "100 s", "3": "1 000 s", "4": "10 000 s" };
+    decadesY.forEach((e) => ctx.fillText(libT[String(Math.round(e))] || "", left - 8, yFor(Math.pow(10, e))));
+    ctx.textAlign = "center"; ctx.textBaseline = "top";
+    decadesX.forEach((e) => { const I = Math.pow(10, e); [1, 2, 5].forEach((m) => { const v = m * I; if (v < xMin * 0.999 || v > xMax * 1.001) return; ctx.fillText(v >= 1000 ? `${fr(v / 1000, 0)} k` : fr(v, 0), xFor(v), bottom + 7); }); });
+    ctx.font = `italic 11.5px ${SERIF}`; ctx.fillStyle = "#8B96A3";
+    ctx.fillText("Courant (A)", (left + right) / 2, bottom + 24);
+    // Repères verticaux Ir / Im / Ii.
+    const reperes = [["Ir", p.Ir], p.Im > 0 ? ["Im", p.Im] : null, p.Ii > 0 ? ["Ii", p.Ii] : null].filter(Boolean);
+    ctx.setLineDash([3, 4]); ctx.strokeStyle = "#8B96A3"; ctx.lineWidth = 1;
+    reperes.forEach(([, I]) => { if (I < xMin || I > xMax) return; const x = xFor(I); ctx.beginPath(); ctx.moveTo(x, top); ctx.lineTo(x, bottom); ctx.stroke(); });
+    ctx.setLineDash([]);
+    ctx.font = `bold 11px ${SANS}`; ctx.textBaseline = "top";
+    reperes.forEach(([nom, I], idx) => {
+      if (I < xMin || I > xMax) return;
+      const x = xFor(I), texte = `${nom} ${fmtI(I)}`, y = top + 4 + idx * 13;
+      const aDroite = x + 6 + ctx.measureText(texte).width > right;
+      ctx.textAlign = aDroite ? "right" : "left";
+      ctx.strokeStyle = "#FFFFFF"; ctx.lineWidth = 3; ctx.strokeText(texte, aDroite ? x - 5 : x + 5, y);
+      ctx.lineWidth = 1; ctx.fillStyle = "#5B6B7D"; ctx.fillText(texte, aDroite ? x - 5 : x + 5, y);
+    });
+    // Courbe théorique.
+    const pts = pointsCourbeDeclenchement(p, xMax);
+    ctx.strokeStyle = "#1560A8"; ctx.lineWidth = 2.6; ctx.lineJoin = "round"; ctx.lineCap = "round";
+    ctx.beginPath();
+    pts.forEach(([I, t], i) => { const x = xFor(Math.min(Math.max(I, xMin), xMax)), y = yFor(t); if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y); });
+    ctx.stroke(); ctx.lineWidth = 1;
+    // Points d'essai mesurés (ambre ; rouge s'ils sortent des limites du rapport) et limite attendue de la surcharge longue.
+    ctx.font = `bold 12px ${SERIF}`;
+    p.points.forEach((pt) => {
+      if (pt.I < xMin || pt.I > xMax) return;
+      const x = xFor(pt.I), y = yFor(pt.t);
+      if (pt.limite) {
+        const yl = yFor(pt.limite);
+        ctx.setLineDash([2, 3]); ctx.strokeStyle = "#B02A2A"; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x, yl); ctx.stroke(); ctx.setLineDash([]);
+        ctx.fillStyle = "#FFFFFF"; ctx.strokeStyle = "#B02A2A"; ctx.lineWidth = 1.8;
+        ctx.beginPath(); ctx.moveTo(x, yl - 5); ctx.lineTo(x + 5, yl); ctx.lineTo(x, yl + 5); ctx.lineTo(x - 5, yl); ctx.closePath(); ctx.fill(); ctx.stroke(); ctx.lineWidth = 1;
+      }
+      ctx.fillStyle = pt.bad ? "#C0392B" : "#FFC02E"; ctx.strokeStyle = "#1A1F26"; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(x, y, 5.5, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); ctx.lineWidth = 1;
+      const texte = `${fmtT(pt.t)} (${pt.repere})`;
+      const aGauche = x + 10 + ctx.measureText(texte).width > right;
+      ctx.textBaseline = "middle"; ctx.textAlign = aGauche ? "right" : "left";
+      ctx.strokeStyle = "#FFFFFF"; ctx.lineWidth = 4; ctx.strokeText(texte, aGauche ? x - 10 : x + 10, y - 11);
+      ctx.lineWidth = 1; ctx.fillStyle = "#1A1F26"; ctx.fillText(texte, aGauche ? x - 10 : x + 10, y - 11);
+    });
+    // Légende (dans le graphique, en bas à gauche : zone libre) et mention de la nature de la courbe.
+    if (p.points.length) {
+      ctx.font = `11px ${SANS}`; ctx.textBaseline = "middle"; ctx.textAlign = "left";
+      const lx = left + 14, ly1 = bottom - 30, ly2 = bottom - 14;
+      ctx.fillStyle = "rgba(255,255,255,0.85)"; ctx.fillRect(left + 4, ly1 - 11, 150, 40);
+      ctx.fillStyle = "#FFC02E"; ctx.strokeStyle = "#1A1F26"; ctx.beginPath(); ctx.arc(lx, ly1, 4.5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = "#5B6B7D"; ctx.fillText("essai mesuré", lx + 10, ly1);
+      ctx.strokeStyle = "#B02A2A"; ctx.fillStyle = "#FFFFFF"; ctx.beginPath(); ctx.moveTo(lx, ly2 - 4.5); ctx.lineTo(lx + 5, ly2); ctx.lineTo(lx, ly2 + 4.5); ctx.lineTo(lx - 5, ly2); ctx.closePath(); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = "#5B6B7D"; ctx.fillText("limite attendue (tr max)", lx + 10, ly2);
+    }
+    ctx.font = `italic 10.5px ${SERIF}`; ctx.fillStyle = "#8B96A3"; ctx.textAlign = "left"; ctx.textBaseline = "middle";
+    ctx.fillText("Courbe théorique d'après les réglages relevés, hors tolérances constructeur.", 18, H - 12);
+    return { dataUrl: canvas.toDataURL("image/png"), largeur: W, hauteur: H };
+  } catch (e) {
+    return null;
+  }
+}
+// ---------------------------------------------------------------------------------------------
+// Courbe officielle du constructeur : accès à son outil de courbes (lien enregistré, ou outil connu, ou recherche
+// web), puis capture collée et recadrée dans les pièces jointes. Les liens personnalisés sont gardés SUR CET
+// APPAREIL ; les paramètres de session (code, token…) en sont retirés — ils ressemblent à des identifiants.
+// ---------------------------------------------------------------------------------------------
+const PARAMETRES_LIEN_SENSIBLES = ["code", "token", "access_token", "id_token", "refresh_token", "state", "session_state", "sig", "signature", "key", "apikey", "api_key", "password"];
+function nettoyerLienOutil(brut) {
+  let url;
+  try { url = new URL(String(brut || "").trim()); } catch (e) { return { url: null, retires: [] }; }
+  if (!/^https?:$/.test(url.protocol)) return { url: null, retires: [] };
+  const retires = [];
+  PARAMETRES_LIEN_SENSIBLES.forEach((k) => { if (url.searchParams.has(k)) { url.searchParams.delete(k); retires.push(k); } });
+  return { url: url.toString(), retires };
+}
+const CLE_LIENS_COURBES = "ht_liens_courbes";
+function lireLiensCourbes() {
+  try { return JSON.parse(localStorage.getItem(CLE_LIENS_COURBES) || "{}") || {}; } catch (e) { return {}; }
+}
+function ecrireLienCourbes(marque, url) {
+  try {
+    const liens = lireLiensCourbes();
+    if (url) liens[marque] = url; else delete liens[marque];
+    localStorage.setItem(CLE_LIENS_COURBES, JSON.stringify(liens));
+  } catch (e) { /* stockage indisponible : le lien n'est simplement pas mémorisé */ }
+}
+const FAMILLE_MARQUE_COURBES = { "merlin gerin": "Schneider Electric" };
+function liensOutilsCourbes(eq, liensPerso = lireLiensCourbes()) {
+  const id = (eq && eq.identification) || {};
+  const marque = String(id.marque || "").trim();
+  const famille = FAMILLE_MARQUE_COURBES[marque.toLowerCase()] || marque;
+  const requete = ["courbe de déclenchement", marque, id.modele, id.typeDisjoncteur].filter(Boolean).join(" ");
+  const liens = [];
+  const perso = liensPerso[famille] || liensPerso[marque];
+  if (perso) liens.push({ cle: "perso", label: `Outil de courbes ${famille || "constructeur"} (mon lien)`, url: perso });
+  else if (famille === "Schneider Electric") liens.push({ cle: "schneider", label: "Outil de courbes Schneider (ECT)", url: "https://ect.se.com/cbt/app/index.html" });
+  liens.push({ cle: "recherche", label: marque ? `Rechercher la courbe ${marque}${id.modele ? " " + id.modele : ""}` : "Rechercher la courbe du constructeur", url: "https://www.google.com/search?q=" + encodeURIComponent(requete || "courbe de déclenchement disjoncteur") });
+  return { marque: famille, liens };
+}
+// Bloc affiché dans la section « Courbe de déclenchement » : courbe théorique d'après les réglages (incluse dans le
+// rapport sauf décision contraire) et accès à la courbe officielle du constructeur.
+function CourbeDeclenchementOutils({ eq, update }) {
+  const [version, setVersion] = useState(0);
+  const p = parametresCourbeDeclenchement(eq);
+  const cle = p ? JSON.stringify([p.Ir, p.tr, p.trX, p.Im, p.tsd, p.i2t, p.Ii, p.Icu, p.points, p.titre]) : "";
+  const apercu = useMemo(() => (p ? genererGraphiqueCourbeDeclenchement(p) : null), [cle]);
+  const { marque, liens } = useMemo(() => liensOutilsCourbes(eq), [eq.identification && eq.identification.marque, eq.identification && eq.identification.modele, eq.identification && eq.identification.typeDisjoncteur, version]);
+  const inclure = eq.courbeDeclenchementAuto !== false;
+  function definirLien() {
+    const nom = marque || "ce constructeur";
+    const saisi = window.prompt(`Lien de l'outil de courbes ${nom} (mémorisé sur cet appareil uniquement).\\nLaissez vide pour revenir au lien par défaut.`, "");
+    if (saisi === null) return;
+    if (!saisi.trim()) { ecrireLienCourbes(marque, ""); setVersion((v) => v + 1); return; }
+    const { url, retires } = nettoyerLienOutil(saisi);
+    if (!url) { window.alert("Ce lien n'est pas valide (il doit commencer par https://)."); return; }
+    if (retires.length) window.alert(`Pour votre sécurité, les paramètres de connexion (${retires.join(", ")}) ont été retirés du lien : ils ressemblent à des identifiants de session et ne servent qu'une fois.`);
+    ecrireLienCourbes(marque, url);
+    setVersion((v) => v + 1);
+  }
+  return (
+    <div style={{ marginBottom: 14, border: "1px solid #E2E6EB", borderRadius: 10, padding: 12, background: "#F7F8FA" }}>
+      <div style={{ fontSize: 12.5, fontWeight: 700, color: "#1A1F26", marginBottom: 6 }}>Courbe d'après les réglages relevés</div>
+      {p ? (
+        <>
+          <div style={{ fontSize: 12, color: "#3E4A5C", lineHeight: 1.5, marginBottom: 8 }}>
+            Tracée automatiquement à partir des réglages (Ir, tr, Im, tsd, Ii) et des essais mesurés. C'est une courbe <b>théorique</b>, sans les zones de tolérance du constructeur.
+          </div>
+          {apercu && <img src={apercu.dataUrl} alt="Courbe de déclenchement d'après les réglages" style={{ width: "100%", maxWidth: 640, display: "block", margin: "0 auto 8px", border: "1px solid #E2E6EB", borderRadius: 10, background: "#FFFFFF" }} />}
+          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, cursor: "pointer" }}>
+            <input type="checkbox" checked={inclure} onChange={(e) => update({ ...eq, courbeDeclenchementAuto: e.target.checked })} />
+            Inclure cette courbe dans le rapport
+          </label>
+        </>
+      ) : (
+        <div style={{ fontSize: 12, color: "#8B96A3", lineHeight: 1.5 }}>Renseignez au moins I nominal, K1, K2 et tr (ou Im, Ii) dans « Réglage du disjoncteur » : la courbe se tracera automatiquement.</div>
+      )}
+      <div style={{ fontSize: 12.5, fontWeight: 700, color: "#1A1F26", margin: "14px 0 6px" }}>Courbe officielle du constructeur</div>
+      <div style={{ fontSize: 12, color: "#3E4A5C", lineHeight: 1.5, marginBottom: 8 }}>
+        Ouvrez l'outil du constructeur, faites une capture de la courbe (Cmd + Ctrl + Maj + 4 sur Mac), puis « Coller » ci-dessous et recadrez avec <Crop size={11} style={{ verticalAlign: "-1px" }} />.
+      </div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        {liens.map((l) => (
+          <a key={l.cle} href={l.url} target="_blank" rel="noopener noreferrer" style={{ ...btnGhost(BRAND.blue), textDecoration: "none" }}><MapPin size={13} /> {l.label}</a>
+        ))}
+        <button onClick={definirLien} style={btnGhost("#3E4A5C")} title="Enregistrer mon lien vers l'outil de courbes de ce constructeur (sur cet appareil)">✎ Mon lien</button>
+      </div>
+    </div>
+  );
+}
+
 // Synthèse visuelle du site (donut) — répartition Conforme / Dégradé / Défaillant, pour un aperçu
 // immédiat de l'état global avant de rentrer dans le détail équipement par équipement.
 // Historique d'un équipement à travers les visites précédentes (même lignageId, sites différents)
@@ -12144,13 +12429,20 @@ function dimensionsCourbe(f, largeurMax = 560, hauteurMax = 460) {
 }
 function docxCourbeDeclenchement(eq, titre) {
   const elements = [];
-  if (!(eq.courbeFiles || []).length) return elements;
-  const contenus = eq.courbeFiles.map((f) => {
-    if (f.isPdf) return new DOCX.Paragraph({ spacing: { after: 40 }, children: [new DOCX.TextRun({ text: "Pièce jointe (PDF) : " + (f.name || "document.pdf"), size: 16, color: DOCX_BLUE, italics: true })] });
-    const [largeur, hauteur] = dimensionsCourbe(f);
-    const img = docxImage(f.dataUrl, largeur, hauteur);
-    return img ? new DOCX.Paragraph({ keepNext: true, alignment: DOCX.AlignmentType.CENTER, spacing: { before: 60, after: 40 }, children: [img] }) : null;
-  }).filter(Boolean);
+  // Courbe théorique d'après les réglages (sauf si l'utilisateur l'a exclue), puis les pièces jointes (courbe officielle).
+  const params = eq.courbeDeclenchementAuto !== false ? parametresCourbeDeclenchement(eq) : null;
+  const graphique = params ? genererGraphiqueCourbeDeclenchement(params) : null;
+  const imgAuto = graphique ? docxImage(graphique.dataUrl, 560, Math.round((560 * graphique.hauteur) / graphique.largeur)) : null;
+  const contenus = [
+    ...(imgAuto ? [new DOCX.Paragraph({ keepNext: true, alignment: DOCX.AlignmentType.CENTER, spacing: { before: 60, after: 40 }, children: [imgAuto] })] : []),
+    ...(eq.courbeFiles || []).map((f) => {
+      if (f.isPdf) return new DOCX.Paragraph({ spacing: { after: 40 }, children: [new DOCX.TextRun({ text: "Pièce jointe (PDF) : " + (f.name || "document.pdf"), size: 16, color: DOCX_BLUE, italics: true })] });
+      const [largeur, hauteur] = dimensionsCourbe(f);
+      const img = docxImage(f.dataUrl, largeur, hauteur);
+      return img ? new DOCX.Paragraph({ keepNext: true, alignment: DOCX.AlignmentType.CENTER, spacing: { before: 60, after: 40 }, children: [img] }) : null;
+    }).filter(Boolean),
+  ];
+  if (!contenus.length) return elements;
   const tests = eq.controles.tests_disjoncteur;
   const testEntries = [
     ["Surcharge longue", tests.test_surcharge_longue.etat],
@@ -12654,7 +12946,8 @@ function docxEquipementElements(eq, locaux, allSites) {
         })
       : sec.items;
     if (itemsAffiches.length === 0) return;
-    const courbeAvecFichiers = sec.key === "courbe_declenchement" && eq.type === "Disjoncteur BT" && (eq.courbeFiles || []).length > 0;
+    const courbeAvecFichiers = sec.key === "courbe_declenchement" && eq.type === "Disjoncteur BT"
+      && ((eq.courbeFiles || []).length > 0 || (eq.courbeDeclenchementAuto !== false && !!parametresCourbeDeclenchement(eq)));
     if (!courbeAvecFichiers) elements.push(docxHeading(sec.title));
     if (sec.key === "mesure_isolement" && sec.items.some((it) => it.key === "pi" || it.fields?.some((f) => f.key === "pi"))) {
       elements.push(docxNormeNote("CEI 60076-3 / IEEE 43. Tension d'injection identique du début à la fin de l'essai — le type de mesure indique jusqu'où il est poussé : Standard (lecture instantanée), PI = R(10 min)/R(1 min), DAR = R(60 s)/R(10 s). L'enroulement non testé doit être court-circuité (shunté) et relié à la terre."));
