@@ -2506,7 +2506,7 @@ const SCHEMAS = {
       ]},
       { key: "tests_disjoncteur", title: "Tests du disjoncteur", items: [
         C("test_surcharge_longue", "Surcharge longue", [F("test_a", "Test à", "x Ir"), F("tr_max", "Tr max attendu", "s"), F("declenchement", "Déclenchement", "s")]),
-        C("test_cc_temporise", "Court-circuit temporisé", [F("test_a", "Test à", "x Im"), F("declenchement_t0", "Déclenchement à T=0", "ms"), F("declenchement_treg", "Déclenchement à T réglé", "ms")]),
+        C("test_cc_temporise", "Court-circuit temporisé", [F("test_a", "Test à", "x Im"), F("i2t_essai", "I²t pendant l'essai", null, ["OFF", "ON"]), F("declenchement_t0", "Déclenchement à T=0", "ms"), F("declenchement_treg", "Déclenchement à T réglé", "ms")]),
         C("test_instantane", "Instantané", [F("valise_str", "Valise STR", "mA"), F("declenchement", "Déclenchement", "ms")]),
       ]},
       { key: "courbe_declenchement", title: "Courbe de déclenchement", items: [
@@ -7662,6 +7662,7 @@ function BRKReglagePanel({ eq, update, custom, onAddCustom, onChangeCustom, onRe
   const valiseSTR_CC = Math.round(n(sl.k1) * n(sl.k2) * testACC * n(cc.k) * 100);
   const valiseIS_CC = Math.round(Ir * n(cc.k) * testACC);
   const valiseIS_Inst = Math.round(n(inst.ii) * 1000 * 1.3);
+  const evCC = evaluationEssaiCourtRetard(eq); // temps attendu au court retard selon le mode I²t de l'essai
 
   return (
     <>
@@ -7717,12 +7718,23 @@ function BRKReglagePanel({ eq, update, custom, onAddCustom, onChangeCustom, onRe
             <MiniInput label="Test à" unit="x Im" value={tCC.test_a} onChange={(v) => setT("test_cc_temporise", "test_a", v)} />
             <MiniComputed label="Valise STR" unit="mA" value={valiseSTR_CC} />
             <MiniComputed label="Valise IS" unit="A" value={valiseIS_CC} />
+            {cc.i2t === "ON" && <MiniSelect label="I²t à l'essai" options={["OFF", "ON"]} value={tCC.i2t_essai || "OFF"} onChange={(v) => setT("test_cc_temporise", "i2t_essai", v)} />}
             <MiniInput label="Décl. à T=0" unit="ms" value={tCC.declenchement_t0} onChange={(v) => setT("test_cc_temporise", "declenchement_t0", v)} />
+            {evCC && <MiniComputed label="Attendu (±20 %)" unit="ms" value={Math.round(evCC.attendu * 1000 * 10) / 10} />}
             <MiniInput label="Décl. à T réglé" unit="ms" value={tCC.declenchement_treg} onChange={(v) => setT("test_cc_temporise", "declenchement_treg", v)} />
             <Select value={tests.test_cc_temporise.etat} onChange={(e) => setTEtat("test_cc_temporise", e.target.value)} style={{ width: 130, padding: "5px 7px", fontSize: 12 }}>
               {EQUIP_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
             </Select>
           </div>
+          {evCC && cc.i2t === "ON" && (
+            <div style={{ fontSize: 11.5, color: "#5B6B7D", lineHeight: 1.5, padding: "0 0 8px", borderBottom: "1px solid #E2E6EB" }}>
+              {evCC.modeEssai === "OFF"
+                ? <>Réglage <b>I²t ON</b>, essai réalisé à <b>I²t OFF</b> : le temps attendu est la temporisation réglée (tsd = {Math.round(evCC.tsd * 1000)} ms), pas la valeur de la courbe I²t.</>
+                : evCC.modesDifferent
+                  ? <>Essai réalisé à <b>I²t ON</b> : temps attendu lu sur la courbe I²t ({String(Math.round(evCC.attendu * 1000 * 10) / 10).replace(".", ",")} ms à {String(evCC.x).replace(".", ",")} Im).</>
+                  : <>Essai à I²t ON, mais Im est au-delà de 10 × Ir : la courbe est plate, le temps attendu reste tsd ({Math.round(evCC.tsd * 1000)} ms).</>}
+            </div>
+          )}
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "8px 0" }}>
             <span style={{ fontSize: 12.5, color: "#3E4A5C", flex: "1 1 160px" }}>Instantané</span>
             <MiniInput label="Valise STR" unit="mA" value={tests.test_instantane.fields.valise_str} onChange={(v) => setT("test_instantane", "valise_str", v)} />
@@ -8016,16 +8028,21 @@ function analyserAnomaliesEquipement(eq) {
         ajouter(`Lors de l'essai de surcharge longue, le déclenchement a été mesuré à ${decl} s, soit au-delà du temps maximal attendu (${trMax} s).`, 1, "disjoncteur", "essai de surcharge longue");
       }
     }
-    // Court-circuit temporisé : écart > 20 % entre déclenchement à T réglé et temporisation réglée.
-    const reglageCC = eq.controles.reglage_disjoncteur?.cc_temporise?.fields;
-    const testCC = eq.controles.tests_disjoncteur?.test_cc_temporise?.fields;
-    if (reglageCC && testCC) {
-      const tsd = numOf(reglageCC.tsd);
-      const treg = numOf(testCC.declenchement_treg);
-      if (tsd && treg !== null && Math.abs(treg - tsd) / tsd > 0.2) {
-        ajouter(`Lors de l'essai de court-circuit temporisé, le déclenchement à T réglé (${treg} ms) s'écarte de plus de 20 % de la temporisation réglée (tsd = ${tsd} ms).`, 1, "disjoncteur", "essai de court-circuit temporisé");
-      }
+    // Court-circuit temporisé : écart > 20 % entre le déclenchement à T réglé et le temps ATTENDU, qui dépend du mode I²t
+    // utilisé pendant l'essai (voir evaluationEssaiCourtRetard) : la temporisation réglée (tsd) à I²t OFF — cas courant,
+    // y compris quand le réglage est sur ON — ou la valeur de la courbe I²t à I²t ON.
+    const evCC = evaluationEssaiCourtRetard(eq);
+    if (evCC && evCC.horsLimites) {
+      const frMs = (s, d) => String(Math.round(s * 1000 * d) / d).replace(".", ","); // millisecondes, virgule décimale
+      const mesMs = frMs(evCC.mesure, 100);
+      const tsdMs = frMs(evCC.tsd, 100);
+      const attMs = frMs(evCC.attendu, 10);
+      const reference = evCC.modeEssai === "ON" && Math.abs(evCC.attendu - evCC.tsd) > 1e-9
+        ? `du temps attendu à I²t ON (${attMs} ms à ${String(evCC.x).replace(".", ",")} Im, pour tsd = ${tsdMs} ms)`
+        : `de la temporisation réglée (tsd = ${tsdMs} ms${evCC.reglageI2t ? ", essai à I²t OFF" : ""})`;
+      ajouter(`Lors de l'essai de court-circuit temporisé, le déclenchement à T réglé (${mesMs} ms) s'écarte de plus de 20 % ${reference}.`, 1, "disjoncteur", "essai de court-circuit temporisé");
     }
+
     // Instantané : repère usuel ≈ 50 ms (donnée constructeur, pas une clause CEI 60947-2 universelle).
     const testInst = eq.controles.tests_disjoncteur?.test_instantane?.fields;
     if (testInst) {
@@ -11485,6 +11502,34 @@ function genererGraphiqueCourbeDecharge({ valeurs, temps, dureeMin, nominale, se
 // toutes les marques puisqu'elle repose sur les réglages saisis, pas sur une base de données constructeur.
 // ---------------------------------------------------------------------------------------------
 const T_INSTANTANE_S = 0.01; // temps d'ouverture représenté sur la partie instantanée (indicatif)
+const LIMITE_INSTANTANE_S = 0.05; // repère usuel retenu par le rapport : anomalie au-delà de 50 ms
+// Essai du court retard : temps de déclenchement ATTENDU selon le mode I²t réellement utilisé pendant l'essai.
+// Cas pratique fréquent : le réglage est sur I²t ON mais l'essai est fait à I²t OFF (temps indépendant du courant) ;
+// le temps mesuré ne doit alors pas être comparé à la courbe I²t, mais à la temporisation réglée (tsd). Le mode
+// d'essai se renseigne dans « Tests du disjoncteur » ; vide = OFF, ce qui reprend le comportement historique du
+// rapport (comparaison à tsd). Avec I²t ON à l'essai : attendu = tsd × (10 Ir / I)² tant que I < 10 Ir, puis tsd.
+// Limites d'acceptation : ±20 % du temps attendu (même règle que l'anomalie du rapport).
+function evaluationEssaiCourtRetard(eq) {
+  const n = (v) => { const x = parseFloat(String(v).replace(",", ".")); return isNaN(x) ? 0 : x; };
+  const rg = eq && eq.controles && eq.controles.reglage_disjoncteur, ts = eq && eq.controles && eq.controles.tests_disjoncteur;
+  if (!rg || !ts || !rg.surcharge_longue || !rg.cc_temporise || !ts.test_cc_temporise) return null;
+  const sl = rg.surcharge_longue.fields || {}, cc = rg.cc_temporise.fields || {}, tCC = ts.test_cc_temporise.fields || {};
+  const Ir = n(sl.inominal) * n(sl.k1) * n(sl.k2);
+  const Im = cc.k ? (cc.im_fonction_de === "In" ? n(sl.inominal) : Ir) * n(cc.k) : 0;
+  const tsd = n(cc.tsd) / 1000;
+  if (!(Ir > 0) || !(Im > 0) || !(tsd > 0)) return null;
+  const x = n(tCC.test_a) || 1.2, I = x * Im;
+  const reglageI2t = cc.i2t === "ON";
+  const modeEssai = reglageI2t && tCC.i2t_essai === "ON" ? "ON" : "OFF";
+  const attendu = modeEssai === "ON" && I < 10 * Ir ? tsd * Math.pow((10 * Ir) / I, 2) : tsd;
+  const mesure = n(tCC.declenchement_treg) > 0 ? n(tCC.declenchement_treg) / 1000 : null;
+  return {
+    Ir, Im, I, x, tsd, reglageI2t, modeEssai, attendu, bas: 0.8 * attendu, haut: 1.2 * attendu, mesure,
+    horsLimites: mesure !== null && Math.abs(mesure - attendu) / attendu > 0.2,
+    // Les deux modes donnent des temps différents : réglage ON, et court retard (Im) sous 10 Ir.
+    modesDifferent: reglageI2t && Im < 10 * Ir,
+  };
+}
 function parametresCourbeDeclenchement(eq) {
   if (!eq || eq.type !== "Disjoncteur BT" || !eq.controles || !eq.controles.reglage_disjoncteur) return null;
   const n = (v) => { const x = parseFloat(String(v).replace(",", ".")); return isNaN(x) ? 0 : x; };
@@ -11501,22 +11546,24 @@ function parametresCourbeDeclenchement(eq) {
   // Points d'essai mesurés, aux courants d'essai de l'app (x Ir, x Im, 1,3 x Ii) ; « bad » reprend les règles d'anomalie du rapport.
   const points = [];
   const tSL = (ts.test_surcharge_longue && ts.test_surcharge_longue.fields) || {};
-  const tCC = (ts.test_cc_temporise && ts.test_cc_temporise.fields) || {};
   const tIn = (ts.test_instantane && ts.test_instantane.fields) || {};
   if (n(tSL.declenchement) > 0) {
     const x = n(tSL.test_a) || 1.5, limite = n(tSL.tr_max) || null;
-    points.push({ nom: "SL", I: x * Ir, t: n(tSL.declenchement), limite, bad: !!(limite && n(tSL.declenchement) > limite), repere: `${String(x).replace(".", ",")} Ir` });
+    points.push({ nom: "SL", I: x * Ir, t: n(tSL.declenchement), limites: limite ? { haut: limite } : null, bad: !!(limite && n(tSL.declenchement) > limite), repere: `${String(x).replace(".", ",")} Ir` });
   }
-  if (Im > 0 && n(tCC.declenchement_treg) > 0) {
-    const x = n(tCC.test_a) || 1.2, t = n(tCC.declenchement_treg) / 1000;
-    points.push({ nom: "CC", I: x * Im, t, limite: null, bad: !!(tsd > 0 && Math.abs(t - tsd) / tsd > 0.2), repere: `${String(x).replace(".", ",")} Im` });
+  const evCC = evaluationEssaiCourtRetard(eq);
+  if (evCC && evCC.mesure !== null) {
+    points.push({ nom: "CC", I: evCC.I, t: evCC.mesure, limites: { bas: evCC.bas, haut: evCC.haut, attendu: evCC.attendu }, bad: evCC.horsLimites, repere: `${String(evCC.x).replace(".", ",")} Im` });
   }
   if (Ii > 0 && n(tIn.declenchement) > 0) {
     const t = n(tIn.declenchement) / 1000;
-    points.push({ nom: "INST", I: 1.3 * Ii, t, limite: null, bad: t > 0.05, repere: "1,3 Ii" });
+    points.push({ nom: "INST", I: 1.3 * Ii, t, limites: { haut: LIMITE_INSTANTANE_S }, bad: t > LIMITE_INSTANTANE_S, repere: "1,3 Ii" });
   }
   const repere = eq.identification && eq.identification.repere;
-  return { Ir, tr, trX, Im, tsd, i2t, Ii, Icu, points, titre: ("Courbe de déclenchement" + (repere ? " · " + repere : "")).toUpperCase() };
+  // Réglage ON mais essai du court retard fait à OFF (cas courant) : la mesure se lit sur la ligne tsd, pas sur la courbe I²t.
+  const essaiCourtRetardOff = !!(evCC && evCC.modesDifferent && evCC.modeEssai === "OFF");
+  const essaiCourtRetardOn = !!(evCC && evCC.modesDifferent && evCC.modeEssai === "ON");
+  return { Ir, tr, trX, Im, tsd, i2t, Ii, Icu, points, essaiCourtRetardOff, essaiCourtRetardOn, titre: ("Courbe de déclenchement" + (repere ? " · " + repere : "")).toUpperCase() };
 }
 // Polyligne (courant en A, temps en s) de la courbe théorique : surcharge longue en I²t, transition verticale vers le
 // court retard (constant, ou en I²t jusqu'à 10 Ir), puis vers l'instantané.
@@ -11553,7 +11600,11 @@ function pointsCourbeDeclenchement(p, xMax) {
 function genererGraphiqueCourbeDeclenchement(p) {
   if (typeof document === "undefined" || !document.createElement || !p) return null;
   try {
-    const W = 640, H = 380, ECHELLE = 2;
+    // Une note supplémentaire (mode d'essai I²t) agrandit le bas du graphique sans réduire la zone de tracé.
+    const noteEssai = p.essaiCourtRetardOff ? "Essai du court retard réalisé à I²t OFF (réglage ON) : temps attendu = tsd, ligne verte en pointillés."
+      : p.essaiCourtRetardOn ? "Essai du court retard réalisé à I²t ON : temps attendu lu sur la courbe I²t." : "";
+    const extraBas = noteEssai ? 16 : 0;
+    const W = 640, H = 380 + extraBas, ECHELLE = 2;
     const canvas = document.createElement("canvas");
     canvas.width = W * ECHELLE; canvas.height = H * ECHELLE;
     const ctx = canvas.getContext("2d");
@@ -11578,7 +11629,7 @@ function genererGraphiqueCourbeDeclenchement(p) {
     const xMin = niceBas(0.6 * p.Ir);
     const xMax = niceHaut(Math.max(p.Icu || 0, 1.3 * (p.Ii || 0) * 1.4, 20 * p.Ir));
     const yMin = 1e-3, yMax = 1e4;
-    const left = 62, right = W - 22, top = 78, bottom = H - 54;
+    const left = 62, right = W - 22, top = 78, bottom = H - 54 - extraBas;
     const xFor = (I) => left + ((Math.log10(I) - Math.log10(xMin)) / (Math.log10(xMax) - Math.log10(xMin))) * (right - left);
     const yFor = (t) => bottom - ((Math.log10(Math.min(Math.max(t, yMin), yMax)) - Math.log10(yMin)) / (Math.log10(yMax) - Math.log10(yMin))) * (bottom - top);
     // Titre et sous-titre (réglages).
@@ -11630,13 +11681,39 @@ function genererGraphiqueCourbeDeclenchement(p) {
     ctx.beginPath();
     pts.forEach(([I, t], i) => { const x = xFor(Math.min(Math.max(I, xMin), xMax)), y = yFor(t); if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y); });
     ctx.stroke(); ctx.lineWidth = 1;
-    // Points d'essai mesurés (ambre ; rouge s'ils sortent des limites du rapport) et limite attendue de la surcharge longue.
+    // Réglage I²t ON, essai à OFF : ligne tsd (verte, pointillés) sur laquelle se lit la mesure du court retard.
+    if (p.essaiCourtRetardOff && p.Im > 0 && p.tsd > 0) {
+      const finCourt = p.Ii > p.Im ? p.Ii : xMax;
+      const x1 = xFor(p.Im), x2 = xFor(Math.min(finCourt, xMax)), yy = yFor(p.tsd);
+      ctx.setLineDash([6, 4]); ctx.strokeStyle = "#2E8B57"; ctx.lineWidth = 2.2;
+      ctx.beginPath(); ctx.moveTo(x1, yy); ctx.lineTo(x2, yy); ctx.stroke(); ctx.setLineDash([]); ctx.lineWidth = 1;
+      ctx.font = `italic 11px ${SERIF}`; ctx.textBaseline = "top"; ctx.textAlign = "left";
+      const texteOff = `tsd ${fr(p.tsd * 1000, 0)} ms — I²t OFF (essai)`;
+      const xt = Math.max(x1 + 8, x2 - ctx.measureText(texteOff).width - 6); // sous la ligne, calé à droite : ne recouvre pas l'étiquette du point d'essai
+      ctx.strokeStyle = "#FFFFFF"; ctx.lineWidth = 3.5; ctx.strokeText(texteOff, xt, yy + 5);
+      ctx.lineWidth = 1; ctx.fillStyle = "#2E8B57"; ctx.fillText(texteOff, xt, yy + 5);
+    }
+    // Points d'essai mesurés (ambre ; rouge s'ils sortent des limites d'acceptation) avec leurs limites.
     ctx.font = `bold 12px ${SERIF}`;
     p.points.forEach((pt) => {
       if (pt.I < xMin || pt.I > xMax) return;
       const x = xFor(pt.I), y = yFor(pt.t);
-      if (pt.limite) {
-        const yl = yFor(pt.limite);
+      const L = pt.limites;
+      if (L && L.bas && L.haut) {
+        // Plage d'acceptation (±20 % du temps attendu) : trait pointillé et deux butées, losange blanc = temps attendu.
+        const yb = yFor(L.bas), yh = yFor(L.haut);
+        ctx.setLineDash([2, 3]); ctx.strokeStyle = "#B02A2A"; ctx.lineWidth = 1.6;
+        ctx.beginPath(); ctx.moveTo(x, yb); ctx.lineTo(x, yh); ctx.stroke(); ctx.setLineDash([]);
+        ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(x - 7, yb); ctx.lineTo(x + 7, yb); ctx.moveTo(x - 7, yh); ctx.lineTo(x + 7, yh); ctx.stroke();
+        if (L.attendu) {
+          const ya = yFor(L.attendu);
+          ctx.fillStyle = "#FFFFFF"; ctx.strokeStyle = "#1A1F26"; ctx.lineWidth = 1.5;
+          ctx.beginPath(); ctx.moveTo(x, ya - 5); ctx.lineTo(x + 5, ya); ctx.lineTo(x, ya + 5); ctx.lineTo(x - 5, ya); ctx.closePath(); ctx.fill(); ctx.stroke();
+        }
+        ctx.lineWidth = 1;
+      } else if (L && L.haut) {
+        // Limite haute unique (tr max, 50 ms) : losange rouge relié au point.
+        const yl = yFor(L.haut);
         ctx.setLineDash([2, 3]); ctx.strokeStyle = "#B02A2A"; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x, yl); ctx.stroke(); ctx.setLineDash([]);
         ctx.fillStyle = "#FFFFFF"; ctx.strokeStyle = "#B02A2A"; ctx.lineWidth = 1.8;
         ctx.beginPath(); ctx.moveTo(x, yl - 5); ctx.lineTo(x + 5, yl); ctx.lineTo(x, yl + 5); ctx.lineTo(x - 5, yl); ctx.closePath(); ctx.fill(); ctx.stroke(); ctx.lineWidth = 1;
@@ -11653,14 +11730,15 @@ function genererGraphiqueCourbeDeclenchement(p) {
     if (p.points.length) {
       ctx.font = `11px ${SANS}`; ctx.textBaseline = "middle"; ctx.textAlign = "left";
       const lx = left + 14, ly1 = bottom - 30, ly2 = bottom - 14;
-      ctx.fillStyle = "rgba(255,255,255,0.85)"; ctx.fillRect(left + 4, ly1 - 11, 150, 40);
+      ctx.fillStyle = "rgba(255,255,255,0.85)"; ctx.fillRect(left + 4, ly1 - 11, 168, 40);
       ctx.fillStyle = "#FFC02E"; ctx.strokeStyle = "#1A1F26"; ctx.beginPath(); ctx.arc(lx, ly1, 4.5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
       ctx.fillStyle = "#5B6B7D"; ctx.fillText("essai mesuré", lx + 10, ly1);
       ctx.strokeStyle = "#B02A2A"; ctx.fillStyle = "#FFFFFF"; ctx.beginPath(); ctx.moveTo(lx, ly2 - 4.5); ctx.lineTo(lx + 5, ly2); ctx.lineTo(lx, ly2 + 4.5); ctx.lineTo(lx - 5, ly2); ctx.closePath(); ctx.fill(); ctx.stroke();
-      ctx.fillStyle = "#5B6B7D"; ctx.fillText("limite attendue (tr max)", lx + 10, ly2);
+      ctx.fillStyle = "#5B6B7D"; ctx.fillText("limites d'acceptation", lx + 10, ly2);
     }
     ctx.font = `italic 10.5px ${SERIF}`; ctx.fillStyle = "#8B96A3"; ctx.textAlign = "left"; ctx.textBaseline = "middle";
     ctx.fillText("Courbe théorique d'après les réglages relevés, hors tolérances constructeur.", 18, H - 12);
+    if (noteEssai) { ctx.fillStyle = p.essaiCourtRetardOff ? "#2E8B57" : "#5B6B7D"; ctx.fillText(noteEssai, 18, H - 28); }
     return { dataUrl: canvas.toDataURL("image/png"), largeur: W, hauteur: H };
   } catch (e) {
     return null;
