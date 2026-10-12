@@ -439,20 +439,22 @@ const FENETRES_COURT_RETARD_SCHNEIDER = [ // tsd (s) → temps de non-déclenche
   { tsd: 0.3, non: 0.23, max: 0.32 }, { tsd: 0.4, non: 0.35, max: 0.50 },
 ];
 const II_NSX_PAR_CALIBRE = { 40: 600, 100: 1500, 160: 2400, 250: 3000, 400: 4800, 630: 6930 }; // Compact NSX : seuil Ii fixe (A), ±15 %
-const tolLongRetardNTNW = (tr6, x) => (tr6 <= 0.5 ? 0.6 : x < 3 ? 0.7 : 0.8); // 0 à −30 % à 1,5 Ir ; 0 à −20 % à 6 et 7,2 Ir ; −40 % au plus petit cran
+// 0 à −30 % à 1,5 Ir ; 0 à −20 % à 6 et 7,2 Ir. Plus petit cran (tr = 0,5 s), notes (1) et (2) du catalogue Masterpact NT/NW 2004 : à 6 Ir le maximum est
+// 0,7 s avec 0 à −40 %, à 7,2 Ir 0,7 s avec 0 à −60 % (voir cranMiniMax07 dans evaluationEssaiSurchargeLongue).
+const tolLongRetardNTNW = (tr6, x) => (tr6 <= 0.5 ? (x < 3 ? 0.7 : x < 6.6 ? 0.6 : 0.4) : x < 3 ? 0.7 : 0.8);
 const tolLongRetardMTZ = (tr6) => (tr6 > 2 ? 0.8 : tr6 === 2 ? 0.75 : 0.7); // −20 % si tr > 2 s ; −25 % ; −30 % si tr < 2 s (trois lignes du guide, lecture retenue)
 const COURT_RETARD_A_TABLE = { precision: 0.10, i2t: true }; // Isd 1,5–10 Ir ±10 %, tsd 0–0,4 s, I²t ON/OFF (valeurs : FENETRES_COURT_RETARD_SCHNEIDER)
 const DECLENCHEURS_SCHNEIDER = {
   "Micrologic 2.0 (Masterpact NT/NW, Compact NS 800-3200)": {
-    court: "Micrologic 2.0", source: "Micrologic 2.0 / 5.0 / 6.0 — guide d'exploitation 04/2010", c: 0.84375, tr6Fixe: null, tolLong: tolLongRetardNTNW,
+    court: "Micrologic 2.0", source: "Micrologic 2.0 / 5.0 / 6.0 — guide d'exploitation 04/2010 ; catalogue Masterpact NT/NW 2004 (Micrologic 2.0 A)", c: 0.84375, tr6Fixe: null, tolLong: tolLongRetardNTNW, cranMiniMax07: true,
     courtRetard: { precision: 0.10, i2t: false, fixe: { non: 0.02, max: 0.08 } }, instantane: { precision: 0.10, non: 0.02, max: 0.08 },
   },
   "Micrologic 5.0 / 6.0 (Masterpact NT/NW, Compact NS 800-3200)": {
-    court: "Micrologic 5.0 / 6.0", source: "Micrologic 2.0 / 5.0 / 6.0 — guide d'exploitation 04/2010", c: 0.84375, tr6Fixe: null, tolLong: tolLongRetardNTNW,
+    court: "Micrologic 5.0 / 6.0 / 7.0", source: "Micrologic 2.0 / 5.0 / 6.0 — guide d'exploitation 04/2010 ; catalogue Masterpact NT/NW 2004 (Micrologic 5.0 / 6.0 / 7.0 A)", c: 0.84375, tr6Fixe: null, tolLong: tolLongRetardNTNW, cranMiniMax07: true,
     courtRetard: COURT_RETARD_A_TABLE, instantane: { precision: 0.10, non: 0.02, max: 0.05 },
   },
   "Micrologic 5.0 P / 6.0 P / 7.0 P (Masterpact NT/NW)": {
-    court: "Micrologic 5.0 P / 6.0 P / 7.0 P", source: "Micrologic P — guide d'exploitation (annexe : protections)", c: 0.84375, tr6Fixe: null, tolLong: tolLongRetardNTNW,
+    court: "Micrologic 5.0 / 6.0 / 7.0 P et H", source: "Micrologic P — guide d'exploitation (annexe : protections) ; catalogue Masterpact NT/NW 2004 (Micrologic H = mêmes protections que le P)", c: 0.84375, tr6Fixe: null, tolLong: tolLongRetardNTNW, cranMiniMax07: true,
     courtRetard: COURT_RETARD_A_TABLE, instantane: { precision: 0.10, non: 0.02, max: 0.05 },
   },
   "Micrologic 2.0 X (Masterpact MTZ)": {
@@ -490,9 +492,52 @@ DECLENCHEURS_SCHNEIDER["Ekip Touch / Hi-Touch / G Touch / G Hi-Touch (ABB SACE E
   instantane: { precision: 0.10, non: 0, max: 0.03 },
   texteLong: "Surcharge longue : temps moyen de la courbe avec une tolérance de ±10 % (±20 % au-delà de 6 × In), jamais inférieur à 1 s ; la temporisation tr (t1) est définie à 3 × I1 : le réglage « à (x Ir) » est ignoré. Court retard : seuil en multiple de In, temps constant ±10 % ou ±40 ms (le plus favorable) ou en I²t. Instantané : ≤ 30 ms.",
 };
+// Merlin Gerin Masterpact M (M08–M63) — notice d'instruction : unités STR 18 M, 28 D, 38 S, 58 U. La notice ne contient AUCUN tableau chiffré :
+// les valeurs ci-dessous sont relevées sur les courbes de déclenchement (tracés vectoriels du PDF, axes logarithmiques calibrés sur la grille).
+//  • surcharge longue : t = T(1,5 Ir) × (1,5 / (I/Ir))² (pente −2 exacte sur les tracés) ; T(1,5 Ir) = tr (15…480 s) sur le STR 58 U, ≈ 113 s fixe sur
+//    les STR 28 D / 38 S ; la zone admise va de la courbe maximale à 0,85 × (soit 0 à −15 %), déclenchement entre 1,05 et 1,2 Ir ;
+//  • court retard (STR 38 S / 58 U) : Im 1,5–10 Ir, tm 0 à 0,4 s, I²t ON/OFF ; zones de déclenchement par réglage tm :
+//    0,1 s → 82–138 ms ; 0,2 s → 138–226 ms ; 0,3 s → 226–351 ms ; 0,4 s → 351–500 ms ; tm = 0 → ≤ 82 ms ;
+//  • instantané : ≤ 60 ms (≤ 80 ms pour l'instantané réglable du STR 28 D) ; STR 18 M : instantané seul, sans protection de surcharge.
+// Le STR 68 U (programmable) n'est pas couvert.
+const FENETRES_COURT_RETARD_STR = [
+  { tsd: 0, non: 0, max: 0.082 }, { tsd: 0.1, non: 0.082, max: 0.138 }, { tsd: 0.2, non: 0.138, max: 0.226 },
+  { tsd: 0.3, non: 0.226, max: 0.351 }, { tsd: 0.4, non: 0.351, max: 0.5 },
+];
+const STR_BASE = { marque: "Merlin Gerin", c: 0, refX: 1.5, tolLong: () => 0.85, noteNature: "temps maximums relevés sur les courbes de la notice" };
+const TEXTE_STR = "Valeurs relevées sur les courbes de la notice Masterpact M (aucun tableau chiffré) : surcharge longue en I² à partir de 1,5 × Ir, zone de 0 à −15 % sous la courbe maximale ; court retard et instantané : zones de déclenchement tracées.";
+DECLENCHEURS_SCHNEIDER["STR 18 M (Masterpact M)"] = { ...STR_BASE, court: "STR 18 M", source: "Masterpact M — notice d'instruction (courbe STR 18 M)", sansLongRetard: true, tr6Fixe: null, courtRetard: null,
+  instantane: { precision: 0.15, non: 0, max: 0.06 }, texteLong: "STR 18 M : protection instantanée seule (pas de protection de surcharge). " + TEXTE_STR };
+DECLENCHEURS_SCHNEIDER["STR 28 D (Masterpact M)"] = { ...STR_BASE, court: "STR 28 D", source: "Masterpact M — notice d'instruction (courbe STR 28 D)", tr6Fixe: 113,
+  courtRetard: { precision: 0.15, i2t: false, fixe: { non: 0, max: 0.08 } }, instantane: { precision: 0.15, non: 0, max: 0.08 }, texteLong: "STR 28 D : surcharge longue fixe (≈ 113 s à 1,5 × Ir), instantané réglable de 1,5 à 10 × Ir. " + TEXTE_STR };
+DECLENCHEURS_SCHNEIDER["STR 38 S (Masterpact M)"] = { ...STR_BASE, court: "STR 38 S", source: "Masterpact M — notice d'instruction (courbe STR 38 S)", tr6Fixe: 113,
+  courtRetard: { precision: 0.15, i2t: true, table: "str" }, instantane: { precision: 0.15, non: 0, max: 0.06 }, texteLong: "STR 38 S : surcharge longue fixe (≈ 113 s à 1,5 × Ir). " + TEXTE_STR };
+DECLENCHEURS_SCHNEIDER["STR 58 U (Masterpact M)"] = { ...STR_BASE, court: "STR 58 U", source: "Masterpact M — notice d'instruction (courbe STR 58 U)", trImpose: true, tr6Fixe: null,
+  courtRetard: { precision: 0.15, i2t: true, table: "str" }, instantane: { precision: 0.15, non: 0, max: 0.06 }, texteLong: "STR 58 U : la temporisation tr (15 à 480 s) est définie à 1,5 × Ir : le réglage « à (x Ir) » est ignoré. " + TEXTE_STR };
+// ABB SACE Emax (E1–E6) — PR121/P, PR122/P, PR123/P : le catalogue technique donne les mêmes fonctions que l'Ekip Touch — surcharge t = k/I² avec t1 à 3 × I1 (3 à 144 s,
+// minimum 1 s, ±10 % si If ≤ 6 In et ±20 % au-delà), court retard à temps constant (±10 % ou ±40 ms, le plus favorable) ou en I²t défini à 10 × In (±15 % / ±20 %),
+// instantané ≤ 30 ms, seuils en multiples de In. Tolérances valables déclencheur auto-alimenté en régime nominal ou alimenté, temps réglé ≥ 100 ms ; sinon L ±20 %, S ±20 %, I ≤ 60 ms.
+for (const nomPR of ["PR121/P", "PR122/P", "PR123/P"]) {
+  DECLENCHEURS_SCHNEIDER[`${nomPR} (ABB SACE Emax)`] = {
+    ...DECLENCHEURS_SCHNEIDER["Ekip Touch / Hi-Touch / G Touch / G Hi-Touch (ABB SACE Emax 2)"],
+    court: nomPR, source: `ABB SACE Emax — catalogue technique (${nomPR})`,
+    texteLong: "Surcharge longue : temps moyen de la courbe avec une tolérance de ±10 % (±20 % au-delà de 6 × In), jamais inférieur à 1 s ; la temporisation tr (t1) est définie à 3 × I1 : le réglage « à (x Ir) » est ignoré. Court retard : seuil en multiple de In, temps constant ±10 % ou ±40 ms (le plus favorable) ou en I²t défini à 10 × In. Instantané : ≤ 30 ms.",
+  };
+}
+// ABB SACE Emax — unité PR111/P (LI, LSI, LSIG), guide d'utilisation § 12 : surcharge à I²t constant, courbes A à D = 3 / 6 / 12 / 18 s à 6 × I1 (tr à saisir à 6 × Ir), jamais moins de 750 ms,
+// tolérance ±10 % jusqu'à 2 × In et ±20 % au-delà ; court retard I2 = 1 à 10 × In (±20 %), courbes A à D à temps défini (0,05 / 0,1 / 0,25 / 0,5 s) ou en I²t défini à 8 × In (minimum 20 / 30 / 80 / 150 ms),
+// tolérance ±20 % ; instantané I3 = 1,5 à 12 × In (±20 %), temps nominal 35 ms ±20 %.
+DECLENCHEURS_SCHNEIDER["PR111/P (ABB SACE Emax)"] = {
+  marque: "ABB", court: "PR111/P", source: "ABB SACE Emax — unité PR111/P, guide d'utilisation (§ 12)", nature: "moyen",
+  c: 0, refX: 6, trImpose: true, tr6Fixe: null, plancherLong: 0.75,
+  tolLong: (tr, x, kIr) => (x * kIr <= 2 ? 0.9 : 0.8), tolHautLong: (tr, x, kIr) => (x * kIr <= 2 ? 1.1 : 1.2),
+  courtRetard: { modele: "pr111", precision: 0.20, i2t: true, baseIm: "In" },
+  instantane: { precision: 0.20, non: 0.028, max: 0.042 },
+  texteLong: "PR111/P : surcharge longue à I² constant, courbes A à D = 3 / 6 / 12 / 18 s à 6 × I1 (tr saisi à 6 × Ir), jamais moins de 750 ms, tolérance ±10 % jusqu'à 2 × In puis ±20 %. Court retard : seuil en multiple de In, courbes A à D à temps défini (50 / 100 / 250 / 500 ms) ou en I²t défini à 8 × In, ±20 %. Instantané : 35 ms ±20 %.",
+};
 // Entrée de la bibliothèque correspondant à la « Marque » et à la « Référence de l'unité de déclenchement » déjà saisies dans
 // l'identification (aucun champ supplémentaire à remplir) ; null si la référence n'est pas documentée → courbe générique.
-// Non couverts : variantes H, moteur (M), 7.0 / 7.x seuls, 2.3 G, Ekip Dip, Ekip Touch hors Emax 2 (le modèle doit indiquer Emax 2).
+// Non couverts : Micrologic 3.0 (instantané seul), moteur (M), 2.3 G, STR 68 U, Ekip Dip, Ekip Touch hors Emax 2 (le modèle doit indiquer Emax 2).
 function cleDeclencheurBibliotheque(id) {
   const ref = String((id && id.referenceRelais) || "").trim().toLowerCase().replace(/\s+/g, " ");
   if (!ref) return null;
@@ -500,14 +545,23 @@ function cleDeclencheurBibliotheque(id) {
   const disjoncteur = `${(id && id.modele) || ""} ${(id && id.typeDisjoncteur) || ""}`.toLowerCase().replace(/³/g, "3");
   if (!marque || /schneider|merlin/.test(marque)) {
     if (/^micrologic 2\.0( a)?$/.test(ref)) return "Micrologic 2.0 (Masterpact NT/NW, Compact NS 800-3200)";
-    if (/^micrologic [56]\.0( a)?$/.test(ref)) return "Micrologic 5.0 / 6.0 (Masterpact NT/NW, Compact NS 800-3200)";
-    if (/^micrologic [567]\.0 p$/.test(ref)) return "Micrologic 5.0 P / 6.0 P / 7.0 P (Masterpact NT/NW)";
+    if (/^micrologic [567]\.0( a)?$/.test(ref)) return "Micrologic 5.0 / 6.0 (Masterpact NT/NW, Compact NS 800-3200)";
+    if (/^micrologic [567]\.0 [ph]$/.test(ref)) return "Micrologic 5.0 P / 6.0 P / 7.0 P (Masterpact NT/NW)";
     if (/^micrologic 2\.0 x$/.test(ref)) return "Micrologic 2.0 X (Masterpact MTZ)";
     if (/^micrologic [567]\.0 x$/.test(ref)) return "Micrologic 5.0 X / 6.0 X / 7.0 X (Masterpact MTZ)";
     if (/^micrologic (2\.2|2\.3|4\.2|4\.3)$/.test(ref)) return "Micrologic 2.2 / 2.3 / 4.2 / 4.3 (Compact NSX 100-630)";
     if (/^micrologic [56]\.[23]( a\/e| a| e)?$/.test(ref)) return "Micrologic 5 / 6 / 7 (Compact NSX 100-630)";
     if (ref === "micrologic 2.2 g") return "Micrologic 2.2 G (Compact NSX 100-250)";
   }
+  if (!marque || /schneider|merlin/.test(marque)) {
+    const str = ref.replace(/ /g, "");
+    if (str === "str18m") return "STR 18 M (Masterpact M)";
+    if (str === "str28d") return "STR 28 D (Masterpact M)";
+    if (str === "str38s") return "STR 38 S (Masterpact M)";
+    if (str === "str58u") return "STR 58 U (Masterpact M)";
+  }
+  if ((!marque || /abb/.test(marque)) && /^pr111/.test(ref)) return "PR111/P (ABB SACE Emax)";
+  if ((!marque || /abb/.test(marque)) && /^pr12[123] ?\/ ?p$/.test(ref)) return `${ref.replace(/ /g, "").toUpperCase()} (ABB SACE Emax)`;
   if ((!marque || /abb/.test(marque)) && /^ekip (g )?(hi-)?touch$/.test(ref) && /emax\s*2|e[1-6]\.2/.test(disjoncteur)) {
     return "Ekip Touch / Hi-Touch / G Touch / G Hi-Touch (ABB SACE Emax 2)";
   }
@@ -523,6 +577,7 @@ function declencheurSchneider(eq) {
 const facteurLongRetard = (d, x) => (((d.refX || 6) * (d.refX || 6)) - d.c) / (x * x - d.c);
 // tr6 : temporisation à 6 × Ir — fixe pour les Compact NSX, sinon déduite du réglage saisi (à 1,5, 6 ou 7,2 × Ir).
 function tr6DepuisReglage(d, tr, trX) {
+  if (d.sansLongRetard) return null; // STR 18 M : instantané seul
   if (d.tr6Fixe) return d.tr6Fixe;
   if (!(tr > 0)) return null;
   // ABB : t1 est toujours défini à 3 × I1 — le réglage « à (x Ir) » est ignoré.
@@ -535,9 +590,20 @@ const tempsMaxLongRetard = (d, tr6, x) => Math.max(d.plancherLong || 0, tr6 * fa
 const bandeLongRetard = (d, tr6, x, kIr) => ({ bas: d.tolLong(tr6, x, kIr), haut: d.tolHautLong ? d.tolHautLong(tr6, x, kIr) : 1 });
 // Plage de déclenchement du court retard au courant I : [non-déclenchement ; coupure maximale], mise à l'échelle (10 Ir / I)²
 // pour I < 10 Ir si l'essai est fait à I²t ON (la courbe est alors en I²t jusqu'à 10 Ir).
+const MIN_TRIP_PR111 = [[0.05, 0.02], [0.1, 0.03], [0.25, 0.08], [0.5, 0.15]]; // [temps de la courbe à 8 × In (s), temps de déclenchement minimal (s)]
+const tempsNominalCourtRetardPR111 = (tsd, x, i2tActif) => {
+  if (!i2tActif) return tsd;
+  const mini = MIN_TRIP_PR111.reduce((a, b) => (Math.abs(b[0] - tsd) < Math.abs(a[0] - tsd) ? b : a))[1];
+  return Math.max(mini, tsd * Math.pow(8 / x, 2));
+};
 function fenetreCourtRetardSchneider(d, tsd, I, Ir, i2tActif, In) {
   const cr = d.courtRetard;
   if (!cr) return null;
+  if (cr.modele === "pr111") {
+    // PR111/P : courbes A à D, I²t OFF = temps défini (0,05 / 0,1 / 0,25 / 0,5 s), I²t ON = temps défini à 8 × In (t = T·(8 In/I)², plancher 20 / 30 / 80 / 150 ms) ; tolérance ±20 %.
+    const t = tempsNominalCourtRetardPR111(tsd, I / (In || Ir), i2tActif);
+    return { non: t * 0.8, max: t * 1.2 };
+  }
   if (cr.modele === "abb") {
     // ABB Ekip Touch : t = k (I²t OFF) → t2 ± le meilleur de 10 % ou 40 ms ; t = k / I² (I²t ON) → t = 100·t2 / (I/In)², ±15 % (±20 % au-delà de 6 In).
     const x = I / (In || Ir);
@@ -547,7 +613,7 @@ function fenetreCourtRetardSchneider(d, tsd, I, Ir, i2tActif, In) {
   }
   let fen = cr.fixe;
   if (!fen) {
-    const t = FENETRES_COURT_RETARD_SCHNEIDER, s = Math.min(Math.max(tsd || 0, 0), 0.4);
+    const t = cr.table === "str" ? FENETRES_COURT_RETARD_STR : FENETRES_COURT_RETARD_SCHNEIDER, s = Math.min(Math.max(tsd || 0, 0), 0.4);
     let k = 0;
     while (k < t.length - 2 && s > t[k + 1].tsd) k++;
     const f = (s - t[k].tsd) / (t[k + 1].tsd - t[k].tsd);
@@ -593,8 +659,10 @@ const LISTE_MARQUE_RELAIS_BT = ["Schneider Electric", "Merlin Gerin", "ABB", "Si
 const MICROLOGIC_2_7 = ["Micrologic 2.0", "Micrologic 3.0", "Micrologic 5.0", "Micrologic 6.0", "Micrologic 7.0", "Micrologic 2.0 A", "Micrologic 3.0 A", "Micrologic 5.0 A", "Micrologic 6.0 A", "Micrologic 7.0 A", "Micrologic 5.0 P", "Micrologic 6.0 P", "Micrologic 7.0 P", "Micrologic 5.0 H", "Micrologic 6.0 H", "Micrologic 7.0 H"];
 const MICROLOGIC_X = ["Micrologic 2.0 X", "Micrologic 5.0 X", "Micrologic 6.0 X", "Micrologic 7.0 X"];
 const MICROLOGIC_NSX = ["Micrologic 2.2", "Micrologic 2.3", "Micrologic 5.2 A/E", "Micrologic 5.3 A/E", "Micrologic 6.2 A/E", "Micrologic 6.3 A/E", "Micrologic 1.3 M", "Micrologic 2.2 M", "Micrologic 2.3 M", "Micrologic 2.2 G", "Micrologic 2.3 G", "Micrologic 6.2 E-M", "Micrologic 6.3 E-M"];
-const STR_COMPACT_NS = ["STR22ME", "STR22GE", "STR22SE", "STR23SE", "STR23SP", "STR43ME", "STR53UE", "STR53UP", "STR25DE", "STR35SE/GE", "STR45AE", "STR45BE", "STR55UE"];
-const STR_MASTERPACT_M = ["STR28D", "STR38S", "STR58U", "STR68U"];
+const STR_COMPACT_NS = ["STR22ME", "STR22GE", "STR22SE", "STR23SE", "STR23SP", "STR43ME", "STR53UE", "STR53UP", "STR25DE", "STR35SE/GE", "STR35ME", "STR45AE", "STR45BE", "STR55UE"];
+const STR_MASTERPACT_M = ["STR18M", "STR28D", "STR38S", "STR58U", "STR68U"];
+// Générations antérieures aux STR (catalogue Merlin Gerin, courbes D46-D47) : calibres de transformateur de courant de 200/800 à 4000/6300 A, soit la gamme Masterpact M08–M63.
+const ST_MASTERPACT_M = ["ST208D", "ST308L", "ST308S", "ST318S", "ST408S", "ST418S"];
 const TM_SCHNEIDER = ["TM-D", "TM-G", "MA"];
 // ABB SACE : thermique-magnétique TMF/TMD/TMA/TMG/MA · électroniques PR211/PR212 (Isomax S), PR221DS,
 // PR222DS/P, PR222DS/PD, PR222MP, PR223DS, PR231/P, PR232/P, PR331/P, PR332/P, PR333/P (Tmax T),
@@ -602,7 +670,7 @@ const TM_SCHNEIDER = ["TM-D", "TM-G", "MA"];
 const ABB_TM = ["TMF", "TMD", "TMA", "TMG", "MA"];
 const ABB_PR_ISOMAX = ["PR211", "PR212", "PR211/P", "PR212/P"];
 const ABB_PR_TMAX = ["PR221DS", "PR222DS/P", "PR222DS/PD", "PR222MP", "PR223DS", "PR231/P", "PR232/P", "PR331/P", "PR332/P", "PR333/P"];
-const ABB_PR_EMAX = ["PR121/P", "PR122/P", "PR123/P"];
+const ABB_PR_EMAX = ["PR111/P", "PR121/P", "PR122/P", "PR123/P"];
 const ABB_EKIP = ["Ekip Dip", "Ekip Touch", "Ekip Hi-Touch", "Ekip G Touch", "Ekip M Touch", "Ekip LCD"];
 // Siemens : 3WL ETU15B…ETU76B · 3WA ETU600 · 3VA1 thermique-magnétique TM · 3VA2/3VA6 électroniques ETU3xx/5xx/8xx.
 const SIEMENS_3WL = ["ETU15B", "ETU25B", "ETU27B", "ETU45B", "ETU55B", "ETU76B"];
@@ -615,8 +683,8 @@ const LEGRAND_DPX = ["Magnétothermique", "Électronique", "Électronique HP (S1
 // Eaton / Moeller NZM : magnétothermique (-A), électroniques (-VE / -VX), protection moteur (-ME).
 const EATON_NZM = ["Magnétothermique (-A)", "Électronique (-VE)", "Électronique (-VX)", "Moteur (-ME)"];
 const MARQUE_GAMME_RELAIS_BT = {
-  "Schneider Electric": [...MICROLOGIC_2_7, ...MICROLOGIC_X, ...MICROLOGIC_NSX, ...STR_COMPACT_NS, ...STR_MASTERPACT_M, ...TM_SCHNEIDER],
-  "Merlin Gerin": [...MICROLOGIC_2_7, ...MICROLOGIC_NSX, ...STR_COMPACT_NS, ...STR_MASTERPACT_M, ...TM_SCHNEIDER],
+  "Schneider Electric": [...MICROLOGIC_2_7, ...MICROLOGIC_X, ...MICROLOGIC_NSX, ...STR_COMPACT_NS, ...STR_MASTERPACT_M, ...ST_MASTERPACT_M, ...TM_SCHNEIDER],
+  "Merlin Gerin": [...MICROLOGIC_2_7, ...MICROLOGIC_NSX, ...STR_COMPACT_NS, ...STR_MASTERPACT_M, ...ST_MASTERPACT_M, ...TM_SCHNEIDER],
   "ABB": [...ABB_TM, ...ABB_PR_ISOMAX, ...ABB_PR_TMAX, ...ABB_PR_EMAX, ...ABB_EKIP],
   "Siemens": [...SIEMENS_3WL, ...SIEMENS_3WA, ...SIEMENS_3VA1, ...SIEMENS_3VA2],
   "Eaton": [...EATON_NZM, "Digitrip 3000", "IZM trip unit"],
@@ -629,7 +697,8 @@ const MARQUE_GAMME_RELAIS_BT = {
 // champ retombe sur la famille de la marque du déclencheur (un déclencheur peut être d'une autre
 // marque que le disjoncteur — rétrofit).
 const DECLENCHEURS_BT_REGLES = [
-  [/masterpact\s*m\s*\d|\bm(08|10|12|16|20|25|32|40|50|63)\b/, [...STR_MASTERPACT_M, "Micrologic 2.0", "Micrologic 5.0", "Micrologic 6.0", "Micrologic 7.0"]],
+  [/\bc(801|1001|1251)\b/, ["STR25DE", "STR35SE/GE", "STR35ME", "STR45AE", "STR45BE", "STR55UE"]],
+  [/masterpact\s*m\s*\d|\bm(08|10|12|16|20|25|32|40|50|63)\b/, [...STR_MASTERPACT_M, ...ST_MASTERPACT_M, "Micrologic 2.0", "Micrologic 5.0", "Micrologic 6.0", "Micrologic 7.0"]],
   [/mtz/, MICROLOGIC_X],
   [/masterpact\s*n[tw]|\bn[tw]\s*\d/, MICROLOGIC_2_7],
   [/nsxm/, ["TM-D", "Micrologic 4.1"]],
@@ -915,13 +984,21 @@ function combineValues(mapping) {
 }
 const LISTE_MODELE_CELLULE_HTA_OPTIONS = optionsParMarque(MARQUE_MODELE_CELLULE_HTA, combineValues(MARQUE_MODELE_CELLULE_HTA));
 // Modèle BT = variante/calibre réel dans la gamme du disjoncteur (ex. Masterpact MTZ1/MTZ2/MTZ3).
+// Masterpact MTZ : MTZ1 630–1600 A, MTZ2 800–4000 A, MTZ3 4000–6300 A (guides utilisateur MTZ1 / MTZ2-MTZ3) ; désignation = taille + courant assigné × 100 A.
+const MODELES_MASTERPACT_MTZ = [["MTZ1", ["06", "08", "10", "12", "16"]], ["MTZ2", ["08", "10", "12", "16", "20", "25", "32", "40"]], ["MTZ3", ["40", "50", "63"]]]
+  .flatMap(([gamme, calibres]) => calibres.map((c) => `Masterpact ${gamme} ${c}`));
 const MODELES_MASTERPACT_M = ["M08", "M10", "M12", "M16", "M20", "M25", "M32", "M40", "M50", "M63"].map((m) => `Masterpact ${m}`);
+// Compact C801 / C1001 / C1251 (types N, H, L ; C1251 N et H) — documentation « Compact C801-1001N/H/L, C1251N/H » (ART75842, 07/2002).
+// ABB SACE Emax (E1 à E6, première génération) : courants assignés Iu du catalogue technique — E1 800-1600, E2 800-2000, E3 800-3200, E4 3200-4000, E6 3200-6300 A.
+const MODELES_EMAX = [["E1", [800, 1000, 1250, 1600]], ["E2", [800, 1000, 1250, 1600, 2000]], ["E3", [800, 1000, 1250, 1600, 2000, 2500, 3200]], ["E4", [3200, 4000]], ["E6", [3200, 4000, 5000, 6300]]]
+  .flatMap(([taille, calibres]) => calibres.map((c) => `Emax ${taille} ${c}`));
+const MODELES_COMPACT_C = ["Compact C801", "Compact C1001", "Compact C1251"];
 const MODELES_MASTERPACT_NT_NW = ["Masterpact NT", "Masterpact NT06", "Masterpact NT08", "Masterpact NT10", "Masterpact NT12", "Masterpact NT16", "Masterpact NW", "Masterpact NW08", "Masterpact NW10", "Masterpact NW12", "Masterpact NW16", "Masterpact NW20", "Masterpact NW25", "Masterpact NW32", "Masterpact NW40", "Masterpact NW40b", "Masterpact NW50", "Masterpact NW63"];
 const MODELES_COMPACT_NS = ["Compact NS", "Compact NS80H", "Compact NS100", "Compact NS160", "Compact NS250", "Compact NS400", "Compact NS630", "Compact NS630b", "Compact NS800", "Compact NS1000", "Compact NS1250", "Compact NS1600", "Compact NS1600b", "Compact NS2000", "Compact NS2500", "Compact NS3200"];
 const MARQUE_MODELE_BT = {
-  "Schneider Electric": ["Compact NSXm", "Compact NSX100", "Compact NSX160", "Compact NSX250", "Compact NSX400", "Compact NSX630", ...MODELES_COMPACT_NS, "Masterpact MTZ1", "Masterpact MTZ2", "Masterpact MTZ3", ...MODELES_MASTERPACT_NT_NW, ...MODELES_MASTERPACT_M],
-  "Merlin Gerin": [...MODELES_COMPACT_NS, ...MODELES_MASTERPACT_NT_NW, ...MODELES_MASTERPACT_M],
-  "ABB": ["Tmax T1", "Tmax T2", "Tmax T3", "Tmax T4", "Tmax T5", "Tmax T6", "Tmax T7", "Tmax T8", "Tmax XT1", "Tmax XT2", "Tmax XT3", "Tmax XT4", "Tmax XT5", "Tmax XT6", "Tmax XT7", "Isomax S1", "Isomax S2", "Isomax S3", "Isomax S4", "Isomax S5", "Isomax S6", "Isomax S7", "Isomax S8", "Emax E1", "Emax E2", "Emax E3", "Emax E4", "Emax E6", "Emax X1", "Emax 2 E1.2", "Emax 2 E2.2", "Emax 2 E4.2", "Emax 2 E6.2"],
+  "Schneider Electric": ["Compact NSXm", "Compact NSX100", "Compact NSX160", "Compact NSX250", "Compact NSX400", "Compact NSX630", ...MODELES_COMPACT_NS, ...MODELES_COMPACT_C, "Masterpact MTZ1", "Masterpact MTZ2", "Masterpact MTZ3", ...MODELES_MASTERPACT_MTZ, ...MODELES_MASTERPACT_NT_NW, ...MODELES_MASTERPACT_M],
+  "Merlin Gerin": [...MODELES_COMPACT_NS, ...MODELES_COMPACT_C, ...MODELES_MASTERPACT_NT_NW, ...MODELES_MASTERPACT_M],
+  "ABB": ["Tmax T1", "Tmax T2", "Tmax T3", "Tmax T4", "Tmax T5", "Tmax T6", "Tmax T7", "Tmax T8", "Tmax XT1", "Tmax XT2", "Tmax XT3", "Tmax XT4", "Tmax XT5", "Tmax XT6", "Tmax XT7", "Isomax S1", "Isomax S2", "Isomax S3", "Isomax S4", "Isomax S5", "Isomax S6", "Isomax S7", "Isomax S8", "Emax E1", "Emax E2", "Emax E3", "Emax E4", "Emax E6", ...MODELES_EMAX, "Emax X1", "Emax 2 E1.2", "Emax 2 E2.2", "Emax 2 E4.2", "Emax 2 E6.2"],
   "Siemens": ["3VA1", "3VA2", "3VA6", "3VA27", "3WL04", "3WL08", "3WL10", "3WL11", "3WL12", "3WA"],
   "Eaton": ["NZM1", "NZM2", "NZM3", "NZM4", "NZML2", "NZML3", "IZM16", "IZM26"],
   "Moeller": ["NZM", "IZM"],
@@ -942,6 +1019,80 @@ function modelesBTParType(identification) {
   return filtre.length ? filtre : liste;
 }
 const LISTE_MODELE_BT_OPTIONS = modelesBTParType;
+// Seuil instantané des unités du Masterpact M, par calibre In : [calibre maximal (A), facteur × In]. Sources : notice Masterpact M (STR 18 M, STR 38 S, STR 58 U,
+// pages de courbes) et catalogue Merlin Gerin ST208-ST418 (D46/D47, tableau « kaliber stroomtrafo »). Le facteur s'applique au calibre In du disjoncteur.
+const INST_STR_NH = [[1000, 28], [1600, 24], [2000, 20], [2500, 14], [3200, 12], [Infinity, 10]]; // types N et H
+const INST_STR_L = [[630, 14], [1000, 10], [1600, 8], [2500, 6]]; // type L (pas de L au-delà de 2500 A)
+const INST_ST = [[800, 28], [1250, 21], [2000, 18], [2500, 14], [3200, 12], [Infinity, 11]]; // ST 308 S, ST 408 S, ST 418 S
+const INST_ST_308L = [[1600, 8], [2500, 6]];
+const facteurSeuil = (table, In) => { const l = table.find(([max]) => In <= max); return l ? l[1] : null; };
+function seuilInstantaneMasterpactM(identification, inominal) {
+  const id = identification || {};
+  const In = Number(inominal) || Number(String(id.intensiteNominale || "").replace(",", ".")) || 0;
+  if (!(In > 0) || !/masterpactm\d/.test(String(id.modele || "").toLowerCase().replace(/\s+/g, ""))) return null;
+  const ref = String(id.referenceRelais || "").toUpperCase().replace(/[\s/-]/g, "");
+  const niveau = String(id.niveauPerformance || "").trim().toUpperCase();
+  const typeL = niveau.startsWith("L"), typeConnu = niveau !== "";
+  const fixe = (nom, texte) => ({ mode: "fixe", nom, texte });
+  const kA = (k) => `${Math.round((k * In) / 100) / 10} kA`;
+  if (ref === "STR38S") {
+    const nh = facteurSeuil(INST_STR_NH, In), l = facteurSeuil(INST_STR_L, In);
+    if (typeConnu) { const k = typeL ? l : nh; return k ? fixe("STR 38 S", `Seuil instantané fixe du STR 38 S (type ${typeL ? "L" : "N/H"}) : In × ${k} = ${kA(k)}.`) : null; }
+    return fixe("STR 38 S", `Seuil instantané fixe du STR 38 S : types N/H In × ${nh} = ${kA(nh)}${l ? ` · type L In × ${l} = ${kA(l)}` : ""}.`);
+  }
+  if (ref === "STR58U") {
+    const nh = facteurSeuil(INST_STR_NH, In), l = facteurSeuil(INST_STR_L, In);
+    const k = typeConnu && typeL ? l : nh;
+    return k ? { mode: "max", nom: "STR 58 U", texte: `Instantané réglable de 2 × In jusqu'à In × ${k} = ${kA(k)} au maximum${typeConnu ? "" : " (types N/H" + (l ? ` ; type L : In × ${l} = ${kA(l)}` : "") + ")"}.` } : null;
+  }
+  if (ref === "STR18M") { const k = facteurSeuil(INST_STR_NH, In); return { mode: "max", nom: "STR 18 M", texte: `Instantané réglable de 2 × In jusqu'à In × ${k} = ${kA(k)} au maximum.` }; }
+  if (ref === "ST308S" || ref === "ST408S" || ref === "ST418S") { const k = facteurSeuil(INST_ST, In); return fixe(ref, `Seuil instantané fixe du ${ref.replace(/^ST(\d{3})([A-Z])$/, "ST $1 $2")} : In × ${k} = ${kA(k)}.`); }
+  if (ref === "ST308L") { const k = facteurSeuil(INST_ST_308L, In); return k ? fixe("ST 308 L", `Seuil instantané fixe du ST 308 L : In × ${k} = ${kA(k)}.`) : null; }
+  return null;
+}
+// ----- Niveaux de performance (pouvoir de coupure ultime Icu) des disjoncteurs BT Schneider / Merlin Gerin -----
+// Relevés dans les documents fournis : guides MTZ1 (DOCA0100FR-06, Icu à 415 V) et MTZ2/MTZ3 (DOCA0101FR-07, Icu à 440 V) ; catalogue Masterpact
+// NT/NW 2004 (Icu à 220/415 V pour les NT, 220/415/440 V pour les NW ; H10 : 1000 V pour NT, 1150 V pour NW) ; guide Compact NSX 100-630
+// (DOCA0140EN-03, plaque avant) ; notice Masterpact M (types N1, H1, H2, L1 — pas de tableau d'Icu : valeurs non renseignées).
+// Valeurs de gamme : elles varient avec la tension d'emploi et le calibre, la plaque de performance de l'appareil fait foi.
+// Niveau = [nom, Icu en kA (null si non documenté), tension de référence].
+const PERFORMANCES_BT = [
+  { re: /mtz1/, gamme: "Masterpact MTZ1", source: "guide MTZ1 (DOCA0100FR-06)", niveaux: [["H1", 42, "415 V"], ["H2", 50, "415 V"], ["H3", 66, "415 V"], ["L1", 150, "415 V"]] },
+  { re: /mtz[23]/, gamme: "Masterpact MTZ2 / MTZ3", source: "guide MTZ2/MTZ3 (DOCA0101FR-07)", niveaux: [["N1", 42, "440 V"], ["H1", 66, "440 V"], ["H2", 100, "440 V"], ["H2V", 100, "440 V (Ue limitée à 440 V)"], ["H3", 150, "440 V"], ["L1", 150, "440 V"]] },
+  { re: /masterpactnt(12|16)/, gamme: "Masterpact NT12 / NT16", source: "catalogue NT/NW 2004", niveaux: [["H1", 42, "415 V"], ["H2", 50, "415 V"], ["H10", 20, "1000 V"]] },
+  { re: /masterpactnt/, gamme: "Masterpact NT", source: "catalogue NT/NW 2004", niveaux: [["H1", 42, "415 V"], ["H2", 50, "415 V"], ["L1", 150, "415 V"], ["H10", 20, "1000 V"]] },
+  { re: /masterpactnw(40b|50|63)/, gamme: "Masterpact NW40b à NW63", source: "catalogue NT/NW 2004", niveaux: [["H1", 100, "415/440 V"], ["H2", 150, "415/440 V"]] },
+  { re: /masterpactnw(25|32|40)/, gamme: "Masterpact NW25 à NW40", source: "catalogue NT/NW 2004", niveaux: [["H1", 65, "415/440 V"], ["H2", 100, "415/440 V"], ["H3", 150, "415/440 V"], ["H10", 50, "1150 V"]] },
+  { re: /masterpactnw20/, gamme: "Masterpact NW20", source: "catalogue NT/NW 2004", niveaux: [["H1", 65, "415/440 V"], ["H2", 100, "415/440 V"], ["H3", 150, "415/440 V"], ["L1", 150, "415/440 V"], ["H10", 50, "1150 V"]] },
+  { re: /masterpactnw(08|10|12|16)/, gamme: "Masterpact NW08 à NW16", source: "catalogue NT/NW 2004", niveaux: [["N1", 42, "415/440 V"], ["H1", 65, "415/440 V"], ["H2", 100, "415/440 V"], ["L1", 150, "415/440 V"], ["H10", 50, "1150 V"]] },
+  { re: /masterpactnw/, gamme: "Masterpact NW", source: "catalogue NT/NW 2004 (calibre à préciser)", niveaux: [["N1", 42, "415/440 V"], ["H1", 65, "415/440 V"], ["H2", 100, "415/440 V"], ["H3", 150, "415/440 V"], ["L1", 150, "415/440 V"], ["H10", 50, "1150 V"]] },
+  { re: /masterpactm\d/, gamme: "Masterpact M", source: "notice Masterpact M", niveaux: [["N1", null, ""], ["H1", null, ""], ["H2", null, ""], ["L1", null, ""]] },
+  { re: /compactc1251/, gamme: "Compact C1251", source: "documentation Compact C801/C1251 (ART75842)", niveaux: [["N", 50, "380/415 V"], ["H", 70, "380/415 V"]] },
+  { re: /compactc(801|1001)/, gamme: "Compact C801 / C1001", source: "documentation Compact C801/C1251 (ART75842)", niveaux: [["N", 50, "380/415 V"], ["H", 70, "380/415 V"], ["L", 150, "380/415 V"]] },
+  { re: /compactns80h/, gamme: "Compact NS80H", source: "guide d'exploitation Compact NS", niveaux: [["H", null, ""]] },
+  { re: /compactns(100|160|250|400|630)(?![\db])/, gamme: "Compact NS100 à NS630", source: "guide d'exploitation Compact NS (types de la plaque : E, N, H, L ; pas de tableau d'Icu)", niveaux: [["E", null, ""], ["N", null, ""], ["H", null, ""], ["L", null, ""]] },
+  { re: /compactnsx(?!m)/, gamme: "Compact NSX 100-630", source: "guide Compact NSX (DOCA0140EN-03)", niveaux: [["B", 25, "440 V"], ["F", 36, "440 V"], ["N", 50, "440 V"], ["H", 70, "440 V"], ["S", 100, "440 V"], ["L", 150, "440 V"], ["R", 200, "440 V"], ["HB1", 75, "690 V"], ["HB2", 100, "690 V"], ["K", 10, "1000 V"]] },
+];
+const PERFORMANCES_EMAX = [ // Emax première génération : [regex modèle normalisé, gamme, niveaux]
+  [/^emaxe1(?!\.)/, "Emax E1", [["B", 42, "415 V"], ["N", 50, "415 V"]]],
+  [/^emaxe2(?!\.)/, "Emax E2", [["B", 42, "415 V"], ["N", 65, "415 V"], ["S", 85, "415 V"], ["L", 130, "415 V"], ["B/E", 20, "1150 V"], ["N/E", 30, "1150 V"]]],
+  [/^emaxe3(?!\.)/, "Emax E3", [["N", 65, "415 V"], ["S", 75, "415 V"], ["H", 100, "415 V"], ["V", 130, "415 V"], ["L", 130, "415 V"]]],
+  [/^emaxe4(?!\.)/, "Emax E4", [["S", 75, "415 V"], ["H", 100, "415 V"], ["V", 150, "415 V"]]],
+  [/^emaxe6(?!\.)/, "Emax E6", [["H", 100, "415 V"], ["V", 150, "415 V"]]],
+].map(([re, gamme, niveaux]) => ({ re, gamme, marques: /abb/, source: "ABB SACE Emax — catalogue technique", niveaux }));
+PERFORMANCES_BT.push(...PERFORMANCES_EMAX);
+const libelleNiveauBT = ([n, icu, tension]) => (icu == null ? n : `${n} — ${icu} kA à ${tension}`);
+function niveauxPerformanceBT(identification) {
+  const id = identification || {};
+  const marque = String(id.marque || "").toLowerCase();
+  const modele = String(id.modele || "").toLowerCase().replace(/\s+/g, "");
+  const g = modele ? PERFORMANCES_BT.find((x) => (!marque || (x.marques || /schneider|merlin/).test(marque)) && x.re.test(modele)) : null;
+  if (!g) return null;
+  const choisi = String(id.niveauPerformance || "").trim();
+  const selection = choisi ? g.niveaux.find((x) => choisi === libelleNiveauBT(x) || choisi.split(/\s|—/)[0] === x[0]) || null : null;
+  return { gamme: g.gamme, source: g.source, niveaux: g.niveaux, libelles: g.niveaux.map(libelleNiveauBT), selection: selection ? { nom: selection[0], icu: selection[1], tension: selection[2] } : null };
+}
+const LISTE_NIVEAU_PERFORMANCE_BT_OPTIONS = (identification) => { const g = niveauxPerformanceBT(identification); return g ? g.libelles : []; };
 const LISTE_REFERENCE_RELAIS_HTA_OPTIONS = optionsParChamp("marqueRelais", MARQUE_GAMME_RELAIS_HTA, combineValues(MARQUE_GAMME_RELAIS_HTA));
 const LISTE_REFERENCE_RELAIS_BT_OPTIONS = referencesDeclencheurBT;
 const MARQUE_MODELE_ONDULEUR = {
@@ -2612,7 +2763,8 @@ const SCHEMAS = {
       { key: "transfoSnManuel", label: "Puissance du transformateur (kVA) — saisie manuelle", numeric: true },
       { key: "transfoU2Manuel", label: "Tension secondaire du transformateur (V) — saisie manuelle", numeric: true },
       { key: "transfoUccManuel", label: "Ucc du transformateur (%) — saisie manuelle", numeric: true },
-      { key: "typeDisjoncteur", label: "Type disjoncteur", options: LISTE_TYPE_DISJONCTEUR_BT_OPTIONS }, { key: "numeroSerieDisjoncteur", label: "Numéro de série" },
+      { key: "typeDisjoncteur", label: "Type disjoncteur", options: LISTE_TYPE_DISJONCTEUR_BT_OPTIONS },
+      { key: "niveauPerformance", label: "Niveau de performance (pouvoir de coupure)", options: LISTE_NIVEAU_PERFORMANCE_BT_OPTIONS }, { key: "numeroSerieDisjoncteur", label: "Numéro de série" },
       { key: "marqueRelais", label: "Marque de l'unité de déclenchement", options: LISTE_MARQUE_RELAIS_BT }, { key: "referenceRelais", label: "Référence de l'unité de déclenchement", options: LISTE_REFERENCE_RELAIS_BT_OPTIONS }, { key: "numeroSerieRelais", label: "Numéro de série (relais)" },
       { key: "intensiteNominale", label: "Intensité nominale (A)", numeric: true }, { key: "debrochable", label: "Débrochable", options: OUI_NON_LIST },
     ],
@@ -3181,7 +3333,7 @@ function repairEquipementControles(eq) {
     if (!controles[sec.key + "__custom"]) controles[sec.key + "__custom"] = [];
     if (sec.key === "parametrage_relais" && !controles.parametrage_relais_seuils) controles.parametrage_relais_seuils = [emptySeuilEntry(PARAM_SEUIL_TYPES[0])];
   });
-  return { ...eq, controles };
+  return appliquerEtatsAutoDisjoncteur({ ...eq, controles });
 }
 function createControlesDefaults(schema) {
   const controles = {};
@@ -7778,9 +7930,11 @@ function DisjoncteurRelaisPanel({ eq, update, custom, onAddCustom, onChangeCusto
 function BRKReglagePanel({ eq, update, custom, onAddCustom, onChangeCustom, onRemoveCustom, idPrefix }) {
   const reglage = eq.controles.reglage_disjoncteur;
   const tests = eq.controles.tests_disjoncteur;
-  const setR = (itemKey, fieldKey, v) => update({ ...eq, controles: { ...eq.controles, reglage_disjoncteur: { ...reglage, [itemKey]: { ...reglage[itemKey], fields: { ...reglage[itemKey].fields, [fieldKey]: v } } } } });
-  const setT = (itemKey, fieldKey, v) => update({ ...eq, controles: { ...eq.controles, tests_disjoncteur: { ...tests, [itemKey]: { ...tests[itemKey], fields: { ...tests[itemKey].fields, [fieldKey]: v } } } } });
-  const setTEtat = (itemKey, etat) => update({ ...eq, controles: { ...eq.controles, tests_disjoncteur: { ...tests, [itemKey]: { ...tests[itemKey], etat } } } });
+  // Les états des essais suivent les limites (constructeur si connu) ; un état choisi à la main est respecté jusqu'à la saisie suivante.
+  const setR = (itemKey, fieldKey, v) => update(appliquerEtatsAutoDisjoncteur({ ...eq, controles: { ...eq.controles, reglage_disjoncteur: { ...reglage, [itemKey]: { ...reglage[itemKey], fields: { ...reglage[itemKey].fields, [fieldKey]: v } } } } }));
+  const setT = (itemKey, fieldKey, v) => update(appliquerEtatsAutoDisjoncteur({ ...eq, controles: { ...eq.controles, tests_disjoncteur: { ...tests, [itemKey]: { ...tests[itemKey], etatManuel: false, fields: { ...tests[itemKey].fields, [fieldKey]: v } } } } }));
+  const setTEtat = (itemKey, etat) => update(appliquerEtatsAutoDisjoncteur({ ...eq, controles: { ...eq.controles, tests_disjoncteur: { ...tests, [itemKey]: { ...tests[itemKey], etat, etatAuto: false, etatManuel: etat !== etatsAutoEssaisDisjoncteur(eq)[itemKey] } } } }));
+  const BadgeAuto = ({ k }) => (tests[k] && tests[k].etatAuto ? <span title="État déterminé d'après la mesure et les limites (constructeur si le déclencheur est connu) ; modifiable à la main" style={{ fontSize: 10, fontWeight: 700, color: "#0A5DA8", background: "rgba(10,93,168,0.10)", borderRadius: 4, padding: "2px 5px" }}>auto</span> : null);
 
   const sl = reglage.surcharge_longue.fields;
   const cc = reglage.cc_temporise.fields;
@@ -7804,6 +7958,9 @@ function BRKReglagePanel({ eq, update, custom, onAddCustom, onChangeCustom, onRe
   const evSL = evaluationEssaiSurchargeLongue(eq); // temps maximal attendu à la surcharge longue (constructeur ou saisi)
   const evIn = evaluationEssaiInstantane(eq); // temps maximal de coupure à l'instantané
   const declencheur = declencheurSchneider(eq);
+  const perf = niveauxPerformanceBT(eq.identification);
+  const seuilInst = seuilInstantaneMasterpactM(eq.identification, n(sl.inominal));
+  const estMTZ = !!(declencheur && /MTZ/.test(declencheur.nom));
   const arrondi = (v, d) => Math.round(v * d) / d;
 
   return (
@@ -7833,10 +7990,18 @@ function BRKReglagePanel({ eq, update, custom, onAddCustom, onChangeCustom, onRe
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "8px 0", borderBottom: "1px solid #E2E6EB" }}>
             <span style={{ fontSize: 12.5, color: "#3E4A5C", flex: "1 1 160px" }}>Instantané</span>
             <MiniInputUnit label="Ii" value={inst.ii} unit={inst.iiUnite || "kA"} onValueChange={(v) => setR("instantane", "ii", v)} onUnitChange={(u) => setR("instantane", "iiUnite", u)} />
+            {seuilInst && <div style={{ flex: "1 1 100%", fontSize: 11.5, color: "#5B6B7D", lineHeight: 1.5 }}>{seuilInst.texte} Valeur de la documentation constructeur, à confirmer sur l'appareil.</div>}
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "8px 0" }}>
             <span style={{ fontSize: 12.5, color: "#3E4A5C", flex: "1 1 160px" }}>Pouvoir de coupure</span>
             <MiniInputUnit label="Icu" value={reglage.pouvoir_coupure.fields.icu} unit={reglage.pouvoir_coupure.fields.icuUnite || "kA"} onValueChange={(v) => setR("pouvoir_coupure", "icu", v)} onUnitChange={(u) => setR("pouvoir_coupure", "icuUnite", u)} />
+            {perf && (
+              <div style={{ flex: "1 1 100%", fontSize: 11.5, color: "#5B6B7D", lineHeight: 1.5 }}>
+                {perf.selection && perf.selection.icu != null
+                  ? <>{perf.gamme} — niveau <b>{perf.selection.nom}</b> : Icu {perf.selection.icu} kA à {perf.selection.tension} (valeur de la gamme, la plaque de performance de l'appareil fait foi).</>
+                  : <>{perf.gamme} — niveaux de performance : {perf.libelles.join(" · ")}. Valeurs de la gamme : se reporter à la plaque de performance de l'appareil.</>}
+              </div>
+            )}
           </div>
         </div>
       </Card>
@@ -7855,6 +8020,7 @@ function BRKReglagePanel({ eq, update, custom, onAddCustom, onChangeCustom, onRe
             <Select value={tests.test_surcharge_longue.etat} onChange={(e) => setTEtat("test_surcharge_longue", e.target.value)} style={{ width: 130, padding: "5px 7px", fontSize: 12 }}>
               {EQUIP_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
             </Select>
+            <BadgeAuto k="test_surcharge_longue" />
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "8px 0", borderBottom: "1px solid #E2E6EB" }}>
             <span style={{ fontSize: 12.5, color: "#3E4A5C", flex: "1 1 160px" }}>Court-circuit temporisé</span>
@@ -7869,7 +8035,13 @@ function BRKReglagePanel({ eq, update, custom, onAddCustom, onChangeCustom, onRe
             <Select value={tests.test_cc_temporise.etat} onChange={(e) => setTEtat("test_cc_temporise", e.target.value)} style={{ width: 130, padding: "5px 7px", fontSize: 12 }}>
               {EQUIP_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
             </Select>
+            <BadgeAuto k="test_cc_temporise" />
           </div>
+          {estMTZ && (
+            <div style={{ fontSize: 11.5, color: "#7A4B00", background: "rgba(255,192,46,0.16)", borderRadius: 6, lineHeight: 1.5, padding: "7px 10px" }}>
+              Avant les essais sur un Masterpact MTZ : vérifier que le mode de maintenance <b>ERMS</b> n'est pas actif — il applique des seuils de protection réduits et fausse les temps mesurés. La <b>mémoire thermique</b> raccourcit aussi le temps de surcharge longue en cas de refermeture rapide.
+            </div>
+          )}
           {declencheur && (
             <div style={{ fontSize: 11.5, color: "#5B6B7D", lineHeight: 1.5, padding: "0 0 8px", borderBottom: "1px solid #E2E6EB" }}>
               Valeurs constructeur : <b>{declencheur.court}</b> — {declencheur.source}. {declencheur.texteLong || "Surcharge longue : temps maximum à froid (un temps plus court peut venir de la mémoire thermique) ; court retard et instantané : temps de non-déclenchement et coupure maximale."}
@@ -7893,6 +8065,7 @@ function BRKReglagePanel({ eq, update, custom, onAddCustom, onChangeCustom, onRe
             <Select value={tests.test_instantane.etat} onChange={(e) => setTEtat("test_instantane", e.target.value)} style={{ width: 130, padding: "5px 7px", fontSize: 12 }}>
               {EQUIP_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
             </Select>
+            <BadgeAuto k="test_instantane" />
           </div>
         </div>
         {custom && <CustomActionsList custom={custom} onAdd={onAddCustom} onChange={onChangeCustom} onRemove={onRemoveCustom} idPrefix={idPrefix} />}
@@ -8077,10 +8250,17 @@ function phraseConstatItem({ label, etat, mesures, avertissements, action, nom =
 }
 // Relève tous les constats d'un équipement sous forme d'objets { phrase, rang, categorie, sujet }.
 function analyserAnomaliesEquipement(eq) {
+  eq = appliquerEtatsAutoDisjoncteur(eq); // l'état des essais de déclenchement suit les limites, même si l'écran n'a pas été ouvert
   const schema = schemaFiltreeParNiveau(getSchema(eq), eq.niveauMaintenance);
   const isRelais = TYPES_AVEC_RELAIS.includes(eq.type);
   const constats = [];
   const ajouter = (phrase, rang, categorie, sujet) => constats.push({ phrase, rang, categorie, sujet });
+  // Essais de déclenchement hors limites : leur phrase détaillée (mesure, limite, état) remplace la phrase générique « jugé dégradé ».
+  const essaiHorsLimites = {};
+  if (eq.type === "Disjoncteur BT") {
+    const a = evaluationEssaiSurchargeLongue(eq), b = evaluationEssaiCourtRetard(eq), c = evaluationEssaiInstantane(eq);
+    essaiHorsLimites.test_surcharge_longue = !!(a && a.horsLimites); essaiHorsLimites.test_cc_temporise = !!(b && b.horsLimites); essaiHorsLimites.test_instantane = !!(c && c.horsLimites);
+  }
   // Rapport de transformation (Transformateur) : mesuré vs théorique ±0,5 % CEI 60076-1 — tolérance
   // calculée au niveau de l'équipement (tension primaire/secondaire), fusionnée dans le constat de
   // l'item "Rapport de transformation" pour ne produire qu'une seule phrase.
@@ -8124,6 +8304,7 @@ function analyserAnomaliesEquipement(eq) {
     sec.items.forEach((item) => {
       const v = eq.controles[sec.key][item.key];
       if (!v) return;
+      if (eq.type === "Disjoncteur BT" && sec.key === "tests_disjoncteur" && essaiHorsLimites[item.key]) return; // phrase détaillée ci-dessous
       const info = detailAnomalieItem(item, v);
       const estRapportParPhase = sec.key === "rapport_transformation" && item.key === "rapport_par_phase";
       const mesures = estRapportParPhase ? [...info.mesures, ...transfoMesures] : info.mesures;
@@ -8170,12 +8351,15 @@ function analyserAnomaliesEquipement(eq) {
   });
   if (eq.type === "Disjoncteur BT") {
     // Surcharge longue : déclenchement mesuré comparé au "Tr max attendu" renseigné par le technicien.
+    const testsDisj = eq.controles.tests_disjoncteur || {};
+    const suiteEtat = (k) => { const t = testsDisj[k]; return t && RANK_OF[t.etat] > 0 ? ` L'essai est jugé ${motsEtat(t.etat)}.${obsTechnicien(t.action)}` : obsTechnicien(t && t.action); };
+    const rangEssai = (k) => Math.max(1, (testsDisj[k] && RANK_OF[testsDisj[k].etat]) || 0);
     // Temps maximal : valeur saisie, sinon celle de la courbe constructeur (déclencheur connu) au courant d'essai.
     const evSL = evaluationEssaiSurchargeLongue(eq);
     if (evSL && evSL.horsLimites) {
       const frS = (v) => String(Math.round(v * 10) / 10).replace(".", ",");
       const doc = evSL.source === "constructeur" ? `, courbe constructeur ${DECLENCHEURS_SCHNEIDER[evSL.declencheur].court} à ${String(evSL.x).replace(".", ",")} Ir` : "";
-      ajouter(`Lors de l'essai de surcharge longue, le déclenchement a été mesuré à ${frS(evSL.mesure)} s, soit au-delà du temps maximal attendu (${frS(evSL.haut)} s${doc}).`, 1, "disjoncteur", "essai de surcharge longue");
+      ajouter(`Lors de l'essai de surcharge longue, le déclenchement a été mesuré à ${frS(evSL.mesure)} s, soit au-delà du temps maximal attendu (${frS(evSL.haut)} s${doc}).${suiteEtat("test_surcharge_longue")}`, rangEssai("test_surcharge_longue"), "disjoncteur", "essai de surcharge longue");
     }
     // Court-circuit temporisé : écart > 20 % entre le déclenchement à T réglé et le temps ATTENDU, qui dépend du mode I²t
     // utilisé pendant l'essai (voir evaluationEssaiCourtRetard) : la temporisation réglée (tsd) à I²t OFF — cas courant,
@@ -8189,12 +8373,12 @@ function analyserAnomaliesEquipement(eq) {
       if (evCC.source === "constructeur") {
         // Déclencheur connu : plage du constructeur (non-déclenchement → coupure maximale), et non ±20 %.
         const courtNom = DECLENCHEURS_SCHNEIDER[evCC.declencheur].court;
-        ajouter(`Lors de l'essai de court-circuit temporisé, le déclenchement à T réglé (${mesMs} ms) est hors de la plage constructeur (${frMs(evCC.bas, 10)} à ${frMs(evCC.haut, 10)} ms pour un ${courtNom}${evCC.reglageI2t ? `, essai à I²t ${evCC.modeEssai}` : ""}).`, 1, "disjoncteur", "essai de court-circuit temporisé");
+        ajouter(`Lors de l'essai de court-circuit temporisé, le déclenchement à T réglé (${mesMs} ms) est hors de la plage constructeur (${frMs(evCC.bas, 10)} à ${frMs(evCC.haut, 10)} ms pour un ${courtNom}${evCC.reglageI2t ? `, essai à I²t ${evCC.modeEssai}` : ""}).${suiteEtat("test_cc_temporise")}`, rangEssai("test_cc_temporise"), "disjoncteur", "essai de court-circuit temporisé");
       } else {
         const reference = evCC.modeEssai === "ON" && Math.abs(evCC.attendu - evCC.tsd) > 1e-9
           ? `du temps attendu à I²t ON (${attMs} ms à ${String(evCC.x).replace(".", ",")} Im, pour tsd = ${tsdMs} ms)`
           : `de la temporisation réglée (tsd = ${tsdMs} ms${evCC.reglageI2t ? ", essai à I²t OFF" : ""})`;
-        ajouter(`Lors de l'essai de court-circuit temporisé, le déclenchement à T réglé (${mesMs} ms) s'écarte de plus de 20 % ${reference}.`, 1, "disjoncteur", "essai de court-circuit temporisé");
+        ajouter(`Lors de l'essai de court-circuit temporisé, le déclenchement à T réglé (${mesMs} ms) s'écarte de plus de 20 % ${reference}.${suiteEtat("test_cc_temporise")}`, rangEssai("test_cc_temporise"), "disjoncteur", "essai de court-circuit temporisé");
       }
     }
 
@@ -8203,9 +8387,9 @@ function analyserAnomaliesEquipement(eq) {
     if (evIn && evIn.horsLimites) {
       const decl = String(Math.round(evIn.mesure * 1000 * 10) / 10).replace(".", ",");
       if (evIn.source === "constructeur") {
-        ajouter(`Lors de l'essai instantané, le temps de coupure mesuré (${decl} ms) dépasse le temps maximal de coupure de ${Math.round(evIn.max * 1000)} ms indiqué par le constructeur (${DECLENCHEURS_SCHNEIDER[evIn.declencheur].court}).`, 1, "disjoncteur", "essai instantané");
+        ajouter(`Lors de l'essai instantané, le temps de coupure mesuré (${decl} ms) dépasse le temps maximal de coupure de ${Math.round(evIn.max * 1000)} ms indiqué par le constructeur (${DECLENCHEURS_SCHNEIDER[evIn.declencheur].court}).${suiteEtat("test_instantane")}`, rangEssai("test_instantane"), "disjoncteur", "essai instantané");
       } else {
-        ajouter(`Lors de l'essai instantané, le temps de coupure mesuré (${decl} ms) dépasse le repère usuel de 50 ms (donnée constructeur, et non une exigence normative de la CEI 60947-2).`, 1, "disjoncteur", "essai instantané");
+        ajouter(`Lors de l'essai instantané, le temps de coupure mesuré (${decl} ms) dépasse le repère usuel de 50 ms (donnée constructeur, et non une exigence normative de la CEI 60947-2).${suiteEtat("test_instantane")}`, rangEssai("test_instantane"), "disjoncteur", "essai instantané");
       }
     }
   }
@@ -9450,7 +9634,6 @@ function PrintEquipement({ eq, allEquipements = [], locaux = [] }) {
   const localEq = (locaux || []).find((l) => l.id === eq.localId);
   const schema = schemaFiltreeParNiveau(getSchema(eq), eq.niveauMaintenance);
   const isRelaisSeuils = TYPES_AVEC_RELAIS.includes(eq.type);
-  const brk = eq.type === "Disjoncteur BT" ? computeBRKValues(eq) : null;
   // Bilan de puissance : résout transfo_id/disj_id (identifiants techniques) vers la
   // référence/puissance/calibre de l'équipement réellement lié, comme côté rapport Word — sans ça,
   // l'aperçu affiche un identifiant technique illisible au lieu du nom de l'équipement.
@@ -9480,7 +9663,7 @@ function PrintEquipement({ eq, allEquipements = [], locaux = [] }) {
           </React.Fragment>
         ))}
       </div>
-      {schema.sections.map((sec) => (
+      {schema.sections.filter((sec) => !(sec.key === "courbe_declenchement" && courbeDeclenchementSansContenu(eq))).map((sec) => (
         <PrintSection key={sec.key} title={sec.title}>
           {isRelaisSeuils && sec.key === "parametrage_relais" && (
             eq.controles.parametrage_relais_seuils.length === 0 ? (
@@ -9525,18 +9708,6 @@ function PrintEquipement({ eq, allEquipements = [], locaux = [] }) {
               </div>
             );
           })}
-          {brk && sec.key === "reglage_disjoncteur" && (
-            <div style={{ fontSize: 11, marginTop: 6 }}>
-              <b>Ir (calculé) :</b> {brk.Ir || "—"} A &nbsp;·&nbsp; <b>Im (calculé) :</b> {brk.Im || "—"} A
-            </div>
-          )}
-          {brk && sec.key === "tests_disjoncteur" && (
-            <div style={{ fontSize: 11, marginTop: 6 }}>
-              <div>Surcharge longue — Valise STR : {brk.valiseSTR_SL} mA · Valise IS : {brk.valiseIS_SL} A</div>
-              <div>Court-circuit temporisé — Valise STR : {brk.valiseSTR_CC} mA · Valise IS : {brk.valiseIS_CC} A</div>
-              <div>Instantané — Valise IS : {brk.valiseIS_Inst} A</div>
-            </div>
-          )}
           {(eq.controles[sec.key + "__custom"] || []).map((c) => (
             <div key={c.id} style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "5px 0", borderBottom: "1px solid #e5e5e5", fontSize: 11 }}>
               <div style={{ flex: "1 1 260px" }}>
@@ -11685,9 +11856,10 @@ function evaluationEssaiCourtRetard(eq) {
   const reglageI2t = cc.i2t === "ON" && !(d && d.courtRetard && !d.courtRetard.i2t);
   const modeEssai = reglageI2t && tCC.i2t_essai === "ON" ? "ON" : "OFF";
   const abb = !!(d && d.courtRetard && d.courtRetard.modele === "abb");
+  const pr111 = !!(d && d.courtRetard && d.courtRetard.modele === "pr111");
   // Temps nominal : tsd à temps constant ; à I²t ON, Schneider = tsd × (10 Ir / I)² jusqu'à 10 Ir, ABB = 100 × t2 / (I/In)².
   const attendu = tsd > 0
-    ? (modeEssai === "ON" ? (abb ? (100 * tsd) / Math.pow(I / In, 2) : (I < 10 * Ir ? tsd * Math.pow((10 * Ir) / I, 2) : tsd)) : tsd)
+    ? (modeEssai === "ON" ? (pr111 ? tempsNominalCourtRetardPR111(tsd, I / In, true) : abb ? (100 * tsd) / Math.pow(I / In, 2) : (I < 10 * Ir ? tsd * Math.pow((10 * Ir) / I, 2) : tsd)) : tsd)
     : null;
   let bas = attendu !== null ? 0.8 * attendu : null, haut = attendu !== null ? 1.2 * attendu : null, source = "generique";
   if (d && d.courtRetard) {
@@ -11700,7 +11872,7 @@ function evaluationEssaiCourtRetard(eq) {
     Ir, Im, I, x, tsd, reglageI2t, modeEssai, attendu, bas, haut, source, mesure, declencheur: d ? d.nom : null,
     horsLimites: mesure !== null && bas !== null && (mesure < bas - 1e-9 || mesure > haut + 1e-9),
     // Les deux modes donnent des temps différents : réglage ON, et (Schneider) Im sous 10 Ir ou (ABB) Im sous 10 In.
-    modesDifferent: reglageI2t && tsd > 0 && (abb ? Im < 10 * In * 0.9999 : Im < 10 * Ir),
+    modesDifferent: reglageI2t && tsd > 0 && (pr111 ? Im < 8 * In * 0.9999 : abb ? Im < 10 * In * 0.9999 : Im < 10 * Ir),
   };
 }
 // Essai de surcharge longue : temps maximal attendu. Constructeur (déclencheur connu) : maximum de la courbe au courant d'essai ;
@@ -11720,8 +11892,9 @@ function evaluationEssaiSurchargeLongue(eq) {
   const kIr = n(sl.k1) * n(sl.k2);
   const bande = tr6 ? bandeLongRetard(d, tr6, x, kIr) : null;
   const tCourbe = tr6 ? tempsMaxLongRetard(d, tr6, x) : null;
-  const tMaxDoc = tCourbe !== null ? tCourbe * bande.haut : null;
-  const tMinDoc = tCourbe !== null ? tCourbe * bande.bas : null;
+  let tMaxDoc = tCourbe !== null ? tCourbe * bande.haut : null;
+  let tMinDoc = tCourbe !== null ? tCourbe * bande.bas : null;
+  if (d && d.cranMiniMax07 && tr6 && tr6 <= 0.5 && x >= 5 && x <= 8) { tMaxDoc = 0.7; tMinDoc = 0.7 * bande.bas; } // notes (1)/(2) du catalogue NT/NW
   const saisi = n(tSL.tr_max) > 0 ? n(tSL.tr_max) : null;
   const haut = saisi !== null ? saisi : tMaxDoc;
   const mesure = n(tSL.declenchement) > 0 ? n(tSL.declenchement) : null;
@@ -11731,6 +11904,42 @@ function evaluationEssaiSurchargeLongue(eq) {
     horsLimites: mesure !== null && haut !== null && mesure > haut * 1.0001,
     sousMinimum: mesure !== null && tMinDoc !== null && mesure < tMinDoc * 0.9999,
   };
+}
+// État des trois essais de déclenchement d'après la mesure et les limites (constructeur si le déclencheur est connu, sinon les
+// repères génériques) : « Conforme » si la mesure est dans les limites, « Dégradé » (rang 1, comme les constats existants) sinon ;
+// null quand il n'y a pas de mesure ou pas de limite connue (l'état reste alors à la main du technicien).
+function etatsAutoEssaisDisjoncteur(eq) {
+  const ev = { test_surcharge_longue: evaluationEssaiSurchargeLongue(eq), test_cc_temporise: evaluationEssaiCourtRetard(eq), test_instantane: evaluationEssaiInstantane(eq) };
+  const res = {};
+  Object.keys(ev).forEach((k) => {
+    const e = ev[k];
+    const limite = !e ? false : k === "test_surcharge_longue" ? e.haut != null : k === "test_cc_temporise" ? e.bas != null && e.haut != null : true;
+    res[k] = !e || e.mesure === null || !limite ? null : e.horsLimites ? "Dégradé" : "Conforme";
+  });
+  return res;
+}
+// Applique ces états aux essais (fonction pure). Un état choisi à la main par le technicien (etatManuel) n'est jamais écrasé ;
+// un état « Dégradé » / « Défaillant » antérieur à la fonction (ni automatique ni manuel marqué) est lui aussi conservé.
+function appliquerEtatsAutoDisjoncteur(eq) {
+  if (!eq || eq.type !== "Disjoncteur BT" || !eq.controles || !eq.controles.tests_disjoncteur) return eq;
+  const auto = etatsAutoEssaisDisjoncteur(eq);
+  const tests = eq.controles.tests_disjoncteur;
+  const suivants = { ...tests };
+  let change = false;
+  Object.keys(auto).forEach((k) => {
+    const t = tests[k];
+    if (!t || t.etatManuel) return;
+    const cible = auto[k];
+    if (cible === null) {
+      // Plus de résultat exploitable : un état posé automatiquement revient à sa valeur par défaut.
+      if (t.etatAuto) { suivants[k] = { ...t, etat: "Conforme", etatAuto: false }; change = true; }
+      return;
+    }
+    const ecrasable = t.etatAuto || !t.etat || t.etat === "Conforme" || t.etat === "Non réalisé";
+    if (!ecrasable) return;
+    if (t.etat !== cible || !t.etatAuto) { suivants[k] = { ...t, etat: cible, etatAuto: true }; change = true; }
+  });
+  return change ? { ...eq, controles: { ...eq.controles, tests_disjoncteur: suivants } } : eq;
 }
 // Essai instantané : temps maximal de coupure du constructeur si le déclencheur est connu, sinon repère usuel de 50 ms.
 function evaluationEssaiInstantane(eq) {
@@ -11755,7 +11964,7 @@ function parametresCourbeDeclenchement(eq) {
   // plages du court retard et de l'instantané ; sinon modèle générique d'après les réglages saisis.
   const d = declencheurSchneider(eq);
   const tr6 = d ? tr6DepuisReglage(d, n(sl.tr), n(sl.tr_classe)) : null;
-  const tr = tr6 || n(sl.tr), trX = tr6 ? (d.refX || 6) : (n(sl.tr_classe) || 6);
+  const tr = d && d.sansLongRetard ? 0 : (tr6 || n(sl.tr)), trX = tr6 ? (d.refX || 6) : (n(sl.tr_classe) || 6);
   const baseEnIn = !!(d && d.courtRetard && d.courtRetard.baseIm === "In") || cc.im_fonction_de === "In"; // ABB : seuil de court retard en multiple de In
   const Im = cc.k ? (baseEnIn ? n(sl.inominal) : Ir) * n(cc.k) : 0;
   const fenetreFixe = !!(d && d.courtRetard && d.courtRetard.fixe);
@@ -11769,15 +11978,15 @@ function parametresCourbeDeclenchement(eq) {
   const points = [];
   const evSL = evaluationEssaiSurchargeLongue(eq);
   if (evSL && evSL.mesure !== null) {
-    points.push({ nom: "SL", I: evSL.I, t: evSL.mesure, limites: evSL.haut ? { haut: evSL.haut, basDoc: evSL.bas } : null, bad: evSL.horsLimites, repere: `${String(evSL.x).replace(".", ",")} Ir` });
+    points.push({ nom: "SL", I: evSL.I, t: evSL.mesure, limites: evSL.haut ? { haut: evSL.haut, basDoc: evSL.bas } : null, bad: evSL.horsLimites, ok: !!evSL.haut && !evSL.horsLimites, repere: `${String(evSL.x).replace(".", ",")} Ir` });
   }
   const evCC = evaluationEssaiCourtRetard(eq);
   if (evCC && evCC.mesure !== null) {
-    points.push({ nom: "CC", I: evCC.I, t: evCC.mesure, limites: { bas: evCC.bas, haut: evCC.haut, attendu: evCC.attendu }, bad: evCC.horsLimites, repere: `${String(evCC.x).replace(".", ",")} Im` });
+    points.push({ nom: "CC", I: evCC.I, t: evCC.mesure, limites: { bas: evCC.bas, haut: evCC.haut, attendu: evCC.attendu }, bad: evCC.horsLimites, ok: !evCC.horsLimites, repere: `${String(evCC.x).replace(".", ",")} Im` });
   }
   const evIn = evaluationEssaiInstantane(eq);
   if (Ii > 0 && evIn && evIn.mesure !== null) {
-    points.push({ nom: "INST", I: 1.3 * Ii, t: evIn.mesure, limites: { haut: evIn.max, bas: evIn.non > 0 ? evIn.non : null }, bad: evIn.horsLimites, repere: "1,3 Ii" });
+    points.push({ nom: "INST", I: 1.3 * Ii, t: evIn.mesure, limites: { haut: evIn.max, bas: evIn.non > 0 ? evIn.non : null }, bad: evIn.horsLimites, ok: !evIn.horsLimites, repere: "1,3 Ii" });
   }
   const repere = eq.identification && eq.identification.repere;
   // Réglage ON mais essai du court retard fait à OFF (cas courant) : la mesure se lit sur la ligne tsd, pas sur la courbe I²t.
@@ -11792,9 +12001,9 @@ function parametresCourbeDeclenchement(eq) {
     bandeLong: d && tr6 ? (x) => bandeLongRetard(d, tr6, x, n(sl.k1) * n(sl.k2)) : null,
     fenCC: d && d.courtRetard && Im > 0 ? (I) => fenetreCourtRetardSchneider(d, n(cc.tsd) / 1000, I, Ir, modeEssaiOn, n(sl.inominal)) : null,
     // ABB : à I²t ON la courbe de court retard est t = 100·t2 / (I/In)² sur toute la plage (pas de palier à 10 Ir).
-    tCourt: d && d.courtRetard && d.courtRetard.modele === "abb" ? (I) => (i2t ? (100 * tsd) / Math.pow(I / n(sl.inominal), 2) : tsd) : null,
+    tCourt: d && d.courtRetard && d.courtRetard.modele === "abb" ? (I) => (i2t ? (100 * tsd) / Math.pow(I / n(sl.inominal), 2) : tsd) : d && d.courtRetard && d.courtRetard.modele === "pr111" ? (I) => tempsNominalCourtRetardPR111(tsd, I / n(sl.inominal), i2t) : null,
     fenInst: d && d.instantane && Ii > 0 ? { x0: Ii * (1 - d.instantane.precision), non: d.instantane.non, max: d.instantane.max } : null,
-    noteDoc: d ? `Courbe constructeur ${d.marque || "Schneider"} — ${d.court} : ${d.nature === "moyen" ? "temps moyens avec tolérance" : "temps maximums à froid"}, zones admises d'après la documentation.` : "",
+    noteDoc: d ? `Courbe constructeur ${d.marque || "Schneider"} — ${d.court} : ${d.noteNature || (d.nature === "moyen" ? "temps moyens avec tolérance" : "temps maximums à froid")}, zones admises d'après la documentation.` : "",
     titre: ("Courbe de déclenchement" + (repere ? " · " + repere : "")).toUpperCase(),
   };
 }
@@ -11955,7 +12164,7 @@ function genererGraphiqueCourbeDeclenchement(p) {
       ctx.strokeStyle = "#FFFFFF"; ctx.lineWidth = 3.5; ctx.strokeText(texteOff, xt, yy + 5);
       ctx.lineWidth = 1; ctx.fillStyle = "#2E8B57"; ctx.fillText(texteOff, xt, yy + 5);
     }
-    // Points d'essai mesurés (ambre ; rouge s'ils sortent des limites d'acceptation) avec leurs limites.
+    // Points d'essai mesurés (vert si la mesure est dans les limites, rouge si elle en sort, ambre si aucune limite n'est connue) avec leurs limites.
     ctx.font = `bold 12px ${SERIF}`;
     p.points.forEach((pt) => {
       if (pt.I < xMin || pt.I > xMax) return;
@@ -11986,7 +12195,7 @@ function genererGraphiqueCourbeDeclenchement(p) {
           ctx.lineWidth = 1.8; ctx.beginPath(); ctx.moveTo(x - 6, yb2); ctx.lineTo(x + 6, yb2); ctx.stroke(); ctx.lineWidth = 1;
         }
       }
-      ctx.fillStyle = pt.bad ? "#C0392B" : "#FFC02E"; ctx.strokeStyle = "#1A1F26"; ctx.lineWidth = 1.5;
+      ctx.fillStyle = pt.bad ? "#C0392B" : pt.ok ? "#1E9E62" : "#FFC02E"; ctx.strokeStyle = "#1A1F26"; ctx.lineWidth = 1.5;
       ctx.beginPath(); ctx.arc(x, y, 5.5, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); ctx.lineWidth = 1;
       const texte = `${fmtT(pt.t)} (${pt.repere})`;
       const aGauche = x + 10 + ctx.measureText(texte).width > right;
@@ -11995,20 +12204,26 @@ function genererGraphiqueCourbeDeclenchement(p) {
       ctx.lineWidth = 1; ctx.fillStyle = "#1A1F26"; ctx.fillText(texte, aGauche ? x - 10 : x + 10, y - 11);
     });
     // Légende (dans le graphique, en bas à gauche : zone libre) et mention de la nature de la courbe.
+    const nbConformes = p.points.filter((x) => x.ok && !x.bad).length, nbHors = p.points.filter((x) => x.bad).length, nbNeutres = p.points.length - nbConformes - nbHors;
     if (p.points.length || p.declencheur) {
       ctx.font = `11px ${SANS}`; ctx.textBaseline = "middle"; ctx.textAlign = "left";
-      const lignes = (p.points.length ? 2 : 0) + (p.declencheur ? 1 : 0);
+      const lignes = (p.declencheur ? 1 : 0) + (nbConformes ? 1 : 0) + (nbHors ? 1 : 0) + (nbNeutres ? 1 : 0) + (p.points.length ? 1 : 0);
       const lx = left + 14;
       let ly = bottom - 14 - 16 * (lignes - 1);
       ctx.fillStyle = "rgba(255,255,255,0.85)"; ctx.fillRect(left + 4, ly - 11, 198, 16 * lignes + 8);
+      const pastille = (couleur, texte) => {
+        ctx.fillStyle = couleur; ctx.strokeStyle = "#1A1F26"; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.arc(lx, ly, 4.5, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); ctx.lineWidth = 1;
+        ctx.fillStyle = "#5B6B7D"; ctx.fillText(texte, lx + 14, ly); ly += 16;
+      };
       if (p.declencheur) {
         ctx.fillStyle = "rgba(21,96,168,0.22)"; ctx.fillRect(lx - 7, ly - 5, 14, 10);
         ctx.fillStyle = "rgba(255,192,46,0.40)"; ctx.fillRect(lx + 1, ly - 5, 6, 10);
         ctx.fillStyle = "#5B6B7D"; ctx.fillText("zones admises (constructeur)", lx + 14, ly); ly += 16;
       }
+      if (nbConformes) pastille("#1E9E62", "essai conforme");
+      if (nbHors) pastille("#C0392B", "essai hors limites");
+      if (nbNeutres) pastille("#FFC02E", "essai mesuré (limite inconnue)");
       if (p.points.length) {
-        ctx.fillStyle = "#FFC02E"; ctx.strokeStyle = "#1A1F26"; ctx.beginPath(); ctx.arc(lx, ly, 4.5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-        ctx.fillStyle = "#5B6B7D"; ctx.fillText("essai mesuré", lx + 14, ly); ly += 16;
         ctx.strokeStyle = "#B02A2A"; ctx.fillStyle = "#FFFFFF"; ctx.beginPath(); ctx.moveTo(lx, ly - 4.5); ctx.lineTo(lx + 5, ly); ctx.lineTo(lx, ly + 4.5); ctx.lineTo(lx - 5, ly); ctx.closePath(); ctx.fill(); ctx.stroke();
         ctx.fillStyle = "#5B6B7D"; ctx.fillText("limites d'acceptation", lx + 14, ly);
       }
@@ -12791,6 +13006,17 @@ function dimensionsCourbe(f, largeurMax = 560, hauteurMax = 460) {
   const largeur = Math.min(largeurMax, hauteurMax * ratio);
   return [Math.round(largeur), Math.round(largeur / ratio)];
 }
+// Section « Courbe de déclenchement » d'un disjoncteur BT : rien à imprimer quand il n'y a ni pièce jointe, ni courbe tracée
+// d'après les réglages, ni référence / action / état saisis — le rapport n'affiche alors pas de titre vide.
+function courbeDeclenchementSansContenu(eq) {
+  if (!eq || eq.type !== "Disjoncteur BT") return false;
+  if ((eq.courbeFiles || []).length > 0) return false;
+  if (eq.courbeDeclenchementAuto !== false && parametresCourbeDeclenchement(eq)) return false;
+  const c = eq.controles || {};
+  const v = c.courbe_declenchement && c.courbe_declenchement.courbe;
+  const saisi = !!v && !!(v.action || v.etat || Object.values(v.fields || {}).some((x) => String(x == null ? "" : x).trim()));
+  return !saisi && !(c.courbe_declenchement__custom || []).length;
+}
 function docxCourbeDeclenchement(eq, titre) {
   const elements = [];
   // Courbe théorique d'après les réglages (sauf si l'utilisateur l'a exclue), puis les pièces jointes (courbe officielle).
@@ -13312,6 +13538,7 @@ function docxEquipementElements(eq, locaux, allSites) {
     if (itemsAffiches.length === 0) return;
     const courbeAvecFichiers = sec.key === "courbe_declenchement" && eq.type === "Disjoncteur BT"
       && ((eq.courbeFiles || []).length > 0 || (eq.courbeDeclenchementAuto !== false && !!parametresCourbeDeclenchement(eq)));
+    if (sec.key === "courbe_declenchement" && courbeDeclenchementSansContenu(eq)) return;
     if (!courbeAvecFichiers) elements.push(docxHeading(sec.title));
     if (sec.key === "mesure_isolement" && sec.items.some((it) => it.key === "pi" || it.fields?.some((f) => f.key === "pi"))) {
       elements.push(docxNormeNote("CEI 60076-3 / IEEE 43. Tension d'injection identique du début à la fin de l'essai — le type de mesure indique jusqu'où il est poussé : Standard (lecture instantanée), PI = R(10 min)/R(1 min), DAR = R(60 s)/R(10 s). L'enroulement non testé doit être court-circuité (shunté) et relié à la terre."));
@@ -13358,13 +13585,6 @@ function docxEquipementElements(eq, locaux, allSites) {
     }
     elements.push(docxSpacer());
   });
-  if (eq.type === "Disjoncteur BT") {
-    const brk = computeBRKValues(eq);
-    elements.push(new DOCX.Paragraph({ keepNext: true, spacing: { before: 160, after: 60 }, children: [new DOCX.TextRun({ text: `Ir (calculé) : ${brk.Ir || "—"} A · Im (calculé) : ${brk.Im || "—"} A`, size: 18, bold: true })] }));
-    elements.push(new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: `Surcharge longue — Valise STR : ${brk.valiseSTR_SL} mA · Valise IS : ${brk.valiseIS_SL} A`, size: 16 })] }));
-    elements.push(new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: `Court-circuit temporisé — Valise STR : ${brk.valiseSTR_CC} mA · Valise IS : ${brk.valiseIS_CC} A`, size: 16 })] }));
-    elements.push(new DOCX.Paragraph({ spacing: { after: 80 }, children: [new DOCX.TextRun({ text: `Instantané — Valise IS : ${brk.valiseIS_Inst} A`, size: 16 })] }));
-  }
   elements.push(new DOCX.Paragraph({
     border: { top: { color: DOCX_BLUE, space: 4, style: DOCX.BorderStyle.SINGLE, size: 8 } }, spacing: { before: 240, after: 80 },
     children: [new DOCX.TextRun({ text: "Synthèse de l'état — à l'issue de la maintenance : ", bold: true, size: 18, color: DOCX_DARK }), new DOCX.TextRun({ text: (eq.etatFinal || "").toUpperCase(), bold: true, size: 18, color: docxEtatColor(eq.etatFinal) })],
