@@ -681,14 +681,16 @@ const SIEMENS_3VA2 = ["ETU310M", "ETU320", "ETU330", "ETU340", "ETU350", "ETU350
 const LEGRAND_DMX = ["MP 2.10", "MP 4.10", "MP4", "MP6"];
 const LEGRAND_DPX = ["Magnétothermique", "Électronique", "Électronique HP (S10)"];
 // Eaton / Moeller NZM : magnétothermique (-A), électroniques (-VE / -VX), protection moteur (-ME).
+const EATON_IZM = ["XZMA", "XZMV", "XZMU", "XZMR", "XZMD"]; // unités de contrôle électroniques IZM (manuel IZM § 9.1)
+const EATON_ZM_ANCIEN = ["ZM 12", "ZM 12V", "ZM 124", "ZM 124V", "ZM 24", "ZM 24V"]; // déclencheurs des anciens NZM 12 / 124 / 24
 const EATON_NZM = ["Magnétothermique (-A)", "Électronique (-VE)", "Électronique (-VX)", "Moteur (-ME)"];
 const MARQUE_GAMME_RELAIS_BT = {
   "Schneider Electric": [...MICROLOGIC_2_7, ...MICROLOGIC_X, ...MICROLOGIC_NSX, ...STR_COMPACT_NS, ...STR_MASTERPACT_M, ...ST_MASTERPACT_M, ...TM_SCHNEIDER],
   "Merlin Gerin": [...MICROLOGIC_2_7, ...MICROLOGIC_NSX, ...STR_COMPACT_NS, ...STR_MASTERPACT_M, ...ST_MASTERPACT_M, ...TM_SCHNEIDER],
   "ABB": [...ABB_TM, ...ABB_PR_ISOMAX, ...ABB_PR_TMAX, ...ABB_PR_EMAX, ...ABB_EKIP],
   "Siemens": [...SIEMENS_3WL, ...SIEMENS_3WA, ...SIEMENS_3VA1, ...SIEMENS_3VA2],
-  "Eaton": [...EATON_NZM, "Digitrip 3000", "IZM trip unit"],
-  "Moeller": [...EATON_NZM, "IZM trip unit"],
+  "Eaton": [...EATON_NZM, ...EATON_ZM_ANCIEN, ...EATON_IZM, "Digitrip 3000", "IZM trip unit"],
+  "Moeller": [...EATON_NZM, ...EATON_ZM_ANCIEN, ...EATON_IZM, "IZM trip unit"],
   "Legrand": [...LEGRAND_DMX, ...LEGRAND_DPX],
   "General Electric": ["Entelliguard TU"],
 };
@@ -721,6 +723,8 @@ const DECLENCHEURS_BT_REGLES = [
   [/3va2|3va6|3va27/, SIEMENS_3VA2],
   [/dmx/, LEGRAND_DMX],
   [/dpx/, LEGRAND_DPX],
+  [/izm/, [...EATON_IZM, "IZM trip unit"]],
+  [/nzm\s*(12|124|24)(?!\d)/, EATON_ZM_ANCIEN],
   [/nzm/, EATON_NZM],
 ];
 function declencheursAssocies(identification) {
@@ -992,6 +996,17 @@ const MODELES_MASTERPACT_M = ["M08", "M10", "M12", "M16", "M20", "M25", "M32", "
 // ABB SACE Emax (E1 à E6, première génération) : courants assignés Iu du catalogue technique — E1 800-1600, E2 800-2000, E3 800-3200, E4 3200-4000, E6 3200-6300 A.
 const MODELES_EMAX = [["E1", [800, 1000, 1250, 1600]], ["E2", [800, 1000, 1250, 1600, 2000]], ["E3", [800, 1000, 1250, 1600, 2000, 2500, 3200]], ["E4", [3200, 4000]], ["E6", [3200, 4000, 5000, 6300]]]
   .flatMap(([taille, calibres]) => calibres.map((c) => `Emax ${taille} ${c}`));
+// Moeller / Eaton NZM (catalogue NZM 2004, courants assignés Iu des références IEC) et IZM (manuel d'utilisation IZM 2002 : IZM1 1000-1600 A, IZM2 2000-3200 A, IZM3 4000-5000 A) ;
+// anciens NZM 12 / 124 / 24 (notice d'installation 04/99, déclencheurs ZM 12 / 124 / 24).
+const MODELES_NZM_IZM = [
+  ["NZM1", [40, 50, 63, 80, 100, 125]],
+  ["NZM2", [10, 15, 16, 20, 25, 30, 32, 35, 40, 45, 50, 60, 63, 70, 80, 90, 100, 110, 125, 140, 150, 160, 175, 200, 220, 225, 250]],
+  ["NZM3", [220, 250, 300, 350, 400, 450, 500, 550, 600, 630]],
+  ["NZM4", [550, 600, 630, 700, 800, 875, 900, 1000, 1200, 1250, 1400, 1600]],
+  ["IZM1", [1000, 1600]], ["IZM2", [2000, 2500, 3200]], ["IZM3", [4000, 5000]],
+].flatMap(([taille, calibres]) => calibres.map((c) => `${taille} ${c}`)).concat(["NZM 12", "NZM 124", "NZM 24"]);
+// Legrand : DPX 160 et DPX 250 ER (guide puissance 2007), DPX 630 de 250 à 630 A (fiche technique F00692FR/03), DMX³ 2500 de 630 à 2500 A (fiche technique F01800FR/01).
+const MODELES_LEGRAND = ["DPX 160", "DPX 250 ER", ...[250, 320, 400, 500, 630].map((c) => `DPX 630 ${c}`), ...[630, 800, 1000, 1250, 1600, 2000, 2500].map((c) => `DMX3 2500 ${c}`)];
 const MODELES_COMPACT_C = ["Compact C801", "Compact C1001", "Compact C1251"];
 const MODELES_MASTERPACT_NT_NW = ["Masterpact NT", "Masterpact NT06", "Masterpact NT08", "Masterpact NT10", "Masterpact NT12", "Masterpact NT16", "Masterpact NW", "Masterpact NW08", "Masterpact NW10", "Masterpact NW12", "Masterpact NW16", "Masterpact NW20", "Masterpact NW25", "Masterpact NW32", "Masterpact NW40", "Masterpact NW40b", "Masterpact NW50", "Masterpact NW63"];
 const MODELES_COMPACT_NS = ["Compact NS", "Compact NS80H", "Compact NS100", "Compact NS160", "Compact NS250", "Compact NS400", "Compact NS630", "Compact NS630b", "Compact NS800", "Compact NS1000", "Compact NS1250", "Compact NS1600", "Compact NS1600b", "Compact NS2000", "Compact NS2500", "Compact NS3200"];
@@ -999,10 +1014,10 @@ const MARQUE_MODELE_BT = {
   "Schneider Electric": ["Compact NSXm", "Compact NSX100", "Compact NSX160", "Compact NSX250", "Compact NSX400", "Compact NSX630", ...MODELES_COMPACT_NS, ...MODELES_COMPACT_C, "Masterpact MTZ1", "Masterpact MTZ2", "Masterpact MTZ3", ...MODELES_MASTERPACT_MTZ, ...MODELES_MASTERPACT_NT_NW, ...MODELES_MASTERPACT_M],
   "Merlin Gerin": [...MODELES_COMPACT_NS, ...MODELES_COMPACT_C, ...MODELES_MASTERPACT_NT_NW, ...MODELES_MASTERPACT_M],
   "ABB": ["Tmax T1", "Tmax T2", "Tmax T3", "Tmax T4", "Tmax T5", "Tmax T6", "Tmax T7", "Tmax T8", "Tmax XT1", "Tmax XT2", "Tmax XT3", "Tmax XT4", "Tmax XT5", "Tmax XT6", "Tmax XT7", "Isomax S1", "Isomax S2", "Isomax S3", "Isomax S4", "Isomax S5", "Isomax S6", "Isomax S7", "Isomax S8", "Emax E1", "Emax E2", "Emax E3", "Emax E4", "Emax E6", ...MODELES_EMAX, "Emax X1", "Emax 2 E1.2", "Emax 2 E2.2", "Emax 2 E4.2", "Emax 2 E6.2"],
-  "Siemens": ["3VA1", "3VA2", "3VA6", "3VA27", "3WL04", "3WL08", "3WL10", "3WL11", "3WL12", "3WA"],
-  "Eaton": ["NZM1", "NZM2", "NZM3", "NZM4", "NZML2", "NZML3", "IZM16", "IZM26"],
-  "Moeller": ["NZM", "IZM"],
-  "Legrand": ["DPX 125", "DPX 250", "DPX 630", "DPX 1600", "DPX3 160", "DPX3 250", "DPX3 630", "DPX3 1600", "DMX3 1600", "DMX3 2500", "DMX3 4000"],
+  "Siemens": ["3VA1", "3VA2", "3VA6", "3VA27", "3WL04", "3WL08", "3WL10", "3WL11", "3WL12", "3WL Taille I", "3WL Taille II", "3WL Taille III", "3WA"],
+  "Eaton": ["NZM1", "NZM2", "NZM3", "NZM4", "NZML2", "NZML3", "IZM16", "IZM26", ...MODELES_NZM_IZM],
+  "Moeller": ["NZM", "IZM", ...MODELES_NZM_IZM],
+  "Legrand": ["DPX 125", "DPX 250", "DPX 630", "DPX 1600", "DPX3 160", "DPX3 250", "DPX3 630", "DPX3 1600", "DMX3 1600", "DMX3 2500", "DMX3 4000", ...MODELES_LEGRAND],
   "General Electric": ["Record Plus", "Entelliguard G"],
 };
 // Modèle proposé selon la marque ET le type (famille) déjà choisi, pour ne montrer que les calibres de
@@ -1081,7 +1096,61 @@ const PERFORMANCES_EMAX = [ // Emax première génération : [regex modèle norm
   [/^emaxe6(?!\.)/, "Emax E6", [["H", 100, "415 V"], ["V", 150, "415 V"]]],
 ].map(([re, gamme, niveaux]) => ({ re, gamme, marques: /abb/, source: "ABB SACE Emax — catalogue technique", niveaux }));
 PERFORMANCES_BT.push(...PERFORMANCES_EMAX);
-const libelleNiveauBT = ([n, icu, tension]) => (icu == null ? n : `${n} — ${icu} kA à ${tension}`);
+// Legrand : pouvoir de coupure Icu à 400/415 V — guide puissance 2007 (tableau des DPX), fiche DPX 630 (36 kA, H 70 kA, L 100 kA) et fiche DMX³ 2500 (N 50, H 65, L 100 kA).
+PERFORMANCES_BT.push(...[
+  [/^dpx125/, "DPX 125", [["16 kA", 16], ["25 kA", 25], ["36 kA", 36]]],
+  [/^dpx160(?!\d)/, "DPX 160", [["25 kA", 25], ["50 kA", 50]]],
+  [/^dpx250er/, "DPX 250 ER", [["25 kA", 25], ["50 kA", 50]]],
+  [/^dpx250/, "DPX 250", [["36 kA", 36], ["70 kA", 70]]],
+  [/^dpx630/, "DPX 630", [["36 kA", 36], ["H 70 kA", 70], ["L 100 kA", 100]]],
+  [/^dpx1600/, "DPX 1600", [["50 kA", 50], ["70 kA", 70]]],
+  [/^dmx3?2500/, "DMX³ 2500", [["N", 50], ["H", 65], ["L", 100]]],
+].map(([re, gamme, niveaux]) => ({ re, gamme, marques: /legrand/, source: "documentation Legrand (guide puissance 2007, fiches DPX 630 et DMX³ 2500)", niveaux: niveaux.map(([n, icu]) => [n, icu, "400/415 V"]) })));
+// Moeller / Eaton NZM : pouvoir de coupure de base B 25 kA, standard N 50 kA, haut H 100 kA (85 kA pour le NZMH4), limiteur L 150 kA à 400/415 V (catalogue NZM 2004, vue d'ensemble).
+PERFORMANCES_BT.push(...[
+  [/^nzm[bnhl]?1(?!2$|24$)/, "NZM1", [["B", 25, "400/415 V"], ["N", 50, "400/415 V"]]],
+  [/^nzm[bnhl]?2(?!4$)/, "NZM2", [["B", 25, "400/415 V"], ["N", 50, "400/415 V"], ["H", 100, "400/415 V"], ["L", 150, "400/415 V"]]],
+  [/^nzm[bnhl]?3/, "NZM3", [["N", 50, "400/415 V"], ["H", 100, "400/415 V"], ["L", 150, "400/415 V"]]],
+  [/^nzm[bnhl]?4/, "NZM4", [["N", 50, "400/415 V"], ["H", 85, "400/415 V"]]],
+].map(([re, gamme, niveaux]) => ({ re, gamme, marques: /eaton|moeller/, source: "catalogue NZM 2004", niveaux })));
+// Siemens 3WL : classes de pouvoir de coupure N, S, H ; classe C (> 100 kA) pour la taille III — notice d'exploitation 3WL 250-6300 A (pas de tableau d'Icu : valeurs non renseignées).
+PERFORMANCES_BT.push(
+  { re: /^3wltailleiii/, gamme: "Siemens 3WL taille III", marques: /siemens/, source: "notice d'exploitation 3WL", niveaux: [["N", null, ""], ["S", null, ""], ["H", null, ""], ["C", null, ""]] },
+  { re: /^3wl/, gamme: "Siemens 3WL", marques: /siemens/, source: "notice d'exploitation 3WL", niveaux: [["N", null, ""], ["S", null, ""], ["H", null, ""]] },
+);
+// Plages de réglage des déclencheurs ETU du Siemens 3WL (notice d'exploitation, § 9.1.10) — rappel affiché sous l'instantané ; la notice ne donne pas de tolérances chiffrées.
+const REGLAGES_ETU_SIEMENS = {
+  ETU15B: "tR = 10 s fixe (sous 6 × IR) · pas de court retard · Ii = 2 à 8 × In (2, 3, 4, 5, 6, 7, 8).",
+  ETU25B: "tR = 10 s fixe (sous 6 × IR) · Isd = 1,25 à 12 × In · Ii fixe ≥ 20 × In (50 kA au maximum).",
+  ETU27B: "tR = 10 s fixe (sous 6 × IR) · Isd = 1,25 à 12 × In · Ii fixe ≥ 20 × In (50 kA au maximum) · protection terre standard.",
+  ETU45B: "tR = 2 / 3,5 / 5,5 / 8 / 10 / 14 / 17 / 21 / 25 / 30 s (sous 6 × IR) · Isd = 1,25 à 12 × In · tsd = 0,02 (M) / 0,1 / 0,2 / 0,3 / 0,4 s ou OFF · Ii = 1,5 / 2,2 / 3 / 4 / 6 / 8 / 10 / 12 × In ou OFF (0,8 × Ics au maximum).",
+  ETU55B: "tR = 2 à 30 s (sous 6 × IR) · Isd = 1,25 × In à 0,8 × Icw · tsd = 0,02 (M) / 0,08 à 4 s ou OFF · Ii = 1,5 × In à 0,8 × Ics ou OFF (100 kA au maximum).",
+  ETU76B: "tR = 2 à 30 s (sous 6 × IR) · Isd = 1,25 × In à 0,8 × Icw · tsd = 0,02 (M) / 0,08 à 4 s ou OFF · Ii = 1,5 × In à 0,8 × Ics ou OFF (100 kA au maximum).",
+};
+const REGLAGES_XZM_IZM = {
+  XZMA: "Ir = 0,5 à 1,0 × In · tr = 10 s fixe (sous 6 × Ir) · pas de court retard · Ii = 2 à 8 × In (2, 3, 4, 5, 6, 7, 8).",
+  XZMV: "Ir = 0,4 à 1,0 × In · tr = 10 s fixe (sous 6 × Ir) · Isd = 1,25 / 1,5 / 2 / 2,5 / 3 / 4 / 6 / 8 / 10 / 12 × In · tsd = 0 / 0,02 (M) / 0,1 / 0,2 / 0,3 / 0,4 s · Ii fixe (50 kA au maximum).",
+  XZMU: "Ir = 0,4 à 1,0 × In · tr = 2 / 3,5 / 5,5 / 8 / 10 / 14 / 17 / 21 / 25 / 30 s (sous 6 × Ir) · Isd = 1,25 à 12 × In · tsd = 0,02 (M) / 0,1 / 0,2 / 0,3 / 0,4 s ou OFF · Ii = 1,5 / 2,2 / 3 / 4 / 6 / 8 / 10 / 12 × In ou OFF (0,8 × Ics au maximum).",
+  XZMR: "Ir = 0,4 à 1,0 × In · tr = 2 à 30 s (sous 6 × Ir) · Isd = 1,25 × In à 0,8 × Icw · tsd = 0,02 (M) / 0,08 à 4 s ou OFF · Ii = 1,5 × In à 0,8 × Ics ou OFF.",
+  XZMD: "Ir = 0,4 à 1,0 × In · tr = 2 à 30 s (sous 6 × Ir) · Isd = 1,25 × In à 0,8 × Icw · tsd = 0,02 (M) / 0,08 à 4 s ou OFF · Ii = 1,5 × In à 0,8 × Ics ou OFF.",
+};
+const REGLAGES_ZM_MOELLER = "tr = 11 s (tr1 = 18 s) ou 16,5 s (tr2 = 27,5 s) sous 6 × Ir selon la position du cavalier ; version « démarrage lourd » : 18 s ou 27,5 s · court retard (ZM…V) : tv = 0 / 10 / 50 / 100 / 150 / 200 / 300 / 500 / 700 / 1000 ms, Irmv = 2 à 12 × Ir · instantané Irm = 2 à 16 × Iu.";
+const REGLAGES_MP_LEGRAND = {
+  MP4: "Ir = 0,4 à 1,0 × In (cran de 0,02) · tr = 5 / 10 / 20 / 30 s, mémoire thermique ON ou OFF · Im = 1,5 / 2 / 2,5 / 3 / 4 / 5 / 6 / 8 / 10 × Ir · tm = 0 / 0,1 / 0,2 / 0,3 s en t constant ou I²t · Ii = 2 / 3 / 4 / 6 / 8 / 10 / 12 / 15 × In ou Icw · version LSIg : Ig = OFF / 0,2 à 1 × In, tg = 0,1 / 0,2 / 0,5 / 1 s.",
+  MP6: "Ir = 0,4 à 1,0 × In (cran de 0,01) · tr = 5 / 10 / 20 / 30 s à 6 × Ir, mémoire thermique ON ou OFF · Im = 1,5 / 2 / 2,5 / 3 / 4 / 5 / 6 / 8 / 10 × Ir · tm = 0,03 / 0,1 / 0,2 / … / 1 s en t constant ou I²t · Ii = OFF / 2 / 3 / 4 / 6 / 8 / 10 / 12 / 15 × In · version LSIg : Ig = OFF / 0,2 à 1 × In, tg = 0,1 / 0,2 / 0,5 / 1 s.",
+};
+function reglagesETUSiemens(identification) {
+  const id = identification || {};
+  const marque = String(id.marque || "").toLowerCase() + String(id.marqueRelais || "").toLowerCase();
+  const refMP = String(id.referenceRelais || "").toUpperCase().replace(/[\s-]/g, "");
+  if ((!marque || /legrand/.test(marque)) && REGLAGES_MP_LEGRAND[refMP] && /dmx3?/i.test(String(id.modele || ""))) return { marque: "Legrand", nom: refMP.replace(/^MP/, "MP "), source: "DMX³ 2500", texte: REGLAGES_MP_LEGRAND[refMP] };
+  const ref = String(id.referenceRelais || "").toUpperCase().replace(/[\s-]/g, "");
+  if ((!marque || /siemens/.test(marque)) && REGLAGES_ETU_SIEMENS[ref]) return { marque: "Siemens", nom: ref.replace(/^ETU/, "ETU "), source: "3WL", texte: REGLAGES_ETU_SIEMENS[ref] };
+  if ((!marque || /moeller|eaton/.test(marque)) && REGLAGES_XZM_IZM[ref]) return { marque: "Moeller", nom: ref.replace(/^XZM/, "XZM "), source: "IZM", texte: REGLAGES_XZM_IZM[ref] };
+  if ((!marque || /moeller|eaton/.test(marque)) && /^ZM(12|124|24)V?$/.test(ref)) return { marque: "Moeller", nom: ref.replace(/^ZM/, "ZM "), source: "NZM 12 / 124 / 24", texte: REGLAGES_ZM_MOELLER };
+  return null;
+}
+const libelleNiveauBT = ([n, icu, tension]) => (icu == null ? n : n.includes(`${icu} kA`) ? `${n} à ${tension}` : `${n} — ${icu} kA à ${tension}`);
 function niveauxPerformanceBT(identification) {
   const id = identification || {};
   const marque = String(id.marque || "").toLowerCase();
@@ -7960,6 +8029,7 @@ function BRKReglagePanel({ eq, update, custom, onAddCustom, onChangeCustom, onRe
   const declencheur = declencheurSchneider(eq);
   const perf = niveauxPerformanceBT(eq.identification);
   const seuilInst = seuilInstantaneMasterpactM(eq.identification, n(sl.inominal));
+  const reglagesETU = reglagesETUSiemens(eq.identification);
   const estMTZ = !!(declencheur && /MTZ/.test(declencheur.nom));
   const arrondi = (v, d) => Math.round(v * d) / d;
 
@@ -7991,6 +8061,7 @@ function BRKReglagePanel({ eq, update, custom, onAddCustom, onChangeCustom, onRe
             <span style={{ fontSize: 12.5, color: "#3E4A5C", flex: "1 1 160px" }}>Instantané</span>
             <MiniInputUnit label="Ii" value={inst.ii} unit={inst.iiUnite || "kA"} onValueChange={(v) => setR("instantane", "ii", v)} onUnitChange={(u) => setR("instantane", "iiUnite", u)} />
             {seuilInst && <div style={{ flex: "1 1 100%", fontSize: 11.5, color: "#5B6B7D", lineHeight: 1.5 }}>{seuilInst.texte} Valeur de la documentation constructeur, à confirmer sur l'appareil.</div>}
+            {reglagesETU && <div style={{ flex: "1 1 100%", fontSize: 11.5, color: "#5B6B7D", lineHeight: 1.5 }}>{reglagesETU.marque} {reglagesETU.nom} — plages de réglage de la notice {reglagesETU.source} : {reglagesETU.texte} La notice ne donne pas de tolérances chiffrées : limites génériques de l'app.</div>}
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "8px 0" }}>
             <span style={{ fontSize: 12.5, color: "#3E4A5C", flex: "1 1 160px" }}>Pouvoir de coupure</span>
