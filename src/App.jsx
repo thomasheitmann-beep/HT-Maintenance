@@ -7221,8 +7221,53 @@ function texteVerificationFusibleTransfo(v) {
 // c'est donc un MAXIMUM (cas d'un disjoncteur d'arrivée) ; un départ en aval voit un courant plus
 // faible. Repère indicatif, jamais un verdict. Non calculé si les données manquent (aucune valeur
 // inventée) ni pour un transformateur à deux secondaires (répartition de la puissance inconnue).
+// Plusieurs transformateurs en amont, couplés en parallèle : le transformateur amont de l'identification (× « exemplaires » s'ils sont identiques) et, au besoin,
+// d'autres transformateurs — suivis dans l'app ou saisis à la main — éventuellement différents. Données dans eq.transfosParalleles = { exemplaires, autres[], couplage }.
+const nbExemplaires = (v) => { const n = Math.floor(numOf(v)); return n >= 1 ? n : 1; };
+function transfosParalleles(eq) {
+  const t = eq.transfosParalleles || {};
+  return { exemplaires: nbExemplaires(t.exemplaires), autres: Array.isArray(t.autres) ? t.autres : [], couplage: t.couplage === "ouvert" ? "ouvert" : "ferme" };
+}
+function transfoParalleleActif(eq) { const t = transfosParalleles(eq); return t.exemplaires > 1 || t.autres.length > 0; }
+function sourcesTransfosAmont(eq, allEquipements) {
+  const t = transfosParalleles(eq), sources = [];
+  const principal = donneesTransformateurAssocie(eq, allEquipements);
+  if (principal) sources.push({ libelle: principal.source === "manuel" ? "transformateur amont (saisi manuellement)" : `transformateur « ${principal.repere} »`, sn: principal.sn, u2: principal.u2, ucc: principal.ucc, n: t.exemplaires, deux: principal.deuxSecondaires });
+  t.autres.forEach((a, i) => {
+    if (a.source === "suivi" && a.repere) {
+      const tr = (allEquipements || []).find((e) => e.type === "Transformateur" && (e.identification?.repere || "").trim() === String(a.repere).trim());
+      const id = (tr && tr.identification) || {};
+      sources.push({ libelle: `transformateur « ${a.repere} »`, sn: numOf(id.puissance), u2: numOf(id.tensionSecondaire), ucc: numOf(id.ucc), n: nbExemplaires(a.nombre), deux: id.deuxEnroulementsSecondaires === "Oui", introuvable: !tr });
+    } else {
+      sources.push({ libelle: `transformateur ${i + 2} (saisi manuellement)`, sn: numOf(a.sn), u2: numOf(a.u2), ucc: numOf(a.ucc), n: nbExemplaires(a.nombre), deux: false });
+    }
+  });
+  return sources;
+}
+function calcVerificationPouvoirCoupureMulti(eq, allEquipements, locaux) {
+  const sources = sourcesTransfosAmont(eq, allEquipements);
+  if (!sources.length) return null;
+  const local = (locaux || []).find((l) => l.id === eq.localId);
+  const norme = (local && local.normeTableauBT) || "NF C 15-100";
+  const icu = numOf(eq.controles?.reglage_disjoncteur?.pouvoir_coupure?.fields?.icu); // kA
+  const couplage = transfosParalleles(eq).couplage;
+  const nbUnites = sources.reduce((s, x) => s + x.n, 0);
+  const base = { multi: true, nbUnites, norme, icu, couplage, manuel: false, transfoRepere: "" };
+  const pb = sources.find((x) => x.introuvable);
+  if (pb) return { ...base, manque: `${pb.libelle} introuvable parmi les équipements du site` };
+  if (sources.some((x) => x.deux)) return { ...base, manque: "un des transformateurs a deux enroulements secondaires : la répartition de la puissance n'étant pas connue, le courant de court-circuit n'est pas calculé" };
+  const incomplet = sources.find((x) => x.sn === null || !x.u2 || !x.ucc);
+  if (incomplet) return { ...base, manque: `renseigner la puissance, la tension secondaire et l'Ucc de ${incomplet.libelle} pour calculer le courant de court-circuit` };
+  const detail = sources.map((x) => { const i2n = (x.sn * 1000) / (Math.sqrt(3) * x.u2); const icc = (i2n * 100) / x.ucc / 1000; return { ...x, i2n: Math.round(i2n), icc, iccUnitaire: Math.round(icc * 100) / 100, iccTotal: Math.round(icc * x.n * 100) / 100 }; });
+  const iccSomme = Math.round(detail.reduce((s, x) => s + x.icc * x.n, 0) * 100) / 100; // somme des valeurs exactes, arrondie une seule fois
+  const iccUnitMax = Math.round(Math.max(...detail.map((x) => x.icc)) * 100) / 100;
+  const iccKa = couplage === "ouvert" ? iccUnitMax : iccSomme;
+  const u2s = detail.map((x) => x.u2), desaccord = Math.max(...u2s) > 1.1 * Math.min(...u2s);
+  return { ...base, sources: detail, iccSomme, iccUnitMax, iccKa, desaccord, insuffisant: icu !== null && icu < iccKa };
+}
 function calcVerificationPouvoirCoupure(eq, allEquipements, locaux) {
   if (eq.type !== "Disjoncteur BT") return null;
+  if (transfoParalleleActif(eq)) return calcVerificationPouvoirCoupureMulti(eq, allEquipements, locaux);
   const tr = donneesTransformateurAssocie(eq, allEquipements);
   if (!tr) return null;
   const local = (locaux || []).find((l) => l.id === eq.localId);
@@ -7250,6 +7295,19 @@ const REFERENCE_NORME_POUVOIR_COUPURE = {
   "DIN": " Norme DIN : même principe (pouvoir de coupure au moins égal au courant de court-circuit présumé) — se référer aux prescriptions applicables au tableau.",
 };
 function texteVerificationPouvoirCoupure(v) {
+  if (v.multi) {
+    const lib = `${v.nbUnites} transformateurs en parallèle`;
+    if (v.manque) return `Contrôle du pouvoir de coupure / ${lib} : ${v.manque}.`;
+    const fr = (x) => String(x); // même présentation des nombres que le texte à un seul transformateur
+    const detail = v.sources.map((x) => `${x.n > 1 ? `${x.n} × ` : ""}${x.sn} kVA (${x.u2} V, Ucc ${x.ucc} %) = ${fr(x.iccUnitaire)} kA${x.n > 1 ? ` → ${fr(x.iccTotal)} kA` : ""}`).join(" ; ");
+    let t = `${v.insuffisant ? "⚠ " : ""}Contrôle du pouvoir de coupure / ${lib} (${v.norme}) : courant de court-circuit triphasé maximal Icc ≈ ${fr(v.iccKa)} kA — ${v.couplage === "ouvert" ? "couplage ouvert : un seul transformateur alimente, cas le plus défavorable retenu" : "couplage fermé : somme des contributions de chaque transformateur"} (${detail}).`;
+    if (v.desaccord) t += " ⚠ Tensions secondaires différentes de plus de 10 % : vérifier la mise en parallèle.";
+    t += v.icu !== null ? ` Pouvoir de coupure installé : Icu = ${v.icu} kA.` : " Pouvoir de coupure (Icu) non renseigné dans « Réglage du disjoncteur ».";
+    if (v.insuffisant) t += " Icu inférieur à l'Icc maximal : à confirmer selon la position du disjoncteur (un départ en aval voit un courant plus faible, atténué par les câbles) — sinon remplacer l'appareil ou justifier une filiation avec la protection amont.";
+    else if (v.icu !== null) t += " Cohérent : Icu ≥ Icc maximal.";
+    if (v.couplage !== "ouvert") t += " Pour l'arrivée d'un transformateur, retenir la plus grande valeur entre l'Icc de ce transformateur et la somme des autres (défaut entre le transformateur et son disjoncteur).";
+    return t + " Source amont supposée infinie et câbles ignorés : repère indicatif." + (REFERENCE_NORME_POUVOIR_COUPURE[v.norme] || "");
+  }
   if (v.manque) return `Contrôle du pouvoir de coupure / ${libelleTransfo(v)} : ${v.manque}.`;
   // Le « ⚠ » en tête de texte fait passer l'encart Word en orange (voir docxNormeNote).
   let t = `${v.insuffisant ? "⚠ " : ""}Contrôle du pouvoir de coupure / ${libelleTransfo(v)} (${v.norme}) : courant de court-circuit triphasé maximal aux bornes secondaires Icc ≈ ${v.iccKa} kA (${v.sn} kVA, ${v.u2} V, Ucc ${v.ucc} %, courant nominal ${v.i2n} A, source amont supposée infinie).`;
@@ -7312,6 +7370,48 @@ function VerificationJeuDeBarre({ eq, allEquipements, locaux }) {
   return (
     <div style={{ background: alerte ? "#FDF3E3" : "#EEF2F6", borderRadius: 8, padding: "10px 12px", fontSize: 12, color: alerte ? "#8A5A0A" : "#0A5DA8", margin: "8px 0", lineHeight: 1.5 }}>
       {texteVerificationJeuDeBarre(v)}
+    </div>
+  );
+}
+// Saisie des transformateurs en parallèle : replié par défaut, rien à renseigner pour un seul transformateur.
+function TransfosParalleles({ eq, update, allEquipements }) {
+  const [ouvert, setOuvert] = useState(false);
+  const t = transfosParalleles(eq);
+  const actif = transfoParalleleActif(eq);
+  const suivis = (allEquipements || []).filter((e) => e.type === "Transformateur" && (e.identification?.repere || "").trim());
+  const maj = (patch) => update({ ...eq, transfosParalleles: { ...t, ...patch } });
+  const majAutre = (id, patch) => maj({ autres: t.autres.map((a) => (a.id === id ? { ...a, ...patch } : a)) });
+  const nombres = ["1", "2", "3", "4", "5", "6"];
+  const optionsSource = ["Saisie manuelle", ...suivis.map((e) => e.identification.repere.trim())];
+  const resume = actif ? (calcVerificationPouvoirCoupureMulti(eq, allEquipements, []) || {}) : null;
+  return (
+    <div style={{ border: "1px solid #D8DEE5", borderRadius: 10, padding: "10px 12px", margin: "8px 0", background: actif ? "rgba(10,93,168,0.04)" : "#FFFFFF" }}>
+      <div onClick={() => setOuvert(!ouvert)} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 12.5, fontWeight: 700, color: "#0A5DA8" }}>
+        <span>Plusieurs transformateurs en parallèle en amont ?{actif && resume && resume.nbUnites ? ` — ${resume.nbUnites} transformateurs, couplage ${t.couplage === "ouvert" ? "ouvert" : "fermé"}` : ""}</span>
+        <span style={{ fontSize: 11.5, fontWeight: 600 }}>{ouvert ? "Masquer" : actif ? "Modifier" : "Ajouter"}</span>
+      </div>
+      {ouvert && (
+        <div style={{ marginTop: 10 }}>
+          <div style={{ fontSize: 11.5, color: "#5B6B7D", lineHeight: 1.5, marginBottom: 8 }}>Le transformateur amont de l'identification (ou saisi manuellement) est le premier. Indiquez ici combien d'exemplaires identiques sont en parallèle, puis ajoutez les transformateurs différents (suivis dans l'app ou saisis à la main).</div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 8 }}>
+            <MiniSelect label="Exemplaires du transformateur amont" options={nombres} value={String(t.exemplaires)} onChange={(v) => maj({ exemplaires: Number(v) })} />
+            <MiniSelect label="Couplage" options={["Fermé (tous alimentent le défaut)", "Ouvert (un seul transformateur)"]} value={t.couplage === "ouvert" ? "Ouvert (un seul transformateur)" : "Fermé (tous alimentent le défaut)"} onChange={(v) => maj({ couplage: /^Ouvert/.test(v) ? "ouvert" : "ferme" })} />
+          </div>
+          {t.autres.map((a, i) => (
+            <div key={a.id} style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 8, paddingTop: 8, borderTop: "1px dashed #E2E6EB" }}>
+              <MiniSelect label={`Autre transformateur ${i + 1}`} options={optionsSource} value={a.source === "suivi" && a.repere ? a.repere : "Saisie manuelle"} onChange={(v) => majAutre(a.id, v === "Saisie manuelle" ? { source: "manuel", repere: "" } : { source: "suivi", repere: v })} />
+              {a.source !== "suivi" && <>
+                <MiniInput label="Puissance" unit="kVA" value={a.sn || ""} onChange={(v) => majAutre(a.id, { sn: v })} />
+                <MiniInput label="U2" unit="V" value={a.u2 || ""} onChange={(v) => majAutre(a.id, { u2: v })} />
+                <MiniInput label="Ucc" unit="%" value={a.ucc || ""} onChange={(v) => majAutre(a.id, { ucc: v })} />
+              </>}
+              <MiniSelect label="Exemplaires" options={nombres} value={String(nbExemplaires(a.nombre))} onChange={(v) => majAutre(a.id, { nombre: Number(v) })} />
+              <button onClick={() => maj({ autres: t.autres.filter((x) => x.id !== a.id) })} style={{ ...btnGhost("#C0392B"), padding: "5px 8px" }} title="Retirer ce transformateur"><Trash2 size={13} /></button>
+            </div>
+          ))}
+          <button onClick={() => maj({ autres: [...t.autres, { id: uid(), source: "manuel", repere: "", sn: "", u2: "", ucc: "", nombre: 1 }] })} style={btnGhost(BRAND.amber)}><Plus size={13} /> Ajouter un autre transformateur</button>
+        </div>
+      )}
     </div>
   );
 }
@@ -9480,6 +9580,7 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
                     onRemoveCustom={(id) => removeCustomAction("tests_disjoncteur", id)}
                     idPrefix={`${eq.id}-brk`}
                   />
+                  <TransfosParalleles eq={eq} update={update} allEquipements={allEquipements} />
                   <VerificationPouvoirCoupure eq={eq} allEquipements={allEquipements} locaux={locaux} />
                 </React.Fragment>
               );
