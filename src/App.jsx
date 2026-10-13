@@ -12644,6 +12644,7 @@ function genererGraphiqueCourbeDeclenchement(p) {
     }
     // Points d'essai mesurés (vert si la mesure est dans les limites, rouge si elle en sort, ambre si aucune limite n'est connue) avec leurs limites.
     ctx.font = `bold 12px ${SERIF}`;
+    const etiquettes = []; // étiquettes « 58 ms (1,2 Im) » : placées après les marqueurs, sans se recouvrir
     p.points.forEach((pt) => {
       if (pt.I < xMin || pt.I > xMax) return;
       const x = xFor(pt.I), y = yFor(pt.t);
@@ -12675,12 +12676,46 @@ function genererGraphiqueCourbeDeclenchement(p) {
       }
       ctx.fillStyle = pt.bad ? "#C0392B" : pt.ok ? "#1E9E62" : "#FFC02E"; ctx.strokeStyle = "#1A1F26"; ctx.lineWidth = 1.5;
       ctx.beginPath(); ctx.arc(x, y, 5.5, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); ctx.lineWidth = 1;
-      const texte = `${fmtT(pt.t)} (${pt.repere})`;
-      const aGauche = x + 10 + ctx.measureText(texte).width > right;
-      ctx.textBaseline = "middle"; ctx.textAlign = aGauche ? "right" : "left";
-      ctx.strokeStyle = "#FFFFFF"; ctx.lineWidth = 4; ctx.strokeText(texte, aGauche ? x - 10 : x + 10, y - 11);
-      ctx.lineWidth = 1; ctx.fillStyle = "#1A1F26"; ctx.fillText(texte, aGauche ? x - 10 : x + 10, y - 11);
+      const texte = `${fmtT(pt.t)} (${pt.repere})`, w = ctx.measureText(texte).width;
+      etiquettes.push({ texte, x, y, w, aGauche: x + 10 + w > right });
     });
+    // Placement des étiquettes : à droite (ou à gauche près du bord), au-dessus du point ; si la place est prise par une autre étiquette,
+    // un autre point d'essai ou la légende, on essaie en dessous, plus haut, plus bas, puis de l'autre côté. Un trait fin relie une étiquette éloignée.
+    {
+      const H = 15, marge = 2;
+      const lignesLegende = (p.declencheur ? 1 : 0) + (p.points.some((q) => q.ok && !q.bad) ? 1 : 0) + (p.points.some((q) => q.bad) ? 1 : 0) + (p.points.some((q) => !q.ok && !q.bad) ? 1 : 0) + (p.points.length ? 1 : 0);
+      const obstacles = etiquettes.map((e) => ({ x0: e.x - 8, x1: e.x + 8, y0: e.y - 8, y1: e.y + 8 }));
+      if (lignesLegende) { const y0 = bottom - 14 - 16 * (lignesLegende - 1) - 11; obstacles.push({ x0: left + 4, x1: left + 202, y0, y1: y0 + 16 * lignesLegende + 8 }); }
+      const touche = (a, b) => a.x0 < b.x1 + marge && a.x1 > b.x0 - marge && a.y0 < b.y1 + marge && a.y1 > b.y0 - marge;
+      [...etiquettes].sort((a, b) => a.x - b.x).forEach((e) => {
+        // Positions essayées dans l'ordre : côté préféré tout près (au-dessus puis en dessous), centrée au-dessus / en dessous du point, côté préféré plus loin, enfin l'autre côté.
+        const candidats = [];
+        [-11, 13].forEach((dy) => candidats.push({ centre: false, gauche: e.aGauche, dy }));
+        [-19, 21].forEach((dy) => candidats.push({ centre: true, gauche: false, dy }));
+        [-29, 31, -47, 49].forEach((dy) => candidats.push({ centre: false, gauche: e.aGauche, dy }));
+        [-11, 13, -29, 31, -47, 49, -65, 67].forEach((dy) => candidats.push({ centre: false, gauche: !e.aGauche, dy }));
+        const geometrie = (c) => {
+          const cx = c.centre ? e.x : (c.gauche ? e.x - 10 : e.x + 10), cy = e.y + c.dy;
+          return { cx, cy, r: { x0: c.centre ? cx - e.w / 2 : (c.gauche ? cx - e.w : cx), x1: c.centre ? cx + e.w / 2 : (c.gauche ? cx : cx + e.w), y0: cy - H / 2, y1: cy + H / 2 } };
+        };
+        // Une position est « ambiguë » quand l'étiquette passe à la verticale d'un autre point d'essai proche : on l'évite tant qu'une autre position est libre.
+        const ambigue = (g) => etiquettes.some((o) => o !== e && o.x >= g.r.x0 - 6 && o.x <= g.r.x1 + 6 && Math.abs(o.y - g.cy) < 70);
+        let choix = null;
+        for (const strict of [true, false]) {
+          for (const c of candidats) {
+            const g = geometrie(c);
+            if (g.r.x0 >= left + 2 && g.r.x1 <= right - 2 && g.r.y0 >= top + 2 && g.r.y1 <= bottom - 2 && !obstacles.some((o) => touche(g.r, o)) && !(strict && ambigue(g))) { choix = { ...c, ...g }; break; }
+          }
+          if (choix) break;
+        }
+        if (!choix) { const c = { centre: false, gauche: e.aGauche, dy: -11 }; choix = { ...c, ...geometrie(c) }; }
+        obstacles.push(choix.r);
+        if (!choix.centre && (choix.dy < -14 || choix.dy > 16 || choix.gauche !== e.aGauche)) { ctx.strokeStyle = "#8B96A3"; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(e.x, e.y); ctx.lineTo(choix.cx, choix.cy); ctx.stroke(); }
+        ctx.textBaseline = "middle"; ctx.textAlign = choix.centre ? "center" : (choix.gauche ? "right" : "left");
+        ctx.strokeStyle = "#FFFFFF"; ctx.lineWidth = 4; ctx.strokeText(e.texte, choix.cx, choix.cy);
+        ctx.lineWidth = 1; ctx.fillStyle = "#1A1F26"; ctx.fillText(e.texte, choix.cx, choix.cy);
+      });
+    }
     // Légende (dans le graphique, en bas à gauche : zone libre) et mention de la nature de la courbe.
     const nbConformes = p.points.filter((x) => x.ok && !x.bad).length, nbHors = p.points.filter((x) => x.bad).length, nbNeutres = p.points.length - nbConformes - nbHors;
     if (p.points.length || p.declencheur) {
