@@ -4852,7 +4852,9 @@ function CourbeDechargeModal({ eq, onFermer, onValider }) {
     : "";
   const [texte, setTexte] = useState(texteInitial);
   const [uniteTemps, setUniteTemps] = useState(existant && existant.temps ? "min" : "auto");
-  const [dureeTexte, setDureeTexte] = useState(existant && existant.dureeMin && !existant.temps ? String(existant.dureeMin) : "");
+  const [dureeTexte, setDureeTexte] = useState(existant && existant.dureeMin && !existant.temps && !existant.intervalleS ? String(existant.dureeMin) : "");
+  const [intervalleTexte, setIntervalleTexte] = useState(existant && existant.intervalleS ? String(existant.intervalleS) : "1");
+  const [afficheeTexte, setAfficheeTexte] = useState(existant && existant.dureeAfficheeMin ? String(existant.dureeAfficheeMin) : "");
   const [message, setMessage] = useState("");
   const [lecturePdf, setLecturePdf] = useState(false);
   const sourceRef = useRef(existant && existant.source ? existant.source : "collage");
@@ -4861,10 +4863,13 @@ function CourbeDechargeModal({ eq, onFermer, onValider }) {
   const th = calcTensionsBatterieTheoriques(eq);
   const nominale = th ? th.nominale : null, seuilBas = th ? th.finDecharge : null;
   const dureeEssai = numOf(eq.controles && eq.controles.essai_decharge && eq.controles.essai_decharge.duree_decharge && eq.controles.essai_decharge.duree_decharge.fields && eq.controles.essai_decharge.duree_decharge.fields.duree);
-  const dureeMin = analyse.erreur ? null : (analyse.temps ? analyse.dureeMin : (numOf(dureeTexte) || dureeEssai || null));
+  const dureeAuto = analyse.erreur || analyse.temps ? null : dureeDepuisIntervalle(analyse.valeurs.length, intervalleTexte); // 1 relevé par seconde par défaut
+  const dureeMin = analyse.erreur ? null : (analyse.temps ? analyse.dureeMin : (numOf(dureeTexte) || dureeAuto || dureeEssai || null));
+  const dureeAffichee = numOf(afficheeTexte) > 0 ? numOf(afficheeTexte) : null;
+  const fm = (x) => String(Math.round(x * 100) / 100).replace(".", ",");
   const repere = eq.identification && eq.identification.repere;
   const titre = ("Courbe de décharge batterie" + (repere ? " · " + repere : "")).toUpperCase();
-  const apercu = useMemo(() => (analyse.erreur ? null : genererGraphiqueCourbeDecharge({ valeurs: analyse.valeurs, temps: analyse.temps, dureeMin, nominale, seuilBas, titre })), [analyse, dureeMin, nominale, seuilBas, titre]);
+  const apercu = useMemo(() => (analyse.erreur ? null : genererGraphiqueCourbeDecharge({ valeurs: analyse.valeurs, temps: analyse.temps, dureeMin, nominale, seuilBas, titre, dureeAfficheeMin: dureeAffichee })), [analyse, dureeMin, dureeAffichee, nominale, seuilBas, titre]);
   const pdfJoint = (eq.courbeDechargeFiles || []).find((f) => f.pdfUrl || FICHIERS_PDF_EN_SESSION.has(f.id));
 
   async function lireDepuisPdf() {
@@ -4896,6 +4901,8 @@ function CourbeDechargeModal({ eq, onFermer, onValider }) {
       valeurs: analyse.valeurs,
       temps: analyse.temps ? analyse.temps.map((t) => Math.round(t * 1000) / 1000) : null,
       dureeMin: dureeMin || null,
+      intervalleS: analyse.temps ? null : (numOf(intervalleTexte) > 0 ? numOf(intervalleTexte) : 1),
+      dureeAfficheeMin: dureeAffichee,
       source: sourceRef.current,
     });
   }
@@ -4929,8 +4936,11 @@ function CourbeDechargeModal({ eq, onFermer, onValider }) {
           <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "flex-end" }}>
             {!analyse.erreur && !analyse.temps && (
               <div style={{ width: 200 }}>
+                <Field label="Intervalle entre relevés (s)">
+                  <TextInput type="number" step="any" value={intervalleTexte} onChange={(e) => setIntervalleTexte(e.target.value)} placeholder="1" />
+                </Field>
                 <Field label="Durée de la décharge (min)">
-                  <TextInput type="number" step="any" value={dureeTexte} onChange={(e) => setDureeTexte(e.target.value)} placeholder={dureeEssai !== null ? `${dureeEssai} (essai)` : "ex. 10"} />
+                  <TextInput type="number" step="any" value={dureeTexte} onChange={(e) => setDureeTexte(e.target.value)} placeholder={dureeAuto !== null ? `${fm(dureeAuto)} (selon l'intervalle)` : "ex. 10"} />
                 </Field>
               </div>
             )}
@@ -4945,6 +4955,13 @@ function CourbeDechargeModal({ eq, onFermer, onValider }) {
                 </Field>
               </div>
             )}
+            {!analyse.erreur && dureeMin ? (
+              <div style={{ width: 230 }}>
+                <Field label="Durée affichée sur le graphique (min)">
+                  <TextInput type="number" step="any" value={afficheeTexte} onChange={(e) => setAfficheeTexte(e.target.value)} placeholder={`${fm(dureeMin)} (toute la série)`} />
+                </Field>
+              </div>
+            ) : null}
             <div style={{ fontSize: 12, color: analyse.erreur ? "#B5730A" : "#3E4A5C", flex: 1, minWidth: 220 }}>
               {analyse.erreur
                 ? (texte.trim() ? analyse.erreur : "En attente des valeurs…")
@@ -4973,7 +4990,7 @@ function CourbeDechargeDonnees({ eq, update }) {
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
         <div style={{ fontSize: 12.5, color: "#3E4A5C", lineHeight: 1.45, flex: 1, minWidth: 240 }}>
           {p
-            ? <>Courbe tracée par l'application à partir de <b>{d.valeurs.length} tensions mesurées</b>{p.dureeMin ? ` sur ${String(Math.round(p.dureeMin * 100) / 100).replace(".", ",")} min` : ""} — elle figure dans le rapport sous « Courbe de décharge batterie ».</>
+            ? <>Courbe tracée par l'application à partir de <b>{d.valeurs.length} tensions mesurées</b>{p.dureeMin ? ` sur ${String(Math.round(p.dureeMin * 100) / 100).replace(".", ",")} min` : ""}{p.dureeAfficheeMin && p.dureeMin && p.dureeAfficheeMin < p.dureeMin ? `, graphique limité aux ${String(Math.round(p.dureeAfficheeMin * 100) / 100).replace(".", ",")} premières minutes` : ""} — elle figure dans le rapport sous « Courbe de décharge batterie ».</>
             : <><b>Tracer la courbe depuis les valeurs mesurées</b> : collez la colonne des tensions (ou lisez-la dans le PDF joint) — plus besoin de joindre le graphique du tableur.</>}
         </div>
         <div style={{ display: "flex", gap: 8 }}>
@@ -4981,6 +4998,16 @@ function CourbeDechargeDonnees({ eq, update }) {
           {p && <button onClick={() => update({ ...eq, courbeDechargeDonnees: null })} style={btnGhost("#C0392B")} title="Supprimer la courbe tracée (les pièces jointes sont conservées)"><Trash2 size={13} /></button>}
         </div>
       </div>
+      {p && p.dureeMin ? (
+        <div style={{ display: "flex", alignItems: "flex-end", gap: 10, flexWrap: "wrap", marginTop: 10 }}>
+          <div style={{ width: 230 }}>
+            <Field label="Durée affichée sur le graphique (min)">
+              <TextInput type="number" step="any" value={d.dureeAfficheeMin || ""} placeholder={`${String(Math.round(p.dureeMin * 100) / 100).replace(".", ",")} (toute la série)`} onChange={(e) => { const x = numOf(e.target.value); update({ ...eq, courbeDechargeDonnees: { ...d, dureeAfficheeMin: x > 0 ? x : null } }); }} />
+            </Field>
+          </div>
+          <span style={{ fontSize: 11.5, color: "#8B96A3", lineHeight: 1.4, flex: "1 1 220px" }}>Seules les premières minutes sont tracées (aperçu et rapport) ; les relevés suivants restent enregistrés.</span>
+        </div>
+      ) : null}
       {apercu && <img src={apercu.dataUrl} alt="Courbe de décharge" style={{ width: "100%", maxWidth: 640, display: "block", margin: "12px auto 0", border: "1px solid #E2E6EB", borderRadius: 10, background: "#FFFFFF" }} />}
       {ouvert && <CourbeDechargeModal eq={eq} onFermer={() => setOuvert(false)} onValider={(donnees) => { update({ ...eq, courbeDechargeDonnees: donnees }); setOuvert(false); }} />}
     </div>
@@ -12126,6 +12153,11 @@ async function extraireTensionsDepuisPdf(pdf) {
   return retenues.flatMap((s) => s.valeurs).map((v) => String(v).replace(".", ",")).join("\n");
 }
 // Paramètres du tracé pour un équipement (écran et rapport) : null s'il n'y a pas de valeurs enregistrées.
+// Durée (min) d'une série de relevés à intervalle régulier — 1 relevé par seconde par défaut : (n − 1) × intervalle / 60.
+function dureeDepuisIntervalle(nbValeurs, intervalleS) {
+  const i = numOf(intervalleS) > 0 ? numOf(intervalleS) : 1;
+  return nbValeurs > 1 ? Math.round((((nbValeurs - 1) * i) / 60) * 1000) / 1000 : null;
+}
 function parametresCourbeDecharge(eq) {
   const d = eq && eq.courbeDechargeDonnees;
   if (!d || !Array.isArray(d.valeurs) || d.valeurs.length < 2) return null;
@@ -12133,7 +12165,8 @@ function parametresCourbeDecharge(eq) {
   const dureeEssai = numOf(eq.controles && eq.controles.essai_decharge && eq.controles.essai_decharge.duree_decharge && eq.controles.essai_decharge.duree_decharge.fields && eq.controles.essai_decharge.duree_decharge.fields.duree);
   const repere = eq.identification && eq.identification.repere;
   return {
-    valeurs: d.valeurs, temps: d.temps || null, dureeMin: d.dureeMin || dureeEssai || null,
+    valeurs: d.valeurs, temps: d.temps || null, dureeMin: d.dureeMin || (d.intervalleS ? dureeDepuisIntervalle(d.valeurs.length, d.intervalleS) : null) || dureeEssai || null,
+    dureeAfficheeMin: d.dureeAfficheeMin > 0 ? d.dureeAfficheeMin : null, // le graphique ne montre que les N premières minutes (les relevés suivants restent enregistrés)
     nominale: th ? th.nominale : null, seuilBas: th ? th.finDecharge : null,
     titre: ("Courbe de décharge batterie" + (repere ? " · " + repere : "")).toUpperCase(),
   };
@@ -12141,10 +12174,10 @@ function parametresCourbeDecharge(eq) {
 // Graphique de la courbe de décharge, dans le style des autres graphiques du rapport : courbe bleue, nominale
 // (vert) et seuil bas (rouge) en pointillés avec leurs valeurs dans la marge, instant de passage sous le seuil bas,
 // valeurs de départ / d'arrivée / minimale. Dessiné en double résolution ; renvoie { dataUrl, largeur, hauteur }.
-function genererGraphiqueCourbeDecharge({ valeurs, temps, dureeMin, nominale, seuilBas, titre }) {
-  if (typeof document === "undefined" || !document.createElement || !valeurs || valeurs.length < 2) return null;
+function genererGraphiqueCourbeDecharge({ valeurs: valeursBrutes, temps, dureeMin, nominale, seuilBas, titre, dureeAfficheeMin }) {
+  if (typeof document === "undefined" || !document.createElement || !valeursBrutes || valeursBrutes.length < 2) return null;
   try {
-    const n = valeurs.length;
+    const nBrut = valeursBrutes.length;
     const W = 640, H = 310, ECHELLE = 2;
     const canvas = document.createElement("canvas");
     canvas.width = W * ECHELLE; canvas.height = H * ECHELLE;
@@ -12163,12 +12196,31 @@ function genererGraphiqueCourbeDecharge({ valeurs, temps, dureeMin, nominale, se
     ctx.lineTo(0.5, r + 0.5); ctx.arc(r + 0.5, r + 0.5, r, Math.PI, Math.PI * 1.5);
     ctx.closePath(); ctx.stroke();
     // Abscisses : temps en minutes (colonne de temps, ou durée répartie sur les mesures) ; sinon numéro de mesure.
-    let ts;
-    if (temps && temps.length === n) ts = temps.map((t) => t - temps[0]);
-    else if (dureeMin) ts = valeurs.map((_, i) => (dureeMin * i) / (n - 1));
-    else ts = valeurs.map((_, i) => i);
-    const enMinutes = !!((temps && temps.length === n) || dureeMin);
+    let tsBrut;
+    if (temps && temps.length === nBrut) tsBrut = temps.map((t) => t - temps[0]);
+    else if (dureeMin) tsBrut = valeursBrutes.map((_, i) => (dureeMin * i) / (nBrut - 1));
+    else tsBrut = valeursBrutes.map((_, i) => i);
+    const enMinutes = !!((temps && temps.length === nBrut) || dureeMin);
+    const tTotal = tsBrut[nBrut - 1] > 0 ? tsBrut[nBrut - 1] : 1;
+    // Durée affichée (min) : on ne trace que les N premières minutes, avec un dernier point interpolé exactement à N min ; les mesures suivantes ne sont pas dessinées.
+    let valeurs = valeursBrutes, ts = tsBrut, tronque = false;
+    if (enMinutes && dureeAfficheeMin > 0 && dureeAfficheeMin < tTotal - 1e-9) {
+      const idx = tsBrut.findIndex((t) => t > dureeAfficheeMin);
+      if (idx >= 2 || (idx === 1 && dureeAfficheeMin - tsBrut[0] > 1e-9)) {
+        ts = tsBrut.slice(0, idx); valeurs = valeursBrutes.slice(0, idx);
+        const t1 = tsBrut[idx - 1], t2 = tsBrut[idx];
+        if (dureeAfficheeMin - t1 > 1e-9) { ts.push(dureeAfficheeMin); valeurs.push(valeursBrutes[idx - 1] + ((valeursBrutes[idx] - valeursBrutes[idx - 1]) * (dureeAfficheeMin - t1)) / (t2 - t1)); }
+        tronque = true;
+      }
+    }
+    const n = valeurs.length;
     const tMax = ts[n - 1] > 0 ? ts[n - 1] : 1;
+    const instantPassage = (vals, tsx) => {
+      if (typeof seuilBas !== "number") return null;
+      const i = vals.findIndex((v) => v < seuilBas);
+      if (i === 0) return tsx[0];
+      return i > 0 ? tsx[i - 1] + ((seuilBas - vals[i - 1]) / (vals[i] - vals[i - 1])) * (tsx[i] - tsx[i - 1]) : null;
+    };
     const refs = [nominale, seuilBas].filter((v) => typeof v === "number" && isFinite(v) && v > 0);
     const bornes = [...valeurs, ...refs];
     let lo = Math.min(...bornes), hi = Math.max(...bornes);
@@ -12187,15 +12239,11 @@ function genererGraphiqueCourbeDecharge({ valeurs, temps, dureeMin, nominale, se
     while (taille > 9 && ctx.measureText(titre || "").width > W - 36) { taille -= 0.5; ctx.font = `bold ${taille}px ${SANS}`; }
     ctx.fillText(titre || "", 18, 16);
     const vMin = Math.min(...valeurs), vDebut = valeurs[0], vFin = valeurs[n - 1];
-    let passage = null; // instant (même unité que l'axe) du premier passage sous le seuil bas
-    if (typeof seuilBas === "number") {
-      const i = valeurs.findIndex((v) => v < seuilBas);
-      if (i === 0) passage = ts[0];
-      else if (i > 0) passage = ts[i - 1] + ((seuilBas - valeurs[i - 1]) / (valeurs[i] - valeurs[i - 1])) * (ts[i] - ts[i - 1]);
-    }
+    const passage = instantPassage(valeurs, ts); // instant (même unité que l'axe) du premier passage sous le seuil bas, dans la partie affichée
+    const passageHorsGraphe = tronque && passage === null ? instantPassage(valeursBrutes, tsBrut) : null; // atteint plus tard que la durée affichée
     const unite = enMinutes ? " min" : "";
-    const sousTitre = [enMinutes ? `${fr(tMax, 1)} min` : `${n} mesures`, `${fr(vDebut, 1)} V → ${fr(vFin, 1)} V`, `minimum ${fr(vMin, 1)} V`,
-      typeof seuilBas === "number" ? (passage !== null ? `seuil bas atteint à ${fr(passage, 1)}${unite}` : "seuil bas non atteint") : null].filter(Boolean).join("  ·  ");
+    const sousTitre = [enMinutes ? (tronque ? `${fr(tMax, 1)} min affichées sur ${fr(tTotal, 1)}` : `${fr(tMax, 1)} min`) : `${n} mesures`, `${fr(vDebut, 1)} V → ${fr(vFin, 1)} V`, `minimum ${fr(vMin, 1)} V`,
+      typeof seuilBas === "number" ? (passage !== null ? `seuil bas atteint à ${fr(passage, 1)}${unite}` : passageHorsGraphe !== null ? `seuil bas atteint à ${fr(passageHorsGraphe, 1)} min (hors graphique)` : "seuil bas non atteint") : null].filter(Boolean).join("  ·  ");
     ctx.font = `12px ${SANS}`; ctx.fillStyle = "#5B6B7D";
     ctx.fillText(sousTitre, 18, 38);
     // Grille et graduations de l'axe vertical.
