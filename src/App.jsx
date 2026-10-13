@@ -415,7 +415,13 @@ const LISTE_IN_FUSIBLE = ["4", "6.3", "10", "16", "20", "25", "31.5", "40", "50"
 const LISTE_UN_FUSIBLE = ["3.6", "7.2", "12", "17.5", "24", "36"];
 const LISTE_DUREE_VIE_FUSIBLE = ["10", "15", "20", "25", "30"];
 const LISTE_ANNEES_MES = Array.from({ length: 41 }, (_, i) => String(new Date().getFullYear() - i));
-const LISTE_COURBE_RELAIS = ["Constant", "Inverse Normale CEI", "Très Inverse CEI", "Extrèment Inverse CEI", "Inverse Temps Long CEI"];
+// Courbes ANSI/IEEE des SIPROTEC (manuels 7SJ80 et 7SJ61) : t = D × (A / ((I/Ip)^p − 1) + B), D = facteur de temps (0,5 à 15 s sur le 7SJ80) ; t constant au-delà de 20 × Ip.
+const COURBES_ANSI_SIPROTEC = {
+  "Inverse ANSI (SIPROTEC)": [8.9341, 2.0938, 0.17966], "Inverse courte ANSI (SIPROTEC)": [0.2663, 1.2969, 0.03393], "Inverse longue ANSI (SIPROTEC)": [5.6143, 1, 2.18592],
+  "Modérément inverse ANSI (SIPROTEC)": [0.0103, 0.02, 0.0228], "Très inverse ANSI (SIPROTEC)": [3.922, 2, 0.0982], "Extrêmement inverse ANSI (SIPROTEC)": [5.64, 2, 0.02434],
+  "Définitivement inverse ANSI (SIPROTEC)": [0.4797, 1.5625, 0.21359],
+};
+const LISTE_COURBE_RELAIS = ["Constant", "Inverse Normale CEI", "Très Inverse CEI", "Extrèment Inverse CEI", "Inverse Temps Long CEI", "Inverse RI", ...Object.keys(COURBES_ANSI_SIPROTEC)];
 const LISTE_TYPE_RELAIS = ["Indépendant", "Dépendant"];
 const LISTE_TEMPO_UNITE = ["ms", "s"];
 const LISTE_ETAT_SEUIL = ["", "Actif"];
@@ -628,7 +634,7 @@ const LISTE_TR_CLASSE = ["1.5", "6"];
 // Le relais de protection peut être d'une marque différente de celle de la cellule (ex. cellule
 // Schneider avec relais ABB) — sa marque et sa gamme sont donc indépendantes de celles de l'équipement.
 // HTA : relais de protection numériques autonomes.
-const LISTE_MARQUE_RELAIS_HTA = ["Schneider Electric", "Merlin Gerin", "Areva", "Alstom", "GE / Alstom", "ABB", "Siemens", "Ormazabal", "VAMP", "Schweitzer Engineering Laboratories (SEL)", "Socomec", "Chauvin Arnoux"];
+const LISTE_MARQUE_RELAIS_HTA = ["Schneider Electric", "Merlin Gerin", "SEG", "Areva", "Alstom", "GE / Alstom", "ABB", "Siemens", "Ormazabal", "VAMP", "Schweitzer Engineering Laboratories (SEL)", "Socomec", "Chauvin Arnoux"];
 // Familles de relais réutilisées entre plusieurs marques (la même gamme porte des plaques différentes
 // selon l'époque : MiCOM est née chez Alstom, est passée chez Areva T&D, puis chez Schneider Electric
 // en 2010 ; Sepam / VIP / Statimax sont d'origine Merlin Gerin).
@@ -637,8 +643,9 @@ const RELAIS_MICOM_ANCIENS = ["K-Series (KCGG / KCEG)", "MCGG", "CDG"];
 const RELAIS_SEPAM_ANCIENS = ["SEPAM 100", "SEPAM 1000+", "SEPAM 2000"];
 const RELAIS_VIP = ["VIP 35", "VIP 200", "VIP 201", "VIP 300 LL/LH", "VIP 400"];
 const MARQUE_GAMME_RELAIS_HTA = {
-  "Schneider Electric": ["SEPAM série 10", "SEPAM série 20", "SEPAM série 40", "SEPAM série 60", "SEPAM série 80", "SEPAM S20", "SEPAM S40", "SEPAM S80", "SEPAM T20", "SEPAM M20", ...RELAIS_SEPAM_ANCIENS, "Statimax", ...RELAIS_VIP, "Easergy P3", "Easergy P5", "VAMP 50 (série)", "VAMP 200 (série)", ...RELAIS_MICOM],
-  "Merlin Gerin": ["SEPAM S20", "SEPAM S40", "SEPAM S80", ...RELAIS_SEPAM_ANCIENS, "Statimax", ...RELAIS_VIP],
+  "Schneider Electric": ["SEPAM série 10", "SEPAM série 20", "SEPAM série 40", "SEPAM série 60", "SEPAM série 80", "SEPAM S20", "SEPAM S40", "SEPAM S80", "SEPAM T20", "SEPAM M20", ...RELAIS_SEPAM_ANCIENS, "Statimax", "Statimax RAH 411 E", ...RELAIS_VIP, "Easergy P3", "Easergy P5", "VAMP 50 (série)", "VAMP 200 (série)", ...RELAIS_MICOM],
+  "Merlin Gerin": ["SEPAM S20", "SEPAM S40", "SEPAM S80", ...RELAIS_SEPAM_ANCIENS, "Statimax", "Statimax RAH 411 E", ...RELAIS_VIP],
+  "SEG": ["WIC1-1", "WIC1-2", "WIC1-3"], // relais autonomes WI-LINE (manuel WIC1)
   "Areva": [...RELAIS_MICOM, ...RELAIS_MICOM_ANCIENS],
   "Alstom": [...RELAIS_MICOM, ...RELAIS_MICOM_ANCIENS],
   "GE / Alstom": [...RELAIS_MICOM, ...RELAIS_MICOM_ANCIENS],
@@ -816,11 +823,22 @@ const TYPE_CELLULE_PAR_GAMME = {
   // pouvoir de fermeture · S sectionnement de barres (interrupteur-sectionneur) · E mise à la terre de
   // barres · T départ transformateur (fusibles) · H sectionnement de barres avec interrupteur-fusibles
   // · L départ disjoncteur · V sectionnement de barres avec disjoncteur · M comptage.
+  // 8DJH : R arrivée interrupteur (AI) · T interrupteur-fusibles combinés (IFC) · V disjoncteur départ barres (DDB) · M transformateur de tension / comptage (TT) ; blocs de cellules
+  // RR, RRR, RRRR (interrupteurs) et RT, RTT, RRT, RTR, RRTR, RRRT, RTRR, RTRT, RTTR, RTTT, RRTT (avec interrupteur-fusibles) — catalogue HA 40.4 (2017, postes de livraison NF C13-100).
   "8DJH": {
-    "Interrupteur HTA": ["INTERRUPTEUR - R", "INTERRUPTEUR - K", "INTERRUPTEUR - K(E)", "INTERRUPTEUR - S", "INTERRUPTEUR - E"],
-    "Interrupteur Fusible HTA": ["INTERRUPTEUR-FUSIBLE - T", "INTERRUPTEUR-FUSIBLE - H"],
+    "Interrupteur HTA": ["INTERRUPTEUR - R", "INTERRUPTEUR - K", "INTERRUPTEUR - K(E)", "INTERRUPTEUR - S", "INTERRUPTEUR - E", "INTERRUPTEUR - RR (bloc)", "INTERRUPTEUR - RRR (bloc)", "INTERRUPTEUR - RRRR (bloc)"],
+    "Interrupteur Fusible HTA": ["INTERRUPTEUR-FUSIBLE - T", "INTERRUPTEUR-FUSIBLE - H", ...["RT", "RRT", "RTR", "RTT", "RRTR", "RRRT", "RTRR", "RTRT", "RTTR", "RTTT", "RRTT"].map((b) => `INTERRUPTEUR-FUSIBLE - ${b} (bloc)`)],
     "Disjoncteur HTA": ["DISJONCTEUR - L", "DISJONCTEUR - V"],
     "Comptage HTA": ["COMPTAGE - M"],
+  },
+  // NXAIR (isolé dans l'air, jusqu'à 17,5 kV / 40 kA — catalogue HA 25.73, 2024) : cellule disjoncteur (disjoncteur à coupure dans le vide débrochable), cellule contacteur (contacteur à coupure dans
+  // le vide avec fusibles HPC HT), cellule de sectionnement, couplage longitudinal, remontée de barres, combiné interrupteur-sectionneur/fusibles à montage fixe, cellule de comptage ; versions duplex (dos-à-dos).
+  "NXAIR": {
+    "Interrupteur HTA": ["INTERRUPTEUR - Cellule de sectionnement", "INTERRUPTEUR - Remontée de barres", "INTERRUPTEUR - Cellule de raccordement au jeu de barres"],
+    "Interrupteur Fusible HTA": ["INTERRUPTEUR-FUSIBLE - Combiné interrupteur-sectionneur/fusibles (montage fixe)"],
+    "Disjoncteur HTA": ["DISJONCTEUR - Cellule disjoncteur", "DISJONCTEUR - Couplage longitudinal", "DISJONCTEUR - Cellule disjoncteur duplex (dos-à-dos)"],
+    "Contacteur HTA": ["CONTACTEUR - Cellule contacteur", "CONTACTEUR - Cellule contacteur avec transformateur de contrôle"],
+    "Comptage HTA": ["COMPTAGE - Cellule de comptage"],
   },
   // Ormazabal cgmcosmos : L départ (interrupteur) · P protection par fusibles · V protection par
   // disjoncteur (vide) · S sectionnement de barres (S-Pt avec mise à la terre) · RC / R2C remontée de
@@ -840,6 +858,15 @@ const TYPE_CELLULE_PAR_GAMME = {
 ["cgmcosmos-P", "cgm.3", "CGM"].forEach((g) => { TYPE_CELLULE_PAR_GAMME[g] = TYPE_CELLULE_PAR_GAMME["cgmcosmos"]; });
 // Liste de "Type de cellule" pour une fonction donnée : gamme (Modèle) si connue → sinon union des
 // gammes de la marque qui ont des codes vérifiés → sinon liste historique (toutes marques confondues).
+// Caractéristiques assignées des gammes de cellules Siemens (catalogues fournis) — rappel affiché sous l'identification des cellules HTA.
+const CARACTERISTIQUES_GAMME_CELLULE = {
+  "8DJH": "8DJH pour postes de livraison NF C13-100 (isolé SF6) : tension assignée 24 kV, 50 Hz ; tenue 50 kV (60 kV sur la distance de sectionnement) / chocs 125 kV (145 kV) ; jeu de barres 400 A ; départs 400 A (interrupteur), 50 A (interrupteur-fusibles, selon fusible HPC HT) ; courant de courte durée 12,5 kA (1 s ; 0,7 s selon HN 64-S-52) ; valeur de crête et pouvoir de fermeture 31,5 kA ; caisson IP67, enveloppe IP2XC ; −15 à +40 °C ; remplissage SF6 150 kPa absolus (minimum de fonctionnement 130 kPa). Source : catalogue HA 40.4 (2017).",
+  "NXAIR": "NXAIR (isolé dans l'air) : tension assignée 7,2 / 12 / 17,5 kV, 50/60 Hz ; tenue 20 / 28 / 38 kV, chocs 60 / 75 / 95 kV ; pouvoir de coupure et courant de courte durée (3 s) jusqu'à 40 kA ; fermeture et crête 100 kA (50 Hz) / 104 kA (60 Hz) ; jeu de barres jusqu'à 4000 A ; départs : disjoncteur 4000 A, contacteur 450 A (7,2 et 12 kV), interrupteur-sectionneur/fusibles 200 A ; arc interne IAC A FLR (40 kA, 1 s) ; continuité de service LSC 2B ; cloisonnement PM. Source : catalogue HA 25.73 (2024).",
+};
+function infoGammeCellule(identification) {
+  const m = identification && identification.modele;
+  return (identification && (!identification.marque || /siemens/i.test(identification.marque)) && CARACTERISTIQUES_GAMME_CELLULE[m]) || null;
+}
 function typeCelluleParGamme(equipType) {
   return (identification) => {
     const modele = identification && identification.modele;
@@ -862,7 +889,7 @@ const MARQUE_TYPE_CELLULE_CONTACTEUR = {
   "Schneider Electric": ["RM6 - Contacteur", "SM6 - Contacteur", "PIX - Contacteur"],
   "Merlin Gerin": ["RM6 - Contacteur", "SM6 - Contacteur"],
   "ABB": ["UniSec - Contacteur", "SafeRing - Contacteur"],
-  "Siemens": ["8DJH - Contacteur"],
+  "Siemens": ["8DJH - Contacteur", "NXAIR - Contacteur"],
 };
 const LISTE_TYPE_CELLULE_CONTACTEUR_OPTIONS = optionsParMarque(MARQUE_TYPE_CELLULE_CONTACTEUR, combineValues(MARQUE_TYPE_CELLULE_CONTACTEUR));
 const LISTE_TYPE_TRANSFORMATEUR = ["TRANSFORMATEUR DE DISTRIBUTION", "TRANSFORMATEUR", "AUTO-TRANSFORMATEUR", "TRANSFORMATEUR A DOUBLE SECONDAIRE", "TRANSFORMATEUR SEC ENROBÉ"];
@@ -1948,6 +1975,8 @@ function calcTempsTheoriqueCEI(courbe, tms, multiple) {
   else if (courbe === "Très Inverse CEI") t = 13.5 / (M - 1) * T;
   else if (courbe === "Extrèment Inverse CEI") t = 80 / (Math.pow(M, 2) - 1) * T;
   else if (courbe === "Inverse Temps Long CEI") t = 120 / (M - 1) * T;
+  else if (courbe === "Inverse RI") t = 1 / (0.339 - 0.236 / M) * T; // courbe RI (CEI 60255-3, relais VIP 300 / WIC1)
+  else if (COURBES_ANSI_SIPROTEC[courbe]) { const [A, p, B] = COURBES_ANSI_SIPROTEC[courbe]; t = T * (A / (Math.pow(Math.min(M, 20), p) - 1) + B); }
   else return null; // "Constant" : pas de courbe, la temporisation saisie fait foi directement
   return Math.round(t * 1000) / 1000; // secondes
 }
@@ -7708,6 +7737,328 @@ function CourantDechargeBranches({ eq, update }) {
     </Card>
   );
 }
+// ----- Relais HTA autonomes (sans source auxiliaire), alimentés par leurs capteurs et déclenchant un Mitop / une bobine à faible consommation -----
+// Statimax RAH 411 E (Merlin Gerin) : méthode de calcul des seuils (document RAH411E) et tableaux des nombres de passages.
+// WIC1-1 / -2 / -3 (SEG WI-LINE) : manuel WIC1 (TD_WIC1_01.08_FR). VIP 300 LL / LH (Schneider Electric) : notice technique VIP300 (2004).
+const RELAIS_AUTONOME_RE = [["statimax", /rah\s?-?411|statimax/i], ["wic1", /wic\s?-?1/i], ["vip300", /vip\s?-?300/i]];
+function typeRelaisAutonome(identification) {
+  const ref = String((identification && identification.referenceRelais) || "");
+  const m = RELAIS_AUTONOME_RE.find(([, re]) => re.test(ref));
+  return m ? m[0] : null;
+}
+const nbR = (v) => { const x = parseFloat(String(v == null ? "" : v).replace(",", ".")); return isNaN(x) ? null : x; };
+const frN = (x, d = 2) => (x === null || x === undefined || isNaN(x) ? "—" : String(Math.round(x * Math.pow(10, d)) / Math.pow(10, d)).replace(".", ","));
+const LABEL_PHASE1 = "50-51-1 — Max I phase (seuil 1)", LABEL_PHASE2 = "50-51-2 — Max I phase (seuil 2)";
+const LABEL_TERRE1 = "50N-51N-1 — Max I terre (seuil 1)", LABEL_TERRE2 = "50N-51N-2 — Max I terre (seuil 2)";
+// --- Statimax RAH 411 E : seuil phase = Inp × (tableau : nombre de passages × position du commutateur Ir) × potentiomètre ; terre = (Inp / 1 ou 5) × molette × potentiomètre.
+const STATIMAX_PASSAGES = {
+  "1A": { 1: [30, 36, 42, 48, 54, 60], 2: [15, 18, 21, 24, 27, 30], 3: [10, 12, 14, 16, 18, 20], 6: [5, 6, 7, 8, 9, 10], 10: [3, 3.6, 4.2, 4.8, 5.4, 6], 12: [2.5, 3, 3.5, 4, 4.5, 5] },
+  "5A": { 1: [6, 7.2, 8.4, 9.6, 10.8, 12], 2: [3, 3.6, 4.2, 4.8, 5.4, 6], 3: [2, 2.4, 2.8, 3.2, 3.6, 4], 6: [1, 1.2, 1.4, 1.6, 1.8, 2], 8: [0.75, 0.9, 1.05, 1.2, 1.35, 1.5], 10: [0.6, 0.72, 0.84, 0.96, 1.08, 1.2] },
+};
+const STATIMAX_MOLETTE_TERRE = { "1A": [0.12, 0.2, 0.4, 0.8], "5A": [0.3, 0.5, 1, 2] };
+const STATIMAX_TEMPO_MS = [100, 150, 200, 250, 300, 350];
+function calcStatimax(p) {
+  const tc = p.tc === "5A" ? "5A" : "1A", inp = nbR(p.inp), alertes = [], seuils = [], lignes = [];
+  if (!(inp > 0)) return { lignes: ["Renseignez le courant nominal primaire Inp du TC de ligne."], seuils, alertes };
+  const passages = nbR(p.passages), pos = nbR(p.positionIr), potar = nbR(p.potarIr);
+  const ligne = STATIMAX_PASSAGES[tc][passages];
+  if (ligne && pos >= 1 && pos <= 6 && potar !== null) {
+    const valeur = ligne[pos - 1], ir = inp * valeur * potar;
+    lignes.push(`Seuil phase : Ir = ${frN(inp, 1)} × ${frN(valeur)} (tableau : ${passages} passage(s), position ${pos}) × ${frN(potar)} (potentiomètre) = ${frN(ir, 1)} A`);
+    if (potar < 1 || potar > 1.3) alertes.push("Potentiomètre phase : plage 1 à 1,3.");
+    if (tc === "1A" && valeur > 30) alertes.push("Au-delà de 30 × Inp : limite pratique des TC 10P30 habituellement utilisés (note du constructeur).");
+    seuils.push({ label: LABEL_PHASE1, fields: { courbe: "Constant", type: "Indépendant", reglage: String(Math.round(ir * 10) / 10), modeDetection: "" } });
+  } else lignes.push("Seuil phase : choisissez nombre de passages, position et potentiomètre.");
+  const posT = nbR(p.positionTerre), potT = nbR(p.potarTerre);
+  if (posT >= 1 && posT <= 4 && potT !== null) {
+    const molette = STATIMAX_MOLETTE_TERRE[tc][posT - 1], irT = (inp / (tc === "1A" ? 1 : 5)) * molette * potT;
+    lignes.push(`Seuil terre : Ir⊥ = ${frN(inp / (tc === "1A" ? 1 : 5), 1)} × ${frN(molette)} (molette ${posT}) × ${frN(potT)} (potentiomètre) = ${frN(irT, 1)} A`);
+    if (potT < 1 || potT > 2) alertes.push("Potentiomètre terre : plage 1 à 2.");
+    seuils.push({ label: LABEL_TERRE1, fields: { courbe: "Constant", reglage: String(Math.round(irT * 10) / 10), modeDetection: "TC homopolaire dédié" } });
+  }
+  const posTp = nbR(p.positionTempo), potTp = nbR(p.potarTempo);
+  if (posTp >= 1 && posTp <= 6 && potTp !== null) {
+    const tempo = STATIMAX_TEMPO_MS[posTp - 1] + potTp;
+    lignes.push(`Temporisation (phase et terre, identique) : ${STATIMAX_TEMPO_MS[posTp - 1]} ms + ${frN(potTp, 0)} ms (potentiomètre) = ${frN(tempo, 0)} ms`);
+    if (potTp < 0 || potTp > 60) alertes.push("Potentiomètre de temporisation : plage 0 à 60 ms.");
+    seuils.forEach((s) => { s.fields.temporisation = String(tempo); s.fields.temporisation_unite = "ms"; });
+  }
+  return { lignes, seuils, alertes };
+}
+// --- WIC1 : courants nominaux primaires des TC, valeurs des commutateurs HEX (WIC1-2 / -3), plages d'interface (WIC1-1).
+const WIC1_TC = { "WIC1-WE2": { min: 16, max: 56, pas: 0.2 }, "WIC1-W2": { min: 16, max: 56, pas: 0.2 }, "WIC1-W3": { min: 32, max: 112, pas: 0.4 }, "WIC1-W4": { min: 64, max: 224, pas: 0.8 }, "WIC1-W5": { min: 128, max: 448, pas: 1.6 }, "WIC1-W6": { min: 256, max: 896, pas: 3.2 } };
+const WIC1_IS_DISCRET = {
+  "WIC1-W2": [16, 18, 20, 22, 24, 26, 28, 30, 32, 34, 36, 40, 44, 48, 52, 56], "WIC1-W3": [32, 36, 40, 44, 48, 52, 56, 60, 64, 68, 72, 80, 88, 96, 104, 112],
+  "WIC1-W4": [64, 72, 80, 88, 96, 104, 112, 120, 128, 136, 144, 160, 176, 192, 208, 224], "WIC1-W5": [128, 144, 160, 176, 192, 208, 224, 240, 256, 272, 288, 320, 352, 384, 416, 448],
+  "WIC1-W6": [256, 288, 320, 352, 384, 416, 448, 480, 512, 544, 576, 640, 704, 768, 832, 896],
+};
+WIC1_IS_DISCRET["WIC1-WE2"] = WIC1_IS_DISCRET["WIC1-W2"];
+const WIC1_DISCRET = {
+  courbes: ["DEFT (temps constant)", "N-INV", "V-INV", "E-INV", "LI-INV", "RI-INV", "HV-Fuse", "FR-Fuse"],
+  iSeuil: [0.9, 0.95, 1, 1.05, 1.1, 1.15, 1.2, 1.3, 1.4, 1.5, 1.6, 1.8, 2, 2.25, 2.5],
+  tISeuil: [0.04, 0.3, 0.6, 1, 2, 3, 4, 6, 8, 10, 15, 30, 60, 120, 210, 300], // version ≥ G0009 (versions antérieures : 0,04 / 1 / 2 / 3 / 4 / 5 / 6 / 8 / 10 / 15 / 30 / 60 / 120 / 180 / 240 / 300)
+  facteurA: [0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.8, 1, 2, 3, 4, 5, 6, 8, 10],
+  i2: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 14, 16, 18, 20], t2: [0.04, 0.07, 0.1, 0.15, 0.2, 0.25, 0.3, 0.4, 0.6, 0.8, 1, 1.4, 1.8, 2.2, 2.6, 3],
+  ie: [0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1, 1.2, 1.4, 1.6, 1.8, 2, 2.5], tIe: [0.1, 0.2, 0.4, 0.6, 0.8, 1, 1.5, 2, 2.5, 3, 3.5, 4, 6, 8, 10, 20],
+};
+const WIC1_COURBE_APP = { "N-INV": "Inverse Normale CEI", "V-INV": "Très Inverse CEI", "E-INV": "Extrèment Inverse CEI", "LI-INV": "Inverse Temps Long CEI", "RI-INV": "Inverse RI" };
+function calcWIC1(p) {
+  const tc = WIC1_TC[p.tc], is = nbR(p.is), alertes = [], seuils = [], lignes = [];
+  if (!tc) return { lignes: ["Choisissez le transformateur de courant (WIC1-W2 … W6)."], seuils, alertes };
+  lignes.push(`Courant minimal d'alimentation du relais : 0,9 × ${tc.min} A = ${frN(0.9 * tc.min, 1)} A (une phase) ; mesure précise de ${frN(0.9 * tc.min, 1)} A à 20 × ${tc.max} A = ${frN(20 * tc.max, 0)} A.`);
+  if (!(is > 0)) { lignes.push("Renseignez le courant de service Is."); return { lignes, seuils, alertes }; }
+  if (is < tc.min || is > tc.max) alertes.push(`Is = ${frN(is, 1)} A hors de la plage du TC (${tc.min} à ${tc.max} A).`);
+  const discret = p.modele !== "WIC1-1";
+  if (discret && WIC1_IS_DISCRET[p.tc] && !WIC1_IS_DISCRET[p.tc].includes(is)) alertes.push(`Is = ${frN(is, 1)} A n'est pas un cran du commutateur (WIC1-2 / -3) : ${WIC1_IS_DISCRET[p.tc].join(" · ")}.`);
+  const dt = p.courbe === "DEFT (temps constant)", fusible = p.courbe === "HV-Fuse" || p.courbe === "FR-Fuse";
+  const f1 = nbR(p.iSeuil), t1 = nbR(p.tISeuil), a = nbR(p.facteurA);
+  if (f1 !== null) {
+    const i1 = is * f1;
+    lignes.push(`Seuil I> : ${frN(f1)} × Is = ${frN(i1, 1)} A${dt ? `, temporisation tI> = ${frN(t1)} s` : fusible ? " (courbe de fusible : non reprise dans les seuils)" : `, facteur de temps a = ${frN(a)} (point de départ de la courbe I/(Is × I>) = 1)`}`);
+    if (discret && !WIC1_DISCRET.iSeuil.includes(f1)) alertes.push("I> : valeur hors des crans WIC1-2 / -3 (0,9 à 2,5 × Is).");
+    if (!discret && (f1 < 0.9 || f1 > 2.5)) alertes.push("I> : plage 0,9 à 2,5 × Is.");
+    if (i1 < tc.min || i1 > tc.max) alertes.push(`Le point de démarrage de la courbe (${frN(i1, 1)} A) devrait être dans la plage du TC (${tc.min} à ${tc.max} A) : au-delà, le relais coupe la courbe à 20 × ${tc.max} A.`);
+    if (!fusible) seuils.push({ label: LABEL_PHASE1, fields: dt ? { courbe: "Constant", type: "Indépendant", reglage: String(Math.round(i1 * 10) / 10), temporisation: String(t1 === null ? "" : t1), temporisation_unite: "s" } : { courbe: WIC1_COURBE_APP[p.courbe] || "", type: "Dépendant", reglage: String(Math.round(i1 * 10) / 10), tms: String(a === null ? "" : a) } });
+  }
+  const f2 = nbR(p.i2), t2 = nbR(p.t2);
+  if (f2 !== null) {
+    const i2 = is * f2;
+    lignes.push(`Seuil I>> : ${frN(f2)} × Is = ${frN(i2, 1)} A, tI>> = ${frN(t2)} s`);
+    if (i2 > 20 * tc.max) alertes.push(`I>> (${frN(i2, 0)} A) dépasse la limite de mesure du TC : 20 × ${tc.max} A = ${20 * tc.max} A.`);
+    if (discret && !WIC1_DISCRET.i2.includes(f2)) alertes.push("I>> : valeur hors des crans WIC1-2 / -3 (1 à 20 × Is).");
+    seuils.push({ label: LABEL_PHASE2, fields: { courbe: "Constant", type: "Indépendant", reglage: String(Math.round(i2 * 10) / 10), temporisation: String(t2 === null ? "" : t2), temporisation_unite: "s" } });
+  }
+  const fe = nbR(p.ie), te = nbR(p.tIe);
+  if (fe !== null && p.defautTerre !== "Non") {
+    const ie = is * fe;
+    lignes.push(`Seuil terre Ie> : ${frN(fe)} × Is = ${frN(ie, 1)} A (somme vectorielle interne des courants), tIe> = ${frN(te)} s — essai du seuil terre : valise triphasée.`);
+    if (discret && !WIC1_DISCRET.ie.includes(fe)) alertes.push("Ie> : valeur hors des crans WIC1-2 / -3 (0,2 à 2,5 × Is).");
+    seuils.push({ label: LABEL_TERRE1, fields: { courbe: "Constant", reglage: String(Math.round(ie * 10) / 10), modeDetection: "Somme des 3I (calculée)", temporisation: String(te === null ? "" : te), temporisation_unite: "s" } });
+  }
+  return { lignes, seuils, alertes };
+}
+// Choix du TC : IN = SN / (√3 · UN) ; liste des TC dont la plage contient IN (manuel WIC1 § 4.10).
+function tcWIC1Pour(snKva, unKv) {
+  const s = nbR(snKva), u = nbR(unKv);
+  if (!(s > 0) || !(u > 0)) return null;
+  const inA = s / (Math.sqrt(3) * u);
+  return { inA, tc: Object.keys(WIC1_TC).filter((k) => k !== "WIC1-WE2" && inA >= WIC1_TC[k].min && inA <= WIC1_TC[k].max) };
+}
+// --- VIP 300 : capteurs et calibres (plage de réglage de Is), valeurs des commutateurs de la face avant.
+const VIP300_CAPTEURS = {
+  "VIP300LL": { "CRa 200/1": { x1: { k: 1, activation: 10, selectif: 1000 }, x4: { k: 4, activation: 40, selectif: 4000 } }, "CRb 1250/1": { x1: { k: 6.25, activation: 62, selectif: 6250 }, x4: { k: 25, activation: 250, selectif: 25000 } } },
+  "VIP300LH": { "Ringmaster 200/1": { x2: { k: 2, activation: 20, selectif: 2000 }, x4: { k: 4, activation: 40, selectif: 4000 } }, "Ringmaster 800/1": { x2: { k: 8, activation: 80, selectif: 8000 }, x4: { k: 16, activation: 160, selectif: 16000 } } },
+};
+const VIP300_IS_BASE = [10, 12, 15, 18, 21, 24, 28, 32, 36, 40, 45, 50], VIP300_IOS_BASE = [1, 2, 4, 6, 8, 12, 16, 20, 25, 30, 35, 40];
+const VIP300_DISCRET = {
+  courbes: ["DT", "SI", "VI", "EI", "RI", "off"], iDT: [1, 1.2, 1.5, 1.8, 2.1, 2.4, 2.7, 3], t: [0.05, 0.07, 0.1, 0.15, 0.2, 0.3, 0.4, 0.6], mult: ["x1", "x10"],
+  i2: [3, 4, 6, 9, 12, 15, 20, "off"], t2: [0.03, 0.05, 0.1, 0.2, 0.4, 0.6, 0.9, 1.5],
+};
+const VIP300_COURBE_APP = { DT: "Constant", SI: "Inverse Normale CEI", VI: "Très Inverse CEI", EI: "Extrèment Inverse CEI", RI: "Inverse RI" };
+// Temps de la courbe à 10 × Is pour un TMS = 1 : le temps t> affiché sur le VIP 300 est le temps de déclenchement à 10 × Is ; TMS équivalent = t> / f(10).
+const f10CEI = (courbe) => ({ SI: 0.14 / (Math.pow(10, 0.02) - 1), VI: 13.5 / 9, EI: 80 / 99, RI: 1 / (0.339 - 0.0236) }[courbe] || null);
+function calcVIP300(p) {
+  const cal = ((VIP300_CAPTEURS[p.modele] || {})[p.capteur] || {})[p.calibre], alertes = [], seuils = [], lignes = [];
+  if (!cal) return { lignes: ["Choisissez le modèle, le capteur et le calibre."], seuils, alertes };
+  lignes.push(`Plage de réglage de Is : ${frN(10 * cal.k, 1)} à ${frN(50 * cal.k, 1)} A ; courant d'activation ${cal.activation} A ; fonctionnement sélectif jusqu'à ${cal.selectif} A.`);
+  const volet = (nom, is, courbe, iDT, t, mult, i2, t2, labelBas, labelHaut, cle) => {
+    const I = nbR(is);
+    if (!(I > 0)) return;
+    const tm = nbR(t) === null ? null : nbR(t) * (mult === "x10" ? 10 : 1);
+    lignes.push(`${nom} : ${cle} = ${frN(I, 1)} A — stimulus de test VAP6 ≈ 20 × ${cle} = ${frN(20 * I, 0)} A`);
+    if (I < 0.99 * 10 * cal.k && cle === "Is") alertes.push(`${cle} sous la plage du capteur / calibre.`);
+    if (courbe && courbe !== "off") {
+      if (courbe === "DT") {
+        const m = nbR(iDT);
+        if (m !== null) lignes.push(`${nom} seuil bas (temps constant) : ${frN(m)} × ${cle} = ${frN(m * I, 1)} A, temporisation ${frN(tm)} s`);
+        if (m !== null) seuils.push({ label: labelBas, fields: { courbe: "Constant", type: "Indépendant", reglage: String(Math.round(m * I * 10) / 10), temporisation: String(tm === null ? "" : tm), temporisation_unite: "s" } });
+      } else {
+        const tms = tm === null || !f10CEI(courbe) ? null : Math.round((tm / f10CEI(courbe)) * 10000) / 10000;
+        lignes.push(`${nom} seuil bas (courbe ${courbe}) : démarrage à 1,2 × ${cle} = ${frN(1.2 * I, 1)} A (1 × ${cle} pour la courbe RI), ${frN(tm)} s à 10 × ${cle}${tms === null ? "" : ` → TMS équivalent ${frN(tms, 4)}`}`);
+        seuils.push({ label: labelBas, fields: { courbe: VIP300_COURBE_APP[courbe] || "", type: "Dépendant", reglage: String(Math.round(I * 10) / 10), tms: tms === null ? "" : String(tms) } });
+      }
+    }
+    if (i2 && i2 !== "off") {
+      const m2 = nbR(i2);
+      if (m2 !== null) {
+        lignes.push(`${nom} seuil haut : ${frN(m2)} × ${cle} = ${frN(m2 * I, 0)} A, temporisation ${frN(nbR(t2))} s`);
+        if (m2 * I > cal.selectif) alertes.push(`${nom} : le seuil haut (${frN(m2 * I, 0)} A) dépasse la plage de fonctionnement sélectif (${cal.selectif} A).`);
+        seuils.push({ label: labelHaut, fields: { courbe: "Constant", type: "Indépendant", reglage: String(Math.round(m2 * I)), temporisation: String(nbR(t2) === null ? "" : nbR(t2)), temporisation_unite: "s" } });
+      }
+    }
+  };
+  volet("Phase", p.is, p.courbe, p.iDT, p.t, p.mult, p.i2, p.t2, LABEL_PHASE1, LABEL_PHASE2, "Is");
+  volet("Terre", p.ios, p.courbeT, p.iDTT, p.tT, p.multT, p.i2T, p.t2T, LABEL_TERRE1, LABEL_TERRE2, "Ios");
+  return { lignes, seuils, alertes };
+}
+// --- Siemens SIPROTEC : 7SJ80 (SIPROTEC Compact, manuel A1 V04.00.02) et 7SJ61 (SIPROTEC 4, manuel V4.1) — plages de réglage (au secondaire) et précisions.
+const RELAIS_SIPROTEC = {
+  "7sj80": {
+    plages: "SIPROTEC Compact 7SJ80 — réglages au secondaire (IN = 1 A / 5 A) : I> et I>> phases 0,10 à 35 A / 0,50 à 175 A (pas 0,01 A) ; I>>> 1 à 35 A / 5 à 175 A ; terre IT> et IT>> 0,05 à 35 A / 0,25 à 175 A ; IT>>> 0,25 à 35 A / 1,25 à 175 A ; temporisation 0 à 60 s (pas 0,01 s). Temps dépendant : Ip 0,10 à 4 A / 0,50 à 20 A, ITp 0,05 à 4 A / 0,25 à 20 A ; facteur T (CEI : normalement, fortement, extrêmement inverse, inverse longue) 0,05 à 3,2 s ; facteur D (ANSI) 0,5 à 15 s. Les courbes démarrent à environ 1,1 × Ip ; le temps reste constant au-delà de 20 × Ip.",
+    autres: "Autres fonctions du 7SJ80 (manuel, chapitre 4) — tension : U<, U<< 10 à 120 V (phase-terre) ou 10 à 210 V (phase-phase), U>, U>> 20 à 150 V ou 20 à 260 V, temporisation 0 à 100 s, démarrage ≈ 50 ms, seuil ±3 % ou 1 V, temps ±1 % ou 10 ms ; déséquilibre I2>, I2>> 0,10 à 3 A / 0,50 à 15 A, temporisation 0 à 60 s, réponse ≈ 35 ms, seuil ±3 % ou 15 mA (1 A) / 75 mA (5 A) ; fréquence : 4 échelons f> ou f<, 40 à 60 Hz (réseau 50 Hz) ou 50 à 70 Hz (60 Hz), temporisation 0 à 100 s, précision 15 mHz, blocage sous 10 à 150 V ; surcharge thermique (49) : facteur k 0,10 à 4,00, τth 1,0 à 999,9 min, alarme 0,10 à 4 A / 0,50 à 20 A, courant ±3 % (classe 2 % CEI 60255-8), temps ±3 % ou 1 s ; défaillance disjoncteur (50BF) : I> et IT> 0,05 à 20 A / 0,25 à 100 A, temporisation 0,06 à 60 s, seuil ±3 %, temps ±1 % ou 20 ms, retombée ≈ 25 ms ; directionnel (67/67N) : zone aval Uréf ± 86°, rotation de la tension de référence −180° à +180°, mémoire de tension sur 2 périodes (défauts triphasés), sensibilité terre 3U0 ≈ 5 V.",
+    precision: "7SJ80 (manuel constructeur) : temps constant — seuil ±3 % ou 15 mA (IN = 1 A) / 75 mA (IN = 5 A), temps ±1 % ou 10 ms, retombée ≈ 0,95 ; temps dépendant — seuil ±3 % (mêmes minima), temps pour 2 ≤ I/Ip ≤ 20 : ±5 % de la valeur calculée + 2 % de tolérance en courant, ou 30 ms ; dérive de 0,5 % par 10 K entre −5 et 55 °C. Temps du relais seul, hors ouverture du disjoncteur.",
+  },
+  "7sj61": {
+    plages: "SIPROTEC 4 7SJ61 — réglages au secondaire : I> et I>> phases 0,50 à 175 A pour IN = 5 A (0,10 à 35 A pour IN = 1 A) ; IT> et IT>> terre 0,25 à 175 A (0,05 à 35 A) ; temporisation 0 à 60 s (pas 0,01 s). Temps dépendant : Ip 0,50 à 20 A (0,10 à 4 A), T (CEI) 0,05 à 3,2 s, D (ANSI) 0,05 à 15 s. Détection sensible de terre : ITT> et ITT>> 0,003 à 1,5 A (temporisation 0 à 320 s), ITTp 0,003 à 1,4 A. Les courbes démarrent à environ 1,1 × Ip ; le temps reste constant au-delà de 20 × Ip.",
+    precision: "7SJ61 (manuel constructeur) : temps constant — seuil ±2 % ou 50 mA (IN = 5 A ; 10 mA pour IN = 1 A), temps ±1 % ou 10 ms, retombée ≈ 0,95 ; temps dépendant — seuil ±2 % ou 50 mA, temps pour 2 ≤ I/Ip ≤ 20 : ±5 % de la valeur calculée + 2 % de tolérance en courant, minimum 30 ms ; terre sensible : ±2 % ou 1 mA, temps ±1 % ou 20 ms. Temps du relais seul, hors ouverture du disjoncteur.",
+  },
+};
+function typeRelaisSiprotec(identification) {
+  const ref = String((identification && identification.referenceRelais) || "");
+  if (/7SJ\s?-?80/i.test(ref)) return "7sj80";
+  if (/7SJ\s?-?61/i.test(ref)) return "7sj61";
+  return null;
+}
+// Plages de réglage des échelons de courant (IN = 5 A ; ÷ 5 pour IN = 1 A) — manuels 7SJ61x V4.1 (§ 10.2-10.3) et 7SJ80xx (§ 4.2-4.3). Le 7SJ61 n'a que deux échelons à temps constant.
+const SIPROTEC_PLAGES_5A = {
+  "7sj61": { dt: { phase: { 1: [0.5, 175], 2: [0.5, 175] }, terre: { 1: [0.25, 175], 2: [0.25, 175] } }, dep: { phase: [0.5, 20], terre: [0.25, 20] } },
+  "7sj80": { dt: { phase: { 1: [0.5, 175], 2: [0.5, 175], 3: [5, 175] }, terre: { 1: [0.25, 175], 2: [0.25, 175], 3: [1.25, 175] } }, dep: { phase: [0.5, 20], terre: [0.25, 20] } },
+};
+function tcSecondaireSeuil(eq, ansiCode, modeDetection) {
+  const estTerre = ansiCode === "50N" || ansiCode === "51N";
+  const viaHomopolaire = estTerre && modeDetection !== "Somme des 3I (calculée)";
+  const liste = (eq.controles && eq.controles.tc_dynamique) || [];
+  const ok = (tc) => tc.fields.rapportPrimaire && tc.fields.secondaire;
+  const tc = (viaHomopolaire && liste.find((t) => ok(t) && t.label === "Homopolaire (terre)")) || (!viaHomopolaire && liste.find((t) => ok(t) && t.label !== "Homopolaire (terre)")) || liste.find(ok);
+  return tc ? numOf(tc.fields.secondaire) : null;
+}
+// Avis sous le seuil : plage du relais au secondaire du TC (1 A ou 5 A) et réglage actuel ramené au secondaire (hors plage = signalé).
+function avisReglageSiprotec(eq, s) {
+  const type = typeRelaisSiprotec(eq.identification);
+  if (!type || !s || !s.label) return null;
+  const fam = ansiFamily(s.label);
+  if (!["50", "51", "50N", "51N"].includes(fam)) return null;
+  const inSec = tcSecondaireSeuil(eq, fam, s.fields.modeDetection);
+  if (inSec !== 1 && inSec !== 5) return null;
+  const etage = Number(((s.label.match(/^\d+[A-Za-z]*-(?:\d+[A-Za-z]*-)?(\d)\b/) || [])[1])) || 1;
+  const terre = fam === "50N" || fam === "51N", dependant = !!s.fields.courbe && s.fields.courbe !== "Constant";
+  const nomRelais = type === "7sj80" ? "7SJ80" : "7SJ61";
+  const plages = SIPROTEC_PLAGES_5A[type];
+  const plage5 = dependant ? plages.dep[terre ? "terre" : "phase"] : plages.dt[terre ? "terre" : "phase"][etage];
+  if (!plage5) return { texte: `${nomRelais} : pas de troisième échelon de courant à temps constant (I>>>) sur ce relais.`, hors: true };
+  const k = inSec === 1 ? 0.2 : 1, min = Math.round(plage5[0] * k * 1000) / 1000, max = Math.round(plage5[1] * k * 1000) / 1000;
+  const sec = calcInjectionAide(s.fields.reglage, "A", eq, fam, s.fields.modeDetection, null, s.fields.angle, s.fields.zoneMin, s.fields.zoneMax, s.fields.sens);
+  const nomPlage = dependant ? (terre ? "ITp" : "Ip") : (terre ? ["IT>", "IT>>", "IT>>>"][etage - 1] : ["I>", "I>>", "I>>>"][etage - 1]);
+  let texte = `${nomRelais} : ${nomPlage} réglable de ${frN(min, 2)} à ${frN(max, 2)} A au secondaire (IN = ${inSec} A).`, hors = false;
+  if (typeof sec === "number") {
+    texte += ` Réglage actuel ≈ ${frN(sec, 3)} A au secondaire.`;
+    if (sec < min - 1e-9 || sec > max + 1e-9) { hors = true; texte += " Hors plage."; }
+  }
+  return { texte, hors };
+}
+const AIDE_PRECISION_RELAIS = {
+  statimax: "Statimax RAH 411 E : temporisation minimale de 100 ms, temps de fonctionnement du Mitop compris. Les TC 10P30 habituellement associés limitent la plage utile à 30 × Inp (30 A au secondaire).",
+  wic1: "WIC1 (manuel constructeur) : temps à temps constant ±1 % ou ±10 ms ; temps inverse ±10 ms ; seuil terre ≤ 5 % ; mesure ≤ 5 % de 0 à 50 °C (≤ 7,5 % de −40 à 85 °C). Courant minimal d'alimentation : 0,9 × plus petit courant nominal du TC. Essai du seuil terre : valise triphasée ; la source d'injection sert aussi d'alimentation.",
+  vip300: "VIP 300 (notice constructeur) : seuils ±5 % ou 0/+2 A ; temps à temps constant ±2 % ou ±20 ms ; temps inverse classe 5 (CEI 60255-3) ou 0/+20 ms (0/+25 ms à la terre) ; seuil haut ±5 % ; dégagement 95 %. Temps hors réponse du Mitop. Essai à la valise VAP6 : stimulus = 20 × Is (phase) ou 20 × Ios (terre).",
+};
+function AssistantRelaisAutonome({ eq, update, type }) {
+  const [ouvert, setOuvert] = useState(false);
+  const donnees = (eq.assistantRelais && eq.assistantRelais[type]) || {};
+  const set = (k, v) => update({ ...eq, assistantRelais: { ...(eq.assistantRelais || {}), [type]: { ...donnees, [k]: v } } });
+  const seuilsEq = eq.controles.parametrage_relais_seuils || [];
+  const appliquer = (seuilsCalcules) => {
+    let courant = [...seuilsEq];
+    seuilsCalcules.forEach((c) => {
+      const i = courant.findIndex((s) => s.label === c.label);
+      if (i >= 0) courant[i] = { ...courant[i], fields: { ...courant[i].fields, ...c.fields, etat: "Actif" } };
+      else { const nouveau = emptySeuilEntry(c.label); nouveau.fields = { ...nouveau.fields, ...c.fields, etat: "Actif" }; courant = [...courant, nouveau]; }
+    });
+    update({ ...eq, controles: { ...eq.controles, parametrage_relais_seuils: courant } });
+  };
+  const S = (label, liste, cle, defaut) => <MiniSelect key={cle} label={label} options={liste.map(String)} value={donnees[cle] !== undefined ? String(donnees[cle]) : defaut || ""} onChange={(v) => set(cle, v)} />;
+  const I = (label, cle, unit) => <MiniInput key={cle} label={label} unit={unit} value={donnees[cle] || ""} onChange={(v) => set(cle, v)} />;
+  let res = null, formulaire = null, titre = "";
+  if (type === "statimax") {
+    titre = "Statimax RAH 411 E — calcul des seuils";
+    const tc = donnees.tc || "1A";
+    res = calcStatimax({ ...donnees, tc });
+    formulaire = (
+      <>
+        {S("Secondaire du TC de ligne", ["1A", "5A"], "tc", "1A")}{I("Inp (TC)", "inp", "A")}
+        {S("Nbre de passages", Object.keys(STATIMAX_PASSAGES[tc]), "passages")}{S("Position commutateur Ir", [1, 2, 3, 4, 5, 6], "positionIr")}{I("Potentiomètre Ir (1 à 1,3)", "potarIr")}
+        {S("Molette Ir⊥", [1, 2, 3, 4], "positionTerre")}{I("Potentiomètre Ir⊥ (1 à 2)", "potarTerre")}
+        {S("Molette temporisation", [1, 2, 3, 4, 5, 6], "positionTempo")}{I("Potentiomètre tempo (0 à 60)", "potarTempo", "ms")}
+      </>
+    );
+  } else if (type === "wic1") {
+    titre = "WIC1 — réglages et valeurs calculées";
+    const modele = donnees.modele || "WIC1-2", discret = modele !== "WIC1-1", dt = (donnees.courbe || "DEFT (temps constant)") === "DEFT (temps constant)";
+    res = calcWIC1({ ...donnees, modele });
+    const tcIs = donnees.tc && WIC1_IS_DISCRET[donnees.tc] ? WIC1_IS_DISCRET[donnees.tc] : [];
+    const choix = tcWIC1Pour(donnees.sn, donnees.un);
+    formulaire = (
+      <>
+        {S("Modèle", ["WIC1-1", "WIC1-2", "WIC1-3"], "modele", "WIC1-2")}{S("TC", Object.keys(WIC1_TC), "tc")}
+        {discret ? S("Is", tcIs, "is") : I("Is", "is", "A")}
+        {S("Courbe", WIC1_DISCRET.courbes, "courbe", "DEFT (temps constant)")}
+        {discret ? S("I> (× Is)", WIC1_DISCRET.iSeuil, "iSeuil") : I("I> (× Is)", "iSeuil")}
+        {dt ? (discret ? S("tI> (s)", WIC1_DISCRET.tISeuil, "tISeuil") : I("tI>", "tISeuil", "s")) : (discret ? S("Facteur a", WIC1_DISCRET.facteurA, "facteurA") : I("Facteur a", "facteurA"))}
+        {discret ? S("I>> (× Is)", WIC1_DISCRET.i2, "i2") : I("I>> (× Is)", "i2")}{discret ? S("tI>> (s)", WIC1_DISCRET.t2, "t2") : I("tI>>", "t2", "s")}
+        {S("Protection terre", ["Oui", "Non"], "defautTerre", "Oui")}
+        {discret ? S("Ie> (× Is)", WIC1_DISCRET.ie, "ie") : I("Ie> (× Is)", "ie")}{discret ? S("tIe> (s)", WIC1_DISCRET.tIe, "tIe") : I("tIe>", "tIe", "s")}
+        {I("Aide au choix du TC : SN", "sn", "kVA")}{I("UN", "un", "kV")}
+        {choix && <div style={{ flex: "1 1 100%", fontSize: 11.5, color: "#5B6B7D" }}>IN = SN / (√3 · UN) = {frN(choix.inA, 1)} A → TC possible(s) : {choix.tc.length ? choix.tc.join(", ") : "aucun (hors des plages W2 à W6)"}.</div>}
+      </>
+    );
+  } else {
+    titre = "VIP 300 — réglages et valeurs calculées";
+    const modele = donnees.modele || "VIP300LL";
+    const capteurs = Object.keys(VIP300_CAPTEURS[modele]), capteur = capteurs.includes(donnees.capteur) ? donnees.capteur : capteurs[0];
+    const calibres = Object.keys(VIP300_CAPTEURS[modele][capteur]), calibre = calibres.includes(donnees.calibre) ? donnees.calibre : calibres[0];
+    const k = VIP300_CAPTEURS[modele][capteur][calibre].k;
+    const lissage = (base) => base.map((x) => Math.round(x * k * 100) / 100);
+    res = calcVIP300({ ...donnees, modele, capteur, calibre });
+    const volet = (suf, nomIs, base) => (
+      <>
+        {S(nomIs + " (A)", lissage(base), suf === "" ? "is" : "ios")}
+        {S("Courbe seuil bas", VIP300_DISCRET.courbes, "courbe" + suf, "DT")}
+        {(donnees["courbe" + suf] || "DT") === "DT" && S("Seuil bas (× " + nomIs + ")", VIP300_DISCRET.iDT, "iDT" + suf)}
+        {(donnees["courbe" + suf] || "DT") !== "off" && S("Temporisation bas (s)", VIP300_DISCRET.t, "t" + suf)}{(donnees["courbe" + suf] || "DT") !== "off" && S("Multiplicateur", VIP300_DISCRET.mult, "mult" + suf, "x1")}
+        {S("Seuil haut (× " + nomIs + ")", VIP300_DISCRET.i2, "i2" + suf, "off")}{S("Temporisation haut (s)", VIP300_DISCRET.t2, "t2" + suf)}
+      </>
+    );
+    formulaire = (
+      <>
+        {S("Modèle", ["VIP300LL", "VIP300LH"], "modele", "VIP300LL")}{S("Capteur", capteurs, "capteur", capteur)}{S("Calibre", calibres, "calibre", calibre)}
+        <div style={{ flex: "1 1 100%", fontWeight: 700, fontSize: 12, color: "#3E4A5C" }}>Protection phase</div>{volet("", "Is", VIP300_IS_BASE)}
+        <div style={{ flex: "1 1 100%", fontWeight: 700, fontSize: 12, color: "#3E4A5C" }}>Protection terre</div>{volet("T", "Ios", VIP300_IOS_BASE)}
+      </>
+    );
+  }
+  return (
+    <div style={{ border: "1px solid #D8DEE5", borderRadius: 10, padding: "10px 12px", marginBottom: 12, background: "rgba(10,93,168,0.04)" }}>
+      <div onClick={() => setOuvert(!ouvert)} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer", fontSize: 13, fontWeight: 700, color: "#0A5DA8" }}>
+        <span>{titre}</span><span style={{ fontSize: 11.5, fontWeight: 600 }}>{ouvert ? "Masquer" : "Ouvrir l'assistant"}</span>
+      </div>
+      {ouvert && (
+        <div style={{ marginTop: 10 }}>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>{formulaire}</div>
+          {res && (
+            <div style={{ marginTop: 10, fontSize: 12, lineHeight: 1.6, color: "#3E4A5C" }}>
+              {res.lignes.map((l, i) => <div key={i}>{l}</div>)}
+              {res.alertes.map((a, i) => <div key={"a" + i} style={{ color: "#B5730A" }}>⚠ {a}</div>)}
+              {res.seuils.length > 0 && (
+                <button onClick={() => appliquer(res.seuils)} style={{ ...btnGhost(BRAND.amber), marginTop: 8 }}><Plus size={13} /> Reporter dans les seuils ({res.seuils.length})</button>
+              )}
+            </div>
+          )}
+          <div style={{ marginTop: 8, fontSize: 11, color: "#8B96A3", lineHeight: 1.5 }}>{AIDE_PRECISION_RELAIS[type]}</div>
+        </div>
+      )}
+    </div>
+  );
+}
+// Accès à l'assistant même quand la « Référence du relais » n'est pas (encore) renseignée ou reconnue : le technicien choisit lui-même le relais.
+const ASSISTANTS_RELAIS_AUTONOMES = { "Statimax RAH 411 E": "statimax", "WIC1 (SEG)": "wic1", "VIP 300 (Schneider Electric)": "vip300" };
+function SelecteurAssistantRelais({ eq, update }) {
+  const choix = Object.keys(ASSISTANTS_RELAIS_AUTONOMES).find((k) => ASSISTANTS_RELAIS_AUTONOMES[k] === eq.assistantRelaisType) || "";
+  return (
+    <div style={{ display: "flex", alignItems: "flex-end", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+      <MiniSelect label="Assistant de réglage (relais autonomes)" options={["", ...Object.keys(ASSISTANTS_RELAIS_AUTONOMES)]} value={choix} onChange={(v) => update({ ...eq, assistantRelaisType: ASSISTANTS_RELAIS_AUTONOMES[v] || "" })} />
+      <span style={{ fontSize: 11.5, color: "#8B96A3", lineHeight: 1.4, flex: "1 1 220px" }}>Calcul des seuils du Statimax RAH 411 E, du WIC1 ou du VIP 300 (ouvert automatiquement quand la référence du relais correspond).</span>
+    </div>
+  );
+}
 function ParametrageRelaisPanel({ eq, update, idPrefix, locaux = [] }) {
   const seuils = eq.controles.parametrage_relais_seuils;
   const setSeuils = (next) => update({ ...eq, controles: { ...eq.controles, parametrage_relais_seuils: next } });
@@ -7736,6 +8087,9 @@ function ParametrageRelaisPanel({ eq, update, idPrefix, locaux = [] }) {
         <SectionTitle>Paramétrage du relais de protection</SectionTitle>
         <button onClick={addSeuil} style={btnGhost(BRAND.amber)}><Plus size={13} /> Ajouter un seuil</button>
       </div>
+      {!typeRelaisAutonome(eq.identification) && !typeRelaisSiprotec(eq.identification) && <SelecteurAssistantRelais eq={eq} update={update} />}
+      {(typeRelaisAutonome(eq.identification) || eq.assistantRelaisType) && <AssistantRelaisAutonome key={typeRelaisAutonome(eq.identification) || eq.assistantRelaisType} eq={eq} update={update} type={typeRelaisAutonome(eq.identification) || eq.assistantRelaisType} />}
+      {typeRelaisSiprotec(eq.identification) && <div style={{ fontSize: 11.5, color: "#5B6B7D", lineHeight: 1.5, marginBottom: 10, padding: "8px 10px", border: "1px solid #D8DEE5", borderRadius: 8, background: "rgba(10,93,168,0.04)" }}>{RELAIS_SIPROTEC[typeRelaisSiprotec(eq.identification)].plages}{RELAIS_SIPROTEC[typeRelaisSiprotec(eq.identification)].autres && <div style={{ marginTop: 6 }}>{RELAIS_SIPROTEC[typeRelaisSiprotec(eq.identification)].autres}</div>}</div>}
       {seuils.length === 0 ? (
         <div style={{ textAlign: "center", padding: 18, color: "#8B96A3", fontSize: 12.5, border: "1px dashed #D8DEE5", borderRadius: 10 }}>
           Aucun seuil paramétré
@@ -7804,6 +8158,8 @@ function DisjoncteurRelaisPanel({ eq, update, custom, onAddCustom, onChangeCusto
   return (
     <Card style={{ marginBottom: 14 }}>
       <SectionTitle>Contrôles du relais de protection</SectionTitle>
+      {typeRelaisAutonome(eq.identification) && <div style={{ fontSize: 11.5, color: "#5B6B7D", lineHeight: 1.5, marginBottom: 8 }}>{AIDE_PRECISION_RELAIS[typeRelaisAutonome(eq.identification)]}</div>}
+      {typeRelaisSiprotec(eq.identification) && <div style={{ fontSize: 11.5, color: "#5B6B7D", lineHeight: 1.5, marginBottom: 8 }}>{RELAIS_SIPROTEC[typeRelaisSiprotec(eq.identification)].precision}</div>}
       <div>
         {renseignes.length === 0 && (
           <div style={{ textAlign: "center", padding: 18, color: "#8B96A3", fontSize: 12.5, border: "1px dashed #D8DEE5", borderRadius: 10, marginBottom: 10 }}>
@@ -7819,7 +8175,7 @@ function DisjoncteurRelaisPanel({ eq, update, custom, onAddCustom, onChangeCusto
           return (
             <div key={s.id} style={{ padding: "10px 0", borderBottom: "1px solid #E2E6EB" }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-                <span style={{ fontSize: 12.5, color: "#3E4A5C", flex: "1 1 240px" }}>Essai de déclenchement — {s.label}</span>
+                <span style={{ fontSize: 12.5, color: "#3E4A5C", flex: "1 1 240px" }}>Essai de déclenchement — {s.label}{(() => { const a = avisReglageSiprotec(eq, s); return a ? <div style={{ fontSize: 11, color: a.hors ? "#B5730A" : "#8B96A3", marginTop: 3, lineHeight: 1.4 }}>{a.texte}</div> : null; })()}</span>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                   <MiniInput label="L1" value={s.essai.fields.l1} onChange={(v) => setEssaiField(s.id, "l1", v)} validState={tol ? toleranceState(s.essai.fields.l1, tol.min, tol.max) : null} />
                   <MiniInput label="L2" value={s.essai.fields.l2} onChange={(v) => setEssaiField(s.id, "l2", v)} validState={tol ? toleranceState(s.essai.fields.l2, tol.min, tol.max) : null} />
@@ -8875,6 +9231,9 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
                   return champ;
                 })}
               </div>
+              {(TYPES_AVEC_RELAIS.includes(eq.type) || eq.type === "Comptage HTA") && infoGammeCellule(eq.identification) && (
+                <div style={{ marginTop: 8, fontSize: 11.5, color: "#5B6B7D", lineHeight: 1.5 }}>{infoGammeCellule(eq.identification)}</div>
+              )}
             </div>
           )}
 
