@@ -3554,7 +3554,7 @@ function emptyLocal(nom) {
 function worstRank(labels) { return labels.reduce((worst, l) => Math.max(worst, RANK_OF[l] ?? 0), 0); }
 
 /* =========================================================================
-   Clôture d'intervention (document client, indépendant du suivi de maintenance)
+   Rapport d'intervention (document client, indépendant du suivi de maintenance)
    ========================================================================= */
 const ACTIONS_INTERVENTION = [
   "Contrôle visuel", "Nettoyage", "Resserrage des connexions", "Contrôle des mesures de sécurité",
@@ -10675,8 +10675,8 @@ function SiteDetail({ site, allSites, update, onBack, onDelete, onPrint, onPrint
             <button onClick={() => onPrintAnnexe(site)} style={btnGhost("#0F8A5F")} title="Génère un fichier Word séparé regroupant toutes les photos du site, classées par équipement et par contrôle">
               <ImagePlus size={13} /> Annexe photos
             </button>
-            <button onClick={() => onCreateIntervention(site, site.equipements)} style={btnGhost(BRAND.blue)} title="Crée une clôture d'intervention pré-remplie avec tous les équipements de ce site">
-              <ClipboardList size={13} /> Clôture d'intervention
+            <button onClick={() => onCreateIntervention(site, site.equipements)} style={btnGhost(BRAND.blue)} title="Crée un rapport d'intervention pré-rempli avec tous les équipements de ce site">
+              <ClipboardList size={13} /> Rapport d'intervention
             </button>
             <InlineConfirmButton icon={Trash2} label="Supprimer le site" onConfirm={() => onDelete(site.id)} />
           </div>
@@ -10795,7 +10795,7 @@ function SiteDetail({ site, allSites, update, onBack, onDelete, onPrint, onPrint
 }
 
 /* =========================================================================
-   Clôture d'intervention — édition
+   Rapport d'intervention — édition
    ========================================================================= */
 function IvField({ label, children, span }) {
   return (
@@ -10827,9 +10827,9 @@ function InterventionEditor({ iv, update, onBack, onDelete, onPrint }) {
   const duree = dureeIntervention(iv.heureDebut, iv.heureFin);
 
   function envoyerParMail() {
-    const subject = encodeURIComponent(`Clôture d'intervention ${iv.numeroRI} — ${iv.client || ""}`);
+    const subject = encodeURIComponent(`Rapport d'intervention ${iv.numeroRI} — ${iv.client || ""}`);
     const body = encodeURIComponent(
-      `Bonjour,\n\nVeuillez trouver ci-joint la clôture d'intervention ${iv.numeroRI} du ${dateFrIso(iv.date)} concernant le site ${iv.site || ""}.\n\n(Pensez à joindre le document Word généré via le bouton « Clôture Word » avant l'envoi.)\n\nCordialement,\n${iv.technicien || "HT Maintenance"}`
+      `Bonjour,\n\nVeuillez trouver ci-joint le rapport d'intervention ${iv.numeroRI} du ${dateFrIso(iv.date)} concernant le site ${iv.site || ""}.\n\n(Pensez à joindre le document Word généré via le bouton « Rapport Word » avant l'envoi.)\n\nCordialement,\n${iv.technicien || "HT Maintenance"}`
     );
     const to = iv.emailClient || "";
     window.open(`mailto:${to}?subject=${subject}&body=${body}`, "_blank");
@@ -10837,7 +10837,7 @@ function InterventionEditor({ iv, update, onBack, onDelete, onPrint }) {
 
   return (
     <div>
-      <button onClick={onBack} style={{ ...btnGhost(), marginBottom: 16 }}><ArrowLeft size={14} /> Retour aux clôtures d'intervention</button>
+      <button onClick={onBack} style={{ ...btnGhost(), marginBottom: 16 }}><ArrowLeft size={14} /> Retour aux rapports d'intervention</button>
 
       <Card style={{ marginBottom: 18 }}>
         <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
@@ -10855,7 +10855,7 @@ function InterventionEditor({ iv, update, onBack, onDelete, onPrint }) {
             ) : (
               <button onClick={() => set("statut", "Clôturée")} style={btnGhost(BRAND.blue)}><CheckCircle2 size={13} /> Clôturer</button>
             )}
-            <button onClick={() => onPrint(iv)} style={btnGhost("#FFC107")}><FileText size={13} /> Clôture Word</button>
+            <button onClick={() => onPrint(iv)} style={btnGhost("#FFC107")}><FileText size={13} /> Rapport Word</button>
             <button onClick={envoyerParMail} style={btnGhost("#FFC107")}><Mail size={13} /> Préparer l'email</button>
             <InlineConfirmButton icon={Trash2} label="Supprimer" onConfirm={() => onDelete(iv.id)} />
           </div>
@@ -11338,7 +11338,7 @@ function InterventionsOverview({ interventions, sites, onOpen, onCreate, onPlani
         <div style={{ textAlign: "center", padding: "60px 20px", background: "#FFFFFF", border: "1px dashed #D8DEE5", borderRadius: 14 }}>
           <ClipboardList size={28} color="#9AA5B1" style={{ marginBottom: 10 }} />
           <div style={{ fontSize: 14, fontWeight: 600, color: "#3E4A5C", marginBottom: 4 }}>
-            {interventions.length === 0 ? "Aucune clôture d'intervention" : "Aucun résultat pour cette recherche"}
+            {interventions.length === 0 ? "Aucun rapport d'intervention" : "Aucun résultat pour cette recherche"}
           </div>
           <div style={{ fontSize: 12.5, color: "#8B96A3" }}>Créez votre premier rapport à transmettre au client.</div>
         </div>
@@ -11429,7 +11429,7 @@ function DayDetailPanel({ dateISO, events, onOpenSite, onOpenIntervention, onCre
         <SectionTitle>{label}</SectionTitle>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button onClick={() => onCreateForDate(dateISO)} style={btnGhost(BRAND.amber)}><Plus size={13} /> Préparer un rapport ce jour</button>
-          <button onClick={() => onCreateInterventionForDate(dateISO)} style={btnGhost(BRAND.blue)}><ClipboardList size={13} /> Créer une clôture d'intervention</button>
+          <button onClick={() => onCreateInterventionForDate(dateISO)} style={btnGhost(BRAND.blue)}><ClipboardList size={13} /> Créer un rapport d'intervention</button>
         </div>
       </div>
       {events.length === 0 ? (
@@ -11444,7 +11444,7 @@ function DayDetailPanel({ dateISO, events, onOpenSite, onOpenIntervention, onCre
               {ev.kind === "site" ? <Building2 size={14} color="#5B6B7D" /> : <ClipboardList size={14} color="#5B6B7D" />}
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 13, fontWeight: 600, color: "#1A1F26", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{ev.label}</div>
-                <div style={{ fontSize: 11, color: "#5B6B7D" }}>{ev.kind === "site" ? "Site" : "Clôture d'intervention"} {ev.sub ? "· " + ev.sub : ""}</div>
+                <div style={{ fontSize: 11, color: "#5B6B7D" }}>{ev.kind === "site" ? "Site" : "Rapport d'intervention"} {ev.sub ? "· " + ev.sub : ""}</div>
               </div>
               <StatusBadge label={ev.statusLabel} size="sm" />
             </div>
@@ -11708,7 +11708,7 @@ function docxBlocInsecable(enfants) {
     })] })],
   });
 }
-function docxHeading(text, avant = 380, apres = 180) {
+function docxHeading(text, avant = 680, apres = 200) {
   return new DOCX.Paragraph({
     spacing: { before: avant, after: apres },
     keepNext: true,
@@ -13728,7 +13728,7 @@ function docxCourbeDeclenchement(eq, titre) {
     : "Essai(s) non conforme(s) : " + nonConformes.map(([label, etat]) => `${label} (${etat})`).join(", ") + ".";
   const paragraphePhrase = new DOCX.Paragraph({ spacing: { after: 80 }, children: [new DOCX.TextRun({ text: phrase, bold: true, size: 18, color: nonConformes.length === 0 ? DOCX_GREEN : DOCX_RED })] });
   // Le titre, la première image et (s'il n'y en a qu'une) la phrase de conformité forment un seul bloc.
-  const enTete = titre ? [docxHeading(titre, 240, 140)] : [];
+  const enTete = titre ? [docxHeading(titre, 480, 160)] : [];
   if (contenus.length <= 1) {
     elements.push(docxBlocInsecable([...enTete, ...contenus, paragraphePhrase]));
   } else {
@@ -13757,7 +13757,7 @@ function docxCourbeDecharge(eq) {
   ];
   if (!contenus.length) return elements;
   // Le titre et la première image ne forment qu'un bloc : le titre ne peut pas rester seul en bas de page.
-  elements.push(docxBlocInsecable([docxHeading("Courbe de décharge batterie", 240, 140), contenus[0]]), ...contenus.slice(1));
+  elements.push(docxBlocInsecable([docxHeading("Courbe de décharge batterie", 480, 160), contenus[0]]), ...contenus.slice(1));
   return elements;
 }
 // Saut de page : un vrai saut dans un paragraphe minuscule (Pages ignore la propriété « saut de page avant » d'un paragraphe).
@@ -13802,7 +13802,7 @@ function docxEquipementElements(eq, locaux, allSites) {
       else { imgW = 400; imgH = 208; }
       const img = docxImage(schemaImg, imgW, imgH);
       if (img) {
-        elements.push(docxBlocInsecable([docxHeading("Schéma synoptique", 240, 140), new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, spacing: { after: 100 }, children: [img] })]));
+        elements.push(docxBlocInsecable([docxHeading("Schéma synoptique", 480, 160), new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, spacing: { after: 100 }, children: [img] })]));
       }
     }
   }
@@ -13898,7 +13898,7 @@ function docxEquipementElements(eq, locaux, allSites) {
         // Le titre de la section (pour la première branche), le graphique et sa légende ne forment qu'un
         // seul bloc : le titre ne peut pas rester seul en bas d'une page, avec le graphique page suivante.
         const bloc = [];
-        if (indexGroupe === 0) bloc.push(docxHeading(sec.title, 240, 100));
+        if (indexGroupe === 0) bloc.push(docxHeading(sec.title, 480, 140));
         if (imgGraph) {
           bloc.push(new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, spacing: { before: 140, after: 60 }, children: [imgGraph] }));
         } else if (plusieursBranches) {
@@ -14613,7 +14613,7 @@ async function generateSiteDocx(site, allSites) {
   if (site.rapport.syntheseRemarques) {
     // Même espacement que celui appliqué avant "Locaux", pour bien détacher cette section de ce
     // qui précède (tableau "Rapport").
-    children.push(docxHeading("Synthèse des remarques et préconisations", 520, 160));
+    children.push(docxHeading("Synthèse des remarques et préconisations"));
     if (remarquesStructurees(site.rapport.syntheseRemarques)) {
       children.push(...docxSyntheseSiteStructuree(site.rapport.syntheseRemarques));
     } else {
@@ -14682,9 +14682,9 @@ async function generateSiteDocx(site, allSites) {
   return DOCX.Packer.toBlob(doc);
 }
 
-// ===== Clôture d'intervention (Word) =====
-// Document court remis au client à la fin de l'intervention : ce n'est PAS un rapport détaillé (le
-// rapport de maintenance du site reste le document de référence), mais une clôture — synthèse de
+// ===== Rapport d'intervention (Word) =====
+// Document court remis au client à la fin de l'intervention : ce n'est PAS le rapport de maintenance détaillé du site (qui reste le
+// document de référence), mais le rapport d'intervention — synthèse de
 // l'intervention, équipements contrôlés et leur état, points importants, conclusion et signatures.
 function dateFrIso(iso) {
   const m = String(iso || "").match(/^(\d{4})-(\d{2})-(\d{2})/);
@@ -14728,22 +14728,49 @@ function phraseSyntheseIntervention(iv, tousTechniciens) {
   return phrases.join(" ");
 }
 
+// En-tête du rapport d'intervention : même charte que la couverture du rapport de site (bloc sombre, bande ambre, cartes chiffrées), sans page de garde séparée
+// puisque le rapport d'intervention tient sur une à deux pages. La barre verticale du bloc reprend la couleur du statut.
+function docxEnteteIntervention(iv, couleurStatut) {
+  const logo = docxImage(LOGO_TRANSPARENT, 120, Math.round(120 / LOGO_TRANSPARENT_RATIO));
+  const aucune = docxToutesAucune();
+  const sansFilets = { ...aucune, insideHorizontal: docxAucuneBordure(), insideVertical: docxAucuneBordure() };
+  const liste = iv.equipements || [];
+  const c = { conforme: 0, degrade: 0, defaillant: 0 };
+  liste.forEach((e) => { const r = RANK_OF[e.etat || "Conforme"]; if (r >= 2) c.defaillant++; else if (r === 1) c.degrade++; else if (r === 0) c.conforme++; });
+  const bloc = docxTable({
+    width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: [TABLE_WIDTH], borders: sansFilets,
+    rows: [new DOCX.TableRow({ cantSplit: true, children: [new DOCX.TableCell({
+      width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_DARK },
+      margins: { top: 420, bottom: 460, left: 560, right: 420 },
+      borders: { top: aucune.top, bottom: aucune.bottom, right: aucune.right, left: { style: DOCX.BorderStyle.SINGLE, size: 72, color: couleurStatut } },
+      children: [
+        new DOCX.Paragraph({ spacing: { before: 0, after: 0 }, children: logo ? [logo] : [] }),
+        new DOCX.Paragraph({ spacing: { before: 240, after: 0 }, children: [new DOCX.TextRun({ text: "RAPPORT D'INTERVENTION", bold: true, color: DOCX_AMBER, size: 17, characterSpacing: 50 })] }),
+        new DOCX.Paragraph({ spacing: { before: 100, after: 60 }, children: [new DOCX.TextRun({ text: iv.numeroRI || "Rapport d'intervention", bold: true, color: DOCX_WHITE, size: 56 })] }),
+        new DOCX.Paragraph({ spacing: { before: 0, after: 0 }, children: [new DOCX.TextRun({ text: [iv.client, iv.site].filter(Boolean).join("  —  "), color: DOCX_SILVER, size: 22 })] }),
+        new DOCX.Paragraph({ spacing: { before: 220, after: 0 }, indent: { right: 7400 }, border: { bottom: { style: DOCX.BorderStyle.SINGLE, size: 30, color: DOCX_AMBER, space: 1 } }, children: [new DOCX.TextRun({ text: "", size: 4 })] }),
+        new DOCX.Paragraph({ spacing: { before: 0, after: 0 }, children: [new DOCX.TextRun({ text: "", size: 12 })] }),
+      ],
+    })] })],
+  });
+  const bande = docxTable({
+    width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: [TABLE_WIDTH], borders: sansFilets,
+    rows: [new DOCX.TableRow({ children: [new DOCX.TableCell({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_AMBER }, borders: aucune, margins: { top: 50, bottom: 50, left: 100, right: 100 }, children: [docxMiniParagraphe()] })] })],
+  });
+  const cartes = docxRangeeCartes([
+    { label: "Équipements", valeur: String(liste.length), couleur: DOCX_BLUE, taille: 48, fond: DOCX_LIGHT },
+    { label: "Conformes", valeur: String(c.conforme), couleur: DOCX_GREEN, taille: 48, fond: DOCX_LIGHT },
+    { label: "Dégradés", valeur: String(c.degrade), couleur: DOCX_ORANGE, taille: 48, fond: DOCX_LIGHT },
+    { label: "Défaillants", valeur: String(c.defaillant), couleur: DOCX_RED, taille: 48, fond: DOCX_LIGHT },
+  ], TABLE_WIDTH, 160);
+  return [bloc, bande, docxSpacer(300), cartes];
+}
 async function generateInterventionDocx(iv) {
   await ensureDocx();
   iv = repairIntervention(iv);
   iv = await resolvePhotosForDocx(iv);
   const duree = dureeIntervention(iv.heureDebut, iv.heureFin);
-  const logoImg = docxImage(LOGO_TRANSPARENT, 62, Math.round(62 / LOGO_TRANSPARENT_RATIO));
   const couleurStatutRI = iv.statut === "Clôturée" ? DOCX_GREEN : DOCX_ORANGE;
-  const headerTable = docxTable({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: [TABLE_WIDTH], rows: [new DOCX.TableRow({ children: [new DOCX.TableCell({
-    width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_DARK },
-    borders: { left: { style: DOCX.BorderStyle.SINGLE, size: 36, color: couleurStatutRI } },
-    children: [
-      new DOCX.Paragraph({ spacing: { before: 110, after: 20 }, indent: { left: 60 }, children: [...(logoImg ? [logoImg] : []), new DOCX.TextRun({ text: "   CLÔTURE D'INTERVENTION", color: DOCX_SILVER, size: 16 })] }),
-      new DOCX.Paragraph({ spacing: { after: 10 }, indent: { left: 60 }, children: [new DOCX.TextRun({ text: iv.numeroRI || "", bold: true, color: DOCX_WHITE, size: 30 })] }),
-      new DOCX.Paragraph({ spacing: { after: 110 }, indent: { left: 60 }, children: [new DOCX.TextRun({ text: `${iv.client || ""} — ${iv.site || ""}`, color: DOCX_SILVER, size: 20 })] }),
-    ],
-  })] })] });
 
   const tousTechniciens = [iv.technicien, ...(iv.techniciensSupplementaires || [])].filter(Boolean).join(", ");
   const toutesJournees = [{ date: iv.date, heureDebut: iv.heureDebut, heureFin: iv.heureFin }, ...(iv.journeesSupplementaires || [])].filter((j) => j.date);
@@ -14751,10 +14778,10 @@ async function generateInterventionDocx(iv) {
   const natureText = NATURE_INTERVENTION.filter((n) => iv.nature && iv.nature[n.key]).map((n) => n.label).join(", ");
   const para = (texte, opts = {}) => new DOCX.Paragraph({ spacing: { after: opts.after ?? 80 }, children: [new DOCX.TextRun({ text: texte, size: opts.size ?? 18, bold: !!opts.bold, color: opts.color })] });
 
-  const children = [headerTable, docxSpacer(60)];
+  const children = [...docxEnteteIntervention(iv, couleurStatutRI), docxSpacer(120)];
 
   // 1. Synthèse de l'intervention
-  children.push(docxHeading("Synthèse de l'intervention", 150, 80));
+  children.push(docxHeading("Synthèse de l'intervention", 560, 180));
   children.push(para(phraseSyntheseIntervention(iv, tousTechniciens)));
   const infos = [
     ["Client", iv.client], ["Site", iv.site],
@@ -14776,11 +14803,11 @@ async function generateInterventionDocx(iv) {
     }
     children.push(docxTable({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: Wi, rows: lignesInfo }));
   }
-  children.push(docxSpacer(50));
+  children.push(docxSpacer(140));
 
   // 2. Équipements contrôlés et leur état
   const liste = iv.equipements || [];
-  children.push(docxHeading(liste.length > 1 ? `Équipements contrôlés (${liste.length})` : "Équipement contrôlé", 150, 80));
+  children.push(docxHeading(liste.length > 1 ? `Équipements contrôlés (${liste.length})` : "Équipement contrôlé"));
   if (!liste.length) {
     children.push(para("Aucun équipement renseigné.", { color: "666666" }));
   } else {
@@ -14799,10 +14826,10 @@ async function generateInterventionDocx(iv) {
     });
     children.push(docxTable({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: W, rows: [entete, ...lignes] }));
   }
-  children.push(docxSpacer(50));
+  children.push(docxSpacer(140));
 
   // 3. Points importants : travaux, mesures notables, équipements à surveiller, anomalies et recommandations
-  children.push(docxHeading("Points importants", 150, 80));
+  children.push(docxHeading("Points importants"));
   const bloc = [];
   const ajouterPuces = (titre, items) => { if (items.length) bloc.push(docxSousTitreRemarques(titre), ...docxPuces(items, 18, 30)); };
   const lignesUtiles = (t) => String(t || "").split("\n").map((l) => l.trim().replace(/^[•\-–*]\s*/, "")).filter(Boolean);
@@ -14833,7 +14860,7 @@ async function generateInterventionDocx(iv) {
   }
   if (!bloc.length) bloc.push(para("Aucun point particulier à signaler.", { color: "666666" }));
   children.push(...bloc);
-  children.push(docxSpacer(40));
+  children.push(docxSpacer(120));
 
   // 4. Conclusion
   const concl = iv.conclusion || "Conforme";
@@ -14852,10 +14879,10 @@ async function generateInterventionDocx(iv) {
       new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: phraseConcl, size: 18, color: DOCX_DARK })] }),
     ],
   })] })] }));
-  children.push(docxSpacer(50));
+  children.push(docxSpacer(140));
 
   // 5. Signatures (client | technicien) — cadre vide conservé si non signé, pour signature sur papier
-  children.push(docxHeading("Validation", 150, 80));
+  children.push(docxHeading("Validation"));
   const sigClient = iv.validation?.signatureClient ? docxImage(iv.validation.signatureClient, 190, 75) : null;
   const sigHT = iv.validation?.signatureHT ? docxImage(iv.validation.signatureHT, 190, 75) : null;
   const bordSig = { style: DOCX.BorderStyle.SINGLE, size: 4, color: "C0C6CE" };
@@ -14872,11 +14899,11 @@ async function generateInterventionDocx(iv) {
     celluleSignature("Technicien HT Maintenance", iv.validation?.technicienHT || iv.technicien, sigHT),
   ]})] }));
 
-  const doc = new DOCX.Document({ styles: DOCX_STYLES, features: { updateFields: true }, sections: [{ properties: { page: { margin: { top: 420, bottom: 420, left: 600, right: 600 } } }, footers: { default: docxFooterPagination() }, children }] });
+  const doc = new DOCX.Document({ styles: DOCX_STYLES, features: { updateFields: true }, sections: [{ properties: { page: PAGE_CORPS }, footers: { default: docxFooterPagination() }, children }] });
   return DOCX.Packer.toBlob(doc);
 }
 
-// Nom des fichiers Word : <PRÉFIXE>_<date>_<client>_<site>.docx — RI pour une clôture d'intervention,
+// Nom des fichiers Word : <PRÉFIXE>_<date>_<client>_<site>.docx — RI pour un rapport d'intervention,
 // RMP pour un rapport de maintenance. Date au format AAAA-MM-JJ (classement chronologique) ; accents
 // retirés pour rester lisible sur tous les systèmes. Une partie vide est simplement omise.
 function morceauNomFichier(texte) {
@@ -15939,7 +15966,7 @@ export default function App({ currentUser, onLogout }) {
     });
   };
 
-  // Génère le document (rapport de maintenance ou clôture d'intervention) et le télécharge en .docx
+  // Génère le document (rapport de maintenance ou rapport d'intervention) et le télécharge en .docx
   // réel (compatible Microsoft Word ET Pages sur Mac), entièrement modifiable.
   useEffect(() => {
     if (!printSite && !printIv && !printAnnexeSite) return;
@@ -16046,7 +16073,7 @@ export default function App({ currentUser, onLogout }) {
     setSelectedIvId(null);
   }
 
-  // Sauvegarde manuelle : exporte toutes les données (sites + clôtures d'intervention) dans un
+  // Sauvegarde manuelle : exporte toutes les données (sites + rapports d'intervention) dans un
   // fichier téléchargeable, et permet de les recharger ensuite (autre appareil, restauration…).
   const importInputRef = useRef(null);
   const [importError, setImportError] = useState(false);
@@ -16112,7 +16139,7 @@ export default function App({ currentUser, onLogout }) {
                   HT <span style={{ color: BRAND.amber }}>Maintenance</span>
                 </h1>
                 <div style={{ fontSize: 12, color: "#5B6B7D" }}>
-                  {selected ? "Fiche site" : selectedIv ? "Clôture d'intervention" : view === "sites" ? "Suivi des interventions de maintenance préventive HT" : view === "interventions" ? "Clôtures d'intervention" : "Calendrier des interventions"}
+                  {selected ? "Fiche site" : selectedIv ? "Rapport d'intervention" : view === "sites" ? "Suivi des interventions de maintenance préventive HT" : view === "interventions" ? "Rapports d'intervention" : "Calendrier des interventions"}
                 </div>
               </div>
             </div>
@@ -16195,7 +16222,7 @@ export default function App({ currentUser, onLogout }) {
                 border: view === "interventions" ? "1px solid #FFC10755" : "1px solid #D8DEE5", background: view === "interventions" ? "rgba(255,193,7,0.12)" : "transparent",
                 color: view === "interventions" ? BRAND.amber : "#5B6B7D", fontSize: 12.5, fontWeight: 600, cursor: "pointer",
               }}>
-                <ClipboardList size={13} /> Clôtures d'intervention
+                <ClipboardList size={13} /> Rapports d'intervention
               </button>
               <button onClick={() => setView("calendrier")} style={{
                 display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: 999,
