@@ -11650,7 +11650,9 @@ const DOCX_GREEN = "0F8A5F", DOCX_ORANGE = "B5730A", DOCX_RED = "C0392B", DOCX_W
 // mot-symbole « HT MAINTENANCE » à barre bleue, bande ambre en pied de couverture. Police Calibri (présente dans Word) en capitales espacées pour les titres.
 const A4_LARGEUR = 11906, A4_HAUTEUR = 16838;
 const DOCX_STYLES = { default: { document: { run: { font: "Calibri", color: DOCX_DARK } } } };
-const PAGE_CORPS = { size: { width: A4_LARGEUR, height: A4_HAUTEUR }, margin: { top: 900, bottom: 1000, left: 1150, right: 1150, header: 400, footer: 450 } };
+// Une seule section et des marges normales pour tout le document : Pages ne gère pas des marges différentes d'une section à l'autre, ni les sauts de page
+// par propriété de paragraphe, ni les hauteurs de ligne / de rangée « exactes » — on s'en tient donc aux éléments que Word, LibreOffice et Pages respectent tous.
+const PAGE_CORPS = { size: { width: A4_LARGEUR, height: A4_HAUTEUR }, margin: { top: 900, bottom: 1000, left: 1153, right: 1153, header: 400, footer: 450 } };
 function docxTable(opts) {
   const aucune = { style: DOCX.BorderStyle.NONE, size: 0, color: "FFFFFF" };
   const fin = { style: DOCX.BorderStyle.SINGLE, size: 4, color: "E2E6EB" };
@@ -11658,7 +11660,7 @@ function docxTable(opts) {
 }
 const docxAucuneBordure = () => ({ style: DOCX.BorderStyle.NONE, size: 0, color: "FFFFFF" });
 const docxToutesAucune = () => { const a = docxAucuneBordure(); return { top: a, bottom: a, left: a, right: a }; };
-const docxMiniParagraphe = () => new DOCX.Paragraph({ spacing: { before: 0, after: 0, line: 20, lineRule: DOCX.LineRuleType.EXACT }, children: [new DOCX.TextRun({ text: "", size: 2 })] });
+const docxMiniParagraphe = () => new DOCX.Paragraph({ spacing: { before: 0, after: 0 }, children: [new DOCX.TextRun({ text: "", size: 4 })] });
 // Carte : fond clair ou blanc, filet de couleur en haut, petit libellé en capitales puis valeur en gras.
 function docxCarte({ label, valeur, couleur, taille = 30, sousTexte, fond = DOCX_WHITE }, largeur) {
   const a = docxAucuneBordure();
@@ -13758,9 +13760,8 @@ function docxCourbeDecharge(eq) {
   elements.push(docxBlocInsecable([docxHeading("Courbe de décharge batterie", 240, 140), contenus[0]]), ...contenus.slice(1));
   return elements;
 }
-// Début de page : paragraphe minuscule à « saut de page avant » (contrairement à un saut de page isolé, il ne crée jamais de page blanche
-// quand le contenu précédent remplit déjà la page).
-function docxDebutPage() { return new DOCX.Paragraph({ pageBreakBefore: true, spacing: { before: 0, after: 0, line: 20, lineRule: DOCX.LineRuleType.EXACT }, children: [new DOCX.TextRun({ text: "", size: 2 })] }); }
+// Saut de page : un vrai saut dans un paragraphe minuscule (Pages ignore la propriété « saut de page avant » d'un paragraphe).
+function docxDebutPage() { return new DOCX.Paragraph({ spacing: { before: 0, after: 0 }, children: [new DOCX.TextRun({ text: "", size: 2 }), new DOCX.PageBreak()] }); }
 function docxEquipementElements(eq, locaux, allSites) {
   // Filet de sécurité : quelle que soit l'origine des données (ancien format, migration, edge case),
   // on s'assure que la structure de contrôles est complète avant de générer le rapport — évite un
@@ -13768,11 +13769,11 @@ function docxEquipementElements(eq, locaux, allSites) {
   eq = repairEquipementControles(eq);
   const schema = schemaFiltreeParNiveau(getSchema(eq), eq.niveauMaintenance);
   if (!schema) {
-    return [docxDebutPage(), docxEquipHeader((eq.type || "Équipement") + (eq.identification.repere ? " — " + eq.identification.repere : ""), docxBookmarkId(eq), eq.etatFinal), docxSpacer(40),
+    return [docxEquipHeader((eq.type || "Équipement") + (eq.identification.repere ? " — " + eq.identification.repere : ""), docxBookmarkId(eq), eq.etatFinal), docxSpacer(40),
       new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: "Type d'équipement non reconnu — données non affichées.", italics: true, color: "C0392B", size: 18 })] }), docxSpacer()];
   }
   const localNom = (locaux || []).find((l) => l.id === eq.localId);
-  const elements = [docxDebutPage(), docxEquipHeader(eq.type + (eq.identification.repere ? " — " + eq.identification.repere : ""), docxBookmarkId(eq), eq.etatFinal), docxSpacer(40)];
+  const elements = [docxEquipHeader(eq.type + (eq.identification.repere ? " — " + eq.identification.repere : ""), docxBookmarkId(eq), eq.etatFinal), docxSpacer(40)];
   // Le local est une ligne du tableau d'identification, juste sous le nom / repère. Un équipement sans
   // tableau d'identification (ex. « Sécurité ») garde l'ancienne mention discrète au-dessus.
   if (localNom && !schema.identification.length) elements.push(new DOCX.Paragraph({ spacing: { after: 60 }, children: [new DOCX.TextRun({ text: "Local : " + (localNom.nom || "Local sans nom"), size: 16, color: "666666", italics: true })] }));
@@ -14455,62 +14456,62 @@ async function generateAnnexePhotosDocx(site) {
   return DOCX.Packer.toBlob(doc);
 }
 function docxCoverPage(site, infos = {}) {
-  // Page pleine : un tableau de la taille de la page, fond #1A1F26, bande ambre en pied (comme la couverture de la présentation commerciale).
-  const interne = A4_LARGEUR - 2 * 950;
+  // Bloc sombre à la largeur du rapport (logo, mot-symbole, titre), bande ambre, puis cartes Site / Client / Dates — le tout dans le flux de la page :
+  // aucune hauteur imposée, aucune marge particulière (compatible Word, LibreOffice et Pages).
   const logo = docxImage(LOGO_TRANSPARENT, 150, Math.round(150 / LOGO_TRANSPARENT_RATIO));
   const photoDataUrl = (site.photoSite || [])[0]?.dataUrl;
-  const photo = photoDataUrl ? docxImage(photoDataUrl, 210, 158) : null;
+  const photo = photoDataUrl ? docxImage(photoDataUrl, 170, 128) : null;
+  const compact = !!photo; // avec une photo, on resserre le bloc sombre et les espaces pour que la couverture tienne sur une seule page
   const dateGeneration = new Date().toLocaleDateString("fr-FR");
   const sousSite = [site.adresse, site.local ? "Local : " + site.local : ""].filter(Boolean).join("  ·  ");
-  const cartes = [
-    docxRangeeCartes([{ label: "Site", valeur: site.nom || "—", couleur: DOCX_BLUE, taille: 40, sousTexte: sousSite }], interne),
-    docxRangeeCartes([
-      { label: "Client", valeur: site.client || "—", couleur: DOCX_AMBER, taille: 28 },
-      { label: "Date(s) d'intervention", valeur: infos.journees || "—", couleur: DOCX_AMBER, taille: 24 },
-    ], interne),
-    ...((infos.intervenants || site.rapport?.offre?.numero) ? [docxRangeeCartes([
-      { label: "Intervenant(s)", valeur: infos.intervenants || "—", couleur: DOCX_BLUE, taille: 24 },
-      ...(site.rapport?.offre?.numero ? [{ label: "Offre / Devis", valeur: "N° " + site.rapport.offre.numero, couleur: DOCX_BLUE, taille: 24 }] : []),
-    ], interne)] : []),
-  ];
-  const barreAmbre = docxTable({ width: { size: 1500, type: DOCX.WidthType.DXA }, columnWidths: [1500], borders: { ...docxToutesAucune(), insideHorizontal: docxAucuneBordure(), insideVertical: docxAucuneBordure() },
-    rows: [new DOCX.TableRow({ height: { value: 90, rule: DOCX.HeightRule.EXACT }, children: [new DOCX.TableCell({ width: { size: 1500, type: DOCX.WidthType.DXA }, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_AMBER }, borders: docxToutesAucune(), children: [docxMiniParagraphe()] })] })] });
-  const contenu = [
-    new DOCX.Paragraph({ spacing: { before: 0, after: 0 }, children: logo ? [logo] : [] }),
-    // Mot-symbole : barre bleue verticale + HT MAINTENANCE en capitales espacées
-    new DOCX.Paragraph({ spacing: { before: 420, after: 0 }, indent: { left: 220 }, border: { left: { style: DOCX.BorderStyle.SINGLE, size: 48, color: DOCX_BLUE, space: 14 } }, children: [
-      new DOCX.TextRun({ text: "HT ", bold: true, color: DOCX_WHITE, size: 44, characterSpacing: 70 }),
-      new DOCX.TextRun({ text: "MAINTENANCE", bold: true, color: DOCX_SILVER, size: 44, characterSpacing: 70 }),
-    ] }),
-    new DOCX.Paragraph({ spacing: { before: 60, after: 0 }, indent: { left: 220 }, children: [new DOCX.TextRun({ text: "Maintenance électrique HTA / BT / Conversion d'énergie", color: DOCX_SILVER, size: 18, characterSpacing: 10 })] }),
-    new DOCX.Paragraph({ spacing: { before: photo ? 700 : 2100, after: 0 }, children: [] }),
-    new DOCX.Paragraph({ spacing: { before: 0, after: 0, line: 880, lineRule: DOCX.LineRuleType.EXACT }, children: [new DOCX.TextRun({ text: "RAPPORT DE MAINTENANCE", bold: true, color: DOCX_WHITE, size: 76, characterSpacing: 10 })] }),
-    new DOCX.Paragraph({ spacing: { before: 0, after: 0, line: 880, lineRule: DOCX.LineRuleType.EXACT }, children: [new DOCX.TextRun({ text: "PRÉVENTIVE", bold: true, color: DOCX_AMBER, size: 76, characterSpacing: 10 })] }),
-    new DOCX.Paragraph({ spacing: { before: 240, after: 280 }, children: [new DOCX.TextRun({ text: "HTA / BT / Conversion d'énergie", color: DOCX_SILVER, size: 30 })] }),
-    barreAmbre,
-    new DOCX.Paragraph({ spacing: { before: 0, after: photo ? 380 : 1100 }, children: [] }),
-    cartes[0], new DOCX.Paragraph({ spacing: { before: 0, after: 200 }, children: [] }),
-    cartes[1], new DOCX.Paragraph({ spacing: { before: 0, after: cartes[2] ? 200 : 0 }, children: [] }),
-    ...(cartes[2] ? [cartes[2]] : []),
-    ...(photo ? [new DOCX.Paragraph({ spacing: { before: 300, after: 0 }, children: [photo] })] : []),
-    new DOCX.Paragraph({ spacing: { before: photo ? 260 : 1000, after: 0 }, children: [new DOCX.TextRun({ text: "Rapport généré le " + dateGeneration, color: "8B96A3", size: 17, italics: true })] }),
-  ];
   const aucune = docxToutesAucune();
-  const hauteurTotale = A4_HAUTEUR - 70; // marge de sécurité : le paragraphe qui suit le tableau ne doit pas provoquer une page vide
-  const bande = 300;
-  return [docxTable({
-    width: { size: A4_LARGEUR, type: DOCX.WidthType.DXA }, columnWidths: [A4_LARGEUR], borders: { ...aucune, insideHorizontal: docxAucuneBordure(), insideVertical: docxAucuneBordure() },
-    rows: [
-      new DOCX.TableRow({ cantSplit: true, height: { value: hauteurTotale - bande, rule: DOCX.HeightRule.EXACT }, children: [new DOCX.TableCell({
-        width: { size: A4_LARGEUR, type: DOCX.WidthType.DXA }, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_DARK }, borders: aucune,
-        margins: { top: 950, bottom: 400, left: 950, right: 950 }, verticalAlign: DOCX.VerticalAlign.TOP,
-        children: [...contenu, docxMiniParagraphe()],
-      })] }),
-      new DOCX.TableRow({ cantSplit: true, height: { value: bande, rule: DOCX.HeightRule.EXACT }, children: [new DOCX.TableCell({
-        width: { size: A4_LARGEUR, type: DOCX.WidthType.DXA }, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_AMBER }, borders: aucune, children: [docxMiniParagraphe()],
-      })] }),
-    ],
-  }), docxMiniParagraphe()];
+  const sansFiletsInterieurs = { ...aucune, insideHorizontal: docxAucuneBordure(), insideVertical: docxAucuneBordure() };
+  const heros = docxTable({
+    width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: [TABLE_WIDTH], borders: sansFiletsInterieurs,
+    rows: [new DOCX.TableRow({ cantSplit: true, children: [new DOCX.TableCell({
+      width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_DARK }, borders: aucune,
+      margins: { top: compact ? 400 : 560, bottom: compact ? 450 : 700, left: 640, right: 500 },
+      children: [
+        new DOCX.Paragraph({ spacing: { before: 0, after: 0 }, children: logo ? [logo] : [] }),
+        // Mot-symbole : barre bleue verticale + HT MAINTENANCE en capitales espacées
+        new DOCX.Paragraph({ spacing: { before: compact ? 240 : 360, after: 0 }, indent: { left: 200 }, border: { left: { style: DOCX.BorderStyle.SINGLE, size: 48, color: DOCX_BLUE, space: 12 } }, children: [
+          new DOCX.TextRun({ text: "HT ", bold: true, color: DOCX_WHITE, size: 36, characterSpacing: 60 }),
+          new DOCX.TextRun({ text: "MAINTENANCE", bold: true, color: DOCX_SILVER, size: 36, characterSpacing: 60 }),
+        ] }),
+        new DOCX.Paragraph({ spacing: { before: 60, after: 0 }, indent: { left: 200 }, children: [new DOCX.TextRun({ text: "Maintenance électrique HTA / BT / Conversion d'énergie", color: DOCX_SILVER, size: 17 })] }),
+        new DOCX.Paragraph({ spacing: { before: compact ? 520 : 900, after: 0 }, children: [new DOCX.TextRun({ text: "RAPPORT DE MAINTENANCE", bold: true, color: DOCX_WHITE, size: 58 })] }),
+        new DOCX.Paragraph({ spacing: { before: 0, after: 0 }, children: [new DOCX.TextRun({ text: "PRÉVENTIVE", bold: true, color: DOCX_AMBER, size: 58 })] }),
+        new DOCX.Paragraph({ spacing: { before: 200, after: 260 }, children: [new DOCX.TextRun({ text: "HTA / BT / Conversion d'énergie", color: DOCX_SILVER, size: 28 })] }),
+        // Court filet ambre : bordure de paragraphe raccourcie par un retrait à droite
+        new DOCX.Paragraph({ spacing: { before: 0, after: 0 }, indent: { right: 6900 }, border: { bottom: { style: DOCX.BorderStyle.SINGLE, size: 36, color: DOCX_AMBER, space: 1 } }, children: [new DOCX.TextRun({ text: "", size: 4 })] }),
+        new DOCX.Paragraph({ spacing: { before: 0, after: 0 }, children: [new DOCX.TextRun({ text: "", size: 12 })] }),
+      ],
+    })] })],
+  });
+  const bandeAmbre = docxTable({
+    width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: [TABLE_WIDTH], borders: sansFiletsInterieurs,
+    rows: [new DOCX.TableRow({ children: [new DOCX.TableCell({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_AMBER }, borders: aucune, margins: { top: 50, bottom: 50, left: 100, right: 100 }, children: [docxMiniParagraphe()] })] })],
+  });
+  const cartes = [
+    docxRangeeCartes([{ label: "Site", valeur: site.nom || "—", couleur: DOCX_BLUE, taille: 38, sousTexte: sousSite, fond: DOCX_LIGHT }], TABLE_WIDTH),
+    docxRangeeCartes([
+      { label: "Client", valeur: site.client || "—", couleur: DOCX_AMBER, taille: 26, fond: DOCX_LIGHT },
+      { label: "Date(s) d'intervention", valeur: infos.journees || "—", couleur: DOCX_AMBER, taille: 22, fond: DOCX_LIGHT },
+    ], TABLE_WIDTH),
+    ...((infos.intervenants || site.rapport?.offre?.numero) ? [docxRangeeCartes([
+      { label: "Intervenant(s)", valeur: infos.intervenants || "—", couleur: DOCX_BLUE, taille: 22, fond: DOCX_LIGHT },
+      ...(site.rapport?.offre?.numero ? [{ label: "Offre / Devis", valeur: "N° " + site.rapport.offre.numero, couleur: DOCX_BLUE, taille: 22, fond: DOCX_LIGHT }] : []),
+    ], TABLE_WIDTH)] : []),
+  ];
+  return [
+    heros, bandeAmbre,
+    new DOCX.Paragraph({ spacing: { before: 0, after: compact ? 300 : 500 }, children: [] }),
+    cartes[0], new DOCX.Paragraph({ spacing: { before: 0, after: compact ? 160 : 260 }, children: [] }),
+    cartes[1], new DOCX.Paragraph({ spacing: { before: 0, after: cartes[2] ? (compact ? 160 : 260) : 0 }, children: [] }),
+    ...(cartes[2] ? [cartes[2]] : []),
+    ...(photo ? [new DOCX.Paragraph({ spacing: { before: 250, after: 0 }, children: [photo] })] : []),
+    new DOCX.Paragraph({ spacing: { before: compact ? 200 : 500, after: 0 }, children: [new DOCX.TextRun({ text: "Rapport généré le " + dateGeneration, color: "8B96A3", size: 17, italics: true }), new DOCX.PageBreak()] }), // le saut de page est porté par ce dernier paragraphe : jamais de page blanche après la couverture
+  ];
 }
 
 function docxBandeauEtat(site, rankLabel, rank, compteur) {
@@ -14663,14 +14664,20 @@ async function generateSiteDocx(site, allSites) {
     children.push(docxHeading("Locaux")); children.push(locauxTable); children.push(docxSpacer());
   }
 
-  equipementsTries(site.equipements).forEach((eq) => { children.push(...docxEquipementElements(eq, site.locaux, allSites)); });
+  equipementsTries(site.equipements).forEach((eq) => {
+    // Chaque équipement commence sur une nouvelle page. Le saut est porté par le DERNIER PARAGRAPHE qui précède (et non par un paragraphe isolé) :
+    // si le contenu précédent remplit exactement la page, un paragraphe isolé passerait sur la page suivante et y créerait une page blanche.
+    const dernier = children[children.length - 1];
+    if (dernier instanceof DOCX.Paragraph) dernier.addChildElement(new DOCX.PageBreak());
+    else children.push(docxDebutPage());
+    children.push(...docxEquipementElements(eq, site.locaux, allSites));
+  });
 
   children.push(docxSpacer(200));
   children.push(new DOCX.Paragraph({ border: { top: { color: DOCX_SILVER, space: 4, style: DOCX.BorderStyle.SINGLE, size: 4 } }, spacing: { before: 100 }, children: [new DOCX.TextRun({ text: "HT Maintenance — Maintenance électrique HTA / BT", size: 14, color: "888888", italics: true })] }));
 
   const doc = new DOCX.Document({ styles: DOCX_STYLES, features: { updateFields: true }, sections: [
-    { properties: { page: { size: { width: A4_LARGEUR, height: A4_HAUTEUR }, margin: { top: 0, bottom: 0, left: 0, right: 0, header: 0, footer: 0 } } }, children: couverture },
-    { properties: { type: DOCX.SectionType.NEXT_PAGE, page: PAGE_CORPS }, footers: { default: docxFooterPagination() }, children },
+    { properties: { titlePage: true, page: PAGE_CORPS }, footers: { default: docxFooterPagination(), first: new DOCX.Footer({ children: [new DOCX.Paragraph("")] }) }, children: [...couverture, ...children] },
   ] });
   return DOCX.Packer.toBlob(doc);
 }
