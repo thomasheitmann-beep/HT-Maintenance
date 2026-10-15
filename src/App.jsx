@@ -11,7 +11,7 @@ const LOGO_TRANSPARENT = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAXwAAADV
 const LOGO_TRANSPARENT_RATIO = 1.784;
 const BRAND = { blue: "#0A5DA8", silver: "#C0C6CE", dark: "#1A1F26", amber: "#FFC107" };
 import {
-  Plus, Search, Camera, AlertTriangle, CheckCircle2, AlertOctagon,
+  Plus, Search, AlertTriangle, CheckCircle2, AlertOctagon,
   Trash2, ArrowLeft, Building2, Clock, ChevronRight, ChevronDown,
   MapPin, ShieldCheck, FileText, Settings2, Printer, ImagePlus,
   Mail, PenLine, RotateCcw, ClipboardList, X, MinusCircle, Download, Upload, Copy, RefreshCw, Users, Phone, Crop,
@@ -1474,12 +1474,15 @@ function lignesEcheancesRemplacement(eq) {
 }
 // Prévision sur les trois prochaines années : colonne « Immédiat » (échéance dépassée ou de l'année en cours), puis chaque année à venir.
 // Une pièce dont l'échéance tombe au-delà de l'horizon est listée sans marque.
+// Colonne par colonne, la case de l'année de remplacement est marquée (couleur selon l'urgence) ; toutes les autres cases sont vertes (pièce en bon état prévu,
+// ou déjà renouvelée à son échéance), pour que chaque pièce — même sans échéance proche — apparaisse sur les trois années.
 const COULEURS_PREVISION = [
   { fond: "FDECEA", texte: "C0392B" }, // immédiat
   { fond: "FDF3E3", texte: "8A5A0A" }, // année + 1
-  { fond: "E8F1FB", texte: "0A5DA8" }, // année + 2
-  { fond: "EAF6EF", texte: "0F8A5F" }, // année + 3
+  { fond: "FFF6CC", texte: "8A6D00" }, // année + 2
+  { fond: "E8F1FB", texte: "0A5DA8" }, // année + 3
 ];
+const COULEUR_PREVISION_OK = { fond: "EAF6EF", texte: "0F8A5F" };
 function previsionRemplacement(lignes, anneeRef = new Date().getFullYear()) {
   const annees = [anneeRef + 1, anneeRef + 2, anneeRef + 3];
   const items = (lignes || []).filter((l) => l.annee !== null && l.annee !== undefined)
@@ -5243,71 +5246,51 @@ function FileGallery({ files, onChange, idPrefix }) {
   );
 }
 
-// Photo d'ensemble de l'équipement (une seule) : appareil photo, fichier / photothèque, capture d'écran (bouton Coller ou Cmd/Ctrl+V dans la zone).
-// Enregistrée dans eq.photoEquipement = { id, dataUrl, caption } — envoyée vers le stockage comme les autres photos, et placée à droite du
-// tableau d'identification dans le rapport Word.
+// Photo d'ensemble de l'équipement (une seule). Un SEUL bouton « Ajouter une photo » : sur iPad / iPhone le système propose alors Prendre une photo,
+// Photothèque ou Choisir un fichier ; sur Mac, le sélecteur de fichiers. Une capture d'écran se colle avec Cmd/Ctrl+V depuis le bloc Identification.
+// Enregistrée dans eq.photoEquipement = { id, dataUrl, caption } — envoyée vers le stockage comme les autres photos, et placée à droite du tableau
+// d'identification dans le rapport Word.
+async function photoEquipementDepuisFichier(file) {
+  const dataUrl = CURRENT_USER_FOR_STORAGE ? await preparerPhoto(file) : await compressImage(file);
+  return { id: uid(), dataUrl, caption: "" };
+}
+function imageDuPressePapiers(e) {
+  const items = e.clipboardData && e.clipboardData.items;
+  if (!items) return null;
+  const FORMATS = ["image/png", "image/jpeg", "image/jpg", "image/webp", "image/gif"]; // TIFF (capture macOS) non décodable : ignoré
+  let meilleur = null;
+  for (const item of items) {
+    if (!item.type || !item.type.startsWith("image/")) continue;
+    const rang = FORMATS.indexOf(item.type);
+    if (rang !== -1 && (!meilleur || rang < meilleur.rang)) meilleur = { item, rang };
+  }
+  return meilleur ? meilleur.item.getAsFile() : null;
+}
 function PhotoEquipementField({ photo, onChange, idPrefix }) {
-  const inputFichier = useRef(null), inputCamera = useRef(null);
+  const inputRef = useRef(null);
   const [busy, setBusy] = useState(false);
   const [erreur, setErreur] = useState("");
   async function ajouter(file) {
     if (!file) return;
     setBusy(true); setErreur("");
-    try {
-      const dataUrl = CURRENT_USER_FOR_STORAGE ? await preparerPhoto(file) : await compressImage(file);
-      onChange({ id: uid(), dataUrl, caption: "" });
-    } catch (e) {
-      console.error("[PhotoEquipement] image ignorée :", e);
-      setErreur("Image illisible ou format non pris en charge.");
-    }
+    try { onChange(await photoEquipementDepuisFichier(file)); }
+    catch (e) { console.error("[PhotoEquipement] image ignorée :", e); setErreur("Image illisible ou format non pris en charge."); }
     setBusy(false);
   }
-  function surCollage(e) {
-    const items = e.clipboardData && e.clipboardData.items;
-    if (!items) return;
-    const FORMATS = ["image/png", "image/jpeg", "image/jpg", "image/webp", "image/gif"]; // TIFF (capture macOS) non décodable : ignoré
-    let meilleur = null;
-    for (const item of items) {
-      if (!item.type || !item.type.startsWith("image/")) continue;
-      const rang = FORMATS.indexOf(item.type);
-      if (rang !== -1 && (!meilleur || rang < meilleur.rang)) meilleur = { item, rang };
-    }
-    const f = meilleur && meilleur.item.getAsFile();
-    if (f) { e.preventDefault(); ajouter(f); }
-  }
-  async function coller() {
-    if (!navigator.clipboard || !navigator.clipboard.read) { setErreur("Collage direct indisponible : cliquez dans la zone puis Cmd/Ctrl+V."); return; }
-    try {
-      for (const item of await navigator.clipboard.read()) {
-        const type = item.types.find((t) => t.startsWith("image/"));
-        if (type) { await ajouter(new File([await item.getType(type)], "capture-" + Date.now() + ".png", { type })); return; }
-      }
-      setErreur("Aucune image dans le presse-papiers.");
-    } catch (e) { setErreur("Accès au presse-papiers refusé : cliquez dans la zone puis Cmd/Ctrl+V."); }
-  }
-  const choisi = (ref) => (e) => { const f = e.target.files && e.target.files[0]; if (f) ajouter(f); e.target.value = ""; };
+  const avecPhoto = !!(photo && photo.dataUrl);
   return (
-    <div tabIndex={0} onPaste={surCollage} style={{ outline: "none", marginTop: 14 }}>
-      <Field label="Photo de l'équipement (appareil photo, fichier, capture d'écran…)">
-        <div style={{ display: "flex", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
-          {photo && photo.dataUrl ? (
-            <img src={photo.dataUrl} alt="Équipement" style={{ width: 150, maxHeight: 130, objectFit: "contain", borderRadius: 8, border: "1px solid #D8DEE5", background: "#F4F6F8" }} />
-          ) : (
-            <div style={{ width: 150, height: 100, display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center", fontSize: 11.5, color: "#8B96A3", border: "1px dashed #D8DEE5", borderRadius: 8, padding: 8 }}>
-              Aucune photo — ou cliquez ici puis Cmd/Ctrl+V
-            </div>
-          )}
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            <button type="button" onClick={() => inputCamera.current && inputCamera.current.click()} disabled={busy} style={btnGhost(BRAND.blue)}><Camera size={13} /> Appareil photo</button>
-            <button type="button" onClick={() => inputFichier.current && inputFichier.current.click()} disabled={busy} style={btnGhost("#FFC107")}><ImagePlus size={13} /> {busy ? "Import…" : photo && photo.dataUrl ? "Remplacer (fichier)" : "Fichier / Photothèque"}</button>
-            <button type="button" onClick={coller} disabled={busy} style={btnGhost(BRAND.blue)} title="Coller une capture d'écran ou une image copiée"><ClipboardList size={13} /> Coller</button>
-            {photo && photo.dataUrl && <button type="button" onClick={() => onChange(null)} style={btnGhost("#EF4444")}><Trash2 size={13} /> Retirer</button>}
-          </div>
+    <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+      {avecPhoto && (
+        <div style={{ position: "relative" }}>
+          <img src={photo.dataUrl} alt="Équipement" style={{ height: 56, maxWidth: 96, objectFit: "cover", borderRadius: 8, border: "1px solid #D8DEE5", display: "block" }} />
+          <button type="button" title="Retirer la photo" onClick={() => onChange(null)} style={{ position: "absolute", top: -7, right: -7, width: 18, height: 18, borderRadius: 9, border: "none", background: "#EF4444", color: "#fff", fontSize: 12, lineHeight: "18px", padding: 0, cursor: "pointer" }}>×</button>
         </div>
-        <input ref={inputCamera} id={`cam-${idPrefix}`} type="file" accept="image/*" capture="environment" style={{ display: "none" }} onChange={choisi()} />
-        <input ref={inputFichier} id={`fic-${idPrefix}`} type="file" accept="image/*" style={{ display: "none" }} onChange={choisi()} />
-        {erreur && <div style={{ fontSize: 11.5, color: "#B91C1C", marginTop: 6 }}>{erreur}</div>}
-      </Field>
+      )}
+      <button type="button" onClick={() => inputRef.current && inputRef.current.click()} disabled={busy} style={btnGhost("#FFC107")} title="Appareil photo, photothèque ou fichier — ou collez une capture d'écran avec Cmd/Ctrl+V">
+        <ImagePlus size={13} /> {busy ? "Import…" : avecPhoto ? "Remplacer la photo" : "Ajouter une photo"}
+      </button>
+      <input ref={inputRef} id={`photo-eq-${idPrefix}`} type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => { const f = e.target.files && e.target.files[0]; if (f) ajouter(f); e.target.value = ""; }} />
+      {erreur && <div style={{ flexBasis: "100%", fontSize: 11.5, color: "#B91C1C" }}>{erreur}</div>}
     </div>
   );
 }
@@ -6755,7 +6738,7 @@ function ElementsBatteriePanel({ eq, update, idPrefix }) {
       </div>
 
       <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "center", marginBottom: 12, fontSize: 12.5 }}>
-        <span style={{ color: "#5B6B7D" }}>Moyenne : <b style={{ color: "#1A1F26" }}>{moyenne ?? "—"} V</b></span>
+        <span style={{ color: "#5B6B7D" }} title="Les seuils haut et bas sont communs à toutes les branches : ils se calculent sur la moyenne de l'ensemble des éléments">Moyenne{nbBranches > 1 ? " (toutes branches)" : ""} : <b style={{ color: "#1A1F26" }}>{moyenne ?? "—"} V</b></span>
         {nbAttendu !== null && (
           <span style={{ color: entries.length === nbAttendu ? "#0F8A5F" : "#B5730A" }}>
             {entries.length} / {nbAttendu} emplacement(s) attendu(s) ({nbBranches} branche(s) × {nbBlocs} bloc(s))
@@ -7908,15 +7891,16 @@ function PrevisionRemplacementCarte({ lignes }) {
               <tr key={i}>
                 <td style={{ padding: "7px 10px", borderBottom: "1px solid #E2E6EB", color: "#3E4A5C" }}>{l.type}</td>
                 <td style={{ padding: "7px 10px", borderBottom: "1px solid #E2E6EB", textAlign: "center", fontWeight: 700, color: l.depassee ? "#C0392B" : l.enCours ? "#8A5A0A" : "#1A1F26" }}>{l.annee}</td>
-                {[0, 1, 2, 3].map((c) => (
-                  <td key={c} style={{ padding: "7px 10px", borderBottom: "1px solid #E2E6EB", textAlign: "center", fontWeight: 700, background: l.colonne === c ? "#" + COULEURS_PREVISION[c].fond : "transparent", color: "#" + COULEURS_PREVISION[c].texte }}>{l.colonne === c ? "●" : ""}</td>
-                ))}
+                {[0, 1, 2, 3].map((c) => {
+                  const marque = l.colonne === c, couleur = marque ? COULEURS_PREVISION[c] : COULEUR_PREVISION_OK;
+                  return <td key={c} style={{ padding: "7px 10px", borderBottom: "1px solid #fff", textAlign: "center", fontWeight: 700, background: "#" + couleur.fond, color: "#" + couleur.texte, fontSize: marque ? 14 : 12 }}>{marque ? "●" : "✓"}</td>;
+                })}
               </tr>
             ))}
           </tbody>
         </table>
       </div>
-      <div style={{ fontSize: 11, color: "#8B96A3", marginTop: 8 }}>● = remplacement à prévoir l'année indiquée. « Immédiat » : échéance dépassée ou de l'année en cours. Au-delà de {p.annees[2]}, la pièce est listée sans marque.</div>
+      <div style={{ fontSize: 11, color: "#8B96A3", marginTop: 8 }}>● = remplacement à prévoir l'année indiquée, couleur selon l'urgence (rouge : immédiat — échéance dépassée ou de l'année en cours). ✓ (vert) = pièce en bon état prévu, ou renouvelée à son échéance.</div>
     </Card>
   );
 }
@@ -8967,7 +8951,7 @@ function analyserAnomaliesEquipement(eq, contexte) {
       const moyenne = Math.round((valeurs.reduce((a, b) => a + b, 0) / valeurs.length) * 1000) / 1000;
       elementsBatt.forEach((e) => {
         if (elementBatterieStatus(e.fields.tension, moyenne, cfg.toleranceBasse, cfg.toleranceHaute) === "bad") {
-          ajouter(`La tension de l'élément de batterie ${citer(e.label)} (${e.fields.tension} V) s'écarte de la moyenne de la branche (${moyenne} V) au-delà de la tolérance admise.`, 1, "batterie", `élément ${e.label}`);
+          ajouter(`La tension de l'élément de batterie ${citer(e.label)} (${e.fields.tension} V) s'écarte de la moyenne de l'ensemble des branches (${moyenne} V) au-delà de la tolérance admise.`, 1, "batterie", `élément ${e.label}`);
         }
       });
     }
@@ -9300,8 +9284,11 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
             </div>
           </div>
           {schema.identification.length > 0 && (
-            <div style={{ marginBottom: 16 }}>
-              <SectionTitle>Identification</SectionTitle>
+            <div style={{ marginBottom: 16 }} onPaste={(e) => { const f = imageDuPressePapiers(e); if (f) { e.preventDefault(); photoEquipementDepuisFichier(f).then((p) => update({ ...eq, photoEquipement: p })).catch(() => {}); } }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap", marginBottom: 4 }}>
+                <SectionTitle>Identification</SectionTitle>
+                <PhotoEquipementField photo={eq.photoEquipement} onChange={(p) => update({ ...eq, photoEquipement: p })} idPrefix={eq.id} />
+              </div>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 14 }}>
                 {schema.identification.map((f) => {
                   // Bilan de puissance : ces champs ne sont pertinents que pour UN type de
@@ -9456,13 +9443,14 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
               {(TYPES_AVEC_RELAIS.includes(eq.type) || eq.type === "Comptage HTA") && infoGammeCellule(eq.identification) && (
                 <div style={{ marginTop: 8, fontSize: 11.5, color: "#5B6B7D", lineHeight: 1.5 }}>{infoGammeCellule(eq.identification)}</div>
               )}
-              <PhotoEquipementField photo={eq.photoEquipement} onChange={(p) => update({ ...eq, photoEquipement: p })} idPrefix={eq.id} />
             </div>
           )}
           {schema.identification.length === 0 && (
-            <div style={{ marginBottom: 16 }}>
-              <SectionTitle>Identification</SectionTitle>
-              <PhotoEquipementField photo={eq.photoEquipement} onChange={(p) => update({ ...eq, photoEquipement: p })} idPrefix={eq.id} />
+            <div style={{ marginBottom: 16 }} onPaste={(e) => { const f = imageDuPressePapiers(e); if (f) { e.preventDefault(); photoEquipementDepuisFichier(f).then((p) => update({ ...eq, photoEquipement: p })).catch(() => {}); } }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap", marginBottom: 4 }}>
+                <SectionTitle>Identification</SectionTitle>
+                <PhotoEquipementField photo={eq.photoEquipement} onChange={(p) => update({ ...eq, photoEquipement: p })} idPrefix={eq.id} />
+              </div>
             </div>
           )}
 
@@ -11953,11 +11941,14 @@ function docxPrevisionRemplacementTable(lignes) {
   const corps = p.items.map((l) => new DOCX.TableRow({ cantSplit: true, children: [
     new DOCX.TableCell({ width: { size: largeurs[0], type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, children: [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: l.type, size: 18, color: DOCX_DARK })] })] }),
     new DOCX.TableCell({ width: { size: largeurs[1], type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, children: [new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, children: [new DOCX.TextRun({ text: String(l.annee), bold: true, size: 18, color: l.depassee ? DOCX_RED : l.enCours ? "8A5A0A" : DOCX_DARK })] })] }),
-    ...[0, 1, 2, 3].map((c) => new DOCX.TableCell({
-      width: { size: largeurs[c + 2], type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, verticalAlign: DOCX.VerticalAlign.CENTER,
-      shading: l.colonne === c ? { type: DOCX.ShadingType.CLEAR, fill: COULEURS_PREVISION[c].fond } : undefined,
-      children: [new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, children: [new DOCX.TextRun({ text: l.colonne === c ? "●" : "", bold: true, size: 20, color: COULEURS_PREVISION[c].texte })] })],
-    })),
+    ...[0, 1, 2, 3].map((c) => {
+      const marque = l.colonne === c, couleur = marque ? COULEURS_PREVISION[c] : COULEUR_PREVISION_OK;
+      return new DOCX.TableCell({
+        width: { size: largeurs[c + 2], type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, verticalAlign: DOCX.VerticalAlign.CENTER,
+        shading: { type: DOCX.ShadingType.CLEAR, fill: couleur.fond },
+        children: [new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, children: [new DOCX.TextRun({ text: marque ? "●" : "✓", bold: true, size: marque ? 20 : 16, color: couleur.texte })] })],
+      });
+    }),
   ] }));
   return docxTable({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: largeurs, rows: [entete, ...corps] });
 }
@@ -12255,7 +12246,7 @@ function grouperElementsParBranche(entries) {
 // valeur, repères 1 / 6 / 11… en abscisse (les blocs hors tolérance en gras). Dessiné en double
 // résolution pour rester net à l'impression. Renvoie { dataUrl, largeur, hauteur } (taille d'affichage
 // en px) ou null si le dessin est impossible (hors navigateur, aucune valeur).
-function genererGraphiqueElementsBatterie(entries, moyenne, toleranceBasse, toleranceHaute, titre) {
+function genererGraphiqueElementsBatterie(entries, moyenne, toleranceBasse, toleranceHaute, titre, bornesCommunes) {
   if (typeof document === "undefined" || !document.createElement || !entries.length) return null;
   try {
     const valeurs = entries.map((e) => numOf(e.fields.tension));
@@ -12285,7 +12276,7 @@ function genererGraphiqueElementsBatterie(entries, moyenne, toleranceBasse, tole
     const seuilHaut = moyenne !== null && moyenne !== undefined && th > 0 ? moyenne * (1 + th / 100) : null;
     // Échelle verticale « propre » (pas de 0,1 / 0,2 / 0,5 / 1 / 2 / 5…), axe qui ne part pas de zéro :
     // les écarts de quelques dixièmes de volt resteraient sinon invisibles.
-    const bornes = [...valides, ...(seuilBas !== null ? [seuilBas] : []), ...(seuilHaut !== null ? [seuilHaut] : [])];
+    const bornes = [...valides, ...(seuilBas !== null ? [seuilBas] : []), ...(seuilHaut !== null ? [seuilHaut] : []), ...(bornesCommunes ? [bornesCommunes.min, bornesCommunes.max] : [])]; // échelle commune à toutes les branches
     let lo = Math.min(...bornes), hi = Math.max(...bornes);
     const marge = (hi - lo) * 0.2 || 0.5;
     lo -= marge; hi += marge * 0.9;
@@ -13937,7 +13928,7 @@ function docxEquipementElements(eq, locaux, allSites) {
     const tablePrevision = docxPrevisionRemplacementTable(lignesEcheancesRemplacement(eq));
     elements.push(docxHeading("Prévision de remplacement des pièces", 520, 160));
     if (tablePrevision) {
-      elements.push(new DOCX.Paragraph({ keepNext: true, spacing: { before: 0, after: 100 }, children: [new DOCX.TextRun({ text: `● = remplacement à prévoir l'année indiquée (${prevision.annees[0]} à ${prevision.annees[2]}). « Immédiat » : échéance dépassée ou de l'année en cours. Au-delà de ${prevision.annees[2]}, la pièce est listée sans marque.`, size: 15, color: "8B96A3", italics: true })] }));
+      elements.push(new DOCX.Paragraph({ keepNext: true, spacing: { before: 0, after: 100 }, children: [new DOCX.TextRun({ text: `● = remplacement à prévoir l'année indiquée, couleur selon l'urgence (rouge : immédiat — échéance dépassée ou de l'année en cours ; orange : ${prevision.annees[0]} ; jaune : ${prevision.annees[1]} ; bleu : ${prevision.annees[2]}).  ✓ (vert) = pièce en bon état prévu, ou renouvelée à son échéance.`, size: 15, color: "8B96A3", italics: true })] }));
       elements.push(tablePrevision);
       if (prevision.dansHorizon === 0) elements.push(new DOCX.Paragraph({ spacing: { after: 60 }, children: [new DOCX.TextRun({ text: `Aucun remplacement à prévoir d'ici fin ${prevision.annees[2]}.`, size: 18, bold: true, color: DOCX_GREEN })] }));
     } else {
@@ -14025,12 +14016,14 @@ function docxEquipementElements(eq, locaux, allSites) {
       const tb = numOf(cfg.toleranceBasse) ?? 3, th = numOf(cfg.toleranceHaute) ?? 3;
       const fr = (v) => String(Math.round(v * 100) / 100).replace(".", ",");
       const modeTitre = !cfg.mode || /floating/i.test(cfg.mode) ? "DE FLOATING" : `(${String(cfg.mode).toUpperCase()})`;
+      // Seuils haut et bas COMMUNS à toutes les branches : calculés sur la moyenne de l'ensemble des éléments (comme à l'écran), pas branche par branche.
+      const toutesValeurs = entries.map((e) => numOf(e.fields.tension)).filter((v) => v !== null);
+      const moyenneB = toutesValeurs.length ? Math.round((toutesValeurs.reduce((a, b) => a + b, 0) / toutesValeurs.length) * 1000) / 1000 : null;
+      const bornesCommunes = toutesValeurs.length && moyenneB !== null ? { min: Math.min(...toutesValeurs, moyenneB * (1 - tb / 100)), max: Math.max(...toutesValeurs, moyenneB * (1 + th / 100)) } : null;
       groupes.forEach((groupe, indexGroupe) => {
-        const valeursB = groupe.items.map((e) => numOf(e.fields.tension)).filter((v) => v !== null);
-        const moyenneB = valeursB.length ? Math.round((valeursB.reduce((a, b) => a + b, 0) / valeursB.length) * 1000) / 1000 : null;
         const sousTitre = [plusieursBranches ? groupe.label : "", eq.identification && eq.identification.repere].filter(Boolean).join(" · ");
         const titreGraphique = `TENSION ${modeTitre} PAR BLOC (V)${sousTitre ? " · " + sousTitre : ""}`.toUpperCase();
-        const graph = genererGraphiqueElementsBatterie(groupe.items, moyenneB, cfg.toleranceBasse, cfg.toleranceHaute, titreGraphique);
+        const graph = genererGraphiqueElementsBatterie(groupe.items, moyenneB, cfg.toleranceBasse, cfg.toleranceHaute, titreGraphique, plusieursBranches ? bornesCommunes : null);
         const imgGraph = graph ? docxImage(graph.dataUrl, graph.largeur, graph.hauteur) : null;
         const evalues = groupe.items.filter((e) => e.fields.tension);
         const defaillants = evalues.filter((e) => elementBatterieStatus(e.fields.tension, moyenneB, cfg.toleranceBasse, cfg.toleranceHaute) === "bad");
@@ -14042,10 +14035,10 @@ function docxEquipementElements(eq, locaux, allSites) {
           bloc.push(new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, spacing: { before: 140, after: 60 }, children: [imgGraph] }));
         } else if (plusieursBranches) {
           // Repli sans dessin possible : l'intitulé de la branche reste affiché.
-          bloc.push(new DOCX.Paragraph({ spacing: { before: 140, after: 40 }, children: [new DOCX.TextRun({ text: `${groupe.label}${moyenneB !== null ? ` — Moyenne : ${fr(moyenneB)} V` : ""}`, bold: true, size: 17, color: DOCX_DARK })] }));
+          bloc.push(new DOCX.Paragraph({ spacing: { before: 140, after: 40 }, children: [new DOCX.TextRun({ text: `${groupe.label}${moyenneB !== null ? ` — Moyenne (ensemble des branches) : ${fr(moyenneB)} V` : ""}`, bold: true, size: 17, color: DOCX_DARK })] }));
         }
         if (evalues.length) {
-          const legende = moyenneB !== null ? `Moyenne ${fr(moyenneB)} V  ·  tolérance −${tb} % / +${th} % (${fr(moyenneB * (1 - tb / 100))} – ${fr(moyenneB * (1 + th / 100))} V)  ·  ` : "";
+          const legende = moyenneB !== null ? `Moyenne ${plusieursBranches ? "de l'ensemble des branches " : ""}${fr(moyenneB)} V  ·  tolérance −${tb} % / +${th} % (${fr(moyenneB * (1 - tb / 100))} – ${fr(moyenneB * (1 + th / 100))} V)  ·  ` : "";
           const compte = defaillants.length === 0
             ? `${evalues.length} élément(s) contrôlé(s) — tous conformes à la tolérance déclarée.`
             : `${evalues.length} élément(s) contrôlé(s) — ${defaillants.length} hors tolérance (détail ci-dessous).`;
