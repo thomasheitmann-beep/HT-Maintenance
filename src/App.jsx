@@ -11,7 +11,7 @@ const LOGO_TRANSPARENT = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAXwAAADV
 const LOGO_TRANSPARENT_RATIO = 1.784;
 const BRAND = { blue: "#0A5DA8", silver: "#C0C6CE", dark: "#1A1F26", amber: "#FFC107" };
 import {
-  Plus, Search, AlertTriangle, CheckCircle2, AlertOctagon,
+  Plus, Search, Camera, AlertTriangle, CheckCircle2, AlertOctagon,
   Trash2, ArrowLeft, Building2, Clock, ChevronRight, ChevronDown,
   MapPin, ShieldCheck, FileText, Settings2, Printer, ImagePlus,
   Mail, PenLine, RotateCcw, ClipboardList, X, MinusCircle, Download, Upload, Copy, RefreshCw, Users, Phone, Crop,
@@ -1465,6 +1465,27 @@ function getCategoriesUsure(type) {
 }
 function emptyModeleUsure(dureeDefaut) {
   return { id: uid(), description: "", marque: "", modele: "", quantite: "", anneeMiseEnService: "", dureeVie: dureeDefaut ?? "" };
+}
+// Échéances de remplacement de toutes les pièces d'usure d'un équipement (onduleur / redresseur : pieces_usure_ups ; batterie de compensation : gradins + ventilation).
+function lignesEcheancesRemplacement(eq) {
+  if (TYPES_AVEC_PIECES_USURE.includes(eq.type)) return calcEcheancesUsureUPS(eq);
+  if (TYPES_AVEC_GRADINS.includes(eq.type)) return calcPiecesUsure(eq);
+  return [];
+}
+// Prévision sur les trois prochaines années : colonne « Immédiat » (échéance dépassée ou de l'année en cours), puis chaque année à venir.
+// Une pièce dont l'échéance tombe au-delà de l'horizon est listée sans marque.
+const COULEURS_PREVISION = [
+  { fond: "FDECEA", texte: "C0392B" }, // immédiat
+  { fond: "FDF3E3", texte: "8A5A0A" }, // année + 1
+  { fond: "E8F1FB", texte: "0A5DA8" }, // année + 2
+  { fond: "EAF6EF", texte: "0F8A5F" }, // année + 3
+];
+function previsionRemplacement(lignes, anneeRef = new Date().getFullYear()) {
+  const annees = [anneeRef + 1, anneeRef + 2, anneeRef + 3];
+  const items = (lignes || []).filter((l) => l.annee !== null && l.annee !== undefined)
+    .map((l) => ({ ...l, colonne: l.annee <= anneeRef ? 0 : annees.includes(l.annee) ? annees.indexOf(l.annee) + 1 : -1, depassee: l.annee < anneeRef, enCours: l.annee === anneeRef }))
+    .sort((a, b) => a.annee - b.annee);
+  return { anneeRef, annees, items, dansHorizon: items.filter((l) => l.colonne >= 0).length };
 }
 function calcEcheancesUsureUPS(eq) {
   const data = eq.controles.pieces_usure_ups || {};
@@ -3591,7 +3612,6 @@ function emptyIntervention(numeroRI) {
     nature: { preventive: false, corrective: false, miseEnService: false, expertise: false },
     travauxActions: [],
     travauxRealises: "",
-    mesures: { isolement: "", resistanceContact: "", tempsManoeuvre: "", essaisFonctionnels: "", observations: "" },
     anomaliesRecommandations: "",
     conclusion: "Conforme",
     validation: { nomClient: "", signatureClient: null, technicienHT: "", signatureHT: null },
@@ -5223,6 +5243,74 @@ function FileGallery({ files, onChange, idPrefix }) {
   );
 }
 
+// Photo d'ensemble de l'équipement (une seule) : appareil photo, fichier / photothèque, capture d'écran (bouton Coller ou Cmd/Ctrl+V dans la zone).
+// Enregistrée dans eq.photoEquipement = { id, dataUrl, caption } — envoyée vers le stockage comme les autres photos, et placée à droite du
+// tableau d'identification dans le rapport Word.
+function PhotoEquipementField({ photo, onChange, idPrefix }) {
+  const inputFichier = useRef(null), inputCamera = useRef(null);
+  const [busy, setBusy] = useState(false);
+  const [erreur, setErreur] = useState("");
+  async function ajouter(file) {
+    if (!file) return;
+    setBusy(true); setErreur("");
+    try {
+      const dataUrl = CURRENT_USER_FOR_STORAGE ? await preparerPhoto(file) : await compressImage(file);
+      onChange({ id: uid(), dataUrl, caption: "" });
+    } catch (e) {
+      console.error("[PhotoEquipement] image ignorée :", e);
+      setErreur("Image illisible ou format non pris en charge.");
+    }
+    setBusy(false);
+  }
+  function surCollage(e) {
+    const items = e.clipboardData && e.clipboardData.items;
+    if (!items) return;
+    const FORMATS = ["image/png", "image/jpeg", "image/jpg", "image/webp", "image/gif"]; // TIFF (capture macOS) non décodable : ignoré
+    let meilleur = null;
+    for (const item of items) {
+      if (!item.type || !item.type.startsWith("image/")) continue;
+      const rang = FORMATS.indexOf(item.type);
+      if (rang !== -1 && (!meilleur || rang < meilleur.rang)) meilleur = { item, rang };
+    }
+    const f = meilleur && meilleur.item.getAsFile();
+    if (f) { e.preventDefault(); ajouter(f); }
+  }
+  async function coller() {
+    if (!navigator.clipboard || !navigator.clipboard.read) { setErreur("Collage direct indisponible : cliquez dans la zone puis Cmd/Ctrl+V."); return; }
+    try {
+      for (const item of await navigator.clipboard.read()) {
+        const type = item.types.find((t) => t.startsWith("image/"));
+        if (type) { await ajouter(new File([await item.getType(type)], "capture-" + Date.now() + ".png", { type })); return; }
+      }
+      setErreur("Aucune image dans le presse-papiers.");
+    } catch (e) { setErreur("Accès au presse-papiers refusé : cliquez dans la zone puis Cmd/Ctrl+V."); }
+  }
+  const choisi = (ref) => (e) => { const f = e.target.files && e.target.files[0]; if (f) ajouter(f); e.target.value = ""; };
+  return (
+    <div tabIndex={0} onPaste={surCollage} style={{ outline: "none", marginTop: 14 }}>
+      <Field label="Photo de l'équipement (appareil photo, fichier, capture d'écran…)">
+        <div style={{ display: "flex", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
+          {photo && photo.dataUrl ? (
+            <img src={photo.dataUrl} alt="Équipement" style={{ width: 150, maxHeight: 130, objectFit: "contain", borderRadius: 8, border: "1px solid #D8DEE5", background: "#F4F6F8" }} />
+          ) : (
+            <div style={{ width: 150, height: 100, display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center", fontSize: 11.5, color: "#8B96A3", border: "1px dashed #D8DEE5", borderRadius: 8, padding: 8 }}>
+              Aucune photo — ou cliquez ici puis Cmd/Ctrl+V
+            </div>
+          )}
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <button type="button" onClick={() => inputCamera.current && inputCamera.current.click()} disabled={busy} style={btnGhost(BRAND.blue)}><Camera size={13} /> Appareil photo</button>
+            <button type="button" onClick={() => inputFichier.current && inputFichier.current.click()} disabled={busy} style={btnGhost("#FFC107")}><ImagePlus size={13} /> {busy ? "Import…" : photo && photo.dataUrl ? "Remplacer (fichier)" : "Fichier / Photothèque"}</button>
+            <button type="button" onClick={coller} disabled={busy} style={btnGhost(BRAND.blue)} title="Coller une capture d'écran ou une image copiée"><ClipboardList size={13} /> Coller</button>
+            {photo && photo.dataUrl && <button type="button" onClick={() => onChange(null)} style={btnGhost("#EF4444")}><Trash2 size={13} /> Retirer</button>}
+          </div>
+        </div>
+        <input ref={inputCamera} id={`cam-${idPrefix}`} type="file" accept="image/*" capture="environment" style={{ display: "none" }} onChange={choisi()} />
+        <input ref={inputFichier} id={`fic-${idPrefix}`} type="file" accept="image/*" style={{ display: "none" }} onChange={choisi()} />
+        {erreur && <div style={{ fontSize: 11.5, color: "#B91C1C", marginTop: 6 }}>{erreur}</div>}
+      </Field>
+    </div>
+  );
+}
 function PhotoGallery({ photos, onChange, idPrefix }) {
   const inputRef = useRef(null);
   const [busy, setBusy] = useState(false);
@@ -7803,48 +7891,37 @@ function PiecesUsureUPSPanel({ eq, update }) {
     </>
   );
 }
-function PiecesUsureSyntheseUPS({ eq }) {
-  const lignes = calcEcheancesUsureUPS(eq);
-  if (lignes.length === 0) return null;
-  const anneeActuelle = new Date().getFullYear();
+function PrevisionRemplacementCarte({ lignes }) {
+  const p = previsionRemplacement(lignes);
+  if (p.items.length === 0) return null;
+  const enTete = ["Pièce", "Échéance", "Immédiat", ...p.annees.map(String)];
   return (
     <Card style={{ marginBottom: 14 }}>
-      <SectionTitle>Échéances de remplacement prévues</SectionTitle>
-      <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-        {lignes.map((l, i) => {
-          const depasse = l.annee !== null && l.annee < anneeActuelle;
-          return (
-            <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 10px", borderBottom: "1px solid #E2E6EB", fontSize: 12.5, background: depasse ? "#FDF3E3" : "transparent", borderRadius: depasse ? 6 : 0 }}>
-              <span style={{ color: depasse ? "#8A5A0A" : "#3E4A5C" }}>{depasse && "⚠ "}{l.type}</span>
-              <span style={{ fontWeight: 700, color: depasse ? "#8A5A0A" : "#1A1F26" }}>{l.annee}{depasse && " — dépassée"}</span>
-            </div>
-          );
-        })}
+      <SectionTitle>Prévision de remplacement des pièces — {p.annees[0]} à {p.annees[2]}</SectionTitle>
+      <div style={{ overflowX: "auto" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+          <thead>
+            <tr>{enTete.map((h, i) => <th key={h + i} style={{ background: "#1A1F26", color: "#fff", padding: "7px 10px", textAlign: i === 0 ? "left" : "center", fontWeight: 700, fontSize: 12 }}>{h}</th>)}</tr>
+          </thead>
+          <tbody>
+            {p.items.map((l, i) => (
+              <tr key={i}>
+                <td style={{ padding: "7px 10px", borderBottom: "1px solid #E2E6EB", color: "#3E4A5C" }}>{l.type}</td>
+                <td style={{ padding: "7px 10px", borderBottom: "1px solid #E2E6EB", textAlign: "center", fontWeight: 700, color: l.depassee ? "#C0392B" : l.enCours ? "#8A5A0A" : "#1A1F26" }}>{l.annee}</td>
+                {[0, 1, 2, 3].map((c) => (
+                  <td key={c} style={{ padding: "7px 10px", borderBottom: "1px solid #E2E6EB", textAlign: "center", fontWeight: 700, background: l.colonne === c ? "#" + COULEURS_PREVISION[c].fond : "transparent", color: "#" + COULEURS_PREVISION[c].texte }}>{l.colonne === c ? "●" : ""}</td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
+      <div style={{ fontSize: 11, color: "#8B96A3", marginTop: 8 }}>● = remplacement à prévoir l'année indiquée. « Immédiat » : échéance dépassée ou de l'année en cours. Au-delà de {p.annees[2]}, la pièce est listée sans marque.</div>
     </Card>
   );
 }
-function PiecesUsureSynthese({ eq }) {
-  const lignes = calcPiecesUsure(eq);
-  if (lignes.length === 0) return null;
-  const anneeActuelle = new Date().getFullYear();
-  return (
-    <Card style={{ marginBottom: 14 }}>
-      <SectionTitle>Échéances de remplacement prévues</SectionTitle>
-      <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-        {lignes.map((l, i) => {
-          const depasse = l.annee !== null && l.annee < anneeActuelle;
-          return (
-            <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 10px", borderBottom: "1px solid #E2E6EB", fontSize: 12.5, background: depasse ? "#FDF3E3" : "transparent", borderRadius: depasse ? 6 : 0 }}>
-              <span style={{ color: depasse ? "#8A5A0A" : "#3E4A5C" }}>{depasse && "⚠ "}{l.type}</span>
-              <span style={{ fontWeight: 700, color: depasse ? "#8A5A0A" : "#1A1F26" }}>{l.annee ?? "—"}{depasse && " — dépassée"}</span>
-            </div>
-          );
-        })}
-      </div>
-    </Card>
-  );
-}
+function PiecesUsureSyntheseUPS({ eq }) { return <PrevisionRemplacementCarte lignes={calcEcheancesUsureUPS(eq)} />; }
+function PiecesUsureSynthese({ eq }) { return <PrevisionRemplacementCarte lignes={calcPiecesUsure(eq)} />; }
 
 function CourantDechargeBranches({ eq, update }) {
   const nb = Math.max(1, Math.round(numOf(eq.controles.batterie_id?.batterie_caracteristiques?.fields?.nombreBranches) || 1));
@@ -9379,6 +9456,13 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
               {(TYPES_AVEC_RELAIS.includes(eq.type) || eq.type === "Comptage HTA") && infoGammeCellule(eq.identification) && (
                 <div style={{ marginTop: 8, fontSize: 11.5, color: "#5B6B7D", lineHeight: 1.5 }}>{infoGammeCellule(eq.identification)}</div>
               )}
+              <PhotoEquipementField photo={eq.photoEquipement} onChange={(p) => update({ ...eq, photoEquipement: p })} idPrefix={eq.id} />
+            </div>
+          )}
+          {schema.identification.length === 0 && (
+            <div style={{ marginBottom: 16 }}>
+              <SectionTitle>Identification</SectionTitle>
+              <PhotoEquipementField photo={eq.photoEquipement} onChange={(p) => update({ ...eq, photoEquipement: p })} idPrefix={eq.id} />
             </div>
           )}
 
@@ -10231,13 +10315,16 @@ function PrintEquipement({ eq, allEquipements = [], locaux = [] }) {
         <span style={{ fontSize: 14, fontWeight: 800, letterSpacing: 0.3 }}>{eq.type}</span>
         <span style={{ width: 26, height: 4, background: BRAND.amber, borderRadius: 2 }} />
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "2px 20px", marginBottom: 12 }}>
-        {schema.identification.filter((f) => !champIdentificationMasque(eq, f.key)).map((f) => (
-          <React.Fragment key={f.key}>
-            <PrintFieldRow label={f.label} value={formatIdentificationValue(identificationAffichee[f.key])} />
-            {f.key === "repere" && localEq && <PrintFieldRow label="Local" value={localEq.nom || "Local sans nom"} />}
-          </React.Fragment>
-        ))}
+      <div style={{ display: "flex", gap: 18, alignItems: "flex-start", marginBottom: 12 }}>
+        <div style={{ flex: 1, display: "grid", gridTemplateColumns: eq.photoEquipement && eq.photoEquipement.dataUrl ? "1fr 1fr" : "1fr 1fr 1fr", gap: "2px 20px" }}>
+          {schema.identification.filter((f) => !champIdentificationMasque(eq, f.key)).map((f) => (
+            <React.Fragment key={f.key}>
+              <PrintFieldRow label={f.label} value={formatIdentificationValue(identificationAffichee[f.key])} />
+              {f.key === "repere" && localEq && <PrintFieldRow label="Local" value={localEq.nom || "Local sans nom"} />}
+            </React.Fragment>
+          ))}
+        </div>
+        {eq.photoEquipement && eq.photoEquipement.dataUrl && <img src={eq.photoEquipement.dataUrl} alt="Équipement" style={{ width: 170, maxHeight: 210, objectFit: "contain", border: "1px solid #ddd", borderRadius: 6 }} />}
       </div>
       {schema.sections.filter((sec) => !(sec.key === "courbe_declenchement" && courbeDeclenchementSansContenu(eq))).map((sec) => (
         <PrintSection key={sec.key} title={sec.title}>
@@ -10813,7 +10900,6 @@ function InterventionEditor({ iv, update, onBack, onDelete, onPrint }) {
   const addEquip = () => update((d) => ({ ...d, equipements: [...(d.equipements || []), emptyEquipementIv()] }));
   const removeEquip = (eqId) => update((d) => ({ ...d, equipements: (d.equipements || []).filter((e) => e.id !== eqId) }));
   const setNature = (k, v) => update((d) => ({ ...d, nature: { ...d.nature, [k]: v } }));
-  const setMesure = (k, v) => update((d) => ({ ...d, mesures: { ...d.mesures, [k]: v } }));
   const setValidation = (k, v) => update((d) => ({ ...d, validation: { ...d.validation, [k]: v } }));
   const addAction = () => update((d) => ({ ...d, travauxActions: [...(d.travauxActions || []), { id: uid(), action: "", detail: "" }] }));
   const setActionField = (id, k, v) => update((d) => ({ ...d, travauxActions: d.travauxActions.map((a) => (a.id === id ? { ...a, [k]: v } : a)) }));
@@ -11029,17 +11115,6 @@ function InterventionEditor({ iv, update, onBack, onDelete, onPrint }) {
         <IvField label="Description complémentaire (facultatif)">
           <TextArea value={iv.travauxRealises} onChange={(e) => set("travauxRealises", e.target.value)} placeholder="Précisions libres sur l'intervention" style={{ minHeight: 100 }} />
         </IvField>
-      </Card>
-
-      <Card style={{ marginBottom: 14 }}>
-        <SectionTitle>Mesures / Contrôles</SectionTitle>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 14 }}>
-          <IvField label="Isolement"><TextInput value={iv.mesures.isolement} onChange={(e) => setMesure("isolement", e.target.value)} /></IvField>
-          <IvField label="Résistance de contact"><TextInput value={iv.mesures.resistanceContact} onChange={(e) => setMesure("resistanceContact", e.target.value)} /></IvField>
-          <IvField label="Temps de manœuvre"><TextInput value={iv.mesures.tempsManoeuvre} onChange={(e) => setMesure("tempsManoeuvre", e.target.value)} /></IvField>
-          <IvField label="Essais fonctionnels"><TextInput value={iv.mesures.essaisFonctionnels} onChange={(e) => setMesure("essaisFonctionnels", e.target.value)} /></IvField>
-          <IvField label="Observations" span={2}><TextArea value={iv.mesures.observations} onChange={(e) => setMesure("observations", e.target.value)} /></IvField>
-        </div>
       </Card>
 
       <Card style={{ marginBottom: 14 }}>
@@ -11820,16 +11895,40 @@ function docxComparaisonEnergieBox(c) {
     })] })],
   });
 }
-function docxFieldRow(label, value) {
-  return new DOCX.TableRow({ children: [
-    new DOCX.TableCell({ width: { size: 3400, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_LIGHT }, children: [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: label, size: 18, color: "555555" })] })] }),
-    new DOCX.TableCell({ width: { size: 6200, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, children: [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: value || "—", size: 18, bold: true, color: DOCX_DARK })] })] }),
-  ]});
+function docxFieldCellules(label, value, largeurLabel = 3400, largeurValeur = 6200) {
+  return [
+    new DOCX.TableCell({ width: { size: largeurLabel, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_LIGHT }, children: [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: label, size: 18, color: "555555" })] })] }),
+    new DOCX.TableCell({ width: { size: largeurValeur, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, children: [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: value || "—", size: 18, bold: true, color: DOCX_DARK })] })] }),
+  ];
 }
-function docxFieldTable(rows) {
+function docxFieldRow(label, value) {
+  return new DOCX.TableRow({ children: docxFieldCellules(label, value) });
+}
+// Image de la photo d'équipement, à l'échelle de la colonne de droite (largeur max 176 px, hauteur max 200 px, proportions conservées).
+function docxImagePhotoEquipement(photo) {
+  if (!photo || !photo.dataUrl) return null;
+  const ratio = photo._imgW && photo._imgH ? photo._imgW / photo._imgH : 4 / 3;
+  let w = 176, h = Math.round(w / ratio);
+  if (h > 200) { h = 200; w = Math.round(h * ratio); }
+  return docxImage(photo.dataUrl, w, h);
+}
+// Tableau d'identification ; avec une photo, une troisième colonne (cellule fusionnée sur toutes les lignes) la place à droite du tableau.
+function docxFieldTable(rows, photo) {
   const filtered = rows.filter((r) => r[1]);
   if (filtered.length === 0) return null;
-  return docxTable({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: [3400, 6200], rows: filtered.map(([l, v]) => docxFieldRow(l, v)) });
+  const img = docxImagePhotoEquipement(photo);
+  if (!img) return docxTable({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: [3400, 6200], rows: filtered.map(([l, v]) => docxFieldRow(l, v)) });
+  const wl = 2300, wv = 4300, wp = TABLE_WIDTH - wl - wv;
+  return docxTable({
+    width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: [wl, wv, wp],
+    rows: filtered.map(([l, v], i) => new DOCX.TableRow({ cantSplit: true, children: [
+      ...docxFieldCellules(l, v, wl, wv),
+      ...(i === 0 ? [new DOCX.TableCell({
+        rowSpan: filtered.length, width: { size: wp, type: DOCX.WidthType.DXA }, verticalAlign: DOCX.VerticalAlign.CENTER, margins: { top: 100, bottom: 100, left: 120, right: 120 },
+        children: [new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, spacing: { before: 0, after: 0 }, children: [img] })],
+      })] : []),
+    ] })),
+  });
 }
 // Table d'échéances de remplacement de pièces d'usure, colorée par année — rouge (dépassée), orange
 // (année en cours), vert (à venir) — avec une alerte textuelle pour les deux premiers cas, comme
@@ -11839,6 +11938,28 @@ function docxFieldTable(rows) {
 // sans passer par champTolStatus.
 function docxColorerEtat(brut, etat) {
   return brut !== "bad" ? brut : etat === "Défaillant" ? "bad" : "warning";
+}
+// Prévision de remplacement des pièces sur les trois prochaines années : « Immédiat » (échéance dépassée ou en cours) puis une colonne par année, la pièce étant marquée
+// dans la colonne de son année d'échéance (couleur selon l'urgence). Placée directement sous le synoptique de l'équipement.
+function docxPrevisionRemplacementTable(lignes) {
+  const p = previsionRemplacement(lignes);
+  if (p.items.length === 0) return null;
+  const largeurs = [3900, 1100, 1150, 1150, 1150, 1150];
+  const enTete = ["Pièce", "Échéance", "Immédiat", ...p.annees.map(String)];
+  const entete = new DOCX.TableRow({ tableHeader: true, cantSplit: true, children: enTete.map((h, i) => new DOCX.TableCell({
+    width: { size: largeurs[i], type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_DARK },
+    children: [new DOCX.Paragraph({ keepNext: true, alignment: i === 0 ? DOCX.AlignmentType.LEFT : DOCX.AlignmentType.CENTER, children: [new DOCX.TextRun({ text: h, bold: true, size: 17, color: DOCX_WHITE })] })],
+  })) });
+  const corps = p.items.map((l) => new DOCX.TableRow({ cantSplit: true, children: [
+    new DOCX.TableCell({ width: { size: largeurs[0], type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, children: [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: l.type, size: 18, color: DOCX_DARK })] })] }),
+    new DOCX.TableCell({ width: { size: largeurs[1], type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, children: [new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, children: [new DOCX.TextRun({ text: String(l.annee), bold: true, size: 18, color: l.depassee ? DOCX_RED : l.enCours ? "8A5A0A" : DOCX_DARK })] })] }),
+    ...[0, 1, 2, 3].map((c) => new DOCX.TableCell({
+      width: { size: largeurs[c + 2], type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, verticalAlign: DOCX.VerticalAlign.CENTER,
+      shading: l.colonne === c ? { type: DOCX.ShadingType.CLEAR, fill: COULEURS_PREVISION[c].fond } : undefined,
+      children: [new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, children: [new DOCX.TextRun({ text: l.colonne === c ? "●" : "", bold: true, size: 20, color: COULEURS_PREVISION[c].texte })] })],
+    })),
+  ] }));
+  return docxTable({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: largeurs, rows: [entete, ...corps] });
 }
 function docxEcheancesUsureTable(lignes) {
   const filtered = lignes.filter((l) => l.annee !== null && l.annee !== undefined);
@@ -13786,8 +13907,12 @@ function docxEquipementElements(eq, locaux, allSites) {
       const idxRepere = champsId.findIndex((f) => f.key === "repere");
       lignesId.splice(idxRepere >= 0 ? idxRepere + 1 : 0, 0, ["Local", localNom.nom || "Local sans nom"]);
     }
-    const t = docxFieldTable(lignesId);
+    const t = docxFieldTable(lignesId, eq.photoEquipement);
     if (t) { elements.push(t); elements.push(docxSpacer()); }
+  } else if (eq.photoEquipement && eq.photoEquipement.dataUrl) {
+    // Type sans champ d'identification : la photo seule, centrée.
+    const imgSeule = docxImagePhotoEquipement(eq.photoEquipement);
+    if (imgSeule) { elements.push(new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, spacing: { after: 100 }, children: [imgSeule] })); elements.push(docxSpacer()); }
   }
   if (eq.type === "Transformateur" && eq.identification?.typeRefroidissement && DESCRIPTION_REFROIDISSEMENT_TRANSFO[eq.identification.typeRefroidissement]) {
     elements.push(docxNormeNote(`${eq.identification.typeRefroidissement} (CEI 60076-2) — ${DESCRIPTION_REFROIDISSEMENT_TRANSFO[eq.identification.typeRefroidissement]}`));
@@ -13805,6 +13930,20 @@ function docxEquipementElements(eq, locaux, allSites) {
         elements.push(docxBlocInsecable([docxHeading("Schéma synoptique", 480, 160), new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, spacing: { after: 100 }, children: [img] })]));
       }
     }
+  }
+  // Prévision de remplacement des pièces d'usure : directement sous le synoptique (ou sous l'identification pour un équipement sans synoptique).
+  if (TYPES_AVEC_PIECES_USURE.includes(eq.type) || TYPES_AVEC_GRADINS.includes(eq.type)) {
+    const prevision = previsionRemplacement(lignesEcheancesRemplacement(eq));
+    const tablePrevision = docxPrevisionRemplacementTable(lignesEcheancesRemplacement(eq));
+    elements.push(docxHeading("Prévision de remplacement des pièces", 520, 160));
+    if (tablePrevision) {
+      elements.push(new DOCX.Paragraph({ keepNext: true, spacing: { before: 0, after: 100 }, children: [new DOCX.TextRun({ text: `● = remplacement à prévoir l'année indiquée (${prevision.annees[0]} à ${prevision.annees[2]}). « Immédiat » : échéance dépassée ou de l'année en cours. Au-delà de ${prevision.annees[2]}, la pièce est listée sans marque.`, size: 15, color: "8B96A3", italics: true })] }));
+      elements.push(tablePrevision);
+      if (prevision.dansHorizon === 0) elements.push(new DOCX.Paragraph({ spacing: { after: 60 }, children: [new DOCX.TextRun({ text: `Aucun remplacement à prévoir d'ici fin ${prevision.annees[2]}.`, size: 18, bold: true, color: DOCX_GREEN })] }));
+    } else {
+      elements.push(new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: "Aucune échéance renseignée", size: 18, color: "666666" })] }));
+    }
+    elements.push(docxSpacer());
   }
   const isRelais = TYPES_AVEC_RELAIS.includes(eq.type);
   let courbeIntegree = false; // la courbe de déclenchement a-t-elle été placée dans sa propre section ?
@@ -14127,28 +14266,9 @@ function docxEquipementElements(eq, locaux, allSites) {
       if (courbeD.length) { elements.push(docxSpacer(80), ...courbeD, docxSpacer()); courbeDechargeIntegree = true; }
       return;
     }
-    if (sec.key === "pieces_usure_ups" && TYPES_AVEC_PIECES_USURE.includes(eq.type)) {
-      // Non repris tel quel : seule la synthèse (type de pièce + année de remplacement) est
-      // destinée au client — description/marque/modèle/quantité/mise en service restent internes.
-      elements.push(docxHeading("Échéances de remplacement prévues"));
-      const lignes = calcEcheancesUsureUPS(eq);
-      const t7 = docxEcheancesUsureTable(lignes);
-      if (t7) elements.push(t7);
-      else elements.push(new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: "Aucune donnée renseignée", size: 18, color: "666666" })] }));
-      elements.push(docxSpacer());
-      return;
-    }
-    if (sec.key === "usure" && TYPES_AVEC_GRADINS.includes(eq.type)) {
-      // Non repris tel quel : seule la synthèse (type de pièce + année de remplacement) est
-      // destinée au client — les références et années de mise en service restent internes.
-      elements.push(docxHeading("Échéances de remplacement prévues"));
-      const lignes = calcPiecesUsure(eq);
-      const t = docxEcheancesUsureTable(lignes);
-      if (t) elements.push(t);
-      else elements.push(new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: "Aucune donnée renseignée", size: 18, color: "666666" })] }));
-      elements.push(docxSpacer());
-      return;
-    }
+    // Pièces d'usure : seule la prévision de remplacement est destinée au client (type de pièce + année) ; elle est imprimée sous le synoptique, plus haut.
+    if (sec.key === "pieces_usure_ups" && TYPES_AVEC_PIECES_USURE.includes(eq.type)) return;
+    if (sec.key === "usure" && TYPES_AVEC_GRADINS.includes(eq.type)) return;
     if (sec.key === "rapport_transformation" && eq.type === "Transformateur") {
       elements.push(docxHeading(sec.title));
       elements.push(docxNormeNote("Rapport de transformation et tolérance : CEI 60076-1. Résistance des enroulements, mesure hors tension à l'équilibre thermique, par phase : CEI 60076-1 / IEEE C57.12.90."));
@@ -14837,11 +14957,6 @@ async function generateInterventionDocx(iv) {
     ...(iv.travauxActions || []).map((a) => (a.action || "") + (a.detail ? " — " + a.detail : "")).filter(Boolean),
     ...lignesUtiles(iv.travauxRealises),
   ]);
-  const m = iv.mesures || {};
-  ajouterPuces("Mesures et contrôles notables", [
-    ["Isolement", m.isolement], ["Résistance de contact", m.resistanceContact], ["Temps de manœuvre", m.tempsManoeuvre],
-    ["Essais fonctionnels", m.essaisFonctionnels], ["Observations", m.observations],
-  ].filter(([, v]) => v && String(v).trim()).map(([l, v]) => `${l} : ${String(v).replace(/\s*\n+\s*/g, " ").trim()}`));
   const anomalies = (iv.anomaliesRecommandations || "").trim();
   if (!anomalies) {
     ajouterPuces("Équipements nécessitant une attention", liste.filter((e) => RANK_OF[e.etat || "Conforme"] >= 1 && e.remarque && String(e.remarque).trim()).map((e) => {
