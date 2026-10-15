@@ -918,6 +918,8 @@ const LISTE_TENSION_MONOPHASE = ["230 V", "220 V", "240 V"];
 const LISTE_PUISSANCE_ONDULEUR_SIMPLIFIE = ["0.5", "0.7", "1", "1.5", "2", "3", "5", "6", "8", "10"];
 const LISTE_REGIME_SORTIE_UPS = ["3+N", "3", "1"];
 const LISTE_TECHNO_BATTERIE = ["PE", "PO", "GEL", "Cd-Ni"];
+// Durée de vie prévue d'une batterie (ans) : sert à calculer l'échéance de remplacement dans la prévision des pièces d'usure (saisie libre possible).
+const LISTE_DUREE_VIE_BATTERIE = ["4", "5", "6", "8", "10", "12", "15", "20"];
 const LISTE_NB_BRANCHES = ["1", "2", "3", "4", "5", "6"];
 const LISTE_REGIME_C_BATTERIE = ["C5", "C8", "C10", "C15", "C20"];
 const LISTE_MACHINE_ETAT = ["Propre", "À nettoyer", "Nettoyé"];
@@ -1472,23 +1474,22 @@ function lignesEcheancesRemplacement(eq) {
   if (TYPES_AVEC_GRADINS.includes(eq.type)) return calcPiecesUsure(eq);
   return [];
 }
-// Prévision sur les trois prochaines années : colonne « Immédiat » (échéance dépassée ou de l'année en cours), puis chaque année à venir.
-// Une pièce dont l'échéance tombe au-delà de l'horizon est listée sans marque.
-// Colonne par colonne, la case de l'année de remplacement est marquée (couleur selon l'urgence) ; toutes les autres cases sont vertes (pièce en bon état prévu,
-// ou déjà renouvelée à son échéance), pour que chaque pièce — même sans échéance proche — apparaisse sur les trois années.
-const COULEURS_PREVISION = [
-  { fond: "FDECEA", texte: "C0392B" }, // immédiat
-  { fond: "FDF3E3", texte: "8A5A0A" }, // année + 1
-  { fond: "FFF6CC", texte: "8A6D00" }, // année + 2
-  { fond: "E8F1FB", texte: "0A5DA8" }, // année + 3
-];
-const COULEUR_PREVISION_OK = { fond: "EAF6EF", texte: "0F8A5F" };
+// Prévision de remplacement : l'année en cours puis les trois années à venir. Pour chaque pièce et chaque année :
+//   vert   = avant l'année d'échéance (pièce en bon état prévu) ;
+//   orange = année d'échéance (remplacement à faire cette année-là) ;
+//   rouge  = après l'échéance (échéance dépassée : pièce non remplacée). Une pièce dont l'échéance est cette année est donc orange cette année, rouge ensuite.
+const COULEURS_PREVISION = {
+  ok: { fond: "EAF6EF", texte: "0F8A5F", symbole: "✓" },
+  orange: { fond: "FDE9C8", texte: "B5730A", symbole: "●" },
+  rouge: { fond: "FADBD8", texte: "C0392B", symbole: "!" },
+};
 function previsionRemplacement(lignes, anneeRef = new Date().getFullYear()) {
-  const annees = [anneeRef + 1, anneeRef + 2, anneeRef + 3];
+  const annees = [anneeRef, anneeRef + 1, anneeRef + 2, anneeRef + 3];
+  const etatAnnee = (echeance, annee) => (annee < echeance ? "ok" : annee === echeance ? "orange" : "rouge");
   const items = (lignes || []).filter((l) => l.annee !== null && l.annee !== undefined)
-    .map((l) => ({ ...l, colonne: l.annee <= anneeRef ? 0 : annees.includes(l.annee) ? annees.indexOf(l.annee) + 1 : -1, depassee: l.annee < anneeRef, enCours: l.annee === anneeRef }))
+    .map((l) => ({ ...l, etats: annees.map((a) => etatAnnee(l.annee, a)), depassee: l.annee < anneeRef, enCours: l.annee === anneeRef }))
     .sort((a, b) => a.annee - b.annee);
-  return { anneeRef, annees, items, dansHorizon: items.filter((l) => l.colonne >= 0).length };
+  return { anneeRef, annees, items, dansHorizon: items.filter((l) => l.annee <= anneeRef + 3).length };
 }
 function calcEcheancesUsureUPS(eq) {
   const data = eq.controles.pieces_usure_ups || {};
@@ -1496,7 +1497,10 @@ function calcEcheancesUsureUPS(eq) {
   const lignes = [];
   getCategoriesUsure(eq.type).forEach((cat) => {
     (data[cat.key] || []).forEach((m, i) => {
-      const annee = numOf(m.anneeMiseEnService), duree = numOf(m.dureeVie);
+      // Premier modèle de batteries : année de mise en service et durée de vie reprises de la fiche « Caractéristiques de la batterie » si elles ne sont pas saisies ici.
+      const repliBatterie = cat.key === "batteries" && i === 0;
+      const annee = numOf(m.anneeMiseEnService) ?? (repliBatterie ? numOf(batterieInfo.anneeMiseEnService) : null);
+      const duree = numOf(m.dureeVie) ?? (repliBatterie ? numOf(batterieInfo.dureeVie) : null);
       if (annee === null || duree === null) return;
       const label = cat.key === "batteries" && i === 0 ? (batterieInfo.typeBloc || batterieInfo.marque || `Modèle ${i + 1}`) : (m.modele || m.description || `Modèle ${i + 1}`);
       lignes.push({ type: `${cat.label} — ${label}`, annee: Math.round(annee) + Math.round(duree) });
@@ -2170,7 +2174,7 @@ function buildOnduleurSchema({ normalMono = false, secoursMono = false, utilisat
           { key: "capacite", label: "Capacité par batterie (Ah)" },
           { key: "regimeC", label: "Régime (autonomie nominale)", options: LISTE_REGIME_C_BATTERIE },
           { key: "nombreBranches", label: "Nombre de branches", options: LISTE_NB_BRANCHES }, { key: "nombreBlocsParBranche", label: "Nombre de blocs par branche" },
-          { key: "anneeMiseEnService", label: "Année de mise en service" },
+          { key: "anneeMiseEnService", label: "Année de mise en service" }, { key: "dureeVie", label: "Durée de vie prévue (ans)", options: LISTE_DUREE_VIE_BATTERIE },
         ]),
       ]},
       { key: "environnement_ups", title: "État de l'installation", items: [
@@ -2295,7 +2299,7 @@ function buildRedresseurSchema({ reseauMono = false } = {}) {
           { key: "capacite", label: "Capacité par batterie (Ah)" },
           { key: "regimeC", label: "Régime (autonomie nominale)", options: LISTE_REGIME_C_BATTERIE },
           { key: "nombreBranches", label: "Nombre de branches", options: LISTE_NB_BRANCHES }, { key: "nombreBlocsParBranche", label: "Nombre de blocs par branche" },
-          { key: "anneeMiseEnService", label: "Année de mise en service" },
+          { key: "anneeMiseEnService", label: "Année de mise en service" }, { key: "dureeVie", label: "Durée de vie prévue (ans)", options: LISTE_DUREE_VIE_BATTERIE },
         ]),
       ]},
       { key: "environnement_ups", title: "État de l'installation", items: [
@@ -7709,12 +7713,12 @@ function HistoriqueTauxCharge({ eq, allSites }) {
   // équipements, se refait inutilement à chaque caractère tapé, causant des saccades qui empirent
   // avec le nombre de sites/équipements accumulés.
   const idStable = eq.lignageId || eq.id;
-  const historique = useMemo(() => getHistoriqueEquipement(allSites, eq), [allSites, idStable]);
+  const historique = useMemo(() => getHistoriqueTauxCharge(allSites, eq), [allSites, idStable]);
   if (historique.length < 2) return null;
   return (
     <Card style={{ marginBottom: 14 }}>
       <div style={{ fontSize: 11.5, fontWeight: 700, color: "#5B6B7D", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.4 }}>
-        Évolution du taux de charge (visites précédentes)
+        Évolution du taux de charge (3 dernières années)
       </div>
       <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "flex-end" }}>
         {historique.map((p, i) => (
@@ -7833,7 +7837,7 @@ function PiecesUsureUPSPanel({ eq, update }) {
               <button onClick={addModele} style={btnGhost(BRAND.blue)}><Plus size={13} /> Ajouter un modèle</button>
             </div>
             {cat.key === "batteries" && (
-              <div style={{ fontSize: 11.5, color: "#8B96A3", marginBottom: 8 }}>Le premier modèle reprend automatiquement marque, type de bloc et quantité depuis la fiche "Batterie" ci-dessus.</div>
+              <div style={{ fontSize: 11.5, color: "#8B96A3", marginBottom: 8 }}>Le premier modèle reprend automatiquement marque, type de bloc, quantité, année de mise en service et durée de vie depuis la fiche "Batterie" ci-dessus (modifiables ici si besoin).</div>
             )}
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               {modeles.map((m, idx) => {
@@ -7877,30 +7881,30 @@ function PiecesUsureUPSPanel({ eq, update }) {
 function PrevisionRemplacementCarte({ lignes }) {
   const p = previsionRemplacement(lignes);
   if (p.items.length === 0) return null;
-  const enTete = ["Pièce", "Échéance", "Immédiat", ...p.annees.map(String)];
+  const enTete = ["Pièce", "Échéance", ...p.annees.map(String)];
   return (
     <Card style={{ marginBottom: 14 }}>
-      <SectionTitle>Prévision de remplacement des pièces — {p.annees[0]} à {p.annees[2]}</SectionTitle>
+      <SectionTitle>Prévision de remplacement des pièces — {p.annees[0]} à {p.annees[3]}</SectionTitle>
       <div style={{ overflowX: "auto" }}>
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
           <thead>
-            <tr>{enTete.map((h, i) => <th key={h + i} style={{ background: "#1A1F26", color: "#fff", padding: "7px 10px", textAlign: i === 0 ? "left" : "center", fontWeight: 700, fontSize: 12 }}>{h}</th>)}</tr>
+            <tr>{enTete.map((h, i) => <th key={h + i} style={{ background: "#1A1F26", color: "#fff", padding: "7px 10px", textAlign: i === 0 ? "left" : "center", fontWeight: 700, fontSize: 12 }}>{h}{i === 2 && <div style={{ fontSize: 9.5, fontWeight: 400, color: "#C0C6CE" }}>en cours</div>}</th>)}</tr>
           </thead>
           <tbody>
             {p.items.map((l, i) => (
               <tr key={i}>
                 <td style={{ padding: "7px 10px", borderBottom: "1px solid #E2E6EB", color: "#3E4A5C" }}>{l.type}</td>
-                <td style={{ padding: "7px 10px", borderBottom: "1px solid #E2E6EB", textAlign: "center", fontWeight: 700, color: l.depassee ? "#C0392B" : l.enCours ? "#8A5A0A" : "#1A1F26" }}>{l.annee}</td>
-                {[0, 1, 2, 3].map((c) => {
-                  const marque = l.colonne === c, couleur = marque ? COULEURS_PREVISION[c] : COULEUR_PREVISION_OK;
-                  return <td key={c} style={{ padding: "7px 10px", borderBottom: "1px solid #fff", textAlign: "center", fontWeight: 700, background: "#" + couleur.fond, color: "#" + couleur.texte, fontSize: marque ? 14 : 12 }}>{marque ? "●" : "✓"}</td>;
+                <td style={{ padding: "7px 10px", borderBottom: "1px solid #E2E6EB", textAlign: "center", fontWeight: 700, color: l.depassee ? "#C0392B" : l.enCours ? "#B5730A" : "#1A1F26" }}>{l.annee}</td>
+                {l.etats.map((e, c) => {
+                  const couleur = COULEURS_PREVISION[e];
+                  return <td key={c} style={{ padding: "7px 10px", borderBottom: "1px solid #fff", textAlign: "center", fontWeight: 700, background: "#" + couleur.fond, color: "#" + couleur.texte, fontSize: e === "ok" ? 12 : 14 }}>{couleur.symbole}</td>;
                 })}
               </tr>
             ))}
           </tbody>
         </table>
       </div>
-      <div style={{ fontSize: 11, color: "#8B96A3", marginTop: 8 }}>● = remplacement à prévoir l'année indiquée, couleur selon l'urgence (rouge : immédiat — échéance dépassée ou de l'année en cours). ✓ (vert) = pièce en bon état prévu, ou renouvelée à son échéance.</div>
+      <div style={{ fontSize: 11, color: "#8B96A3", marginTop: 8 }}>Vert (✓) : pièce en bon état prévu, avant son échéance. Orange (●) : année d'échéance — remplacement à faire cette année-là. Rouge (!) : échéance dépassée (années suivantes, si la pièce n'est pas remplacée).</div>
     </Card>
   );
 }
@@ -11927,30 +11931,35 @@ function docxFieldTable(rows, photo) {
 function docxColorerEtat(brut, etat) {
   return brut !== "bad" ? brut : etat === "Défaillant" ? "bad" : "warning";
 }
-// Prévision de remplacement des pièces sur les trois prochaines années : « Immédiat » (échéance dépassée ou en cours) puis une colonne par année, la pièce étant marquée
-// dans la colonne de son année d'échéance (couleur selon l'urgence). Placée directement sous le synoptique de l'équipement.
+// Prévision de remplacement des pièces : année en cours + trois années à venir, une case colorée par pièce et par année (vert → orange l'année d'échéance → rouge ensuite).
+// Placée directement sous le synoptique de l'équipement.
 function docxPrevisionRemplacementTable(lignes) {
   const p = previsionRemplacement(lignes);
   if (p.items.length === 0) return null;
-  const largeurs = [3900, 1100, 1150, 1150, 1150, 1150];
-  const enTete = ["Pièce", "Échéance", "Immédiat", ...p.annees.map(String)];
-  const entete = new DOCX.TableRow({ tableHeader: true, cantSplit: true, children: enTete.map((h, i) => new DOCX.TableCell({
-    width: { size: largeurs[i], type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_DARK },
-    children: [new DOCX.Paragraph({ keepNext: true, alignment: i === 0 ? DOCX.AlignmentType.LEFT : DOCX.AlignmentType.CENTER, children: [new DOCX.TextRun({ text: h, bold: true, size: 17, color: DOCX_WHITE })] })],
-  })) });
+  const largeurs = [3500, 1000, 1275, 1275, 1275, 1275];
+  const enTete = new DOCX.TableRow({ tableHeader: true, cantSplit: true, children: [
+    ...["Pièce", "Échéance"].map((h, i) => new DOCX.TableCell({
+      width: { size: largeurs[i], type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_DARK }, verticalAlign: DOCX.VerticalAlign.CENTER,
+      children: [new DOCX.Paragraph({ keepNext: true, alignment: i === 0 ? DOCX.AlignmentType.LEFT : DOCX.AlignmentType.CENTER, children: [new DOCX.TextRun({ text: h, bold: true, size: 17, color: DOCX_WHITE })] })],
+    })),
+    ...p.annees.map((a, i) => new DOCX.TableCell({
+      width: { size: largeurs[i + 2], type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_DARK }, verticalAlign: DOCX.VerticalAlign.CENTER,
+      children: [new DOCX.Paragraph({ keepNext: true, alignment: DOCX.AlignmentType.CENTER, children: [new DOCX.TextRun({ text: String(a), bold: true, size: 17, color: DOCX_WHITE })] }),
+        ...(i === 0 ? [new DOCX.Paragraph({ keepNext: true, alignment: DOCX.AlignmentType.CENTER, children: [new DOCX.TextRun({ text: "en cours", size: 13, color: DOCX_SILVER })] })] : [])],
+    })),
+  ] });
   const corps = p.items.map((l) => new DOCX.TableRow({ cantSplit: true, children: [
     new DOCX.TableCell({ width: { size: largeurs[0], type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, children: [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: l.type, size: 18, color: DOCX_DARK })] })] }),
-    new DOCX.TableCell({ width: { size: largeurs[1], type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, children: [new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, children: [new DOCX.TextRun({ text: String(l.annee), bold: true, size: 18, color: l.depassee ? DOCX_RED : l.enCours ? "8A5A0A" : DOCX_DARK })] })] }),
-    ...[0, 1, 2, 3].map((c) => {
-      const marque = l.colonne === c, couleur = marque ? COULEURS_PREVISION[c] : COULEUR_PREVISION_OK;
+    new DOCX.TableCell({ width: { size: largeurs[1], type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, children: [new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, children: [new DOCX.TextRun({ text: String(l.annee), bold: true, size: 18, color: l.depassee ? DOCX_RED : l.enCours ? "B5730A" : DOCX_DARK })] })] }),
+    ...l.etats.map((e, c) => {
+      const couleur = COULEURS_PREVISION[e];
       return new DOCX.TableCell({
-        width: { size: largeurs[c + 2], type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, verticalAlign: DOCX.VerticalAlign.CENTER,
-        shading: { type: DOCX.ShadingType.CLEAR, fill: couleur.fond },
-        children: [new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, children: [new DOCX.TextRun({ text: marque ? "●" : "✓", bold: true, size: marque ? 20 : 16, color: couleur.texte })] })],
+        width: { size: largeurs[c + 2], type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, verticalAlign: DOCX.VerticalAlign.CENTER, shading: { type: DOCX.ShadingType.CLEAR, fill: couleur.fond },
+        children: [new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, children: [new DOCX.TextRun({ text: couleur.symbole, bold: true, size: e === "ok" ? 16 : 20, color: couleur.texte })] })],
       });
     }),
   ] }));
-  return docxTable({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: largeurs, rows: [entete, ...corps] });
+  return docxTable({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: largeurs, rows: [enTete, ...corps] });
 }
 function docxEcheancesUsureTable(lignes) {
   const filtered = lignes.filter((l) => l.annee !== null && l.annee !== undefined);
@@ -13150,6 +13159,69 @@ function getHistoriqueEquipement(allSites, eq) {
   points.sort((a, b) => (a.date || "").localeCompare(b.date || ""));
   return points;
 }
+// Historique du taux de charge d'un équipement sur les 3 dernières années (même convention que les autres historiques : visites dont l'année est ≥ année en cours − 3),
+// avec les trois phases et la moyenne. Les visites antérieures viennent des équipements repris d'une visite à l'autre (lignageId) ; la visite en cours est incluse.
+function getHistoriqueTauxCharge(allSites, eq) {
+  const lignageId = eq.lignageId || eq.id;
+  const seuilAnnee = new Date().getFullYear() - 3;
+  const points = [];
+  (allSites || []).forEach((s) => {
+    (s.equipements || []).forEach((e) => {
+      if ((e.lignageId || e.id) !== lignageId) return;
+      const date = s.rapport && s.rapport.date;
+      if (date && Number(String(date).slice(0, 4)) < seuilAnnee) return;
+      const tc = calcTauxCharge(e);
+      if (!tc) return;
+      const vals = [tc.t1, tc.t2, tc.t3].filter((v) => v !== null && v !== undefined);
+      if (!vals.length) return;
+      points.push({ date, annee: date ? Number(String(date).slice(0, 4)) : null, t1: tc.t1, t2: tc.t2, t3: tc.t3, valeur: Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 10) / 10, courante: e.id === eq.id });
+    });
+  });
+  points.sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+  return points;
+}
+// Bloc « Taux de charge » du rapport Word : valeurs par phase, barres, puis — s'il existe au moins deux visites sur les 3 dernières années — l'historique
+// (tableau par phase colorié selon la charge + courbe de la moyenne). Placé sous l'échéancier des pièces d'usure (ou sous le synoptique / l'identification).
+function docxBlocTauxCharge(eq, allSites) {
+  if (!TYPES_AVEC_MESURES_UTILISATION.includes(eq.type)) return [];
+  const tc = calcTauxCharge(eq);
+  const histo = allSites ? getHistoriqueTauxCharge(allSites, eq) : [];
+  if (!tc && histo.length < 2) return [];
+  const elements = [docxHeading("Taux de charge", 520, 160)];
+  if (tc) {
+    const base = numOf(eq.identification?.calibreDisjoncteur) ? "I mesuré ÷ calibre du disjoncteur" : "S mesuré ÷ puissance nominale";
+    elements.push(new DOCX.Paragraph({ keepNext: true, spacing: { before: 0, after: 40 }, children: [
+      new DOCX.TextRun({ text: `Taux de charge calculé — L1 : ${tc.t1 ?? "—"}% · L2 : ${tc.t2 ?? "—"}% · L3 : ${tc.t3 ?? "—"}%`, bold: true, size: 17, color: DOCX_DARK }),
+      new DOCX.TextRun({ text: `   (${base})`, size: 15, color: "8B96A3", italics: true }),
+    ] }));
+    const graphTC = genererGraphiqueTauxCharge([tc.t1, tc.t2, tc.t3], ["L1", "L2", "L3"]);
+    const imgTC = graphTC ? docxImage(graphTC, 340, 85) : null;
+    if (imgTC) elements.push(new DOCX.Paragraph({ spacing: { after: 60 }, children: [imgTC] }));
+  }
+  if (histo.length >= 2) {
+    const fmtDate = (d) => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(d || ""); return m ? `${m[3]}/${m[2]}/${m[1]}` : (d || "—"); };
+    const couleur = (v) => (v === null || v === undefined ? { fond: "FFFFFF", texte: "8B96A3" } : v > 100 ? { fond: "FDECEA", texte: "C0392B" } : v > 80 ? { fond: "FDF3E3", texte: "B5730A" } : { fond: "EAF6EF", texte: "0F8A5F" });
+    const largeurs = [2600, 1750, 1750, 1750, 1750];
+    const enTete = new DOCX.TableRow({ tableHeader: true, cantSplit: true, children: ["Visite", "L1", "L2", "L3", "Moyenne"].map((h, i) => new DOCX.TableCell({
+      width: { size: largeurs[i], type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_DARK },
+      children: [new DOCX.Paragraph({ keepNext: true, alignment: i === 0 ? DOCX.AlignmentType.LEFT : DOCX.AlignmentType.CENTER, children: [new DOCX.TextRun({ text: h, bold: true, size: 17, color: DOCX_WHITE })] })],
+    })) });
+    const corps = histo.map((p) => new DOCX.TableRow({ cantSplit: true, children: [
+      new DOCX.TableCell({ width: { size: largeurs[0], type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, children: [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: fmtDate(p.date), size: 18, bold: p.courante, color: DOCX_DARK }), ...(p.courante ? [new DOCX.TextRun({ text: "  (cette visite)", size: 14, color: "8B96A3", italics: true })] : [])] })] }),
+      ...[p.t1, p.t2, p.t3, p.valeur].map((v, i) => { const c = couleur(v); return new DOCX.TableCell({
+        width: { size: largeurs[i + 1], type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, shading: { type: DOCX.ShadingType.CLEAR, fill: c.fond },
+        children: [new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, children: [new DOCX.TextRun({ text: v === null || v === undefined ? "—" : `${v}%`, bold: i === 3, size: 18, color: c.texte })] })],
+      }); }),
+    ] }));
+    elements.push(new DOCX.Paragraph({ keepNext: true, spacing: { before: 120, after: 80 }, children: [new DOCX.TextRun({ text: "Évolution du taux de charge — 3 dernières années", bold: true, size: 17, color: DOCX_DARK })] }));
+    elements.push(docxTable({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: largeurs, rows: [enTete, ...corps] }));
+    const graphHisto = genererGraphiqueHistorique(histo, "Taux de charge moyen (%)");
+    const imgHisto = graphHisto ? docxImage(graphHisto, 320, 105) : null;
+    if (imgHisto) elements.push(new DOCX.Paragraph({ spacing: { before: 100, after: 40 }, children: [imgHisto] }));
+  }
+  elements.push(docxSpacer());
+  return elements;
+}
 // Petit graphique d'évolution (ligne) pour visualiser une tendance sur plusieurs années — taux de
 // charge par exemple, pour repérer une dérive avant qu'elle ne devienne critique.
 function genererGraphiqueHistorique(points, labelY) {
@@ -13928,14 +14000,16 @@ function docxEquipementElements(eq, locaux, allSites) {
     const tablePrevision = docxPrevisionRemplacementTable(lignesEcheancesRemplacement(eq));
     elements.push(docxHeading("Prévision de remplacement des pièces", 520, 160));
     if (tablePrevision) {
-      elements.push(new DOCX.Paragraph({ keepNext: true, spacing: { before: 0, after: 100 }, children: [new DOCX.TextRun({ text: `● = remplacement à prévoir l'année indiquée, couleur selon l'urgence (rouge : immédiat — échéance dépassée ou de l'année en cours ; orange : ${prevision.annees[0]} ; jaune : ${prevision.annees[1]} ; bleu : ${prevision.annees[2]}).  ✓ (vert) = pièce en bon état prévu, ou renouvelée à son échéance.`, size: 15, color: "8B96A3", italics: true })] }));
+      elements.push(new DOCX.Paragraph({ keepNext: true, spacing: { before: 0, after: 100 }, children: [new DOCX.TextRun({ text: `Vert (✓) : pièce en bon état prévu, avant son échéance.  Orange (●) : année d'échéance — remplacement à faire cette année-là.  Rouge (!) : échéance dépassée (années suivantes, si la pièce n'est pas remplacée).  ${prevision.annees[0]} = année en cours.`, size: 15, color: "8B96A3", italics: true })] }));
       elements.push(tablePrevision);
-      if (prevision.dansHorizon === 0) elements.push(new DOCX.Paragraph({ spacing: { after: 60 }, children: [new DOCX.TextRun({ text: `Aucun remplacement à prévoir d'ici fin ${prevision.annees[2]}.`, size: 18, bold: true, color: DOCX_GREEN })] }));
+      if (prevision.dansHorizon === 0) elements.push(new DOCX.Paragraph({ spacing: { after: 60 }, children: [new DOCX.TextRun({ text: `Aucun remplacement à prévoir d'ici fin ${prevision.annees[3]}.`, size: 18, bold: true, color: DOCX_GREEN })] }));
     } else {
       elements.push(new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: "Aucune échéance renseignée", size: 18, color: "666666" })] }));
     }
     elements.push(docxSpacer());
   }
+  // Taux de charge (+ historique sur 3 ans) : monté sous l'échéancier des pièces d'usure, ou sous le synoptique / l'identification s'il n'y a pas d'échéancier.
+  elements.push(...docxBlocTauxCharge(eq, allSites));
   const isRelais = TYPES_AVEC_RELAIS.includes(eq.type);
   let courbeIntegree = false; // la courbe de déclenchement a-t-elle été placée dans sa propre section ?
   let courbeDechargeIntegree = false; // idem pour la courbe de décharge batterie
@@ -14171,26 +14245,7 @@ function docxEquipementElements(eq, locaux, allSites) {
           elements.push(new DOCX.Paragraph({ spacing: { before: 0, after: 20 }, children: [new DOCX.TextRun({ text: `Puissance active calculée (P = S × FP) : ${pUtil} kW`, bold: true, size: 17, color: DOCX_DARK })] }));
         }
       }
-      const tc = calcTauxCharge(eq);
-      if (tc) {
-        elements.push(new DOCX.Paragraph({ spacing: { before: 40, after: 20 }, children: [new DOCX.TextRun({ text: `Taux de charge calculé — L1 : ${tc.t1 ?? "—"}% · L2 : ${tc.t2 ?? "—"}% · L3 : ${tc.t3 ?? "—"}%`, bold: true, size: 17, color: DOCX_DARK })] }));
-        const graphTC = genererGraphiqueTauxCharge([tc.t1, tc.t2, tc.t3], ["L1", "L2", "L3"]);
-        if (graphTC) {
-          const imgTC = docxImage(graphTC, 340, 85);
-          if (imgTC) elements.push(new DOCX.Paragraph({ spacing: { after: 40 }, children: [imgTC] }));
-        }
-      }
-      if (allSites) {
-        const historique = getHistoriqueEquipement(allSites, eq);
-        if (historique.length >= 2) {
-          elements.push(new DOCX.Paragraph({ spacing: { before: 20, after: 10 }, children: [new DOCX.TextRun({ text: "Évolution du taux de charge (visites précédentes)", bold: true, size: 17, color: DOCX_DARK })] }));
-          const graphHisto = genererGraphiqueHistorique(historique, "Taux de charge (%)");
-          if (graphHisto) {
-            const imgHisto = docxImage(graphHisto, 320, 105);
-            if (imgHisto) elements.push(new DOCX.Paragraph({ spacing: { after: 40 }, children: [imgHisto] }));
-          }
-        }
-      }
+      // Le taux de charge et son historique sont imprimés plus haut, sous l'échéancier des pièces d'usure (voir docxBlocTauxCharge).
       const tablePhotosU = docxPhotosParPhase("Utilisation", eq.controles.photos_utilisation);
       if (tablePhotosU) { elements.push(docxSpacer(20)); elements.push(tablePhotosU); }
       elements.push(docxSpacer());
