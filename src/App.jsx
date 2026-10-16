@@ -11807,33 +11807,81 @@ function docxRemarquesEquipement(texte) {
   out.push(docxSpacer(100)); // espace avant ce qui suit (photos, courbes…)
   return out;
 }
-// Synthèse du site : paragraphe de synthèse générale, puis tableau Équipement | Constats | Préconisations.
-function docxSyntheseSiteStructuree(texte) {
+// Synthèse du site, lisible par le client : encart « synthèse générale » en grands caractères (barre et fond de la couleur de l'état global), puis tableau détaillé
+// Équipement | Constats | Préconisations dont chaque ligne est colorée selon l'état de l'équipement — rouge : prioritaire, orange : à planifier, vert : conforme —
+// pour voir d'un coup d'œil ce qui est important, ce qui l'est moins et ce qui ne l'est pas. Les équipements sans remarque sont regroupés sur une dernière ligne verte.
+function teinteSyntheseRang(rang) {
+  if (rang >= 2) return { barre: DOCX_RED, fond: "FDECEA", texte: "C0392B", etiquette: "PRIORITAIRE" };
+  if (rang === 1) return { barre: DOCX_ORANGE, fond: "FDF3E3", texte: "B5730A", etiquette: "À PLANIFIER" };
+  if (rang === 0) return { barre: DOCX_GREEN, fond: "EAF6EF", texte: "0F8A5F", etiquette: "CONFORME" };
+  return { barre: "7A8794", fond: "F4F6F8", texte: "5A6573", etiquette: "NON CONCERNÉ" };
+}
+function docxEncartSynthese(lignes, teinte) {
+  const a = docxAucuneBordure();
+  // Une phrase par ligne ; celles qui portent le message clé (bilan chiffré, défaillances, bon état) ressortent en gras et en plus grand.
+  const phrases = lignes.join(" ").split(/(?<=[.!?])\s+(?=[A-ZÉÈÀÂÎÔÛ«])/).map((s) => s.trim()).filter(Boolean);
+  const cle = (s) => /^(Parmi eux|Tous les équipements|Cet équipement|Des défaillances|Aucune défaillance|L'installation est en bon état)/i.test(s);
+  return docxTable({
+    width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: [TABLE_WIDTH], borders: { ...docxToutesAucune(), insideHorizontal: a, insideVertical: a },
+    rows: [new DOCX.TableRow({ cantSplit: true, children: [new DOCX.TableCell({
+      width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, shading: { type: DOCX.ShadingType.CLEAR, fill: teinte.fond },
+      margins: { top: 240, bottom: 200, left: 320, right: 280 }, borders: { top: a, bottom: a, right: a, left: { style: DOCX.BorderStyle.SINGLE, size: 60, color: teinte.barre } },
+      children: [
+        new DOCX.Paragraph({ spacing: { after: 100 }, children: [new DOCX.TextRun({ text: "SYNTHÈSE GÉNÉRALE", bold: true, size: 16, color: teinte.texte, characterSpacing: 40 })] }),
+        ...phrases.map((s) => new DOCX.Paragraph({ spacing: { after: cle(s) ? 140 : 100, line: 300 }, children: [new DOCX.TextRun({ text: s, bold: cle(s), size: cle(s) ? 26 : 23, color: cle(s) ? teinte.texte : DOCX_DARK })] })),
+      ],
+    })] })],
+  });
+}
+function docxSyntheseSiteStructuree(texte, site) {
   const p = parserSyntheseSite(texte);
   const out = [];
+  const equipements = (site && site.equipements) || [];
+  const titreDe = (e) => `${e.type}${e.identification && e.identification.repere ? " (" + e.identification.repere + ")" : ""}`;
+  const equipementDuTitre = (titre) => equipements.find((e) => titreDe(e) === titre) || equipements.find((e) => titre && titre.startsWith(e.type) && e.identification && e.identification.repere && titre.includes(e.identification.repere));
   if (p.generale.length) {
-    out.push(docxSousTitreRemarques("Synthèse générale"));
-    p.generale.forEach((l) => out.push(new DOCX.Paragraph({ spacing: { after: 80 }, children: [new DOCX.TextRun({ text: l, size: 18 })] })));
+    const rangGlobal = equipements.length ? Math.max(...equipements.map((e) => RANK_OF[e.etatFinal] ?? 0)) : 0;
+    out.push(docxEncartSynthese(p.generale, teinteSyntheseRang(rangGlobal)));
+    out.push(docxSpacer(200));
   }
-  if (p.equipements.length) {
-    out.push(docxSousTitreRemarques("Détail par équipement"));
-    const marge = { top: 110, bottom: 110, left: 120, right: 110 };
-    const W = [2000, 3900, 3700];
-    const cellule = (i, enfants, entete) => new DOCX.TableCell({ width: { size: W[i], type: DOCX.WidthType.DXA }, margins: marge, shading: entete ? { type: DOCX.ShadingType.CLEAR, fill: DOCX_DARK } : undefined, children: enfants });
-    const texte1 = (t, gras) => new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: t, bold: !!gras, size: 17, color: gras ? "555555" : undefined })] });
-    const texteEntete = (t) => new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: t, bold: true, size: 17, color: DOCX_WHITE })] });
-    const entete = new DOCX.TableRow({ tableHeader: true, children: [
-      cellule(0, [texteEntete("Équipement")], true), cellule(1, [texteEntete("Constats")], true), cellule(2, [texteEntete("Préconisations")], true),
-    ]});
+  if (p.equipements.length || equipements.length) {
+    out.push(new DOCX.Paragraph({ keepNext: true, spacing: { before: 160, after: 100 }, children: [new DOCX.TextRun({ text: "Détail par équipement", bold: true, size: 24, color: DOCX_BLUE })] }));
+    const marge = { top: 130, bottom: 130, left: 140, right: 120 };
+    const W = [2600, 3600, 3400];
+    const a = docxAucuneBordure();
+    const cellule = (i, enfants, extra = {}) => new DOCX.TableCell({ width: { size: W[i], type: DOCX.WidthType.DXA }, margins: marge, ...extra, children: enfants });
+    const texte1 = (t, couleur) => new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: t, size: 20, color: couleur })] });
+    const entete = new DOCX.TableRow({ tableHeader: true, children: ["Équipement", "Constats", "Préconisations"].map((t, i) => cellule(i, [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: t, bold: true, size: 19, color: DOCX_WHITE })] })], { shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_DARK } })) });
+    const avecRemarques = new Set();
     const lignes = p.equipements.map((e) => {
+      const eq = equipementDuTitre(e.titre);
+      if (eq) avecRemarques.add(eq.id);
+      const teinte = teinteSyntheseRang(eq ? (RANK_OF[eq.etatFinal] ?? 0) : 0);
       const constats = [...e.autres, ...e.constats];
-      return new DOCX.TableRow({ children: [
-        cellule(0, [texte1(e.titre || "—", true)]),
-        cellule(1, constats.length ? docxPuces(constats, 17) : [texte1("—")]),
-        cellule(2, e.preconisations.length ? docxPuces(e.preconisations, 17) : [texte1("—")]),
-      ]});
+      return new DOCX.TableRow({ cantSplit: true, children: [
+        cellule(0, [
+          new DOCX.Paragraph({ spacing: { after: 60 }, children: [new DOCX.TextRun({ text: e.titre || "—", bold: true, size: 21, color: DOCX_DARK })] }),
+          new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: "●  " + teinte.etiquette, bold: true, size: 15, color: teinte.texte, characterSpacing: 20 })] }),
+        ], { shading: { type: DOCX.ShadingType.CLEAR, fill: teinte.fond }, borders: { top: a, bottom: a, right: a, left: { style: DOCX.BorderStyle.SINGLE, size: 48, color: teinte.barre } } }),
+        cellule(1, constats.length ? docxPuces(constats, 19, 60) : [texte1("—")]),
+        cellule(2, e.preconisations.length ? docxPuces(e.preconisations, 19, 60) : [texte1("—")]),
+      ] });
     });
+    // Équipements sans remarque : une dernière ligne verte, pour que le client voit aussi ce qui ne demande aucune action.
+    const sansRemarque = equipements.filter((e) => !avecRemarques.has(e.id) && !(e.remarques && e.remarques.trim()));
+    if (sansRemarque.length) {
+      const teinte = teinteSyntheseRang(0);
+      lignes.push(new DOCX.TableRow({ cantSplit: true, children: [new DOCX.TableCell({
+        width: { size: W[0] + W[1] + W[2], type: DOCX.WidthType.DXA }, columnSpan: 3, margins: marge, shading: { type: DOCX.ShadingType.CLEAR, fill: teinte.fond },
+        borders: { top: a, bottom: a, right: a, left: { style: DOCX.BorderStyle.SINGLE, size: 48, color: teinte.barre } },
+        children: [new DOCX.Paragraph({ children: [
+          new DOCX.TextRun({ text: "✓  Aucune remarque, aucune action : ", bold: true, size: 20, color: teinte.texte }),
+          new DOCX.TextRun({ text: sansRemarque.map(titreDe).join(" · "), size: 20, color: DOCX_DARK }),
+        ] })],
+      })] }));
+    }
     out.push(docxTable({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: W, rows: [entete, ...lignes] }));
+    out.push(new DOCX.Paragraph({ spacing: { before: 100, after: 40 }, children: [new DOCX.TextRun({ text: "Code couleur :  rouge = prioritaire (remise en conformité rapide)  ·  orange = à planifier / à surveiller  ·  vert = conforme, aucune action.", size: 16, italics: true, color: "8B96A3" })] }));
   }
   return out;
 }
@@ -14840,7 +14888,7 @@ async function generateSiteDocx(site, allSites) {
     // qui précède (tableau "Rapport").
     children.push(docxHeading("Synthèse des remarques et préconisations"));
     if (remarquesStructurees(site.rapport.syntheseRemarques)) {
-      children.push(...docxSyntheseSiteStructuree(site.rapport.syntheseRemarques));
+      children.push(...docxSyntheseSiteStructuree(site.rapport.syntheseRemarques, site));
     } else {
     const lignesRemarques = site.rapport.syntheseRemarques.split("\n").filter((l) => l.trim());
     const margeRemarque = { top: 130, bottom: 130, left: 130, right: 120 };
@@ -14859,14 +14907,14 @@ async function generateSiteDocx(site, allSites) {
           const equip = idx >= 0 ? ligne.slice(0, idx).trim() : "";
           const remarque = idx >= 0 ? ligne.slice(idx + 3).trim() : ligne.trim();
           return new DOCX.TableRow({ children: [
-            new DOCX.TableCell({ width: { size: 2600, type: DOCX.WidthType.DXA }, margins: margeRemarque, children: [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: equip, size: 17, color: "555555" })] })] }),
-            new DOCX.TableCell({ width: { size: 7000, type: DOCX.WidthType.DXA }, margins: margeRemarque, children: [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: remarque, size: 18 })] })] }),
+            new DOCX.TableCell({ width: { size: 2600, type: DOCX.WidthType.DXA }, margins: margeRemarque, children: [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: equip, size: 20, bold: true, color: DOCX_DARK })] })] }),
+            new DOCX.TableCell({ width: { size: 7000, type: DOCX.WidthType.DXA }, margins: margeRemarque, children: [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: remarque, size: 20 })] })] }),
           ]});
         }),
       ],
     });
     if (auMoinsUnEquipement) children.push(remarquesTable);
-    else lignesRemarques.forEach((l) => children.push(new DOCX.Paragraph({ spacing: { after: 80 }, children: [new DOCX.TextRun({ text: l, size: 18 })] })));
+    else lignesRemarques.forEach((l) => children.push(new DOCX.Paragraph({ spacing: { after: 100, line: 300 }, children: [new DOCX.TextRun({ text: l, size: 22 })] })));
     }
   }
   else children.push(docxSpacer());
