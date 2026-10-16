@@ -36,7 +36,7 @@ const EQUIPMENT_TYPES_HTABT = [
   "Batterie de compensation",
   "Bilan de puissance",
 ];
-// Redresseur chargeur et inverseur de source statique à venir.
+// Types de la conversion d'énergie (onduleur, redresseur chargeur, inverseur de source statique).
 const EQUIPMENT_TYPES_CONVERSION = ["Onduleur", "Onduleur simplifié", "Redresseur chargeur", "Inverseur de source"];
 const EQUIPMENT_TYPES = [...EQUIPMENT_TYPES_HTABT, ...EQUIPMENT_TYPES_CONVERSION];
 
@@ -10197,6 +10197,14 @@ function printEtatColor(label) {
   return "#0F8A5F";
 }
 
+// Un contrôle « simple » (ni action, ni remarque / valeurs longues) se place en demi-largeur dans
+// la vue d'impression — même règle que docxControlTableCompact pour le rapport Word.
+function printControleSimple(item, value) {
+  if (!value || value.action) return false;
+  const parts = printFieldParts(item, value) || [];
+  const longueur = parts.reduce((s, p) => s + String((p && typeof p === "object" ? p.text : p) || "").length + 5, 0);
+  return longueur <= 45;
+}
 function PrintControlLine({ item, value, extraParts }) {
   const parts = extraParts || printFieldParts(item, value);
   return (
@@ -10355,16 +10363,18 @@ function PrintEquipement({ eq, allEquipements = [], locaux = [] }) {
               <PrintControlLine item={{ label: "Contrôle du circuit de mesures et commande", fields: [] }} value={eq.controles.controles_relais.circuit_mesures_commande} />
             </>
           )}
+          {/* Contrôle avec action ou remarque : pleine largeur (sur deux lignes) ; sinon deux contrôles par ligne. */}
+          <div style={{ display: "flex", flexWrap: "wrap", columnGap: 16 }}>
           {!(isRelaisSeuils && (sec.key === "parametrage_relais" || sec.key === "controles_relais")) && sec.items.map((item) => {
             const value = eq.controles[sec.key][item.key] || { action: "", etat: "", fields: {} };
             return (
-              <div key={item.key}>
+              <div key={item.key} style={{ width: printControleSimple(item, value) ? "calc(50% - 8px)" : "100%" }}>
                 <PrintControlLine item={item} value={value} />
               </div>
             );
           })}
           {(eq.controles[sec.key + "__custom"] || []).map((c) => (
-            <div key={c.id} style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "5px 0", borderBottom: "1px solid #e5e5e5", fontSize: 11 }}>
+            <div key={c.id} style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "5px 0", borderBottom: "1px solid #e5e5e5", fontSize: 11, width: c.action ? "100%" : "calc(50% - 8px)" }}>
               <div style={{ flex: "1 1 260px" }}>
                 <div>{c.label || "(action ajoutée)"}</div>
                 {c.action ? <div style={{ color: "#666", fontSize: 10 }}>Action : {c.action}</div> : null}
@@ -10374,6 +10384,7 @@ function PrintEquipement({ eq, allEquipements = [], locaux = [] }) {
               </div>
             </div>
           ))}
+          </div>
         </PrintSection>
       ))}
       <div style={{ marginTop: 10, paddingTop: 10, borderTop: `2px solid ${BRAND.blue}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
@@ -12069,7 +12080,7 @@ function docxControlRow(label, detail, action, etat, isAlternate, garderAvecSuit
 // Sections « État … » (état de l'installation, de l'onduleur, du by-pass, redresseur / chargeur…) : ce sont de simples listes de contrôles avec un état. Au lieu d'une rangée haute
 // par contrôle, on en place DEUX par ligne (libellé + état | libellé + état), avec des marges réduites et un texte plus petit : le tableau occupe environ trois fois moins de place.
 // Un contrôle qui porte une action ou de longues valeurs garde une ligne pleine largeur (pour rester lisible) ; l'ordre des contrôles est conservé.
-function docxControlTableCompact(rows) {
+function docxControlTableCompact(rows, garderAvecSuite = false) {
   if (rows.length === 0) return null;
   const L = [3300, 1500, 3300, 1500];
   const marges = { top: 40, bottom: 40, left: 110, right: 90 };
@@ -12077,6 +12088,7 @@ function docxControlTableCompact(rows) {
   // Un contrôle se place en demi-largeur s'il n'a pas d'action et au plus une courte valeur (ex. « Valeur : 24 °C ») ; sinon il garde une ligne pleine largeur.
   const longueurDetail = (r) => (Array.isArray(r[1]) ? r[1].reduce((s, p) => s + String((p && p.text) || "").length + 5, 0) : String(r[1] || "").length);
   const simple = (r) => !r[2] && longueurDetail(r) <= 45;
+  let garder = false; // keepNext de la rangée en cours (titre + début du tableau sur la même page)
   const cellEtat = (etat, largeur) => {
     const key = etat === "Conforme" ? "ok" : etat === "Dégradé" ? "warning" : etat === "Défaillant" ? "bad" : null;
     const c = key && DOCX_ETAT_COULEURS[key];
@@ -12084,12 +12096,12 @@ function docxControlTableCompact(rows) {
       width: { size: largeur, type: DOCX.WidthType.DXA }, margins: { top: 40, bottom: 40, left: 60, right: 60 }, verticalAlign: DOCX.VerticalAlign.CENTER,
       shading: etat ? { type: DOCX.ShadingType.CLEAR, fill: c ? c.fond : DOCX_LIGHT } : undefined,
       borders: c ? { top: { style: DOCX.BorderStyle.SINGLE, size: 4, color: c.bord }, bottom: { style: DOCX.BorderStyle.SINGLE, size: 4, color: c.bord }, left: { style: DOCX.BorderStyle.SINGLE, size: 4, color: c.bord }, right: { style: DOCX.BorderStyle.SINGLE, size: 4, color: c.bord } } : undefined,
-      children: [new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, spacing: { before: 0, after: 0 }, children: [new DOCX.TextRun({ text: (etat || "").toUpperCase(), bold: true, size: 14, color: c ? c.texte : "555555" })] })],
+      children: [new DOCX.Paragraph({ keepNext: garder, alignment: DOCX.AlignmentType.CENTER, spacing: { before: 0, after: 0 }, children: [new DOCX.TextRun({ text: (etat || "").toUpperCase(), bold: true, size: 14, color: c ? c.texte : "555555" })] })],
     });
   };
   const cellLabel = (r, largeur, span, separateur) => {
     const detail = r ? r[1] : null, action = r ? r[2] : "";
-    const paragraphes = [new DOCX.Paragraph({ spacing: { before: 0, after: (detail && (Array.isArray(detail) ? detail.length : detail)) || action ? 20 : 0 }, children: [new DOCX.TextRun({ text: r ? r[0] : "", size: 17, color: DOCX_DARK })] })];
+    const paragraphes = [new DOCX.Paragraph({ keepNext: garder, spacing: { before: 0, after: (detail && (Array.isArray(detail) ? detail.length : detail)) || action ? 20 : 0 }, children: [new DOCX.TextRun({ text: r ? r[0] : "", size: 17, color: DOCX_DARK })] })];
     if (Array.isArray(detail) && detail.length) {
       const runs = [];
       detail.forEach((p, i) => {
@@ -12097,11 +12109,11 @@ function docxControlTableCompact(rows) {
         const couleur = p.etat === "bad" ? "C0392B" : p.etat === "warning" ? "B5730A" : p.etat === "ok" ? "0F8A5F" : "666666";
         runs.push(new DOCX.TextRun({ text: p.text, size: 15, color: couleur, italics: true, ...(p.etat === "bad" ? { bold: true } : {}) }));
       });
-      paragraphes.push(new DOCX.Paragraph({ spacing: { before: 0, after: action ? 20 : 0 }, children: runs }));
+      paragraphes.push(new DOCX.Paragraph({ keepNext: garder, spacing: { before: 0, after: action ? 20 : 0 }, children: runs }));
     } else if (detail) {
-      paragraphes.push(new DOCX.Paragraph({ spacing: { before: 0, after: action ? 20 : 0 }, children: [new DOCX.TextRun({ text: detail, size: 15, color: "666666", italics: true })] }));
+      paragraphes.push(new DOCX.Paragraph({ keepNext: garder, spacing: { before: 0, after: action ? 20 : 0 }, children: [new DOCX.TextRun({ text: detail, size: 15, color: "666666", italics: true })] }));
     }
-    if (action) paragraphes.push(new DOCX.Paragraph({ spacing: { before: 0, after: 0 }, children: [new DOCX.TextRun({ text: "Action : " + action, size: 15, color: "666666" })] }));
+    if (action) paragraphes.push(new DOCX.Paragraph({ keepNext: garder, spacing: { before: 0, after: 0 }, children: [new DOCX.TextRun({ text: "Action : " + action, size: 15, color: "666666" })] }));
     return new DOCX.TableCell({
       width: { size: largeur, type: DOCX.WidthType.DXA }, columnSpan: span, margins: marges, verticalAlign: DOCX.VerticalAlign.CENTER,
       borders: separateur ? { top: aucune, bottom: aucune, right: aucune, left: { style: DOCX.BorderStyle.SINGLE, size: 4, color: "E2E6EB" } } : undefined,
@@ -12117,12 +12129,19 @@ function docxControlTableCompact(rows) {
   if (attente) lignes.push({ paire: [attente, null] });
   return docxTable({
     width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: L,
-    rows: lignes.map((l) => new DOCX.TableRow({ cantSplit: true, children: l.pleine
+    rows: lignes.map((l, i) => { garder = garderAvecSuite || (lignes.length <= 8 ? i < lignes.length - 1 : i < 2); return new DOCX.TableRow({ cantSplit: true, children: l.pleine
       ? [cellLabel(l.pleine, L[0] + L[1] + L[2], 3, false), cellEtat(l.pleine[3], L[3])]
-      : [cellLabel(l.paire[0], L[0], 1, false), cellEtat(l.paire[0][3], L[1]), cellLabel(l.paire[1], L[2], 1, true), l.paire[1] ? cellEtat(l.paire[1][3], L[3]) : new DOCX.TableCell({ width: { size: L[3], type: DOCX.WidthType.DXA }, borders: { top: aucune, bottom: aucune, left: aucune, right: aucune }, children: [docxMiniParagraphe()] })] })),
+      : [cellLabel(l.paire[0], L[0], 1, false), cellEtat(l.paire[0][3], L[1]), cellLabel(l.paire[1], L[2], 1, true), l.paire[1] ? cellEtat(l.paire[1][3], L[3]) : new DOCX.TableCell({ width: { size: L[3], type: DOCX.WidthType.DXA }, borders: { top: aucune, bottom: aucune, left: aucune, right: aucune }, children: [docxMiniParagraphe()] })] }); }),
   });
 }
+// Tous les tableaux de contrôles des équipements utilisent désormais la mise en page compacte :
+// un contrôle avec une action ou une remarque (valeurs longues) garde sa ligne pleine largeur sur
+// deux lignes ; les autres sont regroupés deux par ligne. L'ancien rendu (une rangée par contrôle)
+// reste disponible via docxControlTableLarge.
 function docxControlTable(rows, garderAvecSuite = false) {
+  return docxControlTableCompact(rows, garderAvecSuite);
+}
+function docxControlTableLarge(rows, garderAvecSuite = false) {
   if (rows.length === 0) return null;
   return docxTable({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: [7600, 2000], rows: rows.map((r, i) => docxControlRow(r[0], r[1], r[2], r[3], i % 2 === 1, garderAvecSuite || (rows.length <= 8 ? i < rows.length - 1 : i < 2))) });
 }
@@ -14522,7 +14541,7 @@ function docxEquipementElements(eq, locaux, allSites) {
     }
     // Courbe de déclenchement : titre + image (+ phrase) d'un seul bloc, puis le tableau de référence.
     if (courbeAvecFichiers) { elements.push(...docxCourbeDeclenchement(eq, sec.title)); courbeIntegree = true; }
-    const t = sectionEtat ? docxControlTableCompact(rows) : docxControlTable(rows);
+    const t = docxControlTableCompact(rows);
     if (t) elements.push(t);
     if (sec.key === "reglage_disjoncteur" && eq.type === "Disjoncteur BT") {
       const v = calcVerificationPouvoirCoupure(eq, equipementsDuSiteDe(eq, allSites), locaux);
