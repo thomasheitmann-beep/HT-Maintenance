@@ -11841,9 +11841,16 @@ function docxSyntheseSiteStructuree(texte, site) {
   const equipements = (site && site.equipements) || [];
   const titreDe = (e) => `${e.type}${e.identification && e.identification.repere ? " (" + e.identification.repere + ")" : ""}`;
   const equipementDuTitre = (titre) => equipements.find((e) => titreDe(e) === titre) || equipements.find((e) => titre && titre.startsWith(e.type) && e.identification && e.identification.repere && titre.includes(e.identification.repere));
-  if (p.generale.length) {
+  // Synthèse recalculée à partir des équipements actuels du site : le texte enregistré peut dater
+  // d'avant l'ajout d'un équipement ou le changement d'un état (ex. « 1 équipement… conforme » alors
+  // que le site en compte deux, dont un dégradé → encart orange incohérent avec le texte).
+  const auto = parserSyntheseSite(genererSyntheseSite(site));
+  // Paragraphe général généré automatiquement (non réécrit à la main) : toujours remis à jour.
+  const generaleAuto = p.generale.length && /^(Lors de cette intervention de maintenance préventive|Aucun équipement n'a été renseigné)/i.test(p.generale[0]);
+  const generale = generaleAuto ? auto.generale : p.generale;
+  if (generale.length) {
     const rangGlobal = equipements.length ? Math.max(...equipements.map((e) => RANK_OF[e.etatFinal] ?? 0)) : 0;
-    out.push(docxEncartSynthese(p.generale, teinteSyntheseRang(rangGlobal)));
+    out.push(docxEncartSynthese(generale, teinteSyntheseRang(rangGlobal)));
     out.push(docxSpacer(200));
   }
   if (p.equipements.length || equipements.length) {
@@ -11853,11 +11860,24 @@ function docxSyntheseSiteStructuree(texte, site) {
     const a = docxAucuneBordure();
     const cellule = (i, enfants, extra = {}) => new DOCX.TableCell({ width: { size: W[i], type: DOCX.WidthType.DXA }, margins: marge, ...extra, children: enfants });
     const texte1 = (t, couleur) => new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: t, size: 20, color: couleur })] });
-    const entete = new DOCX.TableRow({ tableHeader: true, children: ["Équipement", "Constats", "Préconisations"].map((t, i) => cellule(i, [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: t, bold: true, size: 19, color: DOCX_WHITE })] })], { shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_DARK } })) });
-    const avecRemarques = new Set();
-    const lignes = p.equipements.map((e) => {
-      const eq = equipementDuTitre(e.titre);
-      if (eq) avecRemarques.add(eq.id);
+    const entete = new DOCX.TableRow({ tableHeader: true, cantSplit: true, children: ["Équipement", "Constats", "Préconisations"].map((t, i) => cellule(i, [new DOCX.Paragraph({ keepNext: true, children: [new DOCX.TextRun({ text: t, bold: true, size: 19, color: DOCX_WHITE })] })], { shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_DARK } })) });
+    // Une ligne par équipement du site, du plus critique au conforme, chacune à la couleur de son
+    // état réel. Remarques : celles du texte de synthèse (éventuellement retouchées à la main), sinon
+    // celles de la fiche équipement, sinon une mention « aucune remarque ».
+    const blocDe = (liste, eq) => liste.find((b) => b.titre && equipementDuTitre(b.titre) === eq);
+    const utilises = new Set();
+    const blocs = [...equipements]
+      .map((eq, i) => ({ eq, i }))
+      .sort((a, b) => ((RANK_OF[b.eq.etatFinal] ?? 0) - (RANK_OF[a.eq.etatFinal] ?? 0)) || (a.i - b.i))
+      .map(({ eq }) => {
+        const b = blocDe(p.equipements, eq) || blocDe(auto.equipements, eq);
+        if (b) { utilises.add(b); return { ...b, titre: titreDe(eq), eq }; }
+        return { titre: titreDe(eq), eq, autres: [], constats: ["Aucune remarque particulière."], preconisations: ["Aucune action nécessaire."] };
+      });
+    // Blocs du texte qui ne correspondent plus à aucun équipement (titre modifié à la main) : conservés à la fin.
+    p.equipements.filter((b) => !utilises.has(b) && !equipementDuTitre(b.titre)).forEach((b) => blocs.push({ ...b, eq: null }));
+    const lignes = blocs.map((e) => {
+      const eq = e.eq;
       const teinte = teinteSyntheseRang(eq ? (RANK_OF[eq.etatFinal] ?? 0) : 0);
       const constats = [...e.autres, ...e.constats];
       return new DOCX.TableRow({ cantSplit: true, children: [
@@ -11869,8 +11889,7 @@ function docxSyntheseSiteStructuree(texte, site) {
         cellule(2, e.preconisations.length ? docxPuces(e.preconisations, 19, 60) : [texte1("—")]),
       ] });
     });
-    // Équipements sans remarque : une dernière ligne verte, pour que le client voit aussi ce qui ne demande aucune action.
-    const sansRemarque = equipements.filter((e) => !avecRemarques.has(e.id) && !(e.remarques && e.remarques.trim()));
+    const sansRemarque = []; // désormais chaque équipement a sa propre ligne (voir ci-dessus)
     if (sansRemarque.length) {
       const teinte = teinteSyntheseRang(0);
       lignes.push(new DOCX.TableRow({ cantSplit: true, children: [new DOCX.TableCell({
