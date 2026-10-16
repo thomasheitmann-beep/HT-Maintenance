@@ -12018,6 +12018,62 @@ function docxControlRow(label, detail, action, etat, isAlternate, garderAvecSuit
   ]});
 }
 // `garderAvecSuite` : le tableau reste sur la même page que l'élément qui le suit (ex. une courbe).
+// Sections « État … » (état de l'installation, de l'onduleur, du by-pass, redresseur / chargeur…) : ce sont de simples listes de contrôles avec un état. Au lieu d'une rangée haute
+// par contrôle, on en place DEUX par ligne (libellé + état | libellé + état), avec des marges réduites et un texte plus petit : le tableau occupe environ trois fois moins de place.
+// Un contrôle qui porte une action ou de longues valeurs garde une ligne pleine largeur (pour rester lisible) ; l'ordre des contrôles est conservé.
+function docxControlTableCompact(rows) {
+  if (rows.length === 0) return null;
+  const L = [3300, 1500, 3300, 1500];
+  const marges = { top: 40, bottom: 40, left: 110, right: 90 };
+  const aucune = docxAucuneBordure();
+  // Un contrôle se place en demi-largeur s'il n'a pas d'action et au plus une courte valeur (ex. « Valeur : 24 °C ») ; sinon il garde une ligne pleine largeur.
+  const longueurDetail = (r) => (Array.isArray(r[1]) ? r[1].reduce((s, p) => s + String((p && p.text) || "").length + 5, 0) : String(r[1] || "").length);
+  const simple = (r) => !r[2] && longueurDetail(r) <= 45;
+  const cellEtat = (etat, largeur) => {
+    const key = etat === "Conforme" ? "ok" : etat === "Dégradé" ? "warning" : etat === "Défaillant" ? "bad" : null;
+    const c = key && DOCX_ETAT_COULEURS[key];
+    return new DOCX.TableCell({
+      width: { size: largeur, type: DOCX.WidthType.DXA }, margins: { top: 40, bottom: 40, left: 60, right: 60 }, verticalAlign: DOCX.VerticalAlign.CENTER,
+      shading: etat ? { type: DOCX.ShadingType.CLEAR, fill: c ? c.fond : DOCX_LIGHT } : undefined,
+      borders: c ? { top: { style: DOCX.BorderStyle.SINGLE, size: 4, color: c.bord }, bottom: { style: DOCX.BorderStyle.SINGLE, size: 4, color: c.bord }, left: { style: DOCX.BorderStyle.SINGLE, size: 4, color: c.bord }, right: { style: DOCX.BorderStyle.SINGLE, size: 4, color: c.bord } } : undefined,
+      children: [new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, spacing: { before: 0, after: 0 }, children: [new DOCX.TextRun({ text: (etat || "").toUpperCase(), bold: true, size: 14, color: c ? c.texte : "555555" })] })],
+    });
+  };
+  const cellLabel = (r, largeur, span, separateur) => {
+    const detail = r ? r[1] : null, action = r ? r[2] : "";
+    const paragraphes = [new DOCX.Paragraph({ spacing: { before: 0, after: (detail && (Array.isArray(detail) ? detail.length : detail)) || action ? 20 : 0 }, children: [new DOCX.TextRun({ text: r ? r[0] : "", size: 17, color: DOCX_DARK })] })];
+    if (Array.isArray(detail) && detail.length) {
+      const runs = [];
+      detail.forEach((p, i) => {
+        if (i > 0) runs.push(new DOCX.TextRun({ text: "  ·  ", size: 15, color: "999999", italics: true }));
+        const couleur = p.etat === "bad" ? "C0392B" : p.etat === "warning" ? "B5730A" : p.etat === "ok" ? "0F8A5F" : "666666";
+        runs.push(new DOCX.TextRun({ text: p.text, size: 15, color: couleur, italics: true, ...(p.etat === "bad" ? { bold: true } : {}) }));
+      });
+      paragraphes.push(new DOCX.Paragraph({ spacing: { before: 0, after: action ? 20 : 0 }, children: runs }));
+    } else if (detail) {
+      paragraphes.push(new DOCX.Paragraph({ spacing: { before: 0, after: action ? 20 : 0 }, children: [new DOCX.TextRun({ text: detail, size: 15, color: "666666", italics: true })] }));
+    }
+    if (action) paragraphes.push(new DOCX.Paragraph({ spacing: { before: 0, after: 0 }, children: [new DOCX.TextRun({ text: "Action : " + action, size: 15, color: "666666" })] }));
+    return new DOCX.TableCell({
+      width: { size: largeur, type: DOCX.WidthType.DXA }, columnSpan: span, margins: marges, verticalAlign: DOCX.VerticalAlign.CENTER,
+      borders: separateur ? { top: aucune, bottom: aucune, right: aucune, left: { style: DOCX.BorderStyle.SINGLE, size: 4, color: "E2E6EB" } } : undefined,
+      children: paragraphes,
+    });
+  };
+  const lignes = [];
+  let attente = null;
+  rows.forEach((r) => {
+    if (simple(r)) { if (attente) { lignes.push({ paire: [attente, r] }); attente = null; } else attente = r; }
+    else { if (attente) { lignes.push({ paire: [attente, null] }); attente = null; } lignes.push({ pleine: r }); }
+  });
+  if (attente) lignes.push({ paire: [attente, null] });
+  return docxTable({
+    width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: L,
+    rows: lignes.map((l) => new DOCX.TableRow({ cantSplit: true, children: l.pleine
+      ? [cellLabel(l.pleine, L[0] + L[1] + L[2], 3, false), cellEtat(l.pleine[3], L[3])]
+      : [cellLabel(l.paire[0], L[0], 1, false), cellEtat(l.paire[0][3], L[1]), cellLabel(l.paire[1], L[2], 1, true), l.paire[1] ? cellEtat(l.paire[1][3], L[3]) : new DOCX.TableCell({ width: { size: L[3], type: DOCX.WidthType.DXA }, borders: { top: aucune, bottom: aucune, left: aucune, right: aucune }, children: [docxMiniParagraphe()] })] })),
+  });
+}
 function docxControlTable(rows, garderAvecSuite = false) {
   if (rows.length === 0) return null;
   return docxTable({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: [7600, 2000], rows: rows.map((r, i) => docxControlRow(r[0], r[1], r[2], r[3], i % 2 === 1, garderAvecSuite || (rows.length <= 8 ? i < rows.length - 1 : i < 2))) });
@@ -14392,7 +14448,8 @@ function docxEquipementElements(eq, locaux, allSites) {
     const courbeAvecFichiers = sec.key === "courbe_declenchement" && eq.type === "Disjoncteur BT"
       && ((eq.courbeFiles || []).length > 0 || (eq.courbeDeclenchementAuto !== false && !!parametresCourbeDeclenchement(eq)));
     if (sec.key === "courbe_declenchement" && courbeDeclenchementSansContenu(eq)) return;
-    if (!courbeAvecFichiers) elements.push(docxHeading(sec.title));
+    const sectionEtat = /^(Type et )?[ÉE]tat\b/i.test(sec.title || ""); // « État de l'installation », « État du by-pass / synoptique », « Type et état report alarme »… : liste d'états, imprimée en version compacte
+    if (!courbeAvecFichiers) elements.push(sectionEtat ? docxHeading(sec.title, 400, 120) : docxHeading(sec.title));
     if (sec.key === "mesure_isolement" && sec.items.some((it) => it.key === "pi" || it.fields?.some((f) => f.key === "pi"))) {
       elements.push(docxNormeNote("CEI 60076-3 / IEEE 43. Tension d'injection identique du début à la fin de l'essai — le type de mesure indique jusqu'où il est poussé : Standard (lecture instantanée), PI = R(10 min)/R(1 min), DAR = R(60 s)/R(10 s). L'enroulement non testé doit être court-circuité (shunté) et relié à la terre."));
     } else if (["resistance_contact_chambres", "resistances_contacts", "resistance_jonctions"].some((k) => sec.items.some((it) => it.key === k))) {
@@ -14417,7 +14474,7 @@ function docxEquipementElements(eq, locaux, allSites) {
     }
     // Courbe de déclenchement : titre + image (+ phrase) d'un seul bloc, puis le tableau de référence.
     if (courbeAvecFichiers) { elements.push(...docxCourbeDeclenchement(eq, sec.title)); courbeIntegree = true; }
-    const t = docxControlTable(rows);
+    const t = sectionEtat ? docxControlTableCompact(rows) : docxControlTable(rows);
     if (t) elements.push(t);
     if (sec.key === "reglage_disjoncteur" && eq.type === "Disjoncteur BT") {
       const v = calcVerificationPouvoirCoupure(eq, equipementsDuSiteDe(eq, allSites), locaux);
