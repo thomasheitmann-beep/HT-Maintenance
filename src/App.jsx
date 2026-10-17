@@ -9132,11 +9132,14 @@ function aplatirRemarques(texte) {
 function genererSyntheseSite(site) {
   const equipements = site.equipements || [];
   const n = equipements.length;
-  const compteur = { conforme: 0, degrade: 0, defaillant: 0 };
+  const compteur = { conforme: 0, degrade: 0, defaillant: 0, nonRealise: 0 };
   equipements.forEach((eq) => {
     const r = RANK_OF[eq.etatFinal] ?? 0;
-    if (r >= 2) compteur.defaillant++; else if (r === 1) compteur.degrade++; else compteur.conforme++;
+    if (r >= 2) compteur.defaillant++; else if (r === 1) compteur.degrade++; else if (r < 0) compteur.nonRealise++; else compteur.conforme++;
   });
+  // État de l'environnement et du fonctionnement de l'installation : il compte dans l'état global du
+  // rapport (bandeau), la synthèse doit donc en tenir compte elle aussi.
+  const rangInstallation = worstRank([site.rapport && site.rapport.environnementEtat, site.rapport && site.rapport.fonctionnementEtat].filter(Boolean));
   const phrases = [];
   if (!n) {
     phrases.push("Aucun équipement n'a été renseigné lors de cette intervention.");
@@ -9145,16 +9148,20 @@ function genererSyntheseSite(site) {
     if (compteur.conforme === n) {
       phrases.push(n > 1 ? "Tous les équipements sont conformes." : "Cet équipement est conforme.");
     } else if (n === 1) {
-      phrases.push(`Cet équipement est ${compteur.defaillant ? "défaillant" : "dégradé"}.`);
+      phrases.push(compteur.nonRealise ? "La maintenance de cet équipement n'a pas pu être réalisée." : `Cet équipement est ${compteur.defaillant ? "défaillant" : "dégradé"}.`);
     } else {
       const parts = [];
       if (compteur.conforme) parts.push(compteur.conforme > 1 ? `${compteur.conforme} sont conformes` : "1 est conforme");
       if (compteur.degrade) parts.push(compteur.degrade > 1 ? `${compteur.degrade} sont dégradés` : "1 est dégradé");
       if (compteur.defaillant) parts.push(compteur.defaillant > 1 ? `${compteur.defaillant} sont défaillants` : "1 est défaillant");
+      if (compteur.nonRealise) parts.push(compteur.nonRealise > 1 ? `${compteur.nonRealise} n'ont pas pu être contrôlés` : "1 n'a pas pu être contrôlé");
       phrases.push(`Parmi eux, ${listeFr(parts)}.`);
     }
     if (compteur.defaillant) phrases.push("Des défaillances ont été constatées : une remise en conformité rapide est à prévoir sur les équipements concernés (voir le détail ci-dessous).");
     else if (compteur.degrade) phrases.push("Aucune défaillance n'a été constatée, mais certains équipements présentent une dégradation qu'il convient de surveiller ou de corriger (voir le détail ci-dessous).");
+    else if (rangInstallation >= 2) phrases.push("Les équipements ne présentent pas d'anomalie, mais l'environnement ou le fonctionnement de l'installation présente une défaillance nécessitant une action rapide (voir le rapport ci-dessus).");
+    else if (rangInstallation === 1) phrases.push("Les équipements ne présentent pas d'anomalie, mais l'environnement ou le fonctionnement de l'installation présente une dégradation qu'il convient de surveiller ou de corriger (voir le rapport ci-dessus).");
+    else if (compteur.nonRealise) phrases.push("Aucune anomalie n'a été relevée sur les équipements contrôlés.");
     else phrases.push("L'installation est en bon état général : aucune anomalie majeure n'a été relevée lors de cette intervention.");
   }
   const prochaine = site.rapport && site.rapport.prochaineMaintenance;
@@ -11822,7 +11829,7 @@ function docxEncartSynthese(lignes, teinte) {
   const a = docxAucuneBordure();
   // Une phrase par ligne ; celles qui portent le message clé (bilan chiffré, défaillances, bon état) ressortent en gras et en plus grand.
   const phrases = lignes.join(" ").split(/(?<=[.!?])\s+(?=[A-ZÉÈÀÂÎÔÛ«])/).map((s) => s.trim()).filter(Boolean);
-  const cle = (s) => /^(Parmi eux|Tous les équipements|Cet équipement|Des défaillances|Aucune défaillance|L'installation est en bon état)/i.test(s);
+  const cle = (s) => /^(Parmi eux|Tous les équipements|Cet équipement|Des défaillances|Aucune défaillance|L'installation est en bon état|Les équipements ne présentent|La maintenance de cet équipement|Aucune anomalie n'a été relevée)/i.test(s);
   return docxTable({
     width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: [TABLE_WIDTH], borders: { ...docxToutesAucune(), insideHorizontal: a, insideVertical: a },
     rows: [new DOCX.TableRow({ cantSplit: true, children: [new DOCX.TableCell({
@@ -11849,7 +11856,7 @@ function docxSyntheseSiteStructuree(texte, site) {
   const generaleAuto = p.generale.length && /^(Lors de cette intervention de maintenance préventive|Aucun équipement n'a été renseigné)/i.test(p.generale[0]);
   const generale = generaleAuto ? auto.generale : p.generale;
   if (generale.length) {
-    const rangGlobal = equipements.length ? Math.max(...equipements.map((e) => RANK_OF[e.etatFinal] ?? 0)) : 0;
+    const rangGlobal = overallRank(site); // même état global que le bandeau en tête du rapport
     out.push(docxEncartSynthese(generale, teinteSyntheseRang(rangGlobal)));
     out.push(docxSpacer(200));
   }
@@ -11872,6 +11879,7 @@ function docxSyntheseSiteStructuree(texte, site) {
       .map(({ eq }) => {
         const b = blocDe(p.equipements, eq) || blocDe(auto.equipements, eq);
         if (b) { utilises.add(b); return { ...b, titre: titreDe(eq), eq }; }
+        if ((RANK_OF[eq.etatFinal] ?? 0) < 0) return { titre: titreDe(eq), eq, autres: [], constats: [eq.etatFinal === "Non présent" ? "Équipement non présent sur le site." : "La maintenance de cet équipement n'a pas pu être réalisée."], preconisations: [eq.etatFinal === "Non présent" ? "Aucune action nécessaire." : "Maintenance à planifier lors d'une prochaine intervention."] };
         return { titre: titreDe(eq), eq, autres: [], constats: ["Aucune remarque particulière."], preconisations: ["Aucune action nécessaire."] };
       });
     // Blocs du texte qui ne correspondent plus à aucun équipement (titre modifié à la main) : conservés à la fin.
@@ -11883,7 +11891,7 @@ function docxSyntheseSiteStructuree(texte, site) {
       return new DOCX.TableRow({ cantSplit: true, children: [
         cellule(0, [
           new DOCX.Paragraph({ spacing: { after: 60 }, children: [new DOCX.TextRun({ text: e.titre || "—", bold: true, size: 21, color: DOCX_DARK })] }),
-          new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: "●  " + teinte.etiquette, bold: true, size: 15, color: teinte.texte, characterSpacing: 20 })] }),
+          new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: "●  " + (eq && (RANK_OF[eq.etatFinal] ?? 0) < 0 ? String(eq.etatFinal).toUpperCase() : teinte.etiquette), bold: true, size: 15, color: teinte.texte, characterSpacing: 20 })] }),
         ], { shading: { type: DOCX.ShadingType.CLEAR, fill: teinte.fond }, borders: { top: a, bottom: a, right: a, left: { style: DOCX.BorderStyle.SINGLE, size: 48, color: teinte.barre } } }),
         cellule(1, constats.length ? docxPuces(constats, 19, 60) : [texte1("—")]),
         cellule(2, e.preconisations.length ? docxPuces(e.preconisations, 19, 60) : [texte1("—")]),
@@ -14828,7 +14836,7 @@ function docxBandeauEtat(site, rankLabel, rank, compteur) {
     })] })],
   });
   const cartes = docxRangeeCartes([
-    { label: "Équipements", valeur: String(compteur.conforme + compteur.degrade + compteur.defaillant), couleur: DOCX_BLUE, taille: 52, fond: DOCX_LIGHT },
+    { label: "Équipements", valeur: String(compteur.conforme + compteur.degrade + compteur.defaillant + (compteur.nonRealise || 0)), couleur: DOCX_BLUE, taille: 52, fond: DOCX_LIGHT },
     { label: "Conformes", valeur: String(compteur.conforme), couleur: DOCX_GREEN, taille: 52, fond: DOCX_LIGHT },
     { label: "Dégradés", valeur: String(compteur.degrade), couleur: DOCX_ORANGE, taille: 52, fond: DOCX_LIGHT },
     { label: "Défaillants", valeur: String(compteur.defaillant), couleur: DOCX_RED, taille: 52, fond: DOCX_LIGHT },
@@ -14841,10 +14849,10 @@ async function generateSiteDocx(site, allSites) {
   site = await resolvePhotosForDocx(site);
   const rank = overallRank(site);
   const rankLabel = rankToLabel(rank);
-  const compteur = { conforme: 0, degrade: 0, defaillant: 0 };
+  const compteur = { conforme: 0, degrade: 0, defaillant: 0, nonRealise: 0 };
   site.equipements.forEach((eq) => {
     const r = RANK_OF[eq.etatFinal] ?? 0;
-    if (r >= 2) compteur.defaillant++; else if (r === 1) compteur.degrade++; else compteur.conforme++;
+    if (r >= 2) compteur.defaillant++; else if (r === 1) compteur.degrade++; else if (r < 0) compteur.nonRealise++; else compteur.conforme++;
   });
 
   const syntheseTable = docxSyntheseTable(site);
@@ -15158,11 +15166,17 @@ async function generateInterventionDocx(iv) {
   // 4. Conclusion
   const concl = iv.conclusion || "Conforme";
   const cc = DOCX_ETAT_COULEURS[cleEtatDocx(concl)] || { bord: "7A8794", fond: DOCX_LIGHT, texte: "555555" };
-  const phraseConcl = concl === "Non conforme"
-    ? "Au terme de l'intervention, l'installation est jugée non conforme : des actions correctives sont à prévoir (voir les points importants ci-dessus)."
-    : concl === "Conforme avec réserves"
-      ? "Au terme de l'intervention, l'installation est jugée conforme avec réserves : les points signalés ci-dessus sont à traiter ou à surveiller."
-      : "Au terme de l'intervention, l'installation est jugée conforme : aucune anomalie nécessitant une action n'a été relevée.";
+  // Phrase de conclusion déduite du rang de l'état (et non du libellé exact) : « Dégradé »,
+  // « À corriger », « Défaillant »… ne retombent plus sur la phrase « conforme » par défaut.
+  const rangConcl = RANK_OF[concl] ?? 0;
+  const motConcl = { "Non conforme": "non conforme", "Défaillant": "défaillante", "Défaillant (actions urgentes)": "défaillante", "Dégradé": "dégradée", "Dégradé (actions à prévoir)": "dégradée", "À corriger": "à corriger", "Conforme avec réserves": "conforme avec réserves" }[concl];
+  const phraseConcl = rangConcl >= 2
+    ? `Au terme de l'intervention, l'installation est jugée ${motConcl || "non conforme"} : des actions correctives sont à prévoir rapidement (voir les points importants ci-dessus).`
+    : rangConcl === 1
+      ? `Au terme de l'intervention, l'installation est jugée ${motConcl || "dégradée"} : les points signalés ci-dessus sont à traiter ou à surveiller.`
+      : rangConcl < 0
+        ? "Au terme de l'intervention, la maintenance n'a pas pu être réalisée sur l'ensemble des équipements (voir les points importants ci-dessus)."
+        : "Au terme de l'intervention, l'installation est jugée conforme : aucune anomalie nécessitant une action n'a été relevée.";
   const bordC = { style: DOCX.BorderStyle.SINGLE, size: 6, color: cc.bord };
   children.push(docxTable({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: [TABLE_WIDTH], rows: [new DOCX.TableRow({ children: [new DOCX.TableCell({
     width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, margins: { top: 90, bottom: 90, left: 160, right: 160 },
