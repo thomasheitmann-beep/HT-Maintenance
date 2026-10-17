@@ -1469,6 +1469,19 @@ function emptyModeleUsure(dureeDefaut) {
   return { id: uid(), description: "", marque: "", modele: "", quantite: "", anneeMiseEnService: "", dureeVie: dureeDefaut ?? "" };
 }
 // Échéances de remplacement de toutes les pièces d'usure d'un équipement (onduleur / redresseur : pieces_usure_ups ; batterie de compensation : gradins + ventilation).
+// Pièces d'usure à remplacer cette année ou en retard : phrases affichées sous « Synthèse de l'état »
+// (app), reprises dans le rapport Word de l'équipement et dans la synthèse du site.
+function alertesUsureEquipement(eq, anneeRef = new Date().getFullYear()) {
+  return lignesEcheancesRemplacement(eq)
+    .filter((l) => l.annee !== null && l.annee !== undefined && l.annee <= anneeRef)
+    .sort((a, b) => a.annee - b.annee)
+    .map((l) => ({
+      type: l.type, annee: l.annee, enRetard: l.annee < anneeRef,
+      phrase: l.annee < anneeRef
+        ? `La pièce d'usure ${citer(l.type)} a dépassé son échéance de remplacement (prévue en ${l.annee}).`
+        : `La pièce d'usure ${citer(l.type)} arrive à échéance de remplacement cette année (${l.annee}) : remplacement à planifier.`,
+    }));
+}
 function lignesEcheancesRemplacement(eq) {
   if (TYPES_AVEC_PIECES_USURE.includes(eq.type)) return calcEcheancesUsureUPS(eq);
   if (TYPES_AVEC_GRADINS.includes(eq.type)) return calcPiecesUsure(eq);
@@ -1499,8 +1512,9 @@ function calcEcheancesUsureUPS(eq) {
     (data[cat.key] || []).forEach((m, i) => {
       // Premier modèle de batteries : année de mise en service et durée de vie reprises de la fiche « Caractéristiques de la batterie » si elles ne sont pas saisies ici.
       const repliBatterie = cat.key === "batteries" && i === 0;
-      const annee = numOf(m.anneeMiseEnService) ?? (repliBatterie ? numOf(batterieInfo.anneeMiseEnService) : null);
-      const duree = numOf(m.dureeVie) ?? (repliBatterie ? numOf(batterieInfo.dureeVie) : null);
+      // Modèle 1 des batteries = fiche batterie : ses valeurs priment (saisie unique), l'ancienne saisie du modèle sert de repli.
+      const annee = repliBatterie ? (numOf(batterieInfo.anneeMiseEnService) ?? numOf(m.anneeMiseEnService)) : numOf(m.anneeMiseEnService);
+      const duree = repliBatterie ? (numOf(batterieInfo.dureeVie) ?? numOf(m.dureeVie)) : numOf(m.dureeVie);
       if (annee === null || duree === null) return;
       const label = cat.key === "batteries" && i === 0 ? (batterieInfo.typeBloc || batterieInfo.marque || `Modèle ${i + 1}`) : (m.modele || m.description || `Modèle ${i + 1}`);
       lignes.push({ type: `${cat.label} — ${label}`, annee: Math.round(annee) + Math.round(duree) });
@@ -1521,6 +1535,27 @@ function elementBatterieStatus(tension, moyenne, toleranceBasse, toleranceHaute)
   const tb = numOf(toleranceBasse) ?? 3, th = numOf(toleranceHaute) ?? 3;
   const min = m * (1 - tb / 100), max = m * (1 + th / 100);
   return v < min || v > max ? "bad" : "ok";
+}
+// Tension de référence du relevé batterie, calculée en tenant compte des tolérances : on part de la
+// médiane (insensible à un élément très bas ou très haut), puis on fait la moyenne des seuls éléments
+// compris dans la bande [réf − tol. basse % ; réf + tol. haute %], et on répète jusqu'à stabilité.
+// Ainsi un élément défectueux ne tire plus la moyenne vers le bas au point de faire passer les
+// éléments sains hors tolérance (ex. 4 batteries dont une basse : seule celle-ci est signalée).
+function moyenneReferenceBatterie(valeurs, toleranceBasse, toleranceHaute) {
+  const vals = (valeurs || []).map(numOf).filter((v) => v !== null);
+  if (!vals.length) return null;
+  const tb = numOf(toleranceBasse) ?? 3, th = numOf(toleranceHaute) ?? 3;
+  const tries = [...vals].sort((a, b) => a - b);
+  const milieu = Math.floor(tries.length / 2);
+  let ref = tries.length % 2 ? tries[milieu] : (tries[milieu - 1] + tries[milieu]) / 2;
+  for (let k = 0; k < 20; k++) {
+    const dansBande = vals.filter((v) => v >= ref * (1 - tb / 100) && v <= ref * (1 + th / 100));
+    if (!dansBande.length) break;
+    const nouvelle = dansBande.reduce((a, b) => a + b, 0) / dansBande.length;
+    if (Math.abs(nouvelle - ref) < 1e-9) { ref = nouvelle; break; }
+    ref = nouvelle;
+  }
+  return Math.round(ref * 1000) / 1000;
 }
 const GRADIN_FIELD_DEFS = [
   { key: "q" }, { key: "u" }, { key: "i1" }, { key: "i2" }, { key: "i3" },
@@ -1584,7 +1619,7 @@ function elementsBatterieHorsTolerance(eq) {
   const cfg = eq.controles.releve_config || { toleranceBasse: 3, toleranceHaute: 3 };
   const valeurs = entries.map((e) => numOf(e.fields.tension)).filter((v) => v !== null);
   if (!valeurs.length) return false;
-  const moyenne = Math.round((valeurs.reduce((a, b) => a + b, 0) / valeurs.length) * 1000) / 1000;
+  const moyenne = moyenneReferenceBatterie(valeurs, cfg.toleranceBasse, cfg.toleranceHaute);
   return entries.some((e) => elementBatterieStatus(e.fields.tension, moyenne, cfg.toleranceBasse, cfg.toleranceHaute) === "bad");
 }
 // Détection générique : toute mesure (L1/L2/L3, valeur, Rd...) qui dépasse la tolérance déclarée
@@ -3137,6 +3172,18 @@ const SCHEMAS = {
           F("courantEntree", "Courant d'entrée", "A"), F("courantSortie", "Courant de sortie", "A"),
           F("frequenceEntree", "Fréquence d'entrée", "Hz"), F("frequenceSortie", "Fréquence de sortie", "Hz"),
           F("puissanceActiveSortie", "Puissance active de sortie (P)", "W"), F("puissanceReactiveSortie", "Puissance réactive de sortie (Q)", "VAR"),
+        ]),
+      ]},
+      // Fiche batterie (mêmes champs que l'Onduleur complet) : la saisie des pièces d'usure « Batteries »
+      // en reprend marque, type de bloc, quantité, année de mise en service et durée de vie.
+      { key: "batterie_id", title: "Fiche batterie", items: [
+        I("batterie_caracteristiques", "Caractéristiques de la batterie", [
+          { key: "marque", label: "Marque", options: LISTE_MARQUE_ELEMENT_BATTERIE }, { key: "technologie", label: "Technologie", options: LISTE_TECHNO_BATTERIE },
+          { key: "typeBloc", label: "Type de bloc" }, { key: "tensionNominale", label: "Tension du bloc batterie (V)" },
+          { key: "capacite", label: "Capacité par batterie (Ah)" },
+          { key: "regimeC", label: "Régime (autonomie nominale)", options: LISTE_REGIME_C_BATTERIE },
+          { key: "nombreBranches", label: "Nombre de branches", options: LISTE_NB_BRANCHES }, { key: "nombreBlocsParBranche", label: "Nombre de blocs par branche" },
+          { key: "anneeMiseEnService", label: "Année de mise en service" }, { key: "dureeVie", label: "Durée de vie prévue (ans)", options: LISTE_DUREE_VIE_BATTERIE },
         ]),
       ]},
       { key: "batterie", title: "Batterie", items: [
@@ -6458,12 +6505,12 @@ function MiniComputed({ label, unit, value }) {
     </MiniField>
   );
 }
-function MiniInput({ label, unit, value, onChange, width, validState }) {
+function MiniInput({ label, unit, value, onChange, width, validState, type = "number" }) {
   const borderColor = validState === "ok" ? "#0F8A5F" : validState === "warn" ? "#B5730A" : validState === "bad" ? "#C0392B" : "#D8DEE5";
   const bg = validState === "ok" ? "#F0FBF6" : validState === "warn" ? "#FDF6EC" : validState === "bad" ? "#FDF1F0" : inputStyle.background;
   return (
     <MiniField label={label} unit={unit}>
-      <input type="number" step="any" value={value ?? ""} onChange={(e) => onChange(e.target.value)} style={{ ...inputStyle, width: width || 70, padding: "5px 7px", fontSize: 12, border: `1.5px solid ${borderColor}`, background: bg }} />
+      <input type={type} step={type === "number" ? "any" : undefined} value={value ?? ""} onChange={(e) => onChange(e.target.value)} style={{ ...inputStyle, width: width || 70, padding: "5px 7px", fontSize: 12, border: `1.5px solid ${borderColor}`, background: bg }} />
     </MiniField>
   );
 }
@@ -6716,7 +6763,7 @@ function ElementsBatteriePanel({ eq, update, idPrefix }) {
   const nbAttendu = nbBranches && nbBlocs ? nbBranches * Math.ceil(nbBlocs / (cfg.saisieParGroupe ? Math.max(1, numOf(cfg.tailleGroupe) || 1) : 1)) : null;
 
   const valeurs = entries.map((e) => numOf(e.fields.tension)).filter((v) => v !== null);
-  const moyenne = valeurs.length ? Math.round((valeurs.reduce((a, b) => a + b, 0) / valeurs.length) * 1000) / 1000 : null;
+  const moyenne = moyenneReferenceBatterie(valeurs, cfg.toleranceBasse, cfg.toleranceHaute);
   const nbDefectueux = entries.filter((e) => elementBatterieStatus(e.fields.tension, moyenne, cfg.toleranceBasse, cfg.toleranceHaute) === "bad").length;
 
   return (
@@ -6742,7 +6789,7 @@ function ElementsBatteriePanel({ eq, update, idPrefix }) {
       </div>
 
       <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "center", marginBottom: 12, fontSize: 12.5 }}>
-        <span style={{ color: "#5B6B7D" }} title="Les seuils haut et bas sont communs à toutes les branches : ils se calculent sur la moyenne de l'ensemble des éléments">Moyenne{nbBranches > 1 ? " (toutes branches)" : ""} : <b style={{ color: "#1A1F26" }}>{moyenne ?? "—"} V</b></span>
+        <span style={{ color: "#5B6B7D" }} title="Moyenne des éléments compris dans la tolérance (un élément défectueux n'est pas pris en compte) — seuils communs à toutes les branches">Moyenne{nbBranches > 1 ? " (toutes branches)" : ""} : <b style={{ color: "#1A1F26" }}>{moyenne ?? "—"} V</b></span>
         {nbAttendu !== null && (
           <span style={{ color: entries.length === nbAttendu ? "#0F8A5F" : "#B5730A" }}>
             {entries.length} / {nbAttendu} emplacement(s) attendu(s) ({nbBranches} branche(s) × {nbBlocs} bloc(s))
@@ -7814,7 +7861,9 @@ function TensionsBatterieTheoriques({ eq }) {
 // Pièces d'usure Onduleur : saisie par catégorie (description/marque/modèle/quantité/année de mise
 // en service/durée de vie), avec bouton pour ajouter un modèle différent par catégorie. Usage
 // interne uniquement — seule la synthèse des échéances (calcEcheancesUsureUPS) va dans le rapport.
-function PiecesUsureUPSPanel({ eq, update }) {
+function PiecesUsureUPSPanel({ eq, update, itemFicheBatterie }) {
+  const valeurFiche = eq.controles.batterie_id?.batterie_caracteristiques || { fields: {} };
+  const setFiche = (v) => update({ ...eq, controles: { ...eq.controles, batterie_id: { ...(eq.controles.batterie_id || {}), batterie_caracteristiques: v } } });
   const data = eq.controles.pieces_usure_ups || {};
   const setCategorie = (catKey, modeles) => update({ ...eq, controles: { ...eq.controles, pieces_usure_ups: { ...data, [catKey]: modeles } } });
   const batterieInfo = eq.controles.batterie_id?.batterie_caracteristiques?.fields || {};
@@ -7828,7 +7877,8 @@ function PiecesUsureUPSPanel({ eq, update }) {
       {getCategoriesUsure(eq.type).map((cat) => {
         const modeles = data[cat.key] || [];
         const setModele = (id, patch) => setCategorie(cat.key, modeles.map((m) => (m.id === id ? { ...m, ...patch } : m)));
-        const addModele = () => setCategorie(cat.key, [...modeles, emptyModeleUsure(cat.dureeDefaut)]);
+        // Batteries : l'emplacement 0 correspond à la fiche batterie ; on le crée au besoin pour que « Ajouter un modèle » ajoute bien un 2e modèle.
+        const addModele = () => setCategorie(cat.key, [...(cat.key === "batteries" && modeles.length === 0 ? [emptyModeleUsure(cat.dureeDefaut)] : []), ...modeles, emptyModeleUsure(cat.dureeDefaut)]);
         const removeModele = (id) => setCategorie(cat.key, modeles.filter((m) => m.id !== id));
         return (
           <Card key={cat.key} style={{ marginBottom: 14 }}>
@@ -7836,11 +7886,15 @@ function PiecesUsureUPSPanel({ eq, update }) {
               <SectionTitle>{cat.label}</SectionTitle>
               <button onClick={addModele} style={btnGhost(BRAND.blue)}><Plus size={13} /> Ajouter un modèle</button>
             </div>
-            {cat.key === "batteries" && (
-              <div style={{ fontSize: 11.5, color: "#8B96A3", marginBottom: 8 }}>Le premier modèle reprend automatiquement marque, type de bloc, quantité, année de mise en service et durée de vie depuis la fiche "Batterie" ci-dessus (modifiables ici si besoin).</div>
+            {cat.key === "batteries" && itemFicheBatterie && (
+              <div style={{ marginBottom: 6 }}>
+                <div style={{ fontSize: 11.5, color: "#8B96A3", marginBottom: 4 }}>Modèle 1 — fiche batterie de l'équipement (reprise par le relevé des tensions, les branches, l'autonomie et le rapport). Un modèle différent s'ajoute avec « Ajouter un modèle ».</div>
+                <ControlRow item={itemFicheBatterie} value={valeurFiche} onChange={setFiche} idPrefix={`${eq.id}-fiche-batterie`} />
+              </div>
             )}
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               {modeles.map((m, idx) => {
+                if (cat.key === "batteries" && idx === 0 && itemFicheBatterie) return null; // remplacé par la fiche batterie ci-dessus
                 const isAutoBatterie = cat.key === "batteries" && idx === 0;
                 return (
                   <div key={m.id} style={{ padding: "10px 0", borderBottom: "1px solid #E2E6EB" }}>
@@ -7853,15 +7907,15 @@ function PiecesUsureUPSPanel({ eq, update }) {
                         </>
                       ) : (
                         <>
-                          <MiniInput label="Description" value={m.description} onChange={(v) => setModele(m.id, { description: v })} width={130} />
-                          <MiniInput label="Marque" value={m.marque} onChange={(v) => setModele(m.id, { marque: v })} width={100} />
-                          <MiniInput label="Modèle" value={m.modele} onChange={(v) => setModele(m.id, { modele: v })} width={100} />
+                          <MiniInput type="text" label="Description" value={m.description} onChange={(v) => setModele(m.id, { description: v })} width={130} />
+                          <MiniInput type="text" label="Marque" value={m.marque} onChange={(v) => setModele(m.id, { marque: v })} width={100} />
+                          <MiniInput type="text" label="Modèle" value={m.modele} onChange={(v) => setModele(m.id, { modele: v })} width={100} />
                           <MiniInput label="Quantité" value={m.quantite} onChange={(v) => setModele(m.id, { quantite: v })} width={60} />
                         </>
                       )}
                       <MiniInput label="Année MES" value={m.anneeMiseEnService} onChange={(v) => setModele(m.id, { anneeMiseEnService: v })} width={70} />
                       <MiniInput label="Durée de vie" unit="ans" value={m.dureeVie} onChange={(v) => setModele(m.id, { dureeVie: v })} width={62} />
-                      {modeles.length > 1 && (
+                      {modeles.length > 1 && !(cat.key === "batteries" && idx === 0) && (
                         <button onClick={() => removeModele(m.id)} style={{ background: "none", border: "none", color: "#EF4444", cursor: "pointer", padding: 4 }} title="Retirer">
                           <Trash2 size={15} />
                         </button>
@@ -7904,6 +7958,15 @@ function PrevisionRemplacementCarte({ lignes }) {
           </tbody>
         </table>
       </div>
+      {p.items.some((l) => l.enCours || l.depassee) && (
+        <div style={{ marginTop: 10, fontSize: 12.5, color: "#3E4A5C" }}>
+          {p.items.filter((l) => l.enCours || l.depassee).map((l, i) => (
+            <div key={i} style={{ color: l.depassee ? "#C0392B" : "#B5730A", fontWeight: 600 }}>
+              • {l.depassee ? `${l.type} : échéance de remplacement dépassée (${l.annee}).` : `${l.type} : remplacement à prévoir cette année (${l.annee}).`}
+            </div>
+          ))}
+        </div>
+      )}
       <div style={{ fontSize: 11, color: "#8B96A3", marginTop: 8 }}>Vert (✓) : pièce en bon état prévu, avant son échéance. Orange (●) : année d'échéance — remplacement à faire cette année-là. Rouge (!) : échéance dépassée (années suivantes, si la pièce n'est pas remplacée).</div>
     </Card>
   );
@@ -8952,10 +9015,10 @@ function analyserAnomaliesEquipement(eq, contexte) {
     const cfg = eq.controles.releve_config || { toleranceBasse: 3, toleranceHaute: 3 };
     const valeurs = elementsBatt.map((e) => numOf(e.fields.tension)).filter((v) => v !== null);
     if (valeurs.length) {
-      const moyenne = Math.round((valeurs.reduce((a, b) => a + b, 0) / valeurs.length) * 1000) / 1000;
+      const moyenne = moyenneReferenceBatterie(valeurs, cfg.toleranceBasse, cfg.toleranceHaute);
       elementsBatt.forEach((e) => {
         if (elementBatterieStatus(e.fields.tension, moyenne, cfg.toleranceBasse, cfg.toleranceHaute) === "bad") {
-          ajouter(`La tension de l'élément de batterie ${citer(e.label)} (${e.fields.tension} V) s'écarte de la moyenne de l'ensemble des branches (${moyenne} V) au-delà de la tolérance admise.`, 1, "batterie", `élément ${e.label}`);
+          ajouter(`La tension de l'élément de batterie ${citer(e.label)} (${e.fields.tension} V) s'écarte de la tension moyenne des éléments sains de l'ensemble des branches (${moyenne} V) au-delà de la tolérance admise.`, 1, "batterie", `élément ${e.label}`);
         }
       });
     }
@@ -9020,6 +9083,8 @@ function analyserAnomaliesEquipement(eq, contexte) {
   [...calcPiecesUsure(eq), ...calcEcheancesUsureUPS(eq)].forEach((l) => {
     if (l.annee !== null && l.annee < anneeActuelle) {
       ajouter(`La pièce d'usure ${citer(l.type)} a dépassé son échéance de remplacement (prévue en ${l.annee}).`, 1, "usure", l.type);
+    } else if (l.annee === anneeActuelle) {
+      ajouter(`La pièce d'usure ${citer(l.type)} arrive à échéance de remplacement cette année (${l.annee}).`, 1, "usure", l.type);
     }
   });
   // Interrupteur fusible HTA : calibre installé comparé au transformateur associé (nécessite les équipements du site et les locaux).
@@ -9562,6 +9627,9 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
           )}
 
           {schema.sections.map((sec) => {
+            // Fiche batterie : saisie une seule fois, dans Pièces d'usure → Batteries (premier modèle).
+            // Les données restent dans controles.batterie_id (reprises par le relevé des tensions, les branches, l'autonomie et le rapport Word).
+            if (sec.key === "batterie_id" && TYPES_AVEC_PIECES_USURE.includes(eq.type) && schema.sections.some((x) => x.key === "pieces_usure_ups")) return null;
             if (eq.type === "Bilan de puissance" && sec.key === "bilan_energie") {
               return (
                 <React.Fragment key={sec.key}>
@@ -9890,7 +9958,7 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
               );
             }
             if (sec.key === "pieces_usure_ups" && TYPES_AVEC_PIECES_USURE.includes(eq.type)) {
-              return <PiecesUsureUPSPanel key={sec.key} eq={eq} update={update} />;
+              return <PiecesUsureUPSPanel key={sec.key} eq={eq} update={update} itemFicheBatterie={getSchema(eq).sections.find((x) => x.key === "batterie_id")?.items?.[0]} />;
             }
             if (sec.key === "usure" && TYPES_AVEC_GRADINS.includes(eq.type)) {
               return (
@@ -10124,6 +10192,18 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
                   {EQUIP_STATUSES.map((s) => <option key={s} value={s}>{agree(s, equipGender(eq.type), false)}</option>)}
                 </Select>
               </Field>
+              {(() => {
+                const alertes = alertesUsureEquipement(eq);
+                if (!alertes.length) return null;
+                const retard = alertes.some((a) => a.enRetard);
+                return (
+                  <div style={{ border: `1.5px solid ${retard ? "#C0392B" : "#B5730A"}`, background: retard ? "#FDF1F0" : "#FDF6EC", borderRadius: 10, padding: "10px 12px", fontSize: 12.5, color: "#3E4A5C" }}>
+                    <div style={{ fontWeight: 700, color: retard ? "#C0392B" : "#B5730A", marginBottom: 4, display: "flex", alignItems: "center", gap: 6 }}><AlertTriangle size={14} /> Pièces d'usure à remplacer</div>
+                    {alertes.map((a, i) => <div key={i}>• {a.phrase}</div>)}
+                    <div style={{ fontSize: 11, color: "#8B96A3", marginTop: 4 }}>Repris automatiquement dans le rapport (fiche de l'équipement et synthèse du site). Le bouton de génération des remarques l'ajoute aussi aux remarques.</div>
+                  </div>
+                );
+              })()}
               <div style={{ width: "100%" }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
                   <label style={{ fontSize: 11, fontWeight: 600, color: "#5B6B7D", letterSpacing: 0.5, textTransform: "uppercase" }}>Remarques et préconisations</label>
@@ -11877,8 +11957,17 @@ function docxSyntheseSiteStructuree(texte, site) {
       .map((eq, i) => ({ eq, i }))
       .sort((a, b) => ((RANK_OF[b.eq.etatFinal] ?? 0) - (RANK_OF[a.eq.etatFinal] ?? 0)) || (a.i - b.i))
       .map(({ eq }) => {
-        const b = blocDe(p.equipements, eq) || blocDe(auto.equipements, eq);
-        if (b) { utilises.add(b); return { ...b, titre: titreDe(eq), eq }; }
+        let b = blocDe(p.equipements, eq) || blocDe(auto.equipements, eq);
+        if (b) utilises.add(b);
+        // Pièces d'usure arrivées à échéance (cette année ou en retard) : ajoutées si elles ne figurent pas déjà dans le texte.
+        const texteBloc = b ? [...b.autres, ...b.constats, ...b.preconisations].join(" ") : "";
+        const alertes = alertesUsureEquipement(eq).filter((a) => !texteBloc.includes(a.type));
+        if (alertes.length) {
+          const base = b || { autres: [], constats: [], preconisations: [] };
+          b = { ...base, constats: [...base.constats, ...alertes.map((a) => a.phrase)],
+            preconisations: [...base.preconisations, `Planifier le remplacement des pièces d'usure arrivées à échéance (${listeFr(alertes.map((a) => citer(a.type)))}).`] };
+        }
+        if (b) return { ...b, titre: titreDe(eq), eq };
         if ((RANK_OF[eq.etatFinal] ?? 0) < 0) return { titre: titreDe(eq), eq, autres: [], constats: [eq.etatFinal === "Non présent" ? "Équipement non présent sur le site." : "La maintenance de cet équipement n'a pas pu être réalisée."], preconisations: [eq.etatFinal === "Non présent" ? "Aucune action nécessaire." : "Maintenance à planifier lors d'une prochaine intervention."] };
         return { titre: titreDe(eq), eq, autres: [], constats: ["Aucune remarque particulière."], preconisations: ["Aucune action nécessaire."] };
       });
@@ -14229,7 +14318,7 @@ function docxEquipementElements(eq, locaux, allSites) {
       const modeTitre = !cfg.mode || /floating/i.test(cfg.mode) ? "DE FLOATING" : `(${String(cfg.mode).toUpperCase()})`;
       // Seuils haut et bas COMMUNS à toutes les branches : calculés sur la moyenne de l'ensemble des éléments (comme à l'écran), pas branche par branche.
       const toutesValeurs = entries.map((e) => numOf(e.fields.tension)).filter((v) => v !== null);
-      const moyenneB = toutesValeurs.length ? Math.round((toutesValeurs.reduce((a, b) => a + b, 0) / toutesValeurs.length) * 1000) / 1000 : null;
+      const moyenneB = moyenneReferenceBatterie(toutesValeurs, cfg.toleranceBasse, cfg.toleranceHaute);
       const bornesCommunes = toutesValeurs.length && moyenneB !== null ? { min: Math.min(...toutesValeurs, moyenneB * (1 - tb / 100)), max: Math.max(...toutesValeurs, moyenneB * (1 + th / 100)) } : null;
       groupes.forEach((groupe, indexGroupe) => {
         const sousTitre = [plusieursBranches ? groupe.label : "", eq.identification && eq.identification.repere].filter(Boolean).join(" · ");
@@ -14580,6 +14669,14 @@ function docxEquipementElements(eq, locaux, allSites) {
     border: { top: { color: DOCX_BLUE, space: 4, style: DOCX.BorderStyle.SINGLE, size: 8 } }, spacing: { before: 240, after: 80 },
     children: [new DOCX.TextRun({ text: "Synthèse de l'état — à l'issue de la maintenance : ", bold: true, size: 18, color: DOCX_DARK }), new DOCX.TextRun({ text: (eq.etatFinal || "").toUpperCase(), bold: true, size: 18, color: docxEtatColor(eq.etatFinal) })],
   }));
+  {
+    // Pièces d'usure à remplacer cette année (ou en retard) non déjà citées dans les remarques : rappel sous l'état.
+    const alertes = alertesUsureEquipement(eq).filter((a) => !String(eq.remarques || "").includes(a.type));
+    alertes.forEach((a) => elements.push(new DOCX.Paragraph({ spacing: { before: 60, after: 40 }, children: [
+      new DOCX.TextRun({ text: "●  ", bold: true, size: 18, color: a.enRetard ? "C0392B" : "B5730A" }),
+      new DOCX.TextRun({ text: a.phrase, size: 18, color: a.enRetard ? "C0392B" : "B5730A" }),
+    ] })));
+  }
   if (eq.remarques) elements.push(...docxRemarquesEquipement(eq.remarques));
   { const galerie = docxPhotosCoteACote(eq.photos, 200, 220); if (galerie) { elements.push(docxSpacer(160)); elements.push(galerie); } }
 
