@@ -11047,7 +11047,7 @@ function InterventionEditor({ iv, update, onBack, onDelete, onPrint }) {
               </div>
               <div style={{ marginTop: 10 }}>
                 <IvField label="Remarque">
-                  <TextArea value={eq.remarque || ""} onChange={(e) => setEquip(eq.id, "remarque", e.target.value)} rows={2} />
+                  <TextArea value={eq.remarque || ""} onChange={(e) => setEquip(eq.id, "remarque", e.target.value)} rows={Math.max(3, String(eq.remarque || "").split("\n").reduce((n, l) => n + Math.max(1, Math.ceil(l.length / 80)), 0) + 1)} />
                 </IvField>
               </div>
             </div>
@@ -12085,7 +12085,7 @@ function docxControlRow(label, detail, action, etat, isAlternate, garderAvecSuit
             top: { style: DOCX.BorderStyle.SINGLE, size: 6, color: c.bord }, bottom: { style: DOCX.BorderStyle.SINGLE, size: 6, color: c.bord },
             left: { style: DOCX.BorderStyle.SINGLE, size: 6, color: c.bord }, right: { style: DOCX.BorderStyle.SINGLE, size: 6, color: c.bord },
           } : undefined,
-          children: [new DOCX.Paragraph({ keepNext: garderAvecSuite, alignment: DOCX.AlignmentType.CENTER, children: [new DOCX.TextRun({ text: (etat || "").toUpperCase(), bold: true, color: c ? c.texte : "555555", size: uneLigne ? 14 : 16 })] })],
+          children: [new DOCX.Paragraph({ keepNext: garderAvecSuite, alignment: DOCX.AlignmentType.CENTER, children: [new DOCX.TextRun({ text: (etat || "").toUpperCase(), bold: true, color: c ? c.texte : "555555", size: 16 })] })],
         })
       : new DOCX.TableCell({ width: { size: 2000, type: DOCX.WidthType.DXA }, margins: marges, shading: fondAlterne ? { type: DOCX.ShadingType.CLEAR, fill: fondAlterne } : undefined, children: [new DOCX.Paragraph("")] }),
   ]});
@@ -12096,7 +12096,7 @@ function docxControlRow(label, detail, action, etat, isAlternate, garderAvecSuit
 // Un contrôle qui porte une action ou de longues valeurs garde une ligne pleine largeur (pour rester lisible) ; l'ordre des contrôles est conservé.
 function docxControlTableCompact(rows) {
   if (rows.length === 0) return null;
-  const L = [3300, 1500, 3300, 1500];
+  const L = [2800, 2000, 2800, 2000]; // colonne d'état à 2000, comme dans les tableaux ligne par ligne : toutes les pastilles ont la même largeur
   const marges = { top: 40, bottom: 40, left: 110, right: 90 };
   const aucune = docxAucuneBordure();
   // Un contrôle se place en demi-largeur s'il n'a pas d'action et au plus une courte valeur (ex. « Valeur : 24 °C ») ; sinon il garde une ligne pleine largeur.
@@ -12109,7 +12109,7 @@ function docxControlTableCompact(rows) {
       width: { size: largeur, type: DOCX.WidthType.DXA }, margins: { top: 40, bottom: 40, left: 60, right: 60 }, verticalAlign: DOCX.VerticalAlign.CENTER,
       shading: etat ? { type: DOCX.ShadingType.CLEAR, fill: c ? c.fond : DOCX_LIGHT } : undefined,
       borders: c ? { top: { style: DOCX.BorderStyle.SINGLE, size: 4, color: c.bord }, bottom: { style: DOCX.BorderStyle.SINGLE, size: 4, color: c.bord }, left: { style: DOCX.BorderStyle.SINGLE, size: 4, color: c.bord }, right: { style: DOCX.BorderStyle.SINGLE, size: 4, color: c.bord } } : undefined,
-      children: [new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, spacing: { before: 0, after: 0 }, children: [new DOCX.TextRun({ text: (etat || "").toUpperCase(), bold: true, size: 14, color: c ? c.texte : "555555" })] })],
+      children: [new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, spacing: { before: 0, after: 0 }, children: [new DOCX.TextRun({ text: (etat || "").toUpperCase(), bold: true, size: 16, color: c ? c.texte : "555555" })] })],
     });
   };
   const cellLabel = (r, largeur, span, separateur) => {
@@ -15139,7 +15139,7 @@ async function generateInterventionDocx(iv) {
   if (!anomalies) {
     ajouterPuces("Équipements nécessitant une attention", liste.filter((e) => RANK_OF[e.etat || "Conforme"] >= 1 && e.remarque && String(e.remarque).trim()).map((e) => {
       const nom = [e.type, e.reference].filter(Boolean).join(" — ") || "Équipement";
-      return `${nom} (${motsEtat(e.etat)}) : ${truncateText(aplatirRemarques(e.remarque), 220)}`;
+      return `${nom} (${motsEtat(e.etat)}) : ${aplatirRemarques(e.remarque)}`;
     }));
   }
   if (anomalies) {
