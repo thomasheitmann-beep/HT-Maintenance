@@ -11977,7 +11977,10 @@ function docxSyntheseSiteStructuree(texte, site) {
       const eq = e.eq;
       const teinte = teinteSyntheseRang(eq ? (RANK_OF[eq.etatFinal] ?? 0) : 0);
       const constats = [...e.autres, ...e.constats];
-      return new DOCX.TableRow({ cantSplit: true, children: [
+      // Une rangée insécable plus haute qu'une page est tronquée en bas de page (Pages comme Word) :
+      // on ne la rend insécable que si son texte est court ; sinon elle peut se poursuivre page suivante.
+      const longueurTexte = [...constats, ...e.preconisations].join(" ").length;
+      return new DOCX.TableRow({ cantSplit: longueurTexte < 700, children: [
         cellule(0, [
           new DOCX.Paragraph({ spacing: { after: 60 }, children: [new DOCX.TextRun({ text: e.titre || "—", bold: true, size: 21, color: DOCX_DARK })] }),
           new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: "●  " + (eq && (RANK_OF[eq.etatFinal] ?? 0) < 0 ? String(eq.etatFinal).toUpperCase() : teinte.etiquette), bold: true, size: 15, color: teinte.texte, characterSpacing: 20 })] }),
@@ -12079,7 +12082,7 @@ function docxFieldTable(rows, photo) {
   const wl = 2300, wv = 4300, wp = TABLE_WIDTH - wl - wv;
   return docxTable({
     width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: [wl, wv, wp],
-    rows: filtered.map(([l, v], i) => new DOCX.TableRow({ cantSplit: true, children: [
+    rows: filtered.map(([l, v], i) => new DOCX.TableRow({ cantSplit: String(v ?? "").length < 700, children: [
       ...docxFieldCellules(l, v, wl, wv),
       ...(i === 0 ? [new DOCX.TableCell({
         rowSpan: filtered.length, width: { size: wp, type: DOCX.WidthType.DXA }, verticalAlign: DOCX.VerticalAlign.CENTER, margins: { top: 100, bottom: 100, left: 120, right: 120 },
