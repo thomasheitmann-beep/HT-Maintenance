@@ -3140,6 +3140,12 @@ const SCHEMAS = {
           { key: "tangphi", label: "Tang Phi (calculé)", unit: "(tan φ)", compute: (f) => { const p = numOf(f.p), s = numOf(f.s); if (p === null || s === null || p <= 0 || s < p) return ""; return Math.round((Math.sqrt(s * s - p * p) / p) * 1000) / 1000; } },
         ]),
       ]},
+      // Mesures à l'analyseur de réseau (TGBT, batterie en service) : taux d'harmoniques individuels,
+      // exploités par l'analyse du risque de résonance (rapport Word + constats automatiques).
+      { key: "analyse_harmonique", title: "Analyse harmonique et risque de résonance", items: [
+        S("harmoniques_courant", "Harmoniques de courant au TGBT (Ih / I1)", [F("h5", "Rang 5", "%"), F("h7", "Rang 7", "%"), F("h11", "Rang 11", "%"), F("h13", "Rang 13", "%")]),
+        S("harmoniques_tension", "Harmoniques de tension au TGBT (Uh / U1)", [F("h5", "Rang 5", "%"), F("h7", "Rang 7", "%"), F("h11", "Rang 11", "%"), F("h13", "Rang 13", "%")]),
+      ]},
       { key: "gradins", title: "Gradins", items: [] },
       { key: "usure", title: "Pièces d'usure", items: [
         I("ventilation_usure", "Ventilation", [{ key: "reference", label: "Référence" }, { key: "annee", label: "Année de mise en service" }]),
@@ -7605,56 +7611,149 @@ function calcResonanceHarmonique(eq, allEquipements) {
   const h0 = Math.sqrt(scc / qn);
   return { h0: Math.round(h0 * 100) / 100, transfoLabel: transfo.identification?.repere || "transfo associé", scc: Math.round(scc), snAffiche: sn, uccAffiche: ucc, selfInfo };
 }
+// ---------------------------------------------------------------------------------------------
+// Analyse complète du risque de résonance d'une batterie de compensation :
+//  • batterie SANS self : rang de résonance h₀ = √(Scc/Q) calculé pour CHAQUE étape d'enclenchement
+//    (1 gradin, 2 gradins… Q cumulé), comparé aux rangs 5, 7, 11, 13 (±10 % = risque, ±20 % = vigilance) ;
+//  • batterie AVEC selfs anti-harmoniques : la résonance est fixée par la fréquence d'accord de chaque
+//    gradin (h = f accord / f réseau) — sans risque si l'accord est nettement sous le rang 5 ;
+//    la « plage de Q à éviter » n'a alors pas de sens et n'est plus affichée ;
+//  • les harmoniques réellement mesurés (Ih, Uh par rang) confirment ou écartent le risque ;
+//  • surcharge des condensateurs : I mesuré / I théorique > 1,3 (NF EN 60831-1).
+// Le rang 3 n'est pas retenu : en triphasé sans neutre il ne circule pas dans la batterie.
+const RANGS_RESONANCE = [5, 7, 11, 13];
+function analyseResonanceBatterie(eq, allEquipements) {
+  if (!eq || eq.type !== "Batterie de compensation") return null;
+  const base = calcResonanceHarmonique(eq, allEquipements || []);
+  const arrondi = (v, d = 2) => (v === null || v === undefined ? null : Math.round(v * Math.pow(10, d)) / Math.pow(10, d));
+  const maxDe = (...vals) => { const v = vals.map(numOf).filter((x) => x !== null); return v.length ? Math.max(...v) : null; };
+  const freqReseau = numOf(eq.controles?.mesures_amont?.frequence_amont?.fields?.hz) || 50;
+  const gradins = (eq.controles?.gradins_dynamique || []).filter((g) => g.label || numOf(g.fields?.q));
+  const qn = numOf(eq.identification?.qn);
+  // Harmoniques mesurés
+  const fh = eq.controles?.analyse_harmonique?.harmoniques_courant?.fields || {};
+  const fu = eq.controles?.analyse_harmonique?.harmoniques_tension?.fields || {};
+  const harmoniques = RANGS_RESONANCE.map((h) => ({ rang: h, ih: numOf(fh["h" + h]), uh: numOf(fu["h" + h]) }));
+  const aMesures = harmoniques.some((x) => x.ih !== null || x.uh !== null);
+  const tA = eq.controles?.mesures_amont?.tensions_amont?.fields || {};
+  const cA = eq.controles?.mesures_amont?.courants_amont?.fields || {};
+  const thdu = maxDe(tA.thdv1, tA.thdv2, tA.thdv3), thdi = maxDe(cA.thdi1, cA.thdi2, cA.thdi3);
+  // Un rang est « présent » au-delà de 3 % en courant ou 1 % en tension (repères usuels d'analyse).
+  const presence = (h) => { const x = harmoniques.find((y) => y.rang === h); if (!x || (x.ih === null && x.uh === null)) return null; return (x.ih !== null && x.ih >= 3) || (x.uh !== null && x.uh >= 1) ? "present" : "faible"; };
+  const mesureTexte = (h) => { const x = harmoniques.find((y) => y.rang === h); return [x.ih !== null && `Ih${h} = ${x.ih} %`, x.uh !== null && `Uh${h} = ${x.uh} %`].filter(Boolean).join(", "); };
+  // Selfs anti-harmoniques (fréquence saisie, sinon calculée depuis L en mH)
+  const accords = gradins.map((g) => {
+    const f = numOf(g.fields?.selfFrequence) ?? gradinFrequenceAccordTheorique(g.fields?.q, g.fields?.u, g.fields?.selfMA);
+    const rang = f ? arrondi(f / freqReseau) : null;
+    return { nom: g.label || "Gradin", frequence: f ? arrondi(f, 1) : null, rang, p: rang ? arrondi(100 / (rang * rang), 1) : null, niveau: rang === null ? null : rang >= 4.5 ? 1 : 0 };
+  });
+  const nbSelf = accords.filter((a) => a.frequence).length;
+  const filtrage = nbSelf === 0 ? "non" : nbSelf === accords.length ? "total" : "partiel";
+  // Étapes d'enclenchement (Q cumulé), seulement pertinentes sans self (ou pour les gradins non filtrés)
+  let etapes = [];
+  if (!base.manque && filtrage !== "total") {
+    const qs = gradins.map((g) => numOf(g.fields?.q)).filter((q) => q !== null && q > 0);
+    const liste = qs.length ? qs : (qn ? [qn] : []);
+    let cumul = 0;
+    etapes = liste.map((q, i) => {
+      cumul += q;
+      const h0 = Math.sqrt(base.scc / cumul);
+      const proche = RANGS_RESONANCE.map((h) => ({ h, ecart: Math.abs(h0 - h) / h })).sort((a, b) => a.ecart - b.ecart)[0];
+      const pres = presence(proche.h);
+      let niveau = 0, verdict = "Éloigné des rangs 5, 7, 11, 13";
+      if (proche.ecart < 0.1) {
+        niveau = pres === "present" ? 2 : pres === "faible" ? 0 : 1;
+        verdict = pres === "present" ? `Résonance sur le rang ${proche.h}, présent sur le réseau` : pres === "faible" ? `Proche du rang ${proche.h}, mais rang faible sur le réseau` : `Proche du rang ${proche.h} — à confirmer par mesure`;
+      } else if (proche.ecart < 0.2) {
+        niveau = pres === "present" ? 1 : 0;
+        verdict = pres === "present" ? `Vigilance : rang ${proche.h} présent et assez proche` : `Vigilance : assez proche du rang ${proche.h}`;
+      }
+      return { n: i + 1, q: arrondi(cumul, 1), h0: arrondi(h0), rangProche: proche.h, ecartPct: Math.round(proche.ecart * 100), presence: pres, niveau, verdict };
+    });
+  }
+  // Surcharge des condensateurs (courant max mesuré / courant théorique)
+  const surcharges = gradins.map((g) => {
+    const it = gradinIntensiteTheorique(g.fields?.q, g.fields?.u);
+    const imax = maxDe(g.fields?.i1, g.fields?.i2, g.fields?.i3);
+    if (it === null || imax === null || !it) return null;
+    const ratio = arrondi(imax / it);
+    return { nom: g.label || "Gradin", it, imax, ratio, niveau: ratio > 1.3 ? 2 : ratio > 1.1 ? 1 : 0 };
+  }).filter(Boolean);
+  // Constats (repris dans les remarques générées et la synthèse du site)
+  const constats = [];
+  if (filtrage === "total" || filtrage === "partiel") {
+    accords.filter((a) => a.niveau === 1).forEach((a) => constats.push({ rang: 1, categorie: "self_accord", sujet: a.nom,
+      phrase: `La self anti-harmonique du ${a.nom.toLowerCase().startsWith("gradin") ? "" : "gradin "}${citer(a.nom)} est accordée à ${a.frequence} Hz (rang ${a.rang}), trop près du rang 5 : l'accord doit rester nettement en dessous (h ≈ 3,78 / 189 Hz pour p = 7 %, h ≈ 2,67 / 134 Hz pour p = 14 %).` }));
+  }
+  if (filtrage === "partiel") {
+    const sans = accords.filter((a) => !a.frequence).map((a) => citer(a.nom));
+    constats.push({ rang: 1, categorie: "resonance", sujet: "gradins sans self", phrase: `La batterie mélange des gradins équipés de selfs anti-harmoniques et des gradins sans self (${listeFr(sans)}) : les gradins sans self peuvent entrer en résonance avec le réseau et surcharger.` });
+  }
+  const pire = etapes.filter((e) => e.niveau >= 1).sort((a, b) => b.niveau - a.niveau || a.ecartPct - b.ecartPct)[0];
+  if (pire) {
+    const v = (x) => String(x).replace(".", ",");
+    const conc = etapes.filter((e) => e.niveau >= 1 && e.rangProche === pire.rangProche).map((e) => `${e.n} gradin${e.n > 1 ? "s enclenchés" : " enclenché"} (Q = ${v(e.q)} kVAR, h₀ = ${v(e.h0)})`);
+    const pres = presence(pire.rangProche);
+    constats.push({ rang: pire.niveau, categorie: "resonance", sujet: `rang ${pire.rangProche}`,
+      phrase: `Le rang de résonance de la batterie avec le transformateur est proche du rang harmonique ${pire.rangProche} avec ${listeFr(conc)}` +
+        (pres === "present" ? `, et ce rang est présent sur le réseau (${mesureTexte(pire.rangProche)}) : risque de résonance avéré (surchauffe des condensateurs, distorsion de tension amplifiée).` : ` : risque de résonance à confirmer par une mesure des harmoniques à l'analyseur de réseau.`) });
+  }
+  // Autres rangs à risque (différents du pire) : un constat chacun.
+  [...new Set(etapes.filter((e) => e.niveau >= 1 && pire && e.rangProche !== pire.rangProche).map((e) => e.rangProche))].forEach((h) => {
+    const liste = etapes.filter((e) => e.niveau >= 1 && e.rangProche === h);
+    const n = Math.max(...liste.map((e) => e.niveau));
+    const pres = presence(h);
+    constats.push({ rang: n, categorie: "resonance", sujet: `rang ${h}`,
+      phrase: `Le rang de résonance est aussi proche du rang harmonique ${h} avec ${listeFr(liste.map((e) => `${e.n} gradin${e.n > 1 ? "s enclenchés" : " enclenché"} (h₀ = ${String(e.h0).replace(".", ",")})`))}` +
+        (pres === "present" ? `, rang présent sur le réseau (${mesureTexte(h)}).` : pres === null ? ` : à confirmer par une mesure des harmoniques.` : `.`) });
+  });
+  surcharges.filter((x) => x.niveau === 2).forEach((x) => constats.push({ rang: 2, categorie: "surcharge_condensateurs", sujet: x.nom,
+    phrase: `Le courant mesuré sur le ${citer(x.nom)} atteint ${String(x.imax).replace(".", ",")} A pour ${String(x.it).replace(".", ",")} A théoriques (× ${String(x.ratio).replace(".", ",")}) : au-delà de 1,3 × In admis en permanence par les condensateurs (NF EN 60831-1), signe probable d'une surcharge harmonique.` }));
+  const niveau = Math.max(0, ...constats.map((c) => c.rang));
+  // Phrase de conclusion
+  let conclusion;
+  if (constats.length) conclusion = niveau >= 2 ? "Risque de résonance ou surcharge harmonique avéré : action corrective à prévoir rapidement." : "Risque de résonance à surveiller ou à confirmer par une mesure des harmoniques.";
+  else if (filtrage === "total") conclusion = `Batterie équipée de selfs anti-harmoniques accordées sous le rang 5${accords[0]?.rang ? ` (rang d'accord h = ${String(accords[0].rang).replace(".", ",")}, p ≈ ${String(accords[0].p).replace(".", ",")} %)` : ""} : aucun risque de résonance sur les rangs harmoniques 5, 7, 11 et 13.`;
+  else if (etapes.length) conclusion = "Quel que soit le nombre de gradins enclenchés, le rang de résonance reste à l'écart des rangs harmoniques 5, 7, 11 et 13 : pas de risque de résonance identifié.";
+  else conclusion = base.manque ? `Calcul du rang de résonance indisponible — ${base.manque}.` : "Données insuffisantes pour conclure.";
+  return { base, filtrage, accords, etapes, harmoniques, aMesures, thdu, thdi, surcharges, constats, niveau, conclusion, freqReseau };
+}
 function ResonanceHarmoniqueCalculee({ eq, allEquipements }) {
-  const r = calcResonanceHarmonique(eq, allEquipements);
-  if (!r) return null;
-  if (r.manque) {
-    return (
-      <div style={{ fontSize: 11.5, color: "#8B96A3", fontStyle: "italic", margin: "8px 0" }}>
-        Calcul du rang de résonance indisponible — {r.manque}.
-      </div>
-    );
-  }
-  // Rangs harmoniques les plus couramment présents sur un réseau industriel — une résonance trop
-  // proche de l'un d'eux (± 10 %, marge courante en pratique) est à risque.
-  const rangsRisque = [3, 5, 7, 11, 13];
-  const rangProche = rangsRisque.find((h) => Math.abs(r.h0 - h) / h < 0.1);
-  // Plage de Q à éviter pour ce rang : puisque h0 = √(Scc/Q), un Q plus grand donne un h0 plus
-  // petit (relation inverse) — la zone à risque en Q se déduit directement des bornes ±10% en h0.
-  let plageAeviter = null;
-  if (rangProche) {
-    const qDangerMin = r.scc / Math.pow(rangProche * 1.1, 2);
-    const qDangerMax = r.scc / Math.pow(rangProche * 0.9, 2);
-    plageAeviter = { min: Math.round(qDangerMin), max: Math.round(qDangerMax) };
-  }
+  const a = analyseResonanceBatterie(eq, allEquipements);
+  if (!a) return null;
+  const couleurs = { 0: { bord: "#0F8A5F", fond: "#EAF7F1", texte: "#0F6B3F" }, 1: { bord: "#B5730A", fond: "#FDF3E3", texte: "#8A5A0A" }, 2: { bord: "#C0392B", fond: "#FDF1F0", texte: "#9A2E22" } };
+  const c = couleurs[a.niveau];
+  const th = { background: "#1A1F26", color: "#fff", padding: "5px 8px", fontSize: 11, textAlign: "left", fontWeight: 700 };
+  const td = { padding: "5px 8px", borderBottom: "1px solid #E2E6EB", fontSize: 11.5 };
+  const pastille = (n, texte) => <span style={{ color: couleurs[n].texte, background: couleurs[n].fond, border: `1px solid ${couleurs[n].bord}`, borderRadius: 999, padding: "1px 8px", fontWeight: 700, fontSize: 10.5 }}>{texte}</span>;
   return (
-    <div style={{ background: rangProche ? "#FDF3E3" : "#EEF2F6", borderRadius: 8, padding: "10px 12px", fontSize: 12, color: rangProche ? "#8A5A0A" : "#0A5DA8", margin: "8px 0", lineHeight: 1.5 }}>
-      <strong>Rang de résonance calculé (h₀ = √(Scc/Q)) : {r.h0}</strong> — Scc ≈ {r.scc} kVA (depuis {r.transfoLabel}, Sn={r.snAffiche} kVA, Ucc={r.uccAffiche}%), Q={eq.identification?.qn} kVAR.
-      {r.selfInfo?.present && (
-        <>
-          <br /><strong>⚠ Self anti-harmonique détectée</strong> — ce calcul générique (h₀ = √(Scc/Q)) suppose des condensateurs seuls et ne s'applique pas à un gradin filtré, dont la résonance dépend de sa propre fréquence d'accord :
-          <ul style={{ margin: "4px 0 0 0", paddingLeft: 18 }}>
-            {r.selfInfo.gradins.map((g, i) => (
-              <li key={i}>
-                {g.nom} : {g.frequence} Hz — rang d'accord h = {g.rangAccord}
-                {g.rangAccord >= 4.5 ? (
-                  <> ⚠ inhabituellement proche ou au-dessus du rang 5 — vérifier ce réglage (usuellement accordé nettement en dessous du rang 5, ex. h≈3,8 pour p=14% ou h≈4,2 pour p=7%, pour rester à l'écart des harmoniques 5/7).</>
-                ) : (
-                  <> — cohérent avec un accordage courant (en dessous du rang 5).</>
-                )}
-              </li>
-            ))}
-          </ul>
-        </>
+    <div style={{ border: `1.5px solid ${c.bord}`, background: "#fff", borderRadius: 10, padding: "12px 14px", margin: "10px 0", fontSize: 12, color: "#3E4A5C", lineHeight: 1.5 }}>
+      <div style={{ fontWeight: 700, color: "#0A5DA8", marginBottom: 6 }}>Analyse du risque de résonance (reprise dans le rapport Word)</div>
+      {!a.base.manque && <div>Scc ≈ {a.base.scc} kVA ({a.base.transfoLabel} : Sn = {a.base.snAffiche} kVA, Ucc = {a.base.uccAffiche} %) · Qn = {eq.identification?.qn || "—"} kVAR · Selfs anti-harmoniques : {a.filtrage === "total" ? "oui (tous les gradins)" : a.filtrage === "partiel" ? "sur une partie des gradins" : "non"}</div>}
+      {a.filtrage !== "non" && (
+        <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 8 }}>
+          <thead><tr><th style={th}>Gradin</th><th style={th}>Fréquence d'accord</th><th style={th}>Rang d'accord h</th><th style={th}>p ≈</th><th style={th}>Verdict</th></tr></thead>
+          <tbody>{a.accords.map((x, i) => (
+            <tr key={i}><td style={td}>{x.nom}</td><td style={td}>{x.frequence ? `${x.frequence} Hz` : "sans self"}</td><td style={td}>{x.rang ?? "—"}</td><td style={td}>{x.p ? `${x.p} %` : "—"}</td>
+              <td style={td}>{x.niveau === null ? pastille(1, "Sans self") : x.niveau ? pastille(1, "Trop près du rang 5") : pastille(0, "Accord correct")}</td></tr>
+          ))}</tbody>
+        </table>
       )}
-      {rangProche ? (
-        <>
-          {" "}⚠ Proche du rang harmonique {rangProche} — risque de résonance partielle (surchauffe des condensateurs, distorsion de tension amplifiée) ; envisager une inductance anti-harmonique en série si des harmoniques de ce rang sont présents sur le réseau.
-          <br /><strong>Plage de Q à éviter pour ce rang : {plageAeviter.min} à {plageAeviter.max} kVAR</strong> — viser un Q en dessous de {plageAeviter.min} kVAR ou au-dessus de {plageAeviter.max} kVAR pour s'en éloigner (à recalculer si le transformateur ou son Ucc changent).
-        </>
-      ) : (
-        <> Pas de rang harmonique courant (3, 5, 7, 11, 13) à proximité immédiate.</>
+      {a.etapes.length > 0 && (
+        <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 8 }}>
+          <thead><tr><th style={th}>Gradins enclenchés</th><th style={th}>Q cumulé</th><th style={th}>h₀ = √(Scc/Q)</th><th style={th}>Rang proche (écart)</th><th style={th}>Verdict</th></tr></thead>
+          <tbody>{a.etapes.map((e) => (
+            <tr key={e.n}><td style={td}>{e.n}</td><td style={td}>{e.q} kVAR</td><td style={td}>{e.h0}</td><td style={td}>{e.rangProche} ({e.ecartPct} %)</td><td style={td}>{pastille(e.niveau, e.verdict)}</td></tr>
+          ))}</tbody>
+        </table>
       )}
+      {a.surcharges.some((x) => x.niveau > 0) && (
+        <div style={{ marginTop: 8 }}>{a.surcharges.filter((x) => x.niveau > 0).map((x, i) => <div key={i}>{pastille(x.niveau, x.niveau === 2 ? "Surcharge" : "Courant élevé")} {x.nom} : I max {x.imax} A / I théorique {x.it} A (× {x.ratio})</div>)}</div>
+      )}
+      {!a.aMesures && a.filtrage !== "total" && <div style={{ marginTop: 8, fontSize: 11.5, color: "#8B96A3" }}>Saisissez les taux d'harmoniques mesurés (section « Analyse harmonique ») pour confirmer ou écarter le risque.</div>}
+      <div style={{ marginTop: 8, background: c.fond, color: c.texte, borderRadius: 8, padding: "8px 10px", fontWeight: 600 }}>
+        {a.constats.length ? a.constats.map((k, i) => <div key={i}>• {k.phrase}</div>) : a.conclusion}
+      </div>
     </div>
   );
 }
@@ -9078,6 +9177,11 @@ function analyserAnomaliesEquipement(eq, contexte) {
       }
     }
   }
+  // Batterie de compensation : risque de résonance / surcharge harmonique (analyse complète).
+  if (eq.type === "Batterie de compensation") {
+    const ar = analyseResonanceBatterie(eq, contexte && contexte.allEquipements);
+    if (ar) ar.constats.forEach((c) => ajouter(c.phrase, c.rang, c.categorie, c.sujet));
+  }
   // Pièces d'usure dont l'échéance de remplacement est dépassée.
   const anneeActuelle = new Date().getFullYear();
   [...calcPiecesUsure(eq), ...calcEcheancesUsureUPS(eq)].forEach((l) => {
@@ -9118,6 +9222,9 @@ const RECO_PAR_CATEGORIE = {
   batterie: (s) => `Contrôler la branche de batterie concernée et remplacer les éléments dont la tension est hors tolérance (${s}).`,
   gradin: (s) => `Contrôler les gradins de la batterie de condensateurs dont le courant est hors tolérance (${s}) et remplacer les condensateurs ou contacteurs défectueux.`,
   usure: (s) => `Planifier le remplacement des pièces d'usure arrivées à échéance (${s}).`,
+  resonance: () => "Faire réaliser une mesure des harmoniques à l'analyseur de réseau sur une période représentative ; si la résonance est confirmée, équiper la batterie de selfs anti-harmoniques (accord 189 Hz / p = 7 % ou 134 Hz / p = 14 %) ou revoir l'étagement des gradins pour éviter les puissances concernées.",
+  surcharge_condensateurs: (s) => `Contrôler la capacité et l'échauffement des condensateurs en surcharge (${s}), rechercher la source des harmoniques et envisager une batterie équipée de selfs anti-harmoniques.`,
+  self_accord: (s) => `Vérifier le réglage des selfs anti-harmoniques (${s}) avec le constructeur : l'accord doit rester nettement sous le rang 5.`,
   proprete: (s) => `Procéder au nettoyage de l'équipement (${s}).`,
   ventilation: (s) => `Rétablir une ventilation et un refroidissement suffisants (${s}).`,
   thermique: (s) => `Rechercher et corriger la cause des échauffements relevés (${s}) — serrage, contact ou surcharge — puis contrôler à nouveau par thermographie.`,
@@ -9125,7 +9232,7 @@ const RECO_PAR_CATEGORIE = {
   etat_defaillant: (s) => `Remettre en conformité, par réparation ou remplacement, les points défaillants suivants : ${s}.`,
   etat_degrade: (s) => `Surveiller lors de la prochaine visite les points dégradés suivants, et planifier une action corrective si la dégradation se confirme : ${s}.`,
 };
-const ORDRE_RECO = ["fusible_calibre", "fusible_ib", "fusible", "serrage", "contact", "isolement", "enroulements", "huile", "mise_terre", "protection", "disjoncteur", "batterie", "gradin", "usure", "proprete", "ventilation", "thermique", "mesure", "etat_defaillant", "etat_degrade"];
+const ORDRE_RECO = ["surcharge_condensateurs", "resonance", "self_accord", "fusible_calibre", "fusible_ib", "fusible", "serrage", "contact", "isolement", "enroulements", "huile", "mise_terre", "protection", "disjoncteur", "batterie", "gradin", "usure", "proprete", "ventilation", "thermique", "mesure", "etat_defaillant", "etat_degrade"];
 // Préconisations dédoublonnées, regroupées par famille, les plus urgentes en premier.
 function preconisationsDepuisConstats(constats) {
   const groupes = {};
@@ -9697,6 +9804,19 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
                     onAddCustom={() => addCustomAction(sec.key)}
                     onChangeCustom={(id, patch) => changeCustomAction(sec.key, id, patch)}
                     onRemoveCustom={(id) => removeCustomAction(sec.key, id)}
+                  />
+                </React.Fragment>
+              );
+            }
+            if (eq.type === "Batterie de compensation" && sec.key === "analyse_harmonique") {
+              return (
+                <React.Fragment key={sec.key}>
+                  <SectionBlock
+                    title={sec.title}
+                    items={sec.items}
+                    values={eq.controles[sec.key]}
+                    onChangeItem={(itemKey, v) => setControleItem(sec.key, itemKey, v)}
+                    idPrefix={`${eq.id}-${sec.key}`}
                   />
                   <ResonanceHarmoniqueCalculee eq={eq} allEquipements={allEquipements} />
                 </React.Fragment>
@@ -12004,6 +12124,68 @@ function docxSyntheseSiteStructuree(texte, site) {
     out.push(docxTable({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: W, rows: [entete, ...lignes] }));
     out.push(new DOCX.Paragraph({ spacing: { before: 100, after: 40 }, children: [new DOCX.TextRun({ text: "Code couleur :  rouge = prioritaire (remise en conformité rapide)  ·  orange = à planifier / à surveiller  ·  vert = conforme, aucune action.", size: 16, italics: true, color: "8B96A3" })] }));
   }
+  return out;
+}
+// Bloc Word « Analyse du risque de résonance » (batterie de compensation).
+function docxAnalyseResonance(a, eq) {
+  if (!a) return [];
+  const out = [];
+  const W = TABLE_WIDTH;
+  const coul = (n) => DOCX_ETAT_COULEURS[n >= 2 ? "bad" : n === 1 ? "warning" : "ok"];
+  const cell = (texte, largeur, o = {}) => new DOCX.TableCell({
+    width: { size: largeur, type: DOCX.WidthType.DXA }, margins: { top: 60, bottom: 60, left: 100, right: 80 }, verticalAlign: DOCX.VerticalAlign.CENTER,
+    shading: o.fond ? { type: DOCX.ShadingType.CLEAR, fill: o.fond } : undefined,
+    children: [new DOCX.Paragraph({ alignment: o.centre ? DOCX.AlignmentType.CENTER : undefined, children: [new DOCX.TextRun({ text: String(texte ?? "—"), size: o.size || 17, bold: !!o.bold, color: o.color || DOCX_DARK })] })],
+  });
+  const tableau = (entetes, largeurs, lignes) => docxTable({ width: { size: W, type: DOCX.WidthType.DXA }, columnWidths: largeurs, rows: [
+    new DOCX.TableRow({ tableHeader: true, cantSplit: true, children: entetes.map((t, i) => cell(t, largeurs[i], { bold: true, color: DOCX_WHITE, fond: DOCX_DARK, size: 16 })) }),
+    ...lignes.map((l) => new DOCX.TableRow({ cantSplit: true, children: l.cellules.map((t, i) => (i === l.cellules.length - 1 && l.niveau !== undefined)
+      ? cell(t, largeurs[i], { bold: true, fond: coul(l.niveau).fond, color: coul(l.niveau).texte, size: 16 })
+      : cell(t, largeurs[i])) })),
+  ] });
+  const fr = (v) => String(v ?? "—").replace(".", ",");
+  out.push(new DOCX.Paragraph({ keepNext: true, spacing: { before: 200, after: 80 }, children: [new DOCX.TextRun({ text: "Analyse du risque de résonance", bold: true, size: 21, color: DOCX_BLUE })] }));
+  const b = a.base;
+  const donnees = [
+    !b.manque && `Scc ≈ ${b.scc} kVA (${b.transfoLabel} : Sn = ${b.snAffiche} kVA, Ucc = ${fr(b.uccAffiche)} %)`,
+    eq.identification?.qn && `Qn batterie : ${eq.identification.qn} kVAR`,
+    `Selfs anti-harmoniques : ${a.filtrage === "total" ? "oui" : a.filtrage === "partiel" ? "sur une partie des gradins" : "non"}`,
+    a.thdu !== null && `THDu max : ${fr(a.thdu)} %`, a.thdi !== null && `THDi max : ${fr(a.thdi)} %`,
+  ].filter(Boolean).join("   ·   ");
+  out.push(new DOCX.Paragraph({ keepNext: true, spacing: { after: 100 }, children: [new DOCX.TextRun({ text: donnees, size: 17, color: "555555" })] }));
+  if (a.filtrage !== "non") {
+    out.push(tableau(["Gradin", "Fréquence d'accord", "Rang d'accord h", "p ≈", "Verdict"], [2200, 1800, 1600, 1100, 2900],
+      a.accords.map((x) => ({ niveau: x.niveau === null ? 1 : x.niveau, cellules: [x.nom, x.frequence ? `${fr(x.frequence)} Hz` : "sans self", fr(x.rang), x.p ? `${fr(x.p)} %` : "—", x.niveau === null ? "Sans self" : x.niveau ? "Trop près du rang 5" : "Accord correct"] }))));
+    out.push(docxSpacer(80));
+  }
+  if (a.etapes.length) {
+    out.push(tableau(["Gradins enclenchés", "Q cumulé", "h₀ = √(Scc/Q)", "Rang proche (écart)", "Verdict"], [1500, 1400, 1500, 1700, 3500],
+      a.etapes.map((e) => ({ niveau: e.niveau, cellules: [String(e.n), `${fr(e.q)} kVAR`, fr(e.h0), `${e.rangProche} (${e.ecartPct} %)`, e.verdict] }))));
+    out.push(docxSpacer(80));
+  }
+  if (a.aMesures) {
+    out.push(tableau(["Rang harmonique", "Ih / I1 (courant)", "Uh / U1 (tension)", "Présence"], [2400, 2400, 2400, 2400],
+      a.harmoniques.filter((x) => x.ih !== null || x.uh !== null).map((x) => {
+        const pres = (x.ih !== null && x.ih >= 3) || (x.uh !== null && x.uh >= 1);
+        return { niveau: pres ? 1 : 0, cellules: [`Rang ${x.rang}`, x.ih !== null ? `${fr(x.ih)} %` : "—", x.uh !== null ? `${fr(x.uh)} %` : "—", pres ? "Présent" : "Faible"] };
+      })));
+    out.push(docxSpacer(80));
+  }
+  const surch = a.surcharges.filter((x) => x.niveau > 0);
+  if (surch.length) {
+    out.push(tableau(["Gradin", "I théorique", "I max mesuré", "Rapport", "Verdict"], [2200, 1700, 1700, 1300, 2700],
+      surch.map((x) => ({ niveau: x.niveau, cellules: [x.nom, `${fr(x.it)} A`, `${fr(x.imax)} A`, `× ${fr(x.ratio)}`, x.niveau === 2 ? "Surcharge (> 1,3 × In)" : "Courant élevé (> 1,1 × In)"] }))));
+    out.push(docxSpacer(80));
+  }
+  const c = coul(a.niveau);
+  const lignes = a.constats.length ? [...a.constats.map((k) => k.phrase), a.conclusion] : [a.conclusion];
+  out.push(docxTable({ width: { size: W, type: DOCX.WidthType.DXA }, columnWidths: [W], rows: [new DOCX.TableRow({ cantSplit: lignes.join(" ").length < 700, children: [new DOCX.TableCell({
+    width: { size: W, type: DOCX.WidthType.DXA }, margins: { top: 100, bottom: 100, left: 180, right: 160 }, shading: { type: DOCX.ShadingType.CLEAR, fill: c.fond },
+    borders: { top: { style: DOCX.BorderStyle.SINGLE, size: 6, color: c.bord }, bottom: { style: DOCX.BorderStyle.SINGLE, size: 6, color: c.bord }, right: { style: DOCX.BorderStyle.SINGLE, size: 6, color: c.bord }, left: { style: DOCX.BorderStyle.SINGLE, size: 36, color: c.bord } },
+    children: lignes.map((t, i) => new DOCX.Paragraph({ spacing: { after: i < lignes.length - 1 ? 60 : 0 }, children: [new DOCX.TextRun({ text: (a.constats.length && i < lignes.length - 1 ? "•  " : "") + t, size: 18, bold: i === lignes.length - 1, color: i === lignes.length - 1 ? c.texte : DOCX_DARK })] })),
+  })] })] }));
+  out.push(docxNormeNote("Méthode : h₀ = √(Scc / Q) avec Scc ≈ Sn / Ucc (réseau amont négligé), calculé pour chaque étape d'enclenchement ; risque si h₀ est à moins de 10 % d'un rang 5, 7, 11 ou 13 (vigilance jusqu'à 20 %), confirmé si ce rang est présent (Ih ≥ 3 % ou Uh ≥ 1 %). Batterie à selfs : résonance fixée par la fréquence d'accord, qui doit rester sous le rang 5. Condensateurs : 1,3 × In maximum en permanence (NF EN 60831-1)."));
+  out.push(docxSpacer());
   return out;
 }
 function docxNormeNote(texte) {
@@ -14649,6 +14831,7 @@ function docxEquipementElements(eq, locaux, allSites) {
     if (courbeAvecFichiers) { elements.push(...docxCourbeDeclenchement(eq, sec.title)); courbeIntegree = true; }
     const t = sectionEtat ? docxControlTableCompact(rows) : docxControlTable(rows); // sections « État » sur deux colonnes, les autres ligne par ligne
     if (t) elements.push(t);
+    if (sec.key === "analyse_harmonique" && eq.type === "Batterie de compensation") elements.push(...docxAnalyseResonance(analyseResonanceBatterie(eq, equipementsDuSiteDe(eq, allSites)), eq));
     if (sec.key === "reglage_disjoncteur" && eq.type === "Disjoncteur BT") {
       const v = calcVerificationPouvoirCoupure(eq, equipementsDuSiteDe(eq, allSites), locaux);
       if (v && !v.manque) elements.push(docxNormeNote(texteVerificationPouvoirCoupure(v)));
