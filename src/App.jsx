@@ -3143,8 +3143,13 @@ const SCHEMAS = {
       // Mesures à l'analyseur de réseau (TGBT, batterie en service) : taux d'harmoniques individuels,
       // exploités par l'analyse du risque de résonance (rapport Word + constats automatiques).
       { key: "analyse_harmonique", title: "Analyse harmonique et risque de résonance", items: [
-        S("harmoniques_courant", "Harmoniques de courant au TGBT (Ih / I1)", [F("h5", "Rang 5", "%"), F("h7", "Rang 7", "%"), F("h11", "Rang 11", "%"), F("h13", "Rang 13", "%")]),
-        S("harmoniques_tension", "Harmoniques de tension au TGBT (Uh / U1)", [F("h5", "Rang 5", "%"), F("h7", "Rang 7", "%"), F("h11", "Rang 11", "%"), F("h13", "Rang 13", "%")]),
+        // Hors service : harmoniques produits par les charges (rangs réellement présents sur le réseau).
+        // En service : effet de la batterie — une forte hausse d'un rang à l'enclenchement confirme une résonance.
+        // Même point de mesure (TGBT, secondaire du transformateur) et même charge pour les deux relevés.
+        S("harmoniques_courant_hs", "Harmoniques de courant au TGBT — batterie HORS service (Ih / I1)", [F("h5", "Rang 5", "%"), F("h7", "Rang 7", "%"), F("h11", "Rang 11", "%"), F("h13", "Rang 13", "%")]),
+        S("harmoniques_tension_hs", "Harmoniques de tension au TGBT — batterie HORS service (Uh / U1)", [F("h5", "Rang 5", "%"), F("h7", "Rang 7", "%"), F("h11", "Rang 11", "%"), F("h13", "Rang 13", "%")]),
+        S("harmoniques_courant", "Harmoniques de courant au TGBT — batterie EN service (Ih / I1)", [F("h5", "Rang 5", "%"), F("h7", "Rang 7", "%"), F("h11", "Rang 11", "%"), F("h13", "Rang 13", "%")]),
+        S("harmoniques_tension", "Harmoniques de tension au TGBT — batterie EN service (Uh / U1)", [F("h5", "Rang 5", "%"), F("h7", "Rang 7", "%"), F("h11", "Rang 11", "%"), F("h13", "Rang 13", "%")]),
       ]},
       { key: "gradins", title: "Gradins", items: [] },
       { key: "usure", title: "Pièces d'usure", items: [
@@ -7631,16 +7636,38 @@ function analyseResonanceBatterie(eq, allEquipements) {
   const gradins = (eq.controles?.gradins_dynamique || []).filter((g) => g.label || numOf(g.fields?.q));
   const qn = numOf(eq.identification?.qn);
   // Harmoniques mesurés
-  const fh = eq.controles?.analyse_harmonique?.harmoniques_courant?.fields || {};
-  const fu = eq.controles?.analyse_harmonique?.harmoniques_tension?.fields || {};
-  const harmoniques = RANGS_RESONANCE.map((h) => ({ rang: h, ih: numOf(fh["h" + h]), uh: numOf(fu["h" + h]) }));
-  const aMesures = harmoniques.some((x) => x.ih !== null || x.uh !== null);
+  const ah = eq.controles?.analyse_harmonique || {};
+  const champs = (k) => ah[k]?.fields || {};
+  const fhES = champs("harmoniques_courant"), fuES = champs("harmoniques_tension"), fhHS = champs("harmoniques_courant_hs"), fuHS = champs("harmoniques_tension_hs");
+  const harmoniques = RANGS_RESONANCE.map((h) => {
+    const x = { rang: h, ihHS: numOf(fhHS["h" + h]), uhHS: numOf(fuHS["h" + h]), ihES: numOf(fhES["h" + h]), uhES: numOf(fuES["h" + h]) };
+    // Facteur d'amplification à l'enclenchement de la batterie : sur la tension de préférence (Uh), sinon sur le courant au TGBT (Ih).
+    x.ampli = x.uhHS !== null && x.uhES !== null && x.uhHS > 0 ? Math.round((x.uhES / x.uhHS) * 100) / 100
+      : x.ihHS !== null && x.ihES !== null && x.ihHS > 0 ? Math.round((x.ihES / x.ihHS) * 100) / 100 : null;
+    x.ampliSur = x.uhHS !== null && x.uhES !== null && x.uhHS > 0 ? "Uh" : x.ampli !== null ? "Ih" : null;
+    x.niveauAmpli = x.ampli === null ? null : x.ampli >= 1.5 ? 2 : x.ampli >= 1.2 ? 1 : 0;
+    // Présence sur le réseau : d'après le relevé HORS service (source réelle) ; à défaut, d'après le relevé en service.
+    const ih = x.ihHS ?? x.ihES, uh = x.uhHS ?? x.uhES;
+    x.presence = ih === null && uh === null ? null : (ih !== null && ih >= 3) || (uh !== null && uh >= 1) ? "present" : "faible";
+    x.presenceSur = x.ihHS !== null || x.uhHS !== null ? "HS" : x.presence ? "ES" : null;
+    // compatibilité avec l'ancien format (une seule série)
+    x.ih = ih; x.uh = uh;
+    return x;
+  });
+  const aMesures = harmoniques.some((x) => x.ihHS !== null || x.uhHS !== null || x.ihES !== null || x.uhES !== null);
   const tA = eq.controles?.mesures_amont?.tensions_amont?.fields || {};
   const cA = eq.controles?.mesures_amont?.courants_amont?.fields || {};
   const thdu = maxDe(tA.thdv1, tA.thdv2, tA.thdv3), thdi = maxDe(cA.thdi1, cA.thdi2, cA.thdi3);
   // Un rang est « présent » au-delà de 3 % en courant ou 1 % en tension (repères usuels d'analyse).
-  const presence = (h) => { const x = harmoniques.find((y) => y.rang === h); if (!x || (x.ih === null && x.uh === null)) return null; return (x.ih !== null && x.ih >= 3) || (x.uh !== null && x.uh >= 1) ? "present" : "faible"; };
-  const mesureTexte = (h) => { const x = harmoniques.find((y) => y.rang === h); return [x.ih !== null && `Ih${h} = ${x.ih} %`, x.uh !== null && `Uh${h} = ${x.uh} %`].filter(Boolean).join(", "); };
+  const presence = (h) => harmoniques.find((y) => y.rang === h)?.presence ?? null;
+  const harmo = (h) => harmoniques.find((y) => y.rang === h);
+  const v2 = (x) => String(x).replace(".", ",");
+  const mesureTexte = (h) => {
+    const x = harmo(h);
+    const hs = [x.ihHS !== null && `Ih${h} = ${v2(x.ihHS)} %`, x.uhHS !== null && `Uh${h} = ${v2(x.uhHS)} %`].filter(Boolean).join(", ");
+    const es = [x.ihES !== null && `Ih${h} = ${v2(x.ihES)} %`, x.uhES !== null && `Uh${h} = ${v2(x.uhES)} %`].filter(Boolean).join(", ");
+    return [hs && `batterie hors service : ${hs}`, es && `en service : ${es}`].filter(Boolean).join(" ; ");
+  };
   // Selfs anti-harmoniques (fréquence saisie, sinon calculée depuis L en mH)
   const accords = gradins.map((g) => {
     const f = numOf(g.fields?.selfFrequence) ?? gradinFrequenceAccordTheorique(g.fields?.q, g.fields?.u, g.fields?.selfMA);
@@ -7660,13 +7687,19 @@ function analyseResonanceBatterie(eq, allEquipements) {
       const h0 = Math.sqrt(base.scc / cumul);
       const proche = RANGS_RESONANCE.map((h) => ({ h, ecart: Math.abs(h0 - h) / h })).sort((a, b) => a.ecart - b.ecart)[0];
       const pres = presence(proche.h);
+      const amp = harmo(proche.h).niveauAmpli; // amplification mesurée à l'enclenchement (null si non mesurée)
       let niveau = 0, verdict = "Éloigné des rangs 5, 7, 11, 13";
       if (proche.ecart < 0.1) {
-        niveau = pres === "present" ? 2 : pres === "faible" ? 0 : 1;
-        verdict = pres === "present" ? `Résonance sur le rang ${proche.h}, présent sur le réseau` : pres === "faible" ? `Proche du rang ${proche.h}, mais rang faible sur le réseau` : `Proche du rang ${proche.h} — à confirmer par mesure`;
+        if (amp !== null) {
+          niveau = amp;
+          verdict = amp === 2 ? `Résonance confirmée sur le rang ${proche.h} (amplification mesurée)` : amp === 1 ? `Proche du rang ${proche.h}, légère amplification mesurée` : `Proche du rang ${proche.h}, pas d'amplification mesurée`;
+        } else {
+          niveau = pres === "present" ? 2 : pres === "faible" ? 0 : 1;
+          verdict = pres === "present" ? `Résonance probable sur le rang ${proche.h}, présent sur le réseau` : pres === "faible" ? `Proche du rang ${proche.h}, mais rang faible sur le réseau` : `Proche du rang ${proche.h} — à confirmer par mesure`;
+        }
       } else if (proche.ecart < 0.2) {
-        niveau = pres === "present" ? 1 : 0;
-        verdict = pres === "present" ? `Vigilance : rang ${proche.h} présent et assez proche` : `Vigilance : assez proche du rang ${proche.h}`;
+        niveau = amp !== null ? amp : pres === "present" ? 1 : 0;
+        verdict = amp === 2 ? `Amplification du rang ${proche.h} mesurée` : pres === "present" || amp === 1 ? `Vigilance : rang ${proche.h} présent et assez proche` : `Vigilance : assez proche du rang ${proche.h}`;
       }
       return { n: i + 1, q: arrondi(cumul, 1), h0: arrondi(h0), rangProche: proche.h, ecartPct: Math.round(proche.ecart * 100), presence: pres, niveau, verdict };
     });
@@ -7696,7 +7729,9 @@ function analyseResonanceBatterie(eq, allEquipements) {
     const pres = presence(pire.rangProche);
     constats.push({ rang: pire.niveau, categorie: "resonance", sujet: `rang ${pire.rangProche}`,
       phrase: `Le rang de résonance de la batterie avec le transformateur est proche du rang harmonique ${pire.rangProche} avec ${listeFr(conc)}` +
-        (pres === "present" ? `, et ce rang est présent sur le réseau (${mesureTexte(pire.rangProche)}) : risque de résonance avéré (surchauffe des condensateurs, distorsion de tension amplifiée).` : ` : risque de résonance à confirmer par une mesure des harmoniques à l'analyseur de réseau.`) });
+        (harmo(pire.rangProche).niveauAmpli !== null
+          ? `. Mesures de ce rang — ${mesureTexte(pire.rangProche)}, soit une amplification de × ${v2(harmo(pire.rangProche).ampli)} ${harmo(pire.rangProche).ampliSur === "Uh" ? "en tension" : "en courant"} à l'enclenchement de la batterie : ${harmo(pire.rangProche).niveauAmpli === 2 ? "résonance confirmée (surchauffe des condensateurs, distorsion de tension amplifiée)" : "amplification modérée, à surveiller"}.`
+          : pres === "present" ? `, et ce rang est présent sur le réseau (${mesureTexte(pire.rangProche)}) : risque de résonance avéré (surchauffe des condensateurs, distorsion de tension amplifiée).` : ` : risque de résonance à confirmer par une mesure des harmoniques à l'analyseur de réseau, batterie hors service puis en service.`) });
   }
   // Autres rangs à risque (différents du pire) : un constat chacun.
   [...new Set(etapes.filter((e) => e.niveau >= 1 && pire && e.rangProche !== pire.rangProche).map((e) => e.rangProche))].forEach((h) => {
@@ -7707,6 +7742,10 @@ function analyseResonanceBatterie(eq, allEquipements) {
       phrase: `Le rang de résonance est aussi proche du rang harmonique ${h} avec ${listeFr(liste.map((e) => `${e.n} gradin${e.n > 1 ? "s enclenchés" : " enclenché"} (h₀ = ${String(e.h0).replace(".", ",")})`))}` +
         (pres === "present" ? `, rang présent sur le réseau (${mesureTexte(h)}).` : pres === null ? ` : à confirmer par une mesure des harmoniques.` : `.`) });
   });
+  // Amplification mesurée sur un rang non déjà couvert par le calcul (ex. batterie à selfs mal accordées ou dégradées).
+  const rangsCouverts = new Set(constats.filter((c) => c.categorie === "resonance" && /^rang /.test(c.sujet)).map((c) => Number(c.sujet.slice(5))));
+  harmoniques.filter((x) => x.niveauAmpli >= 1 && !rangsCouverts.has(x.rang)).forEach((x) => constats.push({ rang: x.niveauAmpli, categorie: "resonance", sujet: `rang ${x.rang}`,
+    phrase: `À l'enclenchement de la batterie, le rang harmonique ${x.rang} est amplifié ${x.ampliSur === "Uh" ? "en tension" : "en courant"} (${mesureTexte(x.rang)}, soit × ${v2(x.ampli)}) : ${x.niveauAmpli === 2 ? "résonance confirmée" : "amplification modérée, à surveiller"}${filtrage !== "non" ? " malgré les selfs anti-harmoniques (accord ou état des selfs à vérifier)" : ""}.` }));
   surcharges.filter((x) => x.niveau === 2).forEach((x) => constats.push({ rang: 2, categorie: "surcharge_condensateurs", sujet: x.nom,
     phrase: `Le courant mesuré sur le ${citer(x.nom)} atteint ${String(x.imax).replace(".", ",")} A pour ${String(x.it).replace(".", ",")} A théoriques (× ${String(x.ratio).replace(".", ",")}) : au-delà de 1,3 × In admis en permanence par les condensateurs (NF EN 60831-1), signe probable d'une surcharge harmonique.` }));
   const niveau = Math.max(0, ...constats.map((c) => c.rang));
@@ -7714,7 +7753,7 @@ function analyseResonanceBatterie(eq, allEquipements) {
   let conclusion;
   if (constats.length) conclusion = niveau >= 2 ? "Risque de résonance ou surcharge harmonique avéré : action corrective à prévoir rapidement." : "Risque de résonance à surveiller ou à confirmer par une mesure des harmoniques.";
   else if (filtrage === "total") conclusion = `Batterie équipée de selfs anti-harmoniques accordées sous le rang 5${accords[0]?.rang ? ` (rang d'accord h = ${String(accords[0].rang).replace(".", ",")}, p ≈ ${String(accords[0].p).replace(".", ",")} %)` : ""} : aucun risque de résonance sur les rangs harmoniques 5, 7, 11 et 13.`;
-  else if (etapes.length) conclusion = "Quel que soit le nombre de gradins enclenchés, le rang de résonance reste à l'écart des rangs harmoniques 5, 7, 11 et 13 : pas de risque de résonance identifié.";
+  else if (etapes.length) conclusion = "Quel que soit le nombre de gradins enclenchés, le rang de résonance reste à l'écart des rangs harmoniques 5, 7, 11 et 13, ou aucune amplification n'a été mesurée : pas de risque de résonance identifié.";
   else conclusion = base.manque ? `Calcul du rang de résonance indisponible — ${base.manque}.` : "Données insuffisantes pour conclure.";
   return { base, filtrage, accords, etapes, harmoniques, aMesures, thdu, thdi, surcharges, constats, niveau, conclusion, freqReseau };
 }
@@ -7750,7 +7789,16 @@ function ResonanceHarmoniqueCalculee({ eq, allEquipements }) {
       {a.surcharges.some((x) => x.niveau > 0) && (
         <div style={{ marginTop: 8 }}>{a.surcharges.filter((x) => x.niveau > 0).map((x, i) => <div key={i}>{pastille(x.niveau, x.niveau === 2 ? "Surcharge" : "Courant élevé")} {x.nom} : I max {x.imax} A / I théorique {x.it} A (× {x.ratio})</div>)}</div>
       )}
-      {!a.aMesures && a.filtrage !== "total" && <div style={{ marginTop: 8, fontSize: 11.5, color: "#8B96A3" }}>Saisissez les taux d'harmoniques mesurés (section « Analyse harmonique ») pour confirmer ou écarter le risque.</div>}
+      {a.aMesures && (
+        <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 8 }}>
+          <thead><tr><th style={th}>Rang</th><th style={th}>Ih HS</th><th style={th}>Uh HS</th><th style={th}>Ih ES</th><th style={th}>Uh ES</th><th style={th}>Amplification</th></tr></thead>
+          <tbody>{a.harmoniques.filter((x) => [x.ihHS, x.uhHS, x.ihES, x.uhES].some((v) => v !== null)).map((x) => (
+            <tr key={x.rang}><td style={td}>{x.rang}</td>{[x.ihHS, x.uhHS, x.ihES, x.uhES].map((v, i) => <td key={i} style={td}>{v !== null ? `${v} %` : "—"}</td>)}
+              <td style={td}>{x.ampli !== null ? pastille(x.niveauAmpli, `× ${x.ampli} (${x.ampliSur})`) : "—"}</td></tr>
+          ))}</tbody>
+        </table>
+      )}
+      {a.filtrage !== "total" && !a.harmoniques.some((x) => x.ampli !== null) && <div style={{ marginTop: 8, fontSize: 11.5, color: "#8B96A3" }}>Relevez les harmoniques batterie HORS service puis EN service (même charge, au TGBT) : la comparaison confirme ou écarte la résonance (amplification ≥ × 1,5 = résonance confirmée).</div>}
       <div style={{ marginTop: 8, background: c.fond, color: c.texte, borderRadius: 8, padding: "8px 10px", fontWeight: 600 }}>
         {a.constats.length ? a.constats.map((k, i) => <div key={i}>• {k.phrase}</div>) : a.conclusion}
       </div>
@@ -12164,10 +12212,14 @@ function docxAnalyseResonance(a, eq) {
     out.push(docxSpacer(80));
   }
   if (a.aMesures) {
-    out.push(tableau(["Rang harmonique", "Ih / I1 (courant)", "Uh / U1 (tension)", "Présence"], [2400, 2400, 2400, 2400],
-      a.harmoniques.filter((x) => x.ih !== null || x.uh !== null).map((x) => {
-        const pres = (x.ih !== null && x.ih >= 3) || (x.uh !== null && x.uh >= 1);
-        return { niveau: pres ? 1 : 0, cellules: [`Rang ${x.rang}`, x.ih !== null ? `${fr(x.ih)} %` : "—", x.uh !== null ? `${fr(x.uh)} %` : "—", pres ? "Présent" : "Faible"] };
+    const pc = (v) => (v !== null ? `${fr(v)} %` : "—");
+    out.push(tableau(["Rang", "Ih hors serv.", "Uh hors serv.", "Ih en serv.", "Uh en serv.", "Verdict"], [900, 1400, 1400, 1400, 1400, 3100],
+      a.harmoniques.filter((x) => [x.ihHS, x.uhHS, x.ihES, x.uhES].some((v) => v !== null)).map((x) => {
+        const niveau = x.niveauAmpli !== null ? x.niveauAmpli : x.presence === "present" ? 1 : 0;
+        const verdict = x.ampli !== null
+          ? `${x.niveauAmpli === 2 ? "Résonance confirmée" : x.niveauAmpli === 1 ? "Amplification modérée" : "Pas d'amplification"} (× ${fr(x.ampli)} sur ${x.ampliSur})`
+          : x.presence === "present" ? "Présent sur le réseau" : "Faible";
+        return { niveau, cellules: [String(x.rang), pc(x.ihHS), pc(x.uhHS), pc(x.ihES), pc(x.uhES), verdict] };
       })));
     out.push(docxSpacer(80));
   }
@@ -12184,7 +12236,7 @@ function docxAnalyseResonance(a, eq) {
     borders: { top: { style: DOCX.BorderStyle.SINGLE, size: 6, color: c.bord }, bottom: { style: DOCX.BorderStyle.SINGLE, size: 6, color: c.bord }, right: { style: DOCX.BorderStyle.SINGLE, size: 6, color: c.bord }, left: { style: DOCX.BorderStyle.SINGLE, size: 36, color: c.bord } },
     children: lignes.map((t, i) => new DOCX.Paragraph({ spacing: { after: i < lignes.length - 1 ? 60 : 0 }, children: [new DOCX.TextRun({ text: (a.constats.length && i < lignes.length - 1 ? "•  " : "") + t, size: 18, bold: i === lignes.length - 1, color: i === lignes.length - 1 ? c.texte : DOCX_DARK })] })),
   })] })] }));
-  out.push(docxNormeNote("Méthode : h₀ = √(Scc / Q) avec Scc ≈ Sn / Ucc (réseau amont négligé), calculé pour chaque étape d'enclenchement ; risque si h₀ est à moins de 10 % d'un rang 5, 7, 11 ou 13 (vigilance jusqu'à 20 %), confirmé si ce rang est présent (Ih ≥ 3 % ou Uh ≥ 1 %). Batterie à selfs : résonance fixée par la fréquence d'accord, qui doit rester sous le rang 5. Condensateurs : 1,3 × In maximum en permanence (NF EN 60831-1)."));
+  out.push(docxNormeNote("Méthode : h₀ = √(Scc / Q) avec Scc ≈ Sn / Ucc (réseau amont négligé), calculé pour chaque étape d'enclenchement ; risque si h₀ est à moins de 10 % d'un rang 5, 7, 11 ou 13 (vigilance jusqu'à 20 %), confirmé par la mesure : rang présent batterie hors service (Ih ≥ 3 % ou Uh ≥ 1 %) et amplifié à l'enclenchement de la batterie (Uh en service / Uh hors service ≥ 1,5 : résonance confirmée ; 1,2 à 1,5 : vigilance). Batterie à selfs : résonance fixée par la fréquence d'accord, qui doit rester sous le rang 5. Condensateurs : 1,3 × In maximum en permanence (NF EN 60831-1)."));
   out.push(docxSpacer());
   return out;
 }
