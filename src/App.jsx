@@ -8196,8 +8196,7 @@ function piecesUsureEquipement(eq) {
           if (!b.marque && !b.typeBloc && !b.anneeMiseEnService) return;
           ajouter({ cle: "ups:batteries:fiche", categorie: cat.label, marque: b.marque || "", reference: b.typeBloc || "",
             description: ["Batterie", b.technologie, b.tensionNominale && `${b.tensionNominale} V`, b.capacite && `${b.capacite} Ah`, nb && nbl && `${nb} branche(s) × ${nbl} bloc(s)`].filter(Boolean).join(" · "),
-            // Blocs remplacés partiellement : suivis comme modèles séparés (remplacePartiel = "fiche"), retirés du lot d'origine.
-            quantite: nb !== null && nbl !== null ? Math.max(0, nb * nbl - (data.batteries || []).filter((x) => x.remplacePartiel === "fiche").reduce((t, x) => t + (numOf(x.quantite) || 0), 0)) : 1, anneeMiseEnService: b.anneeMiseEnService ?? m.anneeMiseEnService, dureeVie: b.dureeVie ?? m.dureeVie });
+            quantite: nb !== null && nbl !== null ? nb * nbl : 1, anneeMiseEnService: b.anneeMiseEnService ?? m.anneeMiseEnService, dureeVie: b.dureeVie ?? m.dureeVie });
           return;
         }
         if (!m.description && !m.marque && !m.modele && !m.anneeMiseEnService) return;
@@ -8315,28 +8314,13 @@ function appliquerRemplacementPiece(eq, r) {
   const ancien = piece ? { marque: piece.marque, reference: piece.reference, annee: piece.anneeMiseEnService } : null;
   const controles = { ...eq.controles };
   const [genre, a, b] = String(r.cle).split(":");
-  // Remplacement partiel (ex. 2 batteries défectueuses sur 80) : seules les pièces remplacées prennent la
-  // nouvelle année — elles sont suivies comme un modèle séparé ; le reste du lot garde son année d'origine.
+  // Remplacement partiel (ex. 2 batteries défectueuses sur 80) : aucune modification de la pièce ni de son
+  // année de mise en service — le lot garde sa date ; le remplacement est seulement noté (historique,
+  // synthèse de l'équipement, rapport).
   const total = piece ? numOf(piece.quantite) : null, qte = numOf(r.quantite);
-  const partiel = genre === "ups" && total !== null && qte !== null && qte > 0 && qte < total;
+  const partiel = total !== null && qte !== null && qte > 0 && qte < total;
   if (partiel) {
-    const data = { ...(controles.pieces_usure_ups || {}) };
-    const liste = [...(data[a] || [])];
-    if (a === "batteries" && b === "fiche") {
-      const fb = controles.batterie_id?.batterie_caracteristiques?.fields || {};
-      if (!liste.length) liste.push(emptyModeleUsure(null)); // emplacement 0 = fiche batterie
-      liste.push({ ...emptyModeleUsure(null), remplacePartiel: "fiche", description: r.identique ? `Blocs remplacés (${[fb.technologie, fb.capacite && fb.capacite + " Ah"].filter(Boolean).join(" ")})` : (r.description || "Blocs remplacés"),
-        marque: r.identique ? fb.marque || "" : r.marque || fb.marque || "", modele: r.identique ? fb.typeBloc || "" : r.reference || fb.typeBloc || "", quantite: String(qte), anneeMiseEnService: annee, dureeVie: fb.dureeVie || "" });
-    } else {
-      const idx = liste.findIndex((m) => m.id === b);
-      if (idx >= 0) {
-        const m = liste[idx];
-        liste[idx] = { ...m, quantite: String(total - qte) };
-        liste.push({ ...m, id: uid(), quantite: String(qte), anneeMiseEnService: annee, ...(r.identique ? {} : { marque: r.marque || m.marque, modele: r.reference || m.modele, description: r.description || m.description }) });
-      }
-    }
-    data[a] = liste;
-    controles.pieces_usure_ups = data;
+    // rien à mettre à jour sur l'équipement
   } else if (genre === "ups") {
     if (a === "batteries" && b === "fiche") {
       const bid = controles.batterie_id || {};
@@ -8372,7 +8356,7 @@ function remplacementsDuRapport(eq, rapportDate) {
 }
 function texteRemplacement(r) {
   const neuve = r.identique ? [r.ancien?.marque, r.ancien?.reference].filter(Boolean).join(" ") : [r.marque, r.reference].filter(Boolean).join(" ");
-  return `${r.categorie}${neuve ? " : " + neuve : ""}${r.identique ? " (référence identique)" : r.ancien && (r.ancien.marque || r.ancien.reference) ? ` (remplace ${[r.ancien.marque, r.ancien.reference].filter(Boolean).join(" ")})` : ""}${r.partiel ? ` — ${r.quantite} sur ${r.total} (remplacement partiel, les autres conservent leur année de mise en service)` : r.quantite ? ` — quantité ${r.quantite}` : ""} — remplacé le ${dateFrCourte(r.date)}${r.origine === "RI" && r.numeroRI ? ` lors de l'intervention ${r.numeroRI}` : ""}${r.remarque ? ` — ${r.remarque}` : ""}.`;
+  return `${r.categorie}${neuve ? " : " + neuve : ""}${r.identique ? " (référence identique)" : r.ancien && (r.ancien.marque || r.ancien.reference) ? ` (remplace ${[r.ancien.marque, r.ancien.reference].filter(Boolean).join(" ")})` : ""}${r.partiel ? ` — ${r.quantite} sur ${r.total} (remplacement partiel : l'année de mise en service du lot est conservée)` : r.quantite ? ` — quantité ${r.quantite}` : ""} — remplacé le ${dateFrCourte(r.date)}${r.origine === "RI" && r.numeroRI ? ` lors de l'intervention ${r.numeroRI}` : ""}${r.remarque ? ` — ${r.remarque}` : ""}.`;
 }
 // Remplacements saisis dans des RI pour cet équipement, pas encore reportés ni ignorés.
 function remplacementsRIEnAttente(eq, interventions) {
