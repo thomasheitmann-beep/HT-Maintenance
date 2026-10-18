@@ -3718,6 +3718,8 @@ function prefillInterventionFromSite(site, eqOrList, numeroRI) {
     const idf = eq.identification || {};
     return {
       id: uid(),
+      sourceEquipementId: eq.id, // lien vers l'équipement suivi (report des pièces remplacées à la maintenance suivante)
+      sourceSiteId: site.id,
       type: eq.type || "",
       constructeur: idf.marque || (site.locaux || []).find((l) => l.id === eq.localId)?.marque || "",
       modele: idf.modele || idf.typeCellule || idf.typeTransformateur || idf.typeDisjoncteur || "",
@@ -8192,13 +8194,13 @@ function piecesUsureEquipement(eq) {
         if (cat.key === "batteries" && i === 0) {
           const nb = numOf(b.nombreBranches), nbl = numOf(b.nombreBlocsParBranche);
           if (!b.marque && !b.typeBloc && !b.anneeMiseEnService) return;
-          ajouter({ categorie: cat.label, marque: b.marque || "", reference: b.typeBloc || "",
+          ajouter({ cle: "ups:batteries:fiche", categorie: cat.label, marque: b.marque || "", reference: b.typeBloc || "",
             description: ["Batterie", b.technologie, b.tensionNominale && `${b.tensionNominale} V`, b.capacite && `${b.capacite} Ah`, nb && nbl && `${nb} branche(s) × ${nbl} bloc(s)`].filter(Boolean).join(" · "),
             quantite: nb !== null && nbl !== null ? nb * nbl : 1, anneeMiseEnService: b.anneeMiseEnService ?? m.anneeMiseEnService, dureeVie: b.dureeVie ?? m.dureeVie });
           return;
         }
         if (!m.description && !m.marque && !m.modele && !m.anneeMiseEnService) return;
-        ajouter({ categorie: cat.label, marque: m.marque || "", reference: m.modele || "", description: m.description || "", quantite: numOf(m.quantite) ?? 1, anneeMiseEnService: m.anneeMiseEnService, dureeVie: m.dureeVie ?? cat.dureeDefaut });
+        ajouter({ cle: `ups:${cat.key}:${m.id}`, categorie: cat.label, marque: m.marque || "", reference: m.modele || "", description: m.description || "", quantite: numOf(m.quantite) ?? 1, anneeMiseEnService: m.anneeMiseEnService, dureeVie: m.dureeVie ?? cat.dureeDefaut });
       });
     });
   }
@@ -8206,13 +8208,13 @@ function piecesUsureEquipement(eq) {
     (eq.controles.gradins_dynamique || []).filter((g) => g.label).forEach((g) => {
       [["contacteur", "Contacteur", 1], ["fusibles", "Fusibles", 3], ["condensateurs", "Condensateurs", 1]].forEach(([k, nom, qte]) => {
         if (!g.fields[k + "Ref"] && !g.fields[k + "Annee"]) return;
-        ajouter({ categorie: `${nom} — ${g.label}`, marque: "", reference: g.fields[k + "Ref"] || "",
+        ajouter({ cle: `gradin:${g.id}:${k}`, categorie: `${nom} — ${g.label}`, marque: "", reference: g.fields[k + "Ref"] || "",
           description: [nom, k === "condensateurs" && g.fields.q && `${g.fields.q} kVAR`, k === "condensateurs" && g.fields.u && `${g.fields.u} V`].filter(Boolean).join(" · "),
           quantite: qte, anneeMiseEnService: g.fields[k + "Annee"], dureeVie: g.fields[k + "Duree"] || 10 });
       });
     });
     const v = eq.controles.usure?.ventilation_usure?.fields || {};
-    if (v.reference || v.annee) ajouter({ categorie: "Ventilation", marque: "", reference: v.reference || "", description: "Ventilateur", quantite: 1, anneeMiseEnService: v.annee, dureeVie: 4 });
+    if (v.reference || v.annee) ajouter({ cle: "ventilation", categorie: "Ventilation", marque: "", reference: v.reference || "", description: "Ventilateur", quantite: 1, anneeMiseEnService: v.annee, dureeVie: 4 });
   }
   return out;
 }
@@ -8295,6 +8297,177 @@ function BoutonExportPiecesUsure({ site }) {
         </div>
       )}
     </>
+  );
+}
+// ---------------------------------------------------------------------------------------------
+// Remplacement des pièces d'usure : déclaré pendant la maintenance (fiche équipement) ou lors d'une
+// intervention (RI). Met à jour la pièce (année de mise en service, et marque / référence si la pièce
+// posée n'est pas identique) et garde un historique (eq.remplacementsPieces). Les remplacements saisis
+// dans un RI sont proposés à la maintenance suivante (« à reporter sur l'équipement »).
+const CATALOGUE_PAR_CLE_PIECE = (cle) => /^ups:condensateursAlternatifs/.test(cle) ? "ac" : /^ups:condensateursContinus/.test(cle) ? "dc" : /^ups:ventilateurs|^ventilation/.test(cle) ? "ventil" : null;
+function anneeDe(dateISO) { const m = /^(\d{4})/.exec(String(dateISO || "")); return m ? Number(m[1]) : new Date().getFullYear(); }
+function dateFrCourte(dateISO) { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(dateISO || "")); return m ? `${m[3]}/${m[2]}/${m[1]}` : String(dateISO || ""); }
+// Applique un remplacement à l'équipement. r = { id, cle, date, identique, marque, reference, description, quantite, remarque, origine, numeroRI, sourceId, rapportDate }
+function appliquerRemplacementPiece(eq, r) {
+  const annee = String(anneeDe(r.date));
+  const piece = piecesUsureEquipement(eq).find((p) => p.cle === r.cle);
+  const ancien = piece ? { marque: piece.marque, reference: piece.reference, annee: piece.anneeMiseEnService } : null;
+  const controles = { ...eq.controles };
+  const [genre, a, b] = String(r.cle).split(":");
+  if (genre === "ups") {
+    if (a === "batteries" && b === "fiche") {
+      const bid = controles.batterie_id || {};
+      const v = bid.batterie_caracteristiques || { fields: {} };
+      const fields = { ...(v.fields || {}), anneeMiseEnService: annee, ...(r.identique ? {} : { ...(r.marque ? { marque: r.marque } : {}), ...(r.reference ? { typeBloc: r.reference } : {}) }) };
+      controles.batterie_id = { ...bid, batterie_caracteristiques: { ...v, fields } };
+    } else {
+      const data = { ...(controles.pieces_usure_ups || {}) };
+      data[a] = (data[a] || []).map((m) => m.id !== b ? m : { ...m, anneeMiseEnService: annee, ...(r.identique ? {} : { marque: r.marque || m.marque, modele: r.reference || m.modele, description: r.description || m.description }), ...(r.quantite ? { quantite: r.quantite } : {}) });
+      controles.pieces_usure_ups = data;
+    }
+  } else if (genre === "gradin") {
+    controles.gradins_dynamique = (controles.gradins_dynamique || []).map((g) => g.id !== a ? g : { ...g, fields: { ...g.fields, [b + "Annee"]: annee, ...(r.identique ? {} : { [b + "Ref"]: [r.marque, r.reference].filter(Boolean).join(" ") || g.fields[b + "Ref"] }) } });
+  } else if (genre === "ventilation") {
+    const u = controles.usure || {};
+    const v = u.ventilation_usure || { fields: {} };
+    controles.usure = { ...u, ventilation_usure: { ...v, fields: { ...(v.fields || {}), annee, ...(r.identique ? {} : { reference: [r.marque, r.reference].filter(Boolean).join(" ") || v.fields?.reference }) } } };
+  }
+  const entree = { ...r, annee: Number(annee), categorie: piece ? piece.categorie : r.categorie || "Pièce", ancien };
+  return { ...eq, controles, remplacementsPieces: [...(eq.remplacementsPieces || []), entree] };
+}
+function texteRemplacement(r) {
+  const neuve = r.identique ? [r.ancien?.marque, r.ancien?.reference].filter(Boolean).join(" ") : [r.marque, r.reference].filter(Boolean).join(" ");
+  return `${r.categorie}${neuve ? " : " + neuve : ""}${r.identique ? " (référence identique)" : r.ancien && (r.ancien.marque || r.ancien.reference) ? ` (remplace ${[r.ancien.marque, r.ancien.reference].filter(Boolean).join(" ")})` : ""}${r.quantite ? ` — quantité ${r.quantite}` : ""} — remplacé le ${dateFrCourte(r.date)}${r.origine === "RI" && r.numeroRI ? ` lors de l'intervention ${r.numeroRI}` : ""}${r.remarque ? ` — ${r.remarque}` : ""}.`;
+}
+// Remplacements saisis dans des RI pour cet équipement, pas encore reportés ni ignorés.
+function remplacementsRIEnAttente(eq, interventions) {
+  const faits = new Set([...(eq.remplacementsPieces || []).map((r) => r.sourceId).filter(Boolean), ...(eq.remplacementsIgnores || [])]);
+  const out = [];
+  (interventions || []).forEach((iv) => (iv.equipements || []).forEach((e) => {
+    if (e.sourceEquipementId !== eq.id) return;
+    (e.piecesRemplacees || []).forEach((p) => {
+      const sourceId = `${iv.id}:${p.id}`;
+      if (faits.has(sourceId) || (!p.cle && !p.libre)) return;
+      out.push({ ...p, sourceId, numeroRI: iv.numeroRI, date: p.date || iv.date, origine: "RI" });
+    });
+  }));
+  return out;
+}
+function FormulaireRemplacement({ pieces, initial, onValider, onAnnuler, avecDate = true, labelValider = "Enregistrer le remplacement" }) {
+  const [r, setR] = useState(() => ({ cle: pieces[0]?.cle || "", date: todayISO(), identique: true, marque: "", reference: "", description: "", quantite: "", remarque: "", ...(initial || {}) }));
+  const [catalogue, setCatalogue] = useState(false);
+  const piece = pieces.find((p) => p.cle === r.cle);
+  const kind = CATALOGUE_PAR_CLE_PIECE(r.cle);
+  const set = (k, v) => setR((x) => ({ ...x, [k]: v }));
+  const lab = { display: "flex", flexDirection: "column", gap: 3, fontSize: 10.5, color: "#5B6B7D", fontWeight: 600 };
+  const inp = { ...inputStyle, padding: "6px 8px", fontSize: 12.5 };
+  return (
+    <div style={{ border: `1.5px solid ${BRAND.blue}`, borderRadius: 10, padding: 12, background: "#F8FAFC", marginTop: 8 }}>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+        <label style={lab}>Pièce remplacée
+          <select value={r.cle} onChange={(e) => set("cle", e.target.value)} style={{ ...inp, minWidth: 260 }}>
+            {pieces.map((p) => <option key={p.cle} value={p.cle}>{p.categorie}{p.marque || p.reference ? ` — ${[p.marque, p.reference].filter(Boolean).join(" ")}` : ""}{p.echeance ? ` (échéance ${p.echeance})` : ""}</option>)}
+          </select>
+        </label>
+        {avecDate && <label style={lab}>Date du remplacement<input type="date" value={r.date} onChange={(e) => set("date", e.target.value)} style={inp} /></label>}
+        <label style={lab}>Quantité<input value={r.quantite} onChange={(e) => set("quantite", e.target.value)} placeholder={piece?.quantite ? String(piece.quantite) : ""} style={{ ...inp, width: 70 }} /></label>
+        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: "#1A1F26", fontWeight: 600, paddingBottom: 6 }}>
+          <input type="checkbox" checked={r.identique} onChange={(e) => set("identique", e.target.checked)} /> Référence identique{piece && (piece.marque || piece.reference) ? ` (${[piece.marque, piece.reference].filter(Boolean).join(" ")})` : ""}
+        </label>
+      </div>
+      {!r.identique && (
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end", marginTop: 8 }}>
+          <label style={lab}>Marque (pièce posée)<input value={r.marque} onChange={(e) => set("marque", e.target.value)} style={{ ...inp, width: 140 }} /></label>
+          <label style={lab}>Référence (équivalent)<input value={r.reference} onChange={(e) => set("reference", e.target.value)} style={{ ...inp, width: 170 }} /></label>
+          <label style={lab}>Description<input value={r.description} onChange={(e) => set("description", e.target.value)} style={{ ...inp, width: 300 }} /></label>
+          {kind && <button onClick={() => setCatalogue(!catalogue)} style={btnGhost(BRAND.blue)}><Search size={13} /> Catalogue</button>}
+        </div>
+      )}
+      {catalogue && kind && !r.identique && <CataloguePiecesPicker kind={kind} onFermer={() => setCatalogue(false)} onChoisir={(c) => { setR((x) => ({ ...x, marque: c.marque, reference: c.modele, description: c.description })); setCatalogue(false); }} />}
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end", marginTop: 8 }}>
+        <label style={{ ...lab, flex: 1 }}>Remarque<input value={r.remarque} onChange={(e) => set("remarque", e.target.value)} placeholder="ex. pièce défectueuse, remplacement préventif…" style={{ ...inp, width: "100%" }} /></label>
+        <button onClick={onAnnuler} style={btnGhost("#5B6B7D")}>Annuler</button>
+        <button onClick={() => r.cle && onValider(r)} disabled={!r.cle} style={{ ...btnGhost(BRAND.blue), background: BRAND.blue, color: "#fff" }}>{labelValider}</button>
+      </div>
+    </div>
+  );
+}
+function RemplacementsPiecesPanel({ eq, update, enAttente = [], rapportDate }) {
+  const [formulaire, setFormulaire] = useState(false);
+  const pieces = piecesUsureEquipement(eq);
+  const historique = eq.remplacementsPieces || [];
+  if (!pieces.length && !historique.length && !enAttente.length) return null;
+  const enregistrer = (r) => { update(appliquerRemplacementPiece(eq, { ...r, id: uid(), origine: "maintenance", rapportDate: rapportDate || "" })); setFormulaire(false); };
+  const reporter = (p) => update(appliquerRemplacementPiece(eq, { ...p, id: uid(), rapportDate: rapportDate || "" }));
+  const ignorer = (p) => update({ ...eq, remplacementsIgnores: [...(eq.remplacementsIgnores || []), p.sourceId] });
+  return (
+    <Card style={{ marginBottom: 14 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+        <SectionTitle>Remplacement des pièces d'usure</SectionTitle>
+        {pieces.length > 0 && !formulaire && <button onClick={() => setFormulaire(true)} style={btnGhost(BRAND.blue)}><RefreshCw size={13} /> Déclarer un remplacement</button>}
+      </div>
+      {enAttente.length > 0 && (
+        <div style={{ border: "1.5px solid #B5730A", background: "#FDF6EC", borderRadius: 10, padding: "10px 12px", marginTop: 8, fontSize: 12.5 }}>
+          <div style={{ fontWeight: 700, color: "#B5730A", marginBottom: 6 }}>Pièces remplacées lors d'une intervention — à reporter sur l'équipement</div>
+          {enAttente.map((p) => (
+            <div key={p.sourceId} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap", padding: "4px 0", borderTop: "1px dashed #E8D3AE" }}>
+              <span>{p.categorie || (pieces.find((x) => x.cle === p.cle) || {}).categorie || "Pièce"} {p.identique ? "(référence identique)" : [p.marque, p.reference].filter(Boolean).join(" ")} — {p.numeroRI} du {dateFrCourte(p.date)}</span>
+              <span style={{ display: "flex", gap: 6 }}>
+                <button onClick={() => reporter(p)} disabled={!pieces.some((x) => x.cle === p.cle)} title={pieces.some((x) => x.cle === p.cle) ? "Met à jour la pièce (année, référence) et l'ajoute à l'historique" : "Pièce introuvable sur l'équipement"} style={{ ...btnGhost(BRAND.blue), background: BRAND.blue, color: "#fff" }}>Reporter</button>
+                <button onClick={() => ignorer(p)} style={btnGhost("#5B6B7D")}>Ignorer</button>
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+      {formulaire && <FormulaireRemplacement pieces={pieces} initial={{ date: rapportDate || todayISO() }} onValider={enregistrer} onAnnuler={() => setFormulaire(false)} />}
+      {historique.length > 0 ? (
+        <div style={{ marginTop: 10 }}>
+          {[...historique].reverse().map((r) => (
+            <div key={r.id} style={{ display: "flex", justifyContent: "space-between", gap: 8, padding: "6px 0", borderTop: "1px solid #E2E6EB", fontSize: 12.5, color: "#3E4A5C" }}>
+              <span>• {texteRemplacement(r)}</span>
+              <button onClick={() => update({ ...eq, remplacementsPieces: historique.filter((x) => x.id !== r.id) })} title="Retirer de l'historique (ne modifie pas la pièce)" style={{ background: "none", border: "none", color: "#EF4444", cursor: "pointer" }}><Trash2 size={14} /></button>
+            </div>
+          ))}
+        </div>
+      ) : !formulaire && !enAttente.length && <div style={{ fontSize: 12, color: "#8B96A3", marginTop: 6 }}>Aucun remplacement enregistré. L'année de mise en service (et la référence si la pièce posée est un équivalent) est mise à jour automatiquement.</div>}
+    </Card>
+  );
+}
+// RI : pièces remplacées sur un équipement de l'intervention.
+function PiecesRemplaceesRI({ eqIv, siteEq, onChange, ivDate }) {
+  const [formulaire, setFormulaire] = useState(false);
+  const liste = eqIv.piecesRemplacees || [];
+  const pieces = siteEq ? piecesUsureEquipement(siteEq) : [];
+  const [libre, setLibre] = useState({ categorie: "", marque: "", reference: "", quantite: "" });
+  return (
+    <div style={{ marginTop: 10 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+        <span style={{ fontSize: 11, fontWeight: 700, color: "#5B6B7D", textTransform: "uppercase", letterSpacing: 0.5 }}>Pièces remplacées</span>
+        {!formulaire && <button onClick={() => setFormulaire(true)} style={btnGhost(BRAND.blue)}><Plus size={13} /> Ajouter</button>}
+      </div>
+      {liste.map((p) => (
+        <div key={p.id} style={{ display: "flex", justifyContent: "space-between", gap: 8, padding: "5px 0", borderBottom: "1px solid #E2E6EB", fontSize: 12.5 }}>
+          <span>• {p.categorie}{p.identique ? " (référence identique)" : ` : ${[p.marque, p.reference].filter(Boolean).join(" ")}`}{p.quantite ? ` — qté ${p.quantite}` : ""}{p.remarque ? ` — ${p.remarque}` : ""}</span>
+          <button onClick={() => onChange(liste.filter((x) => x.id !== p.id))} style={{ background: "none", border: "none", color: "#EF4444", cursor: "pointer" }}><Trash2 size={14} /></button>
+        </div>
+      ))}
+      {formulaire && pieces.length > 0 && (
+        <FormulaireRemplacement pieces={pieces} avecDate={false} labelValider="Ajouter au RI"
+          onAnnuler={() => setFormulaire(false)}
+          onValider={(r) => { const piece = pieces.find((x) => x.cle === r.cle); onChange([...liste, { ...r, id: uid(), date: ivDate, categorie: piece ? piece.categorie : "Pièce", ancien: piece ? { marque: piece.marque, reference: piece.reference } : null }]); setFormulaire(false); }} />
+      )}
+      {formulaire && pieces.length === 0 && (
+        <div style={{ border: `1.5px solid ${BRAND.blue}`, borderRadius: 10, padding: 12, background: "#F8FAFC", marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
+          <div style={{ width: "100%", fontSize: 11.5, color: "#8B96A3" }}>Équipement non lié à un équipement suivi (ou sans pièce d'usure renseignée) : saisie libre, sans mise à jour automatique de l'équipement.</div>
+          {[["categorie", "Pièce", 180], ["marque", "Marque", 120], ["reference", "Référence", 150], ["quantite", "Qté", 60]].map(([k, l, w]) => (
+            <label key={k} style={{ display: "flex", flexDirection: "column", gap: 3, fontSize: 10.5, color: "#5B6B7D", fontWeight: 600 }}>{l}<input value={libre[k]} onChange={(e) => setLibre((x) => ({ ...x, [k]: e.target.value }))} style={{ ...inputStyle, width: w, padding: "6px 8px", fontSize: 12.5 }} /></label>
+          ))}
+          <button onClick={() => setFormulaire(false)} style={btnGhost("#5B6B7D")}>Annuler</button>
+          <button onClick={() => { if (!libre.categorie) return; onChange([...liste, { ...libre, id: uid(), libre: true, identique: false, date: ivDate }]); setLibre({ categorie: "", marque: "", reference: "", quantite: "" }); setFormulaire(false); }} style={{ ...btnGhost(BRAND.blue), background: BRAND.blue, color: "#fff" }}>Ajouter au RI</button>
+        </div>
+      )}
+    </div>
   );
 }
 // Pièces d'usure Onduleur : saisie par catégorie (description/marque/modèle/quantité/année de mise
@@ -9724,7 +9897,7 @@ function genererSyntheseSite(site) {
   return ["Synthèse générale :\n" + phrases.join(" "), ...blocs].join("\n\n");
 }
 
-const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, removable = true, onDuplicate, locaux = [], allEquipements = [], allSites = [], caracteristiquesLibrary = {}, apprendreCaracteristique }) {
+const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, removable = true, onDuplicate, locaux = [], allEquipements = [], allSites = [], caracteristiquesLibrary = {}, apprendreCaracteristique, remplacementsEnAttente = [], rapportDate = "" }) {
   const [open, setOpen] = useState(true);
   const schema = schemaFiltreeParNiveau(getSchema(eq), eq.niveauMaintenance);
   const setIdentification = (k, v) => update(repairEquipementControles({ ...eq, identification: { ...eq.identification, [k]: v } }));
@@ -10676,6 +10849,8 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
             );
           })}
 
+          <RemplacementsPiecesPanel eq={eq} update={update} enAttente={remplacementsEnAttente} rapportDate={rapportDate} />
+
           <Card>
             <div style={{ display: "flex", flexDirection: "column", gap: 18, width: "100%" }}>
               <Field label="Synthèse de l'état — à l'issue de la maintenance">
@@ -11143,7 +11318,7 @@ function PrintReport({ site }) {
   );
 }
 
-function SiteDetail({ site, allSites, update, onBack, onDelete, onPrint, onPrintAnnexe, onCreateIntervention, clientsRegistry, contactsRegistry, caracteristiquesLibrary, apprendreCaracteristique }) {
+function SiteDetail({ site, allSites, update, onBack, onDelete, onPrint, onPrintAnnexe, onCreateIntervention, clientsRegistry, contactsRegistry, caracteristiquesLibrary, apprendreCaracteristique, interventions = [] }) {
   const [reprendreOpen, setReprendreOpen] = useState(false);
   const [reprendreSelection, setReprendreSelection] = useState([]);
   // Un onglet par équipement, nommé d'après l'équipement (son repère) et classé selon l'ordre
@@ -11447,6 +11622,8 @@ function SiteDetail({ site, allSites, update, onBack, onDelete, onPrint, onPrint
           allSites={allSites}
           caracteristiquesLibrary={caracteristiquesLibrary}
           apprendreCaracteristique={apprendreCaracteristique}
+          remplacementsEnAttente={remplacementsRIEnAttente(equipementActif, interventions)}
+          rapportDate={site.rapport?.date || ""}
         />
       )}
     </div>
@@ -11465,7 +11642,7 @@ function IvField({ label, children, span }) {
   );
 }
 
-function InterventionEditor({ iv, update, onBack, onDelete, onPrint }) {
+function InterventionEditor({ iv, update, onBack, onDelete, onPrint, sites = [] }) {
   iv = repairIntervention(iv);
   const set = (k, v) => update((d) => ({ ...d, [k]: v }));
   const setEquip = (eqId, k, v) => update((d) => ({ ...d, equipements: (d.equipements || []).map((e) => (e.id === eqId ? { ...e, [k]: v } : e)) }));
@@ -11628,6 +11805,24 @@ function InterventionEditor({ iv, update, onBack, onDelete, onPrint }) {
                 <IvField label="Remarque">
                   <TextArea value={eq.remarque || ""} onChange={(e) => setEquip(eq.id, "remarque", e.target.value)} rows={Math.max(3, String(eq.remarque || "").split("\n").reduce((n, l) => n + Math.max(1, Math.ceil(l.length / 80)), 0) + 1)} />
                 </IvField>
+                {(() => {
+                  // Lien vers l'équipement suivi (site de maintenance) : permet de reporter les pièces remplacées à la maintenance suivante.
+                  const siteLie = sites.find((st) => st.id === (eq.sourceSiteId || iv.linkedSiteId));
+                  const siteEq = siteLie && (siteLie.equipements || []).find((x) => x.id === eq.sourceEquipementId);
+                  const candidats = (siteLie ? [siteLie] : sites.filter((st) => !iv.client || (st.client || "").trim().toLowerCase() === iv.client.trim().toLowerCase())).flatMap((st) => (st.equipements || []).map((x) => ({ st, x })));
+                  return (
+                    <>
+                      <div style={{ marginTop: 10, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 12 }}>
+                        <span style={{ color: "#5B6B7D", fontWeight: 600 }}>Équipement suivi :</span>
+                        <select value={siteEq ? `${siteLie.id}|${siteEq.id}` : ""} onChange={(e) => { const [sid, eid] = e.target.value.split("|"); update((d) => ({ ...d, equipements: d.equipements.map((x) => (x.id === eq.id ? { ...x, sourceSiteId: sid || null, sourceEquipementId: eid || null } : x)) })); }} style={{ ...inputStyle, padding: "5px 8px", fontSize: 12, maxWidth: 420 }}>
+                          <option value="">— non lié (pas de mise à jour à la maintenance suivante) —</option>
+                          {candidats.map(({ st, x }) => <option key={st.id + x.id} value={`${st.id}|${x.id}`}>{st.nom || st.local || "Site"} — {x.type}{x.identification?.repere ? ` (${x.identification.repere})` : ""}</option>)}
+                        </select>
+                      </div>
+                      <PiecesRemplaceesRI eqIv={eq} siteEq={siteEq} ivDate={iv.date} onChange={(liste) => setEquip(eq.id, "piecesRemplacees", liste)} />
+                    </>
+                  );
+                })()}
               </div>
             </div>
           ))
@@ -12453,6 +12648,11 @@ function docxSyntheseSiteStructuree(texte, site) {
         if (b) utilises.add(b);
         // Pièces d'usure arrivées à échéance (cette année ou en retard) : ajoutées si elles ne figurent pas déjà dans le texte.
         const texteBloc = b ? [...b.autres, ...b.constats, ...b.preconisations].join(" ") : "";
+        const remplacees = (eq.remplacementsPieces || []).filter((r) => site?.rapport?.date && r.rapportDate === site.rapport.date);
+        if (remplacees.length) {
+          const base = b || { autres: [], constats: [], preconisations: [] };
+          b = { ...base, constats: [...base.constats, ...remplacees.map((r) => "Remplacement effectué : " + texteRemplacement(r))] };
+        }
         const alertes = alertesUsureEquipement(eq).filter((a) => !texteBloc.includes(a.type));
         if (alertes.length) {
           const base = b || { autres: [], constats: [], preconisations: [] };
@@ -14733,7 +14933,7 @@ function docxCourbeDecharge(eq) {
 }
 // Saut de page : un vrai saut dans un paragraphe minuscule (Pages ignore la propriété « saut de page avant » d'un paragraphe).
 function docxDebutPage() { return new DOCX.Paragraph({ spacing: { before: 0, after: 0 }, children: [new DOCX.TextRun({ text: "", size: 2 }), new DOCX.PageBreak()] }); }
-function docxEquipementElements(eq, locaux, allSites) {
+function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
   // Filet de sécurité : quelle que soit l'origine des données (ancien format, migration, edge case),
   // on s'assure que la structure de contrôles est complète avant de générer le rapport — évite un
   // plantage si une section conditionnelle (ex. relais activé) n'a pas été réparée en amont.
@@ -15239,6 +15439,14 @@ function docxEquipementElements(eq, locaux, allSites) {
       new DOCX.TextRun({ text: a.phrase, size: 18, color: a.enRetard ? "C0392B" : "B5730A" }),
     ] })));
   }
+  {
+    // Pièces d'usure remplacées enregistrées pour cette maintenance (sur place ou reportées depuis un RI).
+    const remplacees = (eq.remplacementsPieces || []).filter((r) => rapportDate && r.rapportDate === rapportDate);
+    if (remplacees.length) {
+      elements.push(new DOCX.Paragraph({ spacing: { before: 100, after: 40 }, keepNext: true, children: [new DOCX.TextRun({ text: "Pièces d'usure remplacées", bold: true, size: 18, color: "0F8A5F" })] }));
+      remplacees.forEach((r) => elements.push(new DOCX.Paragraph({ spacing: { after: 30 }, children: [new DOCX.TextRun({ text: "✓  ", bold: true, size: 18, color: "0F8A5F" }), new DOCX.TextRun({ text: texteRemplacement(r), size: 18, color: DOCX_DARK })] })));
+    }
+  }
   if (eq.remarques) elements.push(...docxRemarquesEquipement(eq.remarques));
   { const galerie = docxPhotosCoteACote(eq.photos, 200, 220); if (galerie) { elements.push(docxSpacer(160)); elements.push(galerie); } }
 
@@ -15635,7 +15843,7 @@ async function generateSiteDocx(site, allSites) {
     const dernier = children[children.length - 1];
     if (dernier instanceof DOCX.Paragraph) dernier.addChildElement(new DOCX.PageBreak());
     else children.push(docxDebutPage());
-    children.push(...docxEquipementElements(eq, site.locaux, allSites));
+    children.push(...docxEquipementElements(eq, site.locaux, allSites, site.rapport?.date || ""));
   });
 
   children.push(docxSpacer(200));
@@ -15802,6 +16010,12 @@ async function generateInterventionDocx(iv) {
     ...(iv.travauxActions || []).map((a) => (a.action || "") + (a.detail ? " — " + a.detail : "")).filter(Boolean),
     ...lignesUtiles(iv.travauxRealises),
   ]);
+  ajouterPuces("Pièces remplacées", (iv.equipements || []).flatMap((e) => (e.piecesRemplacees || []).map((p) => {
+    const nomEq = [e.type, e.reference].filter(Boolean).join(" — ") || "Équipement";
+    const ancienne = p.ancien ? [p.ancien.marque, p.ancien.reference].filter(Boolean).join(" ") : "";
+    const posee = p.identique ? (ancienne ? `${ancienne} (référence identique)` : "référence identique") : [p.marque, p.reference].filter(Boolean).join(" ") + (ancienne ? ` (équivalent, remplace ${ancienne})` : "");
+    return `${nomEq} : ${p.categorie || "pièce"} — ${posee}${p.quantite ? `, quantité ${p.quantite}` : ""}${p.remarque ? ` — ${p.remarque}` : ""}.`;
+  })));
   const anomalies = (iv.anomaliesRecommandations || "").trim();
   if (!anomalies) {
     ajouterPuces("Équipements nécessitant une attention", liste.filter((e) => RANK_OF[e.etat || "Conforme"] >= 1 && e.remarque && String(e.remarque).trim()).map((e) => {
@@ -17216,9 +17430,9 @@ export default function App({ currentUser, onLogout }) {
           )}
 
           {selected ? (
-            <SiteDetail site={selected} allSites={sites} update={(updater) => updateSite(selected.id, updater)} onBack={() => setSelectedId(null)} onDelete={deleteSite} onPrint={requestPrintSite} onPrintAnnexe={setPrintAnnexeSite} onCreateIntervention={createIntervention} clientsRegistry={clientsRegistry} contactsRegistry={contactsRegistry} caracteristiquesLibrary={caracteristiquesLibrary} apprendreCaracteristique={apprendreCaracteristique} />
+            <SiteDetail site={selected} allSites={sites} update={(updater) => updateSite(selected.id, updater)} onBack={() => setSelectedId(null)} onDelete={deleteSite} onPrint={requestPrintSite} onPrintAnnexe={setPrintAnnexeSite} onCreateIntervention={createIntervention} clientsRegistry={clientsRegistry} contactsRegistry={contactsRegistry} caracteristiquesLibrary={caracteristiquesLibrary} apprendreCaracteristique={apprendreCaracteristique} interventions={interventions} />
           ) : selectedIv ? (
-            <InterventionEditor iv={selectedIv} update={(updater) => updateIntervention(selectedIv.id, updater)} onBack={() => setSelectedIvId(null)} onDelete={deleteIntervention} onPrint={requestPrintIv} />
+            <InterventionEditor iv={selectedIv} update={(updater) => updateIntervention(selectedIv.id, updater)} onBack={() => setSelectedIvId(null)} onDelete={deleteIntervention} onPrint={requestPrintIv} sites={sites} />
           ) : view === "sites" ? (
             !loaded ? <div style={{ textAlign: "center", padding: 60, color: "#8B96A3", fontSize: 13 }}>{enLigne ? "Chargement…" : "Hors connexion — les données se chargeront dès le retour du réseau."}</div> : <Overview sites={sites} interventions={interventions} onOpen={setSelectedId} onNew={addSite} onOpenIntervention={setSelectedIvId} />
           ) : view === "interventions" ? (
