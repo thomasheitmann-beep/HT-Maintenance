@@ -8172,6 +8172,131 @@ function CataloguePiecesPicker({ kind, onChoisir, onFermer }) {
     </div>
   );
 }
+// ---------------------------------------------------------------------------------------------
+// Export des pièces d'usure d'un site vers l'application de chiffrage (fichier .json importé dans
+// « Lignes libres » du chiffrage, prix laissés vides). Une entrée par modèle de pièce et par équipement.
+const FORMAT_EXPORT_PIECES_USURE = "ht-maintenance/pieces-usure";
+function piecesUsureEquipement(eq) {
+  const idf = eq.identification || {};
+  const equipement = { type: eq.type || "", repere: idf.repere || "", marque: idf.marque || "", modele: idf.modele || idf.typeCellule || "", id: eq.id };
+  const out = [];
+  const ajouter = (p) => {
+    const annee = numOf(p.anneeMiseEnService), duree = numOf(p.dureeVie);
+    out.push({ equipement, ...p, anneeMiseEnService: annee, dureeVie: duree, echeance: annee !== null && duree !== null ? Math.round(annee) + Math.round(duree) : null });
+  };
+  if (TYPES_AVEC_PIECES_USURE.includes(eq.type)) {
+    const data = eq.controles.pieces_usure_ups || {};
+    const b = eq.controles.batterie_id?.batterie_caracteristiques?.fields || {};
+    getCategoriesUsure(eq.type).forEach((cat) => {
+      (data[cat.key] || []).forEach((m, i) => {
+        if (cat.key === "batteries" && i === 0) {
+          const nb = numOf(b.nombreBranches), nbl = numOf(b.nombreBlocsParBranche);
+          if (!b.marque && !b.typeBloc && !b.anneeMiseEnService) return;
+          ajouter({ categorie: cat.label, marque: b.marque || "", reference: b.typeBloc || "",
+            description: ["Batterie", b.technologie, b.tensionNominale && `${b.tensionNominale} V`, b.capacite && `${b.capacite} Ah`, nb && nbl && `${nb} branche(s) × ${nbl} bloc(s)`].filter(Boolean).join(" · "),
+            quantite: nb !== null && nbl !== null ? nb * nbl : 1, anneeMiseEnService: b.anneeMiseEnService ?? m.anneeMiseEnService, dureeVie: b.dureeVie ?? m.dureeVie });
+          return;
+        }
+        if (!m.description && !m.marque && !m.modele && !m.anneeMiseEnService) return;
+        ajouter({ categorie: cat.label, marque: m.marque || "", reference: m.modele || "", description: m.description || "", quantite: numOf(m.quantite) ?? 1, anneeMiseEnService: m.anneeMiseEnService, dureeVie: m.dureeVie ?? cat.dureeDefaut });
+      });
+    });
+  }
+  if (TYPES_AVEC_GRADINS.includes(eq.type)) {
+    (eq.controles.gradins_dynamique || []).filter((g) => g.label).forEach((g) => {
+      [["contacteur", "Contacteur", 1], ["fusibles", "Fusibles", 3], ["condensateurs", "Condensateurs", 1]].forEach(([k, nom, qte]) => {
+        if (!g.fields[k + "Ref"] && !g.fields[k + "Annee"]) return;
+        ajouter({ categorie: `${nom} — ${g.label}`, marque: "", reference: g.fields[k + "Ref"] || "",
+          description: [nom, k === "condensateurs" && g.fields.q && `${g.fields.q} kVAR`, k === "condensateurs" && g.fields.u && `${g.fields.u} V`].filter(Boolean).join(" · "),
+          quantite: qte, anneeMiseEnService: g.fields[k + "Annee"], dureeVie: g.fields[k + "Duree"] || 10 });
+      });
+    });
+    const v = eq.controles.usure?.ventilation_usure?.fields || {};
+    if (v.reference || v.annee) ajouter({ categorie: "Ventilation", marque: "", reference: v.reference || "", description: "Ventilateur", quantite: 1, anneeMiseEnService: v.annee, dureeVie: 4 });
+  }
+  return out;
+}
+function statutEcheance(echeance, anneeRef) {
+  if (echeance === null) return { cle: "inconnue", libelle: "Échéance inconnue" };
+  if (echeance < anneeRef) return { cle: "retard", libelle: `En retard (${echeance})` };
+  if (echeance === anneeRef) return { cle: "annee", libelle: `Cette année (${echeance})` };
+  return { cle: "avenir", libelle: `Dans ${echeance - anneeRef} an${echeance - anneeRef > 1 ? "s" : ""} (${echeance})` };
+}
+function BoutonExportPiecesUsure({ site }) {
+  const [ouvert, setOuvert] = useState(false);
+  const anneeRef = new Date().getFullYear();
+  const pieces = useMemo(() => (ouvert ? (site.equipements || []).flatMap(piecesUsureEquipement).map((p, i) => ({ ...p, cle: i, statut: statutEcheance(p.echeance, anneeRef) })) : []), [ouvert, site]);
+  const [horizon, setHorizon] = useState("0"); // "0" = retard + cette année ; "1".."3" = + N ans ; "tout"
+  const [exclus, setExclus] = useState({});
+  const dansHorizon = (p) => horizon === "tout" || (p.echeance !== null && p.echeance <= anneeRef + Number(horizon));
+  const selection = pieces.filter((p) => dansHorizon(p) && !exclus[p.cle]);
+  const exporter = () => {
+    const payload = {
+      format: FORMAT_EXPORT_PIECES_USURE, version: 1, exporteLe: new Date().toISOString(),
+      site: { client: site.client || "", site: site.nom || site.local || "", adresse: site.adresse || "", dateRapport: site.rapport?.date || "" },
+      pieces: selection.map((p) => ({
+        equipement: { type: p.equipement.type, repere: p.equipement.repere, marque: p.equipement.marque, modele: p.equipement.modele },
+        categorie: p.categorie, marque: p.marque, reference: p.reference, description: p.description, quantite: p.quantite,
+        anneeMiseEnService: p.anneeMiseEnService, dureeVie: p.dureeVie, echeance: p.echeance, statut: p.statut.cle,
+      })),
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    downloadBlob(blob, nomFichierDocument("PU", site.rapport?.date, site.client, site.nom || site.local).replace(/\.docx$/, ".json"));
+    setOuvert(false);
+  };
+  const couleur = { retard: "#C0392B", annee: "#B5730A", avenir: "#0F8A5F", inconnue: "#8B96A3" };
+  return (
+    <>
+      <button onClick={() => { setExclus({}); setOuvert(true); }} style={btnGhost(BRAND.blue)} title="Exporte les pièces d'usure à remplacer (fichier à importer dans l'application de chiffrage)">
+        <Download size={13} /> Pièces d'usure → chiffrage
+      </button>
+      {ouvert && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(26,31,38,0.45)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={() => setOuvert(false)}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 12, padding: 18, width: "min(860px, 100%)", maxHeight: "88vh", display: "flex", flexDirection: "column", gap: 12 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+              <div style={{ fontWeight: 700, fontSize: 15, color: "#1A1F26" }}>Pièces d'usure à chiffrer — {site.nom || site.local || "site"}</div>
+              <button onClick={() => setOuvert(false)} style={{ background: "none", border: "none", cursor: "pointer", color: "#5B6B7D" }}>✕</button>
+            </div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", fontSize: 12.5 }}>
+              <span style={{ color: "#5B6B7D", fontWeight: 600 }}>Pièces à extraire :</span>
+              {[["0", "En retard + cette année"], ["1", `Jusqu'à ${anneeRef + 1}`], ["2", `Jusqu'à ${anneeRef + 2}`], ["3", `Jusqu'à ${anneeRef + 3}`], ["tout", "Toutes"]].map(([k, l]) => (
+                <button key={k} onClick={() => setHorizon(k)} style={{ ...btnGhost(BRAND.blue), background: horizon === k ? BRAND.blue : "transparent", color: horizon === k ? "#fff" : BRAND.blue }}>{l}</button>
+              ))}
+            </div>
+            <div style={{ overflow: "auto", border: "1px solid #E2E6EB", borderRadius: 8 }}>
+              {pieces.length === 0 ? (
+                <div style={{ padding: 20, textAlign: "center", color: "#8B96A3", fontSize: 13 }}>Aucune pièce d'usure renseignée sur ce site (onduleurs, redresseurs, batteries de compensation).</div>
+              ) : (
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5, minWidth: 680 }}>
+                  <thead><tr>{["", "Équipement", "Pièce", "Marque / Référence", "Qté", "Échéance"].map((h, i) => <th key={i} style={{ background: "#1A1F26", color: "#fff", padding: "6px 8px", textAlign: "left", fontSize: 11, position: "sticky", top: 0 }}>{h}</th>)}</tr></thead>
+                  <tbody>
+                    {pieces.filter(dansHorizon).map((p) => (
+                      <tr key={p.cle} style={{ opacity: exclus[p.cle] ? 0.45 : 1 }}>
+                        <td style={{ padding: "6px 8px", borderBottom: "1px solid #E2E6EB" }}><input type="checkbox" checked={!exclus[p.cle]} onChange={() => setExclus((x) => ({ ...x, [p.cle]: !x[p.cle] }))} /></td>
+                        <td style={{ padding: "6px 8px", borderBottom: "1px solid #E2E6EB" }}><b>{p.equipement.type}</b>{p.equipement.repere ? ` (${p.equipement.repere})` : ""}</td>
+                        <td style={{ padding: "6px 8px", borderBottom: "1px solid #E2E6EB" }}>{p.categorie}{p.description && <div style={{ fontSize: 11, color: "#5B6B7D" }}>{p.description}</div>}</td>
+                        <td style={{ padding: "6px 8px", borderBottom: "1px solid #E2E6EB" }}>{[p.marque, p.reference].filter(Boolean).join(" — ") || "—"}</td>
+                        <td style={{ padding: "6px 8px", borderBottom: "1px solid #E2E6EB" }}>{p.quantite}</td>
+                        <td style={{ padding: "6px 8px", borderBottom: "1px solid #E2E6EB", color: couleur[p.statut.cle], fontWeight: 700, whiteSpace: "nowrap" }}>{p.statut.libelle}</td>
+                      </tr>
+                    ))}
+                    {pieces.length > 0 && pieces.filter(dansHorizon).length === 0 && <tr><td colSpan={6} style={{ padding: 16, textAlign: "center", color: "#8B96A3" }}>Aucune pièce sur cette période — élargissez la sélection.</td></tr>}
+                  </tbody>
+                </table>
+              )}
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <span style={{ fontSize: 11.5, color: "#8B96A3" }}>Fichier .json à importer dans le chiffrage (Lignes libres → « Importer pièces d'usure »). Prix à saisir dans le chiffrage.</span>
+              <button onClick={exporter} disabled={!selection.length} style={{ ...btnGhost(BRAND.blue), background: selection.length ? BRAND.blue : "#C0C6CE", color: "#fff" }}>
+                <Download size={13} /> Exporter {selection.length} pièce(s)
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
 // Pièces d'usure Onduleur : saisie par catégorie (description/marque/modèle/quantité/année de mise
 // en service/durée de vie), avec bouton pour ajouter un modèle différent par catégorie. Usage
 // interne uniquement — seule la synthèse des échéances (calcEcheancesUsureUPS) va dans le rapport.
@@ -11208,6 +11333,7 @@ function SiteDetail({ site, allSites, update, onBack, onDelete, onPrint, onPrint
             <button onClick={() => onPrintAnnexe(site)} style={btnGhost("#0F8A5F")} title="Génère un fichier Word séparé regroupant toutes les photos du site, classées par équipement et par contrôle">
               <ImagePlus size={13} /> Annexe photos
             </button>
+            <BoutonExportPiecesUsure site={site} />
             <button onClick={() => onCreateIntervention(site, site.equipements)} style={btnGhost(BRAND.blue)} title="Crée un rapport d'intervention pré-rempli avec tous les équipements de ce site">
               <ClipboardList size={13} /> Rapport d'intervention
             </button>
