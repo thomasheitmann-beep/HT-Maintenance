@@ -15966,7 +15966,37 @@ function docxEnteteIntervention(iv, couleurStatut) {
   ], TABLE_WIDTH, 160);
   return [bloc, bande, docxSpacer(300), cartes];
 }
-async function generateInterventionDocx(iv) {
+// Synthèse générale du RI (même encadré que le rapport de maintenance), à partir des états des
+// équipements du RI : remplace la liste détaillée des constats par équipement, illisible dans un RI
+// alors que le détail figure dans le rapport de maintenance transmis séparément.
+function phrasesSyntheseRI(iv, site) {
+  const liste = iv.equipements || [];
+  const n = liste.length;
+  if (!n) return [];
+  const c = { conforme: 0, degrade: 0, defaillant: 0, nonRealise: 0 };
+  liste.forEach((e) => { const r = RANK_OF[e.etat || "Conforme"] ?? 0; if (r >= 2) c.defaillant++; else if (r === 1) c.degrade++; else if (r < 0) c.nonRealise++; else c.conforme++; });
+  const preventive = !!iv.nature?.preventive;
+  const nomSite = iv.site || site?.nom || "";
+  const ph = [`Lors de cette intervention${preventive ? " de maintenance préventive" : ""}${nomSite ? " sur le site " + citer(nomSite) : ""}, ${n > 1 ? n + " équipements ont été contrôlés" : "1 équipement a été contrôlé"}.`];
+  if (c.conforme === n) ph.push(n > 1 ? "Tous les équipements sont conformes." : "Cet équipement est conforme.");
+  else if (n === 1) ph.push(c.nonRealise ? "La maintenance de cet équipement n'a pas pu être réalisée." : `Cet équipement est ${c.defaillant ? "défaillant" : "dégradé"}.`);
+  else {
+    const parts = [];
+    if (c.conforme) parts.push(c.conforme > 1 ? `${c.conforme} sont conformes` : "1 est conforme");
+    if (c.degrade) parts.push(c.degrade > 1 ? `${c.degrade} sont dégradés` : "1 est dégradé");
+    if (c.defaillant) parts.push(c.defaillant > 1 ? `${c.defaillant} sont défaillants` : "1 est défaillant");
+    if (c.nonRealise) parts.push(c.nonRealise > 1 ? `${c.nonRealise} n'ont pas pu être contrôlés` : "1 n'a pas pu être contrôlé");
+    ph.push(`Parmi eux, ${listeFr(parts)}.`);
+  }
+  const renvoi = site || preventive ? "le rapport de maintenance qui vous sera transmis" : "les remarques de l'intervention";
+  if (c.defaillant) ph.push(`Des défaillances ont été constatées : une remise en conformité rapide est à prévoir sur les équipements concernés (détail dans ${renvoi}).`);
+  else if (c.degrade) ph.push(`Aucune défaillance n'a été constatée, mais certains équipements présentent une dégradation qu'il convient de surveiller ou de corriger (détail dans ${renvoi}).`);
+  else if (!c.nonRealise) ph.push("L'installation est en bon état général : aucune anomalie majeure n'a été relevée lors de cette intervention.");
+  const prochaine = site?.rapport?.prochaineMaintenance;
+  if (prochaine && /^\d{4}-\d{2}-\d{2}/.test(prochaine)) { const [y, m, d] = prochaine.slice(0, 10).split("-"); ph.push(`La prochaine maintenance préventive est recommandée avant le ${d}/${m}/${y}.`); }
+  return ph;
+}
+async function generateInterventionDocx(iv, sites = []) {
   await ensureDocx();
   iv = repairIntervention(iv);
   iv = await resolvePhotosForDocx(iv);
@@ -16029,8 +16059,18 @@ async function generateInterventionDocx(iv) {
   }
   children.push(docxSpacer(140));
 
-  // 3. Points importants : travaux, mesures notables, équipements à surveiller, anomalies et recommandations
-  children.push(docxHeading("Points importants"));
+  // Synthèse générale (encadré coloré comme le rapport de maintenance), juste sous le tableau des équipements.
+  const siteLieRI = (sites || []).find((st) => st.id === iv.linkedSiteId) || null;
+  const phrasesRI = phrasesSyntheseRI(iv, siteLieRI);
+  if (phrasesRI.length) {
+    const rangRI = Math.max(0, ...(iv.equipements || []).map((e) => RANK_OF[e.etat || "Conforme"] ?? 0));
+    children.push(docxSpacer(160));
+    children.push(docxEncartSynthese(phrasesRI, teinteSyntheseRang(rangRI)));
+    children.push(docxSpacer(160));
+  }
+
+  // 3. Points importants : travaux, pièces remplacées, anomalies saisies (le détail des constats par
+  // équipement n'est plus listé quand la synthèse générale est affichée).
   const bloc = [];
   const ajouterPuces = (titre, items) => { if (items.length) bloc.push(docxSousTitreRemarques(titre), ...docxPuces(items, 18, 30)); };
   const lignesUtiles = (t) => String(t || "").split("\n").map((l) => l.trim().replace(/^[•\-–*]\s*/, "")).filter(Boolean);
@@ -16045,7 +16085,7 @@ async function generateInterventionDocx(iv) {
     return `${nomEq} : ${p.categorie || "pièce"} — ${posee}${p.quantite ? `, quantité ${p.quantite}` : ""}${p.remarque ? ` — ${p.remarque}` : ""}.`;
   })));
   const anomalies = (iv.anomaliesRecommandations || "").trim();
-  if (!anomalies) {
+  if (!anomalies && !phrasesRI.length) {
     ajouterPuces("Équipements nécessitant une attention", liste.filter((e) => RANK_OF[e.etat || "Conforme"] >= 1 && e.remarque && String(e.remarque).trim()).map((e) => {
       const nom = [e.type, e.reference].filter(Boolean).join(" — ") || "Équipement";
       return `${nom} (${motsEtat(e.etat)}) : ${aplatirRemarques(e.remarque)}`;
@@ -16060,9 +16100,15 @@ async function generateInterventionDocx(iv) {
       ajouterPuces("Anomalies et recommandations", lignesUtiles(anomalies));
     }
   }
-  if (!bloc.length) bloc.push(para("Aucun point particulier à signaler.", { color: "666666" }));
-  children.push(...bloc);
-  children.push(docxSpacer(120));
+  if (bloc.length) {
+    children.push(docxHeading("Points importants"));
+    children.push(...bloc);
+    children.push(docxSpacer(120));
+  } else if (!phrasesRI.length) {
+    children.push(docxHeading("Points importants"));
+    children.push(para("Aucun point particulier à signaler.", { color: "666666" }));
+    children.push(docxSpacer(120));
+  }
 
   // 4. Conclusion
   const concl = iv.conclusion || "Conforme";
@@ -16072,11 +16118,11 @@ async function generateInterventionDocx(iv) {
   const rangConcl = RANK_OF[concl] ?? 0;
   const motConcl = { "Non conforme": "non conforme", "Défaillant": "défaillante", "Défaillant (actions urgentes)": "défaillante", "Dégradé": "dégradée", "Dégradé (actions à prévoir)": "dégradée", "À corriger": "à corriger", "Conforme avec réserves": "conforme avec réserves" }[concl];
   const phraseConcl = rangConcl >= 2
-    ? `Au terme de l'intervention, l'installation est jugée ${motConcl || "non conforme"} : des actions correctives sont à prévoir rapidement (voir les points importants ci-dessus).`
+    ? `Au terme de l'intervention, l'installation est jugée ${motConcl || "non conforme"} : des actions correctives sont à prévoir rapidement (voir la synthèse ci-dessus).`
     : rangConcl === 1
       ? `Au terme de l'intervention, l'installation est jugée ${motConcl || "dégradée"} : les points signalés ci-dessus sont à traiter ou à surveiller.`
       : rangConcl < 0
-        ? "Au terme de l'intervention, la maintenance n'a pas pu être réalisée sur l'ensemble des équipements (voir les points importants ci-dessus)."
+        ? "Au terme de l'intervention, la maintenance n'a pas pu être réalisée sur l'ensemble des équipements (voir la synthèse ci-dessus)."
         : "Au terme de l'intervention, l'installation est jugée conforme : aucune anomalie nécessitant une action n'a été relevée.";
   const bordC = { style: DOCX.BorderStyle.SINGLE, size: 6, color: cc.bord };
   children.push(docxTable({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: [TABLE_WIDTH], rows: [new DOCX.TableRow({ children: [new DOCX.TableCell({
@@ -17185,7 +17231,7 @@ export default function App({ currentUser, onLogout }) {
           const blob = await generateSiteDocx(printSite, sites);
           if (!cancelled) downloadBlob(blob, nomFichierMaintenance(printSite));
         } else if (printIv) {
-          const blob = await generateInterventionDocx(printIv);
+          const blob = await generateInterventionDocx(printIv, sites);
           if (!cancelled) downloadBlob(blob, nomFichierIntervention(printIv));
         } else if (printAnnexeSite) {
           const blob = await generateAnnexePhotosDocx(printAnnexeSite);
