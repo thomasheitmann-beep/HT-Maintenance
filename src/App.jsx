@@ -1563,6 +1563,7 @@ const GRADIN_FIELD_DEFS = [
   { key: "contacteurRef" }, { key: "contacteurAnnee" },
   { key: "fusiblesRef" }, { key: "fusiblesAnnee" },
   { key: "condensateursRef" }, { key: "condensateursAnnee" },
+  { key: "contacteurDuree" }, { key: "fusiblesDuree" }, { key: "condensateursDuree" }, // durée de vie (ans) — vide = 10 ans
 ];
 // Courant théorique par phase d'un gradin, à partir de sa puissance réactive et de sa tension
 // (I = Q×1000 / (√3×U)) — sert à valider la cohérence des courants mesurés (±10%).
@@ -6707,14 +6708,35 @@ function GradinsPanel({ eq, update, idPrefix }) {
                 <div style={{ fontSize: 10.5, fontWeight: 700, color: "#8B96A3", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>
                   Pièces d'usure (usage interne — non affiché au client)
                 </div>
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 8 }}>
-                  <MiniInput label="Contacteur — Réf." value={e.fields.contacteurRef} onChange={(v) => setField(e.id, "contacteurRef", v)} width={110} />
-                  <MiniInput label="Contacteur — MES" value={e.fields.contacteurAnnee} onChange={(v) => setField(e.id, "contacteurAnnee", v)} width={70} />
-                  <MiniInput label="Fusibles — Réf." value={e.fields.fusiblesRef} onChange={(v) => setField(e.id, "fusiblesRef", v)} width={110} />
-                  <MiniInput label="Fusibles — MES" value={e.fields.fusiblesAnnee} onChange={(v) => setField(e.id, "fusiblesAnnee", v)} width={70} />
-                  <MiniInput label="Condensateurs — Réf." value={e.fields.condensateursRef} onChange={(v) => setField(e.id, "condensateursRef", v)} width={110} />
-                  <MiniInput label="Condensateurs — MES" value={e.fields.condensateursAnnee} onChange={(v) => setField(e.id, "condensateursAnnee", v)} width={70} />
-                </div>
+                {(() => {
+                  // Pièces d'usure du gradin : une ligne par pièce, référence en grand, durée de vie 10 ans par défaut (modifiable), échéance calculée.
+                  const anneeCourante = new Date().getFullYear();
+                  const pieces = [["contacteur", "Contacteur"], ["fusibles", "Fusibles"], ["condensateurs", "Condensateurs"]];
+                  const cellStyle = { ...inputStyle, width: "100%", boxSizing: "border-box", padding: "7px 9px", fontSize: 13 };
+                  return (
+                    <div style={{ border: "1px solid #E2E6EB", borderRadius: 10, overflowX: "auto", marginBottom: 10 }}><div style={{ minWidth: 560 }}>
+                      <div style={{ display: "grid", gridTemplateColumns: "minmax(110px, 0.9fr) minmax(160px, 2.4fr) minmax(90px, 0.8fr) minmax(90px, 0.8fr) minmax(90px, 0.8fr)", background: "#F4F6F8", fontSize: 10.5, fontWeight: 700, color: "#5B6B7D", textTransform: "uppercase", letterSpacing: 0.4 }}>
+                        {["Pièce", "Référence", "Année MES", "Durée de vie", "Échéance"].map((t) => <div key={t} style={{ padding: "7px 9px" }}>{t}</div>)}
+                      </div>
+                      {pieces.map(([k, nom]) => {
+                        const annee = numOf(e.fields[k + "Annee"]);
+                        const duree = numOf(e.fields[k + "Duree"]) ?? 10;
+                        const echeance = annee !== null ? Math.round(annee) + Math.round(duree) : null;
+                        const couleur = echeance === null ? "#8B96A3" : echeance < anneeCourante ? "#C0392B" : echeance === anneeCourante ? "#B5730A" : "#0F8A5F";
+                        const fond = echeance === null ? "transparent" : echeance < anneeCourante ? "#FDF1F0" : echeance === anneeCourante ? "#FDF6EC" : "#EAF7F1";
+                        return (
+                          <div key={k} style={{ display: "grid", gridTemplateColumns: "minmax(110px, 0.9fr) minmax(160px, 2.4fr) minmax(90px, 0.8fr) minmax(90px, 0.8fr) minmax(90px, 0.8fr)", alignItems: "center", borderTop: "1px solid #E2E6EB" }}>
+                            <div style={{ padding: "7px 9px", fontWeight: 700, fontSize: 12.5, color: "#1A1F26" }}>{nom}</div>
+                            <div style={{ padding: "5px 6px" }}><input type="text" value={e.fields[k + "Ref"] ?? ""} onChange={(ev) => setField(e.id, k + "Ref", ev.target.value)} placeholder="Référence / modèle" style={cellStyle} /></div>
+                            <div style={{ padding: "5px 6px" }}><input type="number" step="1" value={e.fields[k + "Annee"] ?? ""} onChange={(ev) => setField(e.id, k + "Annee", ev.target.value)} placeholder="ex. 2018" style={cellStyle} /></div>
+                            <div style={{ padding: "5px 6px", display: "flex", alignItems: "center", gap: 4 }}><input type="number" step="1" value={e.fields[k + "Duree"] ?? ""} onChange={(ev) => setField(e.id, k + "Duree", ev.target.value)} placeholder="10" style={cellStyle} /><span style={{ fontSize: 11, color: "#8B96A3" }}>ans</span></div>
+                            <div style={{ padding: "5px 6px" }}><div style={{ padding: "7px 9px", borderRadius: 8, background: fond, color: couleur, fontWeight: 700, fontSize: 13, textAlign: "center" }}>{echeance ?? "—"}</div></div>
+                          </div>
+                        );
+                      })}
+                    </div></div>
+                  );
+                })()}
 
                 <div style={{ marginBottom: 8 }}>
                   <FileGallery files={e.photos || []} onChange={(files) => setEntry(e.id, { photos: files })} idPrefix={`${idPrefix}-${e.id}-photo`} />
@@ -7105,9 +7127,11 @@ function calcPiecesUsure(eq) {
   const lignes = [];
   const anneeRemplacement = (annee, delai) => { const a = numOf(annee); return a === null ? null : Math.round(a) + delai; };
   (eq.controles.gradins_dynamique || []).filter((g) => g.label).forEach((g) => {
-    if (g.fields.contacteurAnnee) lignes.push({ type: `Contacteur — ${g.label}`, annee: anneeRemplacement(g.fields.contacteurAnnee, 10) });
-    if (g.fields.fusiblesAnnee) lignes.push({ type: `Fusibles — ${g.label}`, annee: anneeRemplacement(g.fields.fusiblesAnnee, 10) });
-    if (g.fields.condensateursAnnee) lignes.push({ type: `Condensateurs — ${g.label}`, annee: anneeRemplacement(g.fields.condensateursAnnee, 10) });
+    // Durée de vie : 10 ans par défaut, modifiable par pièce (champs …Duree).
+    const duree = (k) => Math.round(numOf(g.fields[k + "Duree"]) ?? 10);
+    if (g.fields.contacteurAnnee) lignes.push({ type: `Contacteur — ${g.label}`, annee: anneeRemplacement(g.fields.contacteurAnnee, duree("contacteur")) });
+    if (g.fields.fusiblesAnnee) lignes.push({ type: `Fusibles — ${g.label}`, annee: anneeRemplacement(g.fields.fusiblesAnnee, duree("fusibles")) });
+    if (g.fields.condensateursAnnee) lignes.push({ type: `Condensateurs — ${g.label}`, annee: anneeRemplacement(g.fields.condensateursAnnee, duree("condensateurs")) });
   });
   const ventilationAnnee = eq.controles.usure?.ventilation_usure?.fields?.annee;
   if (ventilationAnnee) lignes.push({ type: "Ventilation", annee: anneeRemplacement(ventilationAnnee, 4) });
