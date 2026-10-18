@@ -8196,7 +8196,8 @@ function piecesUsureEquipement(eq) {
           if (!b.marque && !b.typeBloc && !b.anneeMiseEnService) return;
           ajouter({ cle: "ups:batteries:fiche", categorie: cat.label, marque: b.marque || "", reference: b.typeBloc || "",
             description: ["Batterie", b.technologie, b.tensionNominale && `${b.tensionNominale} V`, b.capacite && `${b.capacite} Ah`, nb && nbl && `${nb} branche(s) × ${nbl} bloc(s)`].filter(Boolean).join(" · "),
-            quantite: nb !== null && nbl !== null ? nb * nbl : 1, anneeMiseEnService: b.anneeMiseEnService ?? m.anneeMiseEnService, dureeVie: b.dureeVie ?? m.dureeVie });
+            // Blocs remplacés partiellement : suivis comme modèles séparés (remplacePartiel = "fiche"), retirés du lot d'origine.
+            quantite: nb !== null && nbl !== null ? Math.max(0, nb * nbl - (data.batteries || []).filter((x) => x.remplacePartiel === "fiche").reduce((t, x) => t + (numOf(x.quantite) || 0), 0)) : 1, anneeMiseEnService: b.anneeMiseEnService ?? m.anneeMiseEnService, dureeVie: b.dureeVie ?? m.dureeVie });
           return;
         }
         if (!m.description && !m.marque && !m.modele && !m.anneeMiseEnService) return;
@@ -8314,7 +8315,29 @@ function appliquerRemplacementPiece(eq, r) {
   const ancien = piece ? { marque: piece.marque, reference: piece.reference, annee: piece.anneeMiseEnService } : null;
   const controles = { ...eq.controles };
   const [genre, a, b] = String(r.cle).split(":");
-  if (genre === "ups") {
+  // Remplacement partiel (ex. 2 batteries défectueuses sur 80) : seules les pièces remplacées prennent la
+  // nouvelle année — elles sont suivies comme un modèle séparé ; le reste du lot garde son année d'origine.
+  const total = piece ? numOf(piece.quantite) : null, qte = numOf(r.quantite);
+  const partiel = genre === "ups" && total !== null && qte !== null && qte > 0 && qte < total;
+  if (partiel) {
+    const data = { ...(controles.pieces_usure_ups || {}) };
+    const liste = [...(data[a] || [])];
+    if (a === "batteries" && b === "fiche") {
+      const fb = controles.batterie_id?.batterie_caracteristiques?.fields || {};
+      if (!liste.length) liste.push(emptyModeleUsure(null)); // emplacement 0 = fiche batterie
+      liste.push({ ...emptyModeleUsure(null), remplacePartiel: "fiche", description: r.identique ? `Blocs remplacés (${[fb.technologie, fb.capacite && fb.capacite + " Ah"].filter(Boolean).join(" ")})` : (r.description || "Blocs remplacés"),
+        marque: r.identique ? fb.marque || "" : r.marque || fb.marque || "", modele: r.identique ? fb.typeBloc || "" : r.reference || fb.typeBloc || "", quantite: String(qte), anneeMiseEnService: annee, dureeVie: fb.dureeVie || "" });
+    } else {
+      const idx = liste.findIndex((m) => m.id === b);
+      if (idx >= 0) {
+        const m = liste[idx];
+        liste[idx] = { ...m, quantite: String(total - qte) };
+        liste.push({ ...m, id: uid(), quantite: String(qte), anneeMiseEnService: annee, ...(r.identique ? {} : { marque: r.marque || m.marque, modele: r.reference || m.modele, description: r.description || m.description }) });
+      }
+    }
+    data[a] = liste;
+    controles.pieces_usure_ups = data;
+  } else if (genre === "ups") {
     if (a === "batteries" && b === "fiche") {
       const bid = controles.batterie_id || {};
       const v = bid.batterie_caracteristiques || { fields: {} };
@@ -8332,12 +8355,24 @@ function appliquerRemplacementPiece(eq, r) {
     const v = u.ventilation_usure || { fields: {} };
     controles.usure = { ...u, ventilation_usure: { ...v, fields: { ...(v.fields || {}), annee, ...(r.identique ? {} : { reference: [r.marque, r.reference].filter(Boolean).join(" ") || v.fields?.reference }) } } };
   }
-  const entree = { ...r, annee: Number(annee), categorie: piece ? piece.categorie : r.categorie || "Pièce", ancien };
+  const entree = { ...r, annee: Number(annee), categorie: piece ? piece.categorie : r.categorie || "Pièce", ancien, partiel, total: partiel ? total : null };
   return { ...eq, controles, remplacementsPieces: [...(eq.remplacementsPieces || []), entree] };
+}
+// Remplacements à faire figurer dans le rapport en cours : enregistrés pour ce rapport, ou datés des
+// 12 mois précédant la date du rapport (jusqu'à 2 mois après) — robuste si la date du rapport a changé.
+function remplacementsDuRapport(eq, rapportDate) {
+  const liste = eq.remplacementsPieces || [];
+  if (!rapportDate) return liste;
+  const ref = new Date(rapportDate).getTime();
+  return liste.filter((r) => {
+    if (r.rapportDate && r.rapportDate === rapportDate) return true;
+    const t = new Date(r.date).getTime();
+    return Number.isFinite(t) && Number.isFinite(ref) && t >= ref - 365 * 864e5 && t <= ref + 60 * 864e5;
+  });
 }
 function texteRemplacement(r) {
   const neuve = r.identique ? [r.ancien?.marque, r.ancien?.reference].filter(Boolean).join(" ") : [r.marque, r.reference].filter(Boolean).join(" ");
-  return `${r.categorie}${neuve ? " : " + neuve : ""}${r.identique ? " (référence identique)" : r.ancien && (r.ancien.marque || r.ancien.reference) ? ` (remplace ${[r.ancien.marque, r.ancien.reference].filter(Boolean).join(" ")})` : ""}${r.quantite ? ` — quantité ${r.quantite}` : ""} — remplacé le ${dateFrCourte(r.date)}${r.origine === "RI" && r.numeroRI ? ` lors de l'intervention ${r.numeroRI}` : ""}${r.remarque ? ` — ${r.remarque}` : ""}.`;
+  return `${r.categorie}${neuve ? " : " + neuve : ""}${r.identique ? " (référence identique)" : r.ancien && (r.ancien.marque || r.ancien.reference) ? ` (remplace ${[r.ancien.marque, r.ancien.reference].filter(Boolean).join(" ")})` : ""}${r.partiel ? ` — ${r.quantite} sur ${r.total} (remplacement partiel, les autres conservent leur année de mise en service)` : r.quantite ? ` — quantité ${r.quantite}` : ""} — remplacé le ${dateFrCourte(r.date)}${r.origine === "RI" && r.numeroRI ? ` lors de l'intervention ${r.numeroRI}` : ""}${r.remarque ? ` — ${r.remarque}` : ""}.`;
 }
 // Remplacements saisis dans des RI pour cet équipement, pas encore reportés ni ignorés.
 function remplacementsRIEnAttente(eq, interventions) {
@@ -8370,7 +8405,7 @@ function FormulaireRemplacement({ pieces, initial, onValider, onAnnuler, avecDat
           </select>
         </label>
         {avecDate && <label style={lab}>Date du remplacement<input type="date" value={r.date} onChange={(e) => set("date", e.target.value)} style={inp} /></label>}
-        <label style={lab}>Quantité<input value={r.quantite} onChange={(e) => set("quantite", e.target.value)} placeholder={piece?.quantite ? String(piece.quantite) : ""} style={{ ...inp, width: 70 }} /></label>
+        <label style={lab}>Quantité remplacée{piece?.quantite ? ` (sur ${piece.quantite})` : ""}<input value={r.quantite} onChange={(e) => set("quantite", e.target.value)} placeholder={piece?.quantite ? `${piece.quantite} = toutes` : ""} style={{ ...inp, width: 110 }} /></label>
         <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: "#1A1F26", fontWeight: 600, paddingBottom: 6 }}>
           <input type="checkbox" checked={r.identique} onChange={(e) => set("identique", e.target.checked)} /> Référence identique{piece && (piece.marque || piece.reference) ? ` (${[piece.marque, piece.reference].filter(Boolean).join(" ")})` : ""}
         </label>
@@ -9802,10 +9837,13 @@ function preconisationsDepuisConstats(constats) {
 // Texte structuré « Constats / Préconisations » d'un équipement.
 function genererRemarquesEquipement(eq, contexte) {
   const constats = analyserAnomaliesEquipement(eq, contexte);
+  // Pièces d'usure remplacées lors de cette maintenance : reprises dans les constats.
+  const rempl = contexte && "rapportDate" in contexte ? remplacementsDuRapport(eq, contexte.rapportDate).map((r) => "Remplacement effectué : " + texteRemplacement(r)) : [];
+  if (!constats.length && rempl.length) return `Constats :\n• Aucune anomalie relevée sur cet équipement : l'ensemble des contrôles réalisés est conforme.\n${rempl.map((x) => "• " + x).join("\n")}`;
   if (!constats.length) return "Aucune anomalie relevée sur cet équipement : l'ensemble des contrôles réalisés est conforme.";
   const tries = [...constats].sort((a, b) => b.rang - a.rang);
   const recos = preconisationsDepuisConstats(tries);
-  return `Constats :\n${tries.map((c) => "• " + c.phrase).join("\n")}\n\nPréconisations :\n${recos.map((r) => "• " + r).join("\n")}`;
+  return `Constats :\n${[...tries.map((c) => c.phrase), ...rempl].map((x) => "• " + x).join("\n")}\n\nPréconisations :\n${recos.map((r) => "• " + r).join("\n")}`;
 }
 // ----- Analyse du texte (pour le rendu Word / aperçu) -----
 function remarquesStructurees(texte) { return /^\s*(constats?|préconisations?|synthèse générale)\s*:\s*$/im.test(texte || ""); }
@@ -10858,6 +10896,12 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
                   {EQUIP_STATUSES.map((s) => <option key={s} value={s}>{agree(s, equipGender(eq.type), false)}</option>)}
                 </Select>
               </Field>
+              {remplacementsDuRapport(eq, rapportDate).length > 0 && (
+                <div style={{ border: "1.5px solid #0F8A5F", background: "#EAF7F1", borderRadius: 10, padding: "10px 12px", fontSize: 12.5, color: "#1A1F26" }}>
+                  <div style={{ fontWeight: 700, color: "#0F8A5F", marginBottom: 4 }}>Pièces d'usure remplacées (repris dans le rapport)</div>
+                  {remplacementsDuRapport(eq, rapportDate).map((r) => <div key={r.id}>✓ {texteRemplacement(r)}</div>)}
+                </div>
+              )}
               {(() => {
                 const alertes = alertesUsureEquipement(eq);
                 if (!alertes.length) return null;
@@ -10876,7 +10920,7 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                     <button
                       onClick={() => {
-                        update({ ...eq, remarques: genererRemarquesEquipement(eq, { allEquipements, locaux }) });
+                        update({ ...eq, remarques: genererRemarquesEquipement(eq, { allEquipements, locaux, rapportDate }) });
                       }}
                       style={btnGhost(BRAND.blue)}
                       title="Rédige les constats en phrases complètes et en déduit les préconisations"
@@ -12648,7 +12692,7 @@ function docxSyntheseSiteStructuree(texte, site) {
         if (b) utilises.add(b);
         // Pièces d'usure arrivées à échéance (cette année ou en retard) : ajoutées si elles ne figurent pas déjà dans le texte.
         const texteBloc = b ? [...b.autres, ...b.constats, ...b.preconisations].join(" ") : "";
-        const remplacees = (eq.remplacementsPieces || []).filter((r) => site?.rapport?.date && r.rapportDate === site.rapport.date);
+        const remplacees = remplacementsDuRapport(eq, site?.rapport?.date || "").filter((r) => !texteBloc.includes(texteRemplacement(r)));
         if (remplacees.length) {
           const base = b || { autres: [], constats: [], preconisations: [] };
           b = { ...base, constats: [...base.constats, ...remplacees.map((r) => "Remplacement effectué : " + texteRemplacement(r))] };
@@ -15441,7 +15485,7 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
   }
   {
     // Pièces d'usure remplacées enregistrées pour cette maintenance (sur place ou reportées depuis un RI).
-    const remplacees = (eq.remplacementsPieces || []).filter((r) => rapportDate && r.rapportDate === rapportDate);
+    const remplacees = remplacementsDuRapport(eq, rapportDate).filter((r) => !String(eq.remarques || "").includes(texteRemplacement(r)));
     if (remplacees.length) {
       elements.push(new DOCX.Paragraph({ spacing: { before: 100, after: 40 }, keepNext: true, children: [new DOCX.TextRun({ text: "Pièces d'usure remplacées", bold: true, size: 18, color: "0F8A5F" })] }));
       remplacees.forEach((r) => elements.push(new DOCX.Paragraph({ spacing: { after: 30 }, children: [new DOCX.TextRun({ text: "✓  ", bold: true, size: 18, color: "0F8A5F" }), new DOCX.TextRun({ text: texteRemplacement(r), size: 18, color: DOCX_DARK })] })));
