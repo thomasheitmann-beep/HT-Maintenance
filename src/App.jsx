@@ -1446,7 +1446,7 @@ const TYPES_AVEC_GRADINS = ["Batterie de compensation"];
 const TYPES_AVEC_BRANCHES_UPS = ["Onduleur", "Redresseur chargeur"];
 // Pièces d'usure (batteries, ventilateurs...) : concerne aussi l'Onduleur simplifié, mais SANS la
 // courbe de décharge / suivi par élément propre à TYPES_AVEC_BRANCHES_UPS.
-const TYPES_AVEC_PIECES_USURE = [...TYPES_AVEC_BRANCHES_UPS, "Onduleur simplifié"];
+const TYPES_AVEC_PIECES_USURE = [...TYPES_AVEC_BRANCHES_UPS, "Onduleur simplifié", "Inverseur de source"];
 // Types qui partagent le bloc "Mesures — Utilisation" (mesures triphasées + photos par phase +
 // taux de charge calculé) : l'Onduleur, et le Bilan de puissance qui réutilise la même structure.
 const TYPES_AVEC_MESURES_UTILISATION = ["Onduleur", "Bilan de puissance", "Inverseur de source"];
@@ -1459,10 +1459,13 @@ const CATEGORIES_USURE_UPS = [
   { key: "ventilateurs", label: "Ventilateurs", dureeDefaut: 4 },
 ];
 const CATEGORIES_USURE_REDRESSEUR = CATEGORIES_USURE_UPS.filter((c) => c.key !== "condensateursAlternatifs");
+// Inverseur de source statique : condensateurs alternatifs (filtres, alimentations) et ventilateurs.
+const CATEGORIES_USURE_INVERSEUR = CATEGORIES_USURE_UPS.filter((c) => c.key === "condensateursAlternatifs" || c.key === "ventilateurs");
 const CATEGORIES_USURE_UPS_SIMPLIFIE = CATEGORIES_USURE_UPS.filter((c) => c.key === "batteries" || c.key === "ventilateurs");
 function getCategoriesUsure(type) {
   if (type === "Redresseur chargeur") return CATEGORIES_USURE_REDRESSEUR;
   if (type === "Onduleur simplifié") return CATEGORIES_USURE_UPS_SIMPLIFIE;
+  if (type === "Inverseur de source") return CATEGORIES_USURE_INVERSEUR;
   return CATEGORIES_USURE_UPS;
 }
 function emptyModeleUsure(dureeDefaut) {
@@ -2481,6 +2484,7 @@ function buildInverseurSchema({ source1Mono = false, source2Mono = false, utilis
       { key: "thermographie_ups", title: "Thermographie", items: [
         C("controle_thermo_ups", "Contrôle thermographique", [F("temperature", "Température relevée", "°C"), F("charge", "Charge au moment du contrôle", "%")]),
       ]},
+      { key: "pieces_usure_ups", title: "Pièces d'usure", items: [] },
     ],
   };
 }
@@ -3600,6 +3604,23 @@ function dupliquerEquipementPourNouvelleVisite(source) {
   fresh.identification = { ...source.identification };
   fresh.niveauMaintenance = source.niveauMaintenance || "1-4";
   fresh.lignageId = source.lignageId || source.id;
+  // Pièces d'usure et fiche batterie reprises telles quelles (années de mise en service, références,
+  // historique des remplacements) : elles évoluent d'une visite à l'autre sans ressaisie.
+  const src = source.controles || {};
+  const clone = (o) => JSON.parse(JSON.stringify(o));
+  if (src.pieces_usure_ups) fresh.controles.pieces_usure_ups = clone(src.pieces_usure_ups);
+  if (src.batterie_id) fresh.controles.batterie_id = clone(src.batterie_id);
+  if (src.usure?.ventilation_usure && fresh.controles.usure) fresh.controles.usure = { ...fresh.controles.usure, ventilation_usure: clone(src.usure.ventilation_usure) };
+  if (Array.isArray(src.gradins_dynamique) && src.gradins_dynamique.length) {
+    const garder = ["q", "u", "selfMA", "selfFrequence", "contacteurRef", "contacteurAnnee", "contacteurDuree", "fusiblesRef", "fusiblesAnnee", "fusiblesDuree", "condensateursRef", "condensateursAnnee", "condensateursDuree"];
+    fresh.controles.gradins_dynamique = src.gradins_dynamique.map((g) => {
+      const base = emptyDynamicEntry(g.label, GRADIN_FIELD_DEFS, true);
+      garder.forEach((k) => { if (g.fields && g.fields[k] !== undefined) base.fields[k] = g.fields[k]; });
+      return base;
+    });
+  }
+  if (source.remplacementsPieces) fresh.remplacementsPieces = clone(source.remplacementsPieces);
+  if (source.remplacementsIgnores) fresh.remplacementsIgnores = [...source.remplacementsIgnores];
   return fresh;
 }
 
@@ -8349,7 +8370,7 @@ function remplacementsDuRapport(eq, rapportDate) {
   if (!rapportDate) return liste;
   const ref = new Date(rapportDate).getTime();
   return liste.filter((r) => {
-    if (r.rapportDate && r.rapportDate === rapportDate) return true;
+    if (r.rapportDate) return r.rapportDate === rapportDate; // enregistré pour un autre rapport (ex. visite précédente reprise) : exclu
     const t = new Date(r.date).getTime();
     return Number.isFinite(t) && Number.isFinite(ref) && t >= ref - 365 * 864e5 && t <= ref + 60 * 864e5;
   });
@@ -8359,11 +8380,14 @@ function texteRemplacement(r) {
   return `${r.categorie}${neuve ? " : " + neuve : ""}${r.identique ? " (référence identique)" : r.ancien && (r.ancien.marque || r.ancien.reference) ? ` (remplace ${[r.ancien.marque, r.ancien.reference].filter(Boolean).join(" ")})` : ""}${r.partiel ? ` — ${r.quantite} sur ${r.total} (remplacement partiel : l'année de mise en service du lot est conservée)` : r.quantite ? ` — quantité ${r.quantite}` : ""} — remplacé le ${dateFrCourte(r.date)}${r.origine === "RI" && r.numeroRI ? ` lors de l'intervention ${r.numeroRI}` : ""}${r.remarque ? ` — ${r.remarque}` : ""}.`;
 }
 // Remplacements saisis dans des RI pour cet équipement, pas encore reportés ni ignorés.
-function remplacementsRIEnAttente(eq, interventions) {
+function remplacementsRIEnAttente(eq, interventions, allSites = []) {
+  // Le RI peut viser l'équipement d'une visite précédente : on suit le même équipement physique (lignageId).
+  const lignage = eq.lignageId || eq.id;
+  const idsLignage = new Set([eq.id, ...allSites.flatMap((st) => (st.equipements || []).filter((x) => (x.lignageId || x.id) === lignage).map((x) => x.id))]);
   const faits = new Set([...(eq.remplacementsPieces || []).map((r) => r.sourceId).filter(Boolean), ...(eq.remplacementsIgnores || [])]);
   const out = [];
   (interventions || []).forEach((iv) => (iv.equipements || []).forEach((e) => {
-    if (e.sourceEquipementId !== eq.id) return;
+    if (!idsLignage.has(e.sourceEquipementId)) return;
     (e.piecesRemplacees || []).forEach((p) => {
       const sourceId = `${iv.id}:${p.id}`;
       if (faits.has(sourceId) || (!p.cle && !p.libre)) return;
@@ -11650,7 +11674,7 @@ function SiteDetail({ site, allSites, update, onBack, onDelete, onPrint, onPrint
           allSites={allSites}
           caracteristiquesLibrary={caracteristiquesLibrary}
           apprendreCaracteristique={apprendreCaracteristique}
-          remplacementsEnAttente={remplacementsRIEnAttente(equipementActif, interventions)}
+          remplacementsEnAttente={remplacementsRIEnAttente(equipementActif, interventions, allSites)}
           rapportDate={site.rapport?.date || ""}
         />
       )}
@@ -11844,7 +11868,11 @@ function InterventionEditor({ iv, update, onBack, onDelete, onPrint, sites = [] 
                         <span style={{ color: "#5B6B7D", fontWeight: 600 }}>Équipement suivi :</span>
                         <select value={siteEq ? `${siteLie.id}|${siteEq.id}` : ""} onChange={(e) => { const [sid, eid] = e.target.value.split("|"); update((d) => ({ ...d, equipements: d.equipements.map((x) => (x.id === eq.id ? { ...x, sourceSiteId: sid || null, sourceEquipementId: eid || null } : x)) })); }} style={{ ...inputStyle, padding: "5px 8px", fontSize: 12, maxWidth: 420 }}>
                           <option value="">— non lié (pas de mise à jour à la maintenance suivante) —</option>
-                          {candidats.map(({ st, x }) => <option key={st.id + x.id} value={`${st.id}|${x.id}`}>{st.nom || st.local || "Site"} — {x.type}{x.identification?.repere ? ` (${x.identification.repere})` : ""}</option>)}
+                          {[...new Set(candidats.map(({ st }) => st))].sort((a, b) => `${a.client || ""}|${b.rapport?.date || ""}`.localeCompare(`${b.client || ""}|${a.rapport?.date || ""}`, "fr")).map((st) => (
+                            <optgroup key={st.id} label={`${st.client || "Client"} — ${st.nom || st.local || "Site"}${st.rapport?.date ? " — " + (MOIS_FR[Number(st.rapport.date.slice(5, 7)) - 1] || "") + " " + st.rapport.date.slice(0, 4) : ""}`}>
+                              {candidats.filter((c) => c.st === st).map(({ x }) => <option key={st.id + x.id} value={`${st.id}|${x.id}`}>{x.type}{x.identification?.repere ? ` (${x.identification.repere})` : ""}</option>)}
+                            </optgroup>
+                          ))}
                         </select>
                       </div>
                       <PiecesRemplaceesRI eqIv={eq} siteEq={siteEq} ivDate={iv.date} onChange={(liste) => setEquip(eq.id, "piecesRemplacees", liste)} />
@@ -11958,6 +11986,386 @@ function InterventionEditor({ iv, update, onBack, onDelete, onPrint, sites = [] 
 // Planification à l'avance : site (pré-remplissage + historique équipements), technicien assigné,
 // date future — crée l'intervention avec le statut "Planifiée", sans ouvrir l'éditeur (pour
 // enchaîner sur d'autres planifications depuis la même fenêtre).
+// ---------------------------------------------------------------------------------------------
+// Classement Client ▸ Année ▸ Mois (repliable) — interventions clôturées et choix d'un site /
+// équipement existant, pour que les listes restent lisibles quand l'historique grandit.
+const MOIS_FR = ["Janvier", "Février", "Mars", "Avril", "Mai", "Juin", "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre"];
+function grouperClientAnneeMois(items, getClient, getDate) {
+  const clients = new Map();
+  items.forEach((it) => {
+    const client = (getClient(it) || "").trim() || "Client non renseigné";
+    const m = /^(\d{4})-(\d{2})/.exec(String(getDate(it) || ""));
+    const annee = m ? m[1] : "Sans date", mois = m ? Number(m[2]) - 1 : -1;
+    if (!clients.has(client)) clients.set(client, new Map());
+    const annees = clients.get(client);
+    if (!annees.has(annee)) annees.set(annee, new Map());
+    const moisMap = annees.get(annee);
+    if (!moisMap.has(mois)) moisMap.set(mois, []);
+    moisMap.get(mois).push(it);
+  });
+  return [...clients.entries()].sort((a, b) => a[0].localeCompare(b[0], "fr")).map(([client, annees]) => ({
+    client,
+    total: [...annees.values()].reduce((t, mm) => t + [...mm.values()].reduce((u, l) => u + l.length, 0), 0),
+    annees: [...annees.entries()].sort((a, b) => b[0].localeCompare(a[0])).map(([annee, moisMap]) => ({
+      annee,
+      total: [...moisMap.values()].reduce((u, l) => u + l.length, 0),
+      mois: [...moisMap.entries()].sort((a, b) => b[0] - a[0]).map(([mois, liste]) => ({ mois, libelle: mois >= 0 ? MOIS_FR[mois] : "Sans date", liste: [...liste].sort((x, y) => String(getDate(y) || "").localeCompare(String(getDate(x) || ""))) })),
+    })),
+  }));
+}
+function ArbreClientAnneeMois({ items, getClient, getDate, renderItem, toutOuvert = false, unite = "élément" }) {
+  const [ouverts, setOuverts] = useState({});
+  const arbre = useMemo(() => grouperClientAnneeMois(items, getClient, getDate), [items]);
+  const estOuvert = (k) => toutOuvert || !!ouverts[k];
+  const basculer = (k) => setOuverts((o) => ({ ...o, [k]: !o[k] }));
+  const pluriel = (n) => `${n} ${unite}${n > 1 ? "s" : ""}`;
+  const entete = (k, niveau, libelle, n) => (
+    <div onClick={() => basculer(k)} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", padding: niveau === 0 ? "8px 10px" : "6px 10px", paddingLeft: 10 + niveau * 18, background: niveau === 0 ? "#F4F6F8" : "transparent", borderBottom: "1px solid #E2E6EB", fontSize: niveau === 0 ? 13 : 12.5, fontWeight: niveau === 2 ? 600 : 700, color: niveau === 0 ? "#1A1F26" : "#3E4A5C", userSelect: "none" }}>
+      {estOuvert(k) ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+      {libelle} <span style={{ fontWeight: 400, color: "#8B96A3" }}>({pluriel(n)})</span>
+    </div>
+  );
+  if (!arbre.length) return null;
+  return (
+    <div style={{ border: "1px solid #D8DEE5", borderRadius: 10, overflow: "hidden", background: "#fff" }}>
+      {arbre.map((c) => (
+        <div key={c.client}>
+          {entete(c.client, 0, c.client, c.total)}
+          {estOuvert(c.client) && c.annees.map((a) => (
+            <div key={a.annee}>
+              {entete(c.client + "|" + a.annee, 1, a.annee, a.total)}
+              {estOuvert(c.client + "|" + a.annee) && a.mois.map((m) => (
+                <div key={m.mois}>
+                  {entete(c.client + "|" + a.annee + "|" + m.mois, 2, m.libelle, m.liste.length)}
+                  {estOuvert(c.client + "|" + a.annee + "|" + m.mois) && (
+                    <div style={{ padding: "6px 10px 8px", paddingLeft: 64, display: "flex", flexDirection: "column", gap: 6 }}>
+                      {m.liste.map((it) => renderItem(it))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+// Choix d'un site existant : recherche + arbre Client ▸ Année ▸ Mois (date du rapport).
+function SelecteurSiteArbre({ sites, value, onChange }) {
+  const [q, setQ] = useState("");
+  const filtres = useMemo(() => {
+    const t = q.trim().toLowerCase();
+    if (!t) return sites;
+    return sites.filter((s) => [s.nom, s.client, s.local, s.adresse, ...(s.equipements || []).map((e) => `${e.type} ${e.identification?.repere || ""}`)].join(" ").toLowerCase().includes(t));
+  }, [sites, q]);
+  const choisi = sites.find((s) => s.id === value);
+  return (
+    <div>
+      {choisi && (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "8px 10px", border: `1.5px solid ${BRAND.blue}`, borderRadius: 8, background: "#EEF4FB", marginBottom: 8, fontSize: 12.5 }}>
+          <span><b>{choisi.nom || "Site sans nom"}</b> — {choisi.client || "—"}{choisi.rapport?.date ? ` · ${dateFrCourte(choisi.rapport.date)}` : ""}</span>
+          <span onClick={() => onChange("")} style={{ color: "#0A5DA8", cursor: "pointer", fontSize: 11.5 }}>Changer</span>
+        </div>
+      )}
+      {!choisi && (
+        <>
+          <div style={{ position: "relative", marginBottom: 8 }}>
+            <Search size={14} style={{ position: "absolute", left: 10, top: 10, color: "#8B96A3" }} />
+            <TextInput placeholder="Rechercher client, site, équipement…" value={q} onChange={(e) => setQ(e.target.value)} style={{ paddingLeft: 30 }} />
+          </div>
+          <div style={{ maxHeight: 300, overflowY: "auto" }}>
+            {filtres.length === 0 ? <div style={{ fontSize: 12, color: "#8B96A3", padding: 8 }}>Aucun site trouvé.</div> : (
+              <ArbreClientAnneeMois items={filtres} getClient={(s) => s.client} getDate={(s) => s.rapport?.date} unite="site" toutOuvert={!!q.trim()}
+                renderItem={(s) => (
+                  <div key={s.id} onClick={() => onChange(s.id)} style={{ padding: "7px 10px", border: "1px solid #E2E6EB", borderRadius: 8, cursor: "pointer", fontSize: 12.5, color: "#1A1F26" }}
+                    onMouseEnter={(e) => (e.currentTarget.style.borderColor = BRAND.blue)} onMouseLeave={(e) => (e.currentTarget.style.borderColor = "#E2E6EB")}>
+                    <b>{s.nom || "Site sans nom"}</b>{s.rapport?.date ? ` · ${dateFrCourte(s.rapport.date)}` : ""} <span style={{ color: "#8B96A3" }}>({(s.equipements || []).length} équipement{(s.equipements || []).length > 1 ? "s" : ""})</span>
+                  </div>
+                )} />
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+// =============================================================================================
+// Onglet « Rapports » : archive filtrable (client, site, année, mois, type d'équipement, état,
+// recherche) avec deux vues — RMP (Client › Site ▸ Année ▸ Mois) et Équipements (une fiche par
+// équipement physique, historique des visites). Lecture seule : s'appuie sur les données existantes.
+// Un même équipement est suivi d'une visite à l'autre par son lignageId (transmis à chaque reprise
+// de site) ; pour l'historique plus ancien, rapprochement par client + site + type + repère.
+const normTxt = (s) => String(s || "").trim().toLowerCase().replace(/\s+/g, " ");
+function cleEquipementPhysique(site, eq) {
+  const rep = normTxt(eq.identification?.repere);
+  return rep ? `r|${normTxt(site.client)}|${normTxt(site.nom || site.local)}|${eq.type}|${rep}` : `l|${eq.lignageId || eq.id}`;
+}
+function construireEquipementsPhysiques(sites) {
+  // 1) regroupe par lignage ; 2) fusionne les lignages qui partagent la même clé client/site/type/repère.
+  const parLignage = new Map();
+  sites.forEach((site) => (site.equipements || []).forEach((eq) => {
+    const l = eq.lignageId || eq.id;
+    if (!parLignage.has(l)) parLignage.set(l, []);
+    parLignage.get(l).push({ site, eq });
+  }));
+  const parCle = new Map();
+  parLignage.forEach((visites) => {
+    const recent = [...visites].sort((a, b) => String(b.site.rapport?.date || "").localeCompare(String(a.site.rapport?.date || "")))[0];
+    const cle = cleEquipementPhysique(recent.site, recent.eq);
+    if (!parCle.has(cle)) parCle.set(cle, []);
+    parCle.get(cle).push(...visites);
+  });
+  return [...parCle.entries()].map(([cle, visites]) => {
+    const tri = [...visites].sort((a, b) => String(b.site.rapport?.date || "").localeCompare(String(a.site.rapport?.date || "")));
+    const dernier = tri[0];
+    return { cle, visites: tri, dernier, type: dernier.eq.type, repere: dernier.eq.identification?.repere || "", client: dernier.site.client || "", siteNom: dernier.site.nom || dernier.site.local || "" };
+  });
+}
+const SECTIONS_MESURES_CLES = /isolement|transformation|enroulement|resistance|declench|essai|test_|batterie|tension|courant|mesure|thermo|decharge|reglage/i;
+function mesuresComparees(visites) {
+  // Une ligne par contrôle mesuré, une colonne par visite (4 plus récentes).
+  const cols = visites.slice(0, 4);
+  const lignes = new Map();
+  cols.forEach(({ eq }, ci) => {
+    let schema;
+    try { schema = getSchema(eq); } catch (e) { return; }
+    (schema.sections || []).filter((s) => SECTIONS_MESURES_CLES.test(s.key)).forEach((sec) => {
+      (sec.items || []).forEach((item) => {
+        const v = eq.controles?.[sec.key]?.[item.key];
+        if (!v) return;
+        const parts = printFieldParts(item, v).map((p) => (typeof p === "object" && p ? p.text : p)).filter(Boolean);
+        if (!parts.length) return;
+        const k = sec.key + "|" + item.key;
+        if (!lignes.has(k)) lignes.set(k, { section: sec.title, label: item.label, cells: [] });
+        lignes.get(k).cells[ci] = { texte: parts.join(" · "), etat: v.etat };
+      });
+    });
+  });
+  return { cols, lignes: [...lignes.values()] };
+}
+function RapportsView({ sites, interventions, onOpenSite, onOpenIntervention, onPrintSite, onPrintAnnexe }) {
+  const [vue, setVue] = useState("rmp");
+  const [f, setF] = useState({ client: "", site: "", annee: "", mois: "", type: "", etat: "", q: "" });
+  const [fiche, setFiche] = useState(null); // clé de l'équipement physique affiché
+  const set = (k, v) => setF((x) => {
+    const n = { ...x, [k]: v };
+    if (k === "client") n.site = "";
+    if (k === "annee") n.mois = "";
+    return n;
+  });
+  const anneeDeSite = (s) => (/^(\d{4})/.exec(s.rapport?.date || "") || [])[1] || "";
+  const moisDeSite = (s) => { const m = /^\d{4}-(\d{2})/.exec(s.rapport?.date || ""); return m ? String(Number(m[1]) - 1) : ""; };
+  const etatSite = (s) => rankToLabel(overallRank(s));
+  const q = normTxt(f.q);
+  const siteOk = (s, ignore = "") => (
+    (ignore === "client" || !f.client || (s.client || "") === f.client) &&
+    (ignore === "site" || !f.site || (s.nom || s.local || "") === f.site) &&
+    (ignore === "annee" || !f.annee || anneeDeSite(s) === f.annee) &&
+    (ignore === "mois" || !f.mois || moisDeSite(s) === f.mois)
+  );
+  const eqOk = (eq, ignore = "") => (
+    (ignore === "type" || !f.type || eq.type === f.type) &&
+    (ignore === "etat" || !f.etat || (RANK_OF[eq.etatFinal] ?? 0) === Number(f.etat)) &&
+    (!q || normTxt([eq.type, eq.identification?.repere, eq.identification?.marque, eq.identification?.modele, eq.identification?.numeroSerie, ...Object.values(eq.identification || {})].join(" ")).includes(q))
+  );
+  // Options des filtres (uniquement les valeurs existantes, en cascade).
+  const opts = useMemo(() => {
+    const u = (arr) => [...new Set(arr.filter(Boolean))].sort((a, b) => String(a).localeCompare(String(b), "fr"));
+    return {
+      client: u(sites.filter((s) => siteOk(s, "client")).map((s) => s.client)),
+      site: u(sites.filter((s) => siteOk(s, "site")).map((s) => s.nom || s.local)),
+      annee: u(sites.filter((s) => siteOk(s, "annee")).map(anneeDeSite)).reverse(),
+      mois: u(sites.filter((s) => siteOk(s, "mois")).map(moisDeSite)).sort((a, b) => Number(a) - Number(b)),
+      type: u(sites.filter((s) => siteOk(s)).flatMap((s) => (s.equipements || []).filter((e) => eqOk(e, "type")).map((e) => e.type))),
+    };
+  }, [sites, f]);
+  const sitesFiltres = useMemo(() => sites.filter((s) => siteOk(s) && (!(f.type || f.etat || q) || (s.equipements || []).some((e) => eqOk(e)) || (q && normTxt([s.nom, s.client, s.local, s.adresse].join(" ")).includes(q)))), [sites, f]);
+  const physiques = useMemo(() => construireEquipementsPhysiques(sites), [sites]);
+  const physiquesFiltres = useMemo(() => physiques.filter((p) => p.visites.some(({ site, eq }) => siteOk(site) && eqOk(eq))), [physiques, f]);
+  const ficheCourante = fiche && physiques.find((p) => p.cle === fiche);
+  const actifs = Object.values(f).filter(Boolean).length;
+
+  const sel = (k, label, options, rendu = (o) => o) => (
+    <label style={{ display: "flex", flexDirection: "column", gap: 3, fontSize: 10.5, color: "#5B6B7D", fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.3 }}>
+      {label}
+      <select value={f[k]} onChange={(e) => set(k, e.target.value)} style={{ ...inputStyle, padding: "7px 9px", fontSize: 12.5, minWidth: 130, textTransform: "none", fontWeight: 400 }}>
+        <option value="">Tous</option>
+        {options.map((o) => <option key={o} value={o}>{rendu(o)}</option>)}
+      </select>
+    </label>
+  );
+  const btnVue = (k, l) => (
+    <button onClick={() => { setVue(k); setFiche(null); }} style={{ ...btnGhost(BRAND.blue), background: vue === k ? BRAND.blue : "transparent", color: vue === k ? "#fff" : BRAND.blue }}>{l}</button>
+  );
+  const ivDuSite = (s) => interventions.filter((iv) => iv.linkedSiteId === s.id || (iv.equipements || []).some((e) => e.sourceSiteId === s.id));
+
+  return (
+    <div>
+      <Card style={{ marginBottom: 14 }}>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+          {sel("client", "Client", opts.client)}
+          {sel("site", "Site", opts.site)}
+          {sel("annee", "Année", opts.annee)}
+          {sel("mois", "Mois", opts.mois, (m) => MOIS_FR[Number(m)])}
+          {sel("type", "Type d'équipement", opts.type)}
+          {sel("etat", "État", ["0", "1", "2"], (e) => ({ 0: "Conforme", 1: "Dégradé", 2: "Défaillant" })[e])}
+          <label style={{ display: "flex", flexDirection: "column", gap: 3, fontSize: 10.5, color: "#5B6B7D", fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.3, flex: "1 1 180px" }}>
+            Recherche
+            <input value={f.q} onChange={(e) => set("q", e.target.value)} placeholder="Repère, n° de série, référence…" style={{ ...inputStyle, padding: "7px 9px", fontSize: 12.5, textTransform: "none", fontWeight: 400 }} />
+          </label>
+          {actifs > 0 && <button onClick={() => setF({ client: "", site: "", annee: "", mois: "", type: "", etat: "", q: "" })} style={btnGhost("#5B6B7D")}>Effacer les filtres</button>}
+        </div>
+        <div style={{ display: "flex", gap: 8, marginTop: 12, alignItems: "center", flexWrap: "wrap" }}>
+          {btnVue("rmp", `Rapports de maintenance (${sitesFiltres.length})`)}
+          {btnVue("equipements", `Équipements (${physiquesFiltres.length})`)}
+        </div>
+      </Card>
+
+      {vue === "rmp" && (
+        sitesFiltres.length === 0 ? <div style={{ textAlign: "center", padding: 40, color: "#8B96A3", fontSize: 13 }}>Aucun rapport pour ces filtres.</div> : (
+          <ArbreClientAnneeMois items={sitesFiltres} unite="rapport" toutOuvert={actifs > 0}
+            getClient={(s) => `${s.client || "Client non renseigné"} › ${s.nom || s.local || "Site sans nom"}`} getDate={(s) => s.rapport?.date}
+            renderItem={(s) => (
+              <div key={s.id} style={{ border: "1px solid #E2E6EB", borderRadius: 10, padding: "9px 12px", background: "#fff" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                  <span style={{ fontWeight: 700, fontSize: 13, color: "#1A1F26" }}>{s.rapport?.date ? dateFrCourte(s.rapport.date) : "Sans date"}</span>
+                  <StatusBadge label={etatSite(s)} size="sm" />
+                  <span style={{ fontSize: 12, color: "#5B6B7D" }}>{(s.equipements || []).length} équipement(s){s.rapport?.intervenant ? ` · ${s.rapport.intervenant}` : ""}</span>
+                  <span style={{ flex: 1 }} />
+                  <button onClick={() => onOpenSite(s.id)} style={btnGhost(BRAND.blue)}>Ouvrir</button>
+                  <button onClick={() => onPrintSite(s)} style={btnGhost("#FFC107")}><FileText size={13} /> Word</button>
+                  <button onClick={() => onPrintAnnexe(s)} style={btnGhost("#0F8A5F")}><ImagePlus size={13} /> Photos</button>
+                </div>
+                {ivDuSite(s).length > 0 && (
+                  <div style={{ marginTop: 6, display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    {ivDuSite(s).map((iv) => <span key={iv.id} onClick={() => onOpenIntervention(iv.id)} style={{ fontSize: 11.5, color: "#0A5DA8", background: "#EEF4FB", borderRadius: 6, padding: "2px 8px", cursor: "pointer" }}>{iv.numeroRI} · {dateFrCourte(iv.date)}</span>)}
+                  </div>
+                )}
+              </div>
+            )} />
+        )
+      )}
+
+      {vue === "equipements" && !ficheCourante && (
+        physiquesFiltres.length === 0 ? <div style={{ textAlign: "center", padding: 40, color: "#8B96A3", fontSize: 13 }}>Aucun équipement pour ces filtres.</div> : (
+          <ArbreClientAnneeMois items={physiquesFiltres} unite="équipement" toutOuvert={actifs > 0}
+            getClient={(p) => `${p.client || "Client non renseigné"} › ${p.siteNom || "Site"}`} getDate={(p) => p.dernier.site.rapport?.date}
+            renderItem={(p) => (
+              <div key={p.cle} onClick={() => setFiche(p.cle)} style={{ border: "1px solid #E2E6EB", borderRadius: 10, padding: "9px 12px", background: "#fff", cursor: "pointer", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}
+                onMouseEnter={(e) => (e.currentTarget.style.borderColor = BRAND.blue)} onMouseLeave={(e) => (e.currentTarget.style.borderColor = "#E2E6EB")}>
+                <span style={{ fontWeight: 700, fontSize: 13, color: "#1A1F26" }}>{p.type}{p.repere ? ` — ${p.repere}` : ""}</span>
+                <StatusBadge label={p.dernier.eq.etatFinal || "Conforme"} size="sm" />
+                <span style={{ fontSize: 12, color: "#5B6B7D" }}>{[p.dernier.eq.identification?.marque, p.dernier.eq.identification?.modele].filter(Boolean).join(" ")} · {p.visites.length} visite{p.visites.length > 1 ? "s" : ""}</span>
+                <span style={{ flex: 1 }} />
+                <ChevronRight size={15} color="#9AA5B1" />
+              </div>
+            )} />
+        )
+      )}
+
+      {vue === "equipements" && ficheCourante && <FicheEquipementHistorique p={ficheCourante} interventions={interventions} onRetour={() => setFiche(null)} onOpenSite={onOpenSite} onOpenIntervention={onOpenIntervention} />}
+    </div>
+  );
+}
+function FicheEquipementHistorique({ p, interventions, onRetour, onOpenSite, onOpenIntervention }) {
+  const eq = p.dernier.eq, idf = eq.identification || {};
+  const local = (p.dernier.site.locaux || []).find((l) => l.id === eq.localId);
+  const ids = new Set(p.visites.map((v) => v.eq.id));
+  const ivs = interventions.filter((iv) => (iv.equipements || []).some((e) => ids.has(e.sourceEquipementId)));
+  const remplacements = [...new Map(p.visites.flatMap((v) => v.eq.remplacementsPieces || []).map((r) => [r.id, r])).values()].sort((a, b) => String(b.date).localeCompare(String(a.date)));
+  const pieces = piecesUsureEquipement(eq).map((x) => ({ ...x, statut: statutEcheance(x.echeance, new Date().getFullYear()) }));
+  const { cols, lignes } = mesuresComparees(p.visites);
+  const couleurStatut = { retard: "#C0392B", annee: "#B5730A", avenir: "#0F8A5F", inconnue: "#8B96A3" };
+  const th = { background: "#1A1F26", color: "#fff", padding: "6px 8px", fontSize: 11, textAlign: "left", fontWeight: 700 };
+  const td = { padding: "6px 8px", borderBottom: "1px solid #E2E6EB", fontSize: 12, verticalAlign: "top" };
+  const ident = [["Marque", idf.marque], ["Modèle", idf.modele || idf.typeCellule || idf.typeTransformateur], ["N° de série", idf.numeroSerie || idf.numeroSerieDisjoncteur], ["Année de mise en service", idf.anneeMiseEnService || idf.annee], ["Local", local?.nom]].filter(([, v]) => v);
+  return (
+    <div>
+      <button onClick={onRetour} style={{ ...btnGhost("#5B6B7D"), marginBottom: 12 }}><ArrowLeft size={13} /> Retour à la liste</button>
+      <Card style={{ marginBottom: 14 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <div style={{ fontSize: 17, fontWeight: 700, color: "#1A1F26" }}>{p.type}{p.repere ? ` — ${p.repere}` : ""}</div>
+          <StatusBadge label={eq.etatFinal || "Conforme"} />
+        </div>
+        <div style={{ fontSize: 12.5, color: "#5B6B7D", marginTop: 2 }}>{p.client} › {p.siteNom}</div>
+        <div style={{ display: "flex", gap: 18, flexWrap: "wrap", marginTop: 10, fontSize: 12.5 }}>
+          {ident.map(([k, v]) => <div key={k}><span style={{ color: "#8B96A3" }}>{k} : </span><b>{v}</b></div>)}
+        </div>
+      </Card>
+
+      <Card style={{ marginBottom: 14 }}>
+        <SectionTitle>Historique des visites ({p.visites.length})</SectionTitle>
+        <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+          {p.visites.map((v, i) => {
+            const precedent = p.visites[i + 1];
+            const change = precedent && (precedent.eq.etatFinal || "Conforme") !== (v.eq.etatFinal || "Conforme");
+            return (
+              <div key={v.eq.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderTop: i ? "1px solid #E2E6EB" : "none", flexWrap: "wrap" }}>
+                <span style={{ width: 90, fontWeight: 700, fontSize: 12.5 }}>{v.site.rapport?.date ? dateFrCourte(v.site.rapport.date) : "Sans date"}</span>
+                <StatusBadge label={v.eq.etatFinal || "Conforme"} size="sm" />
+                {change && <span style={{ fontSize: 11.5, color: "#B5730A", fontWeight: 600 }}>{precedent.eq.etatFinal || "Conforme"} → {v.eq.etatFinal || "Conforme"}</span>}
+                <span style={{ fontSize: 11.5, color: "#5B6B7D", flex: "1 1 200px" }}>{String(v.eq.remarques || "").replace(/\s+/g, " ").slice(0, 140)}{String(v.eq.remarques || "").length > 140 ? "…" : ""}</span>
+                <button onClick={() => onOpenSite(v.site.id)} style={btnGhost(BRAND.blue)}>Ouvrir le RMP</button>
+              </div>
+            );
+          })}
+        </div>
+      </Card>
+
+      {lignes.length > 0 && (
+        <Card style={{ marginBottom: 14 }}>
+          <SectionTitle>Évolution des mesures</SectionTitle>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 520 }}>
+              <thead><tr><th style={th}>Contrôle</th>{cols.map((c) => <th key={c.eq.id} style={th}>{c.site.rapport?.date ? dateFrCourte(c.site.rapport.date) : "—"}</th>)}</tr></thead>
+              <tbody>{lignes.map((l, i) => (
+                <tr key={i}><td style={td}><div style={{ fontWeight: 600 }}>{l.label}</div><div style={{ fontSize: 10.5, color: "#8B96A3" }}>{l.section}</div></td>
+                  {cols.map((c, ci) => { const cell = l.cells[ci]; const r = cell ? RANK_OF[cell.etat] ?? 0 : 0; return <td key={ci} style={{ ...td, color: r >= 2 ? "#C0392B" : r === 1 ? "#B5730A" : "#1A1F26" }}>{cell ? cell.texte : "—"}</td>; })}
+                </tr>
+              ))}</tbody>
+            </table>
+          </div>
+        </Card>
+      )}
+
+      {(pieces.length > 0 || remplacements.length > 0) && (
+        <Card style={{ marginBottom: 14 }}>
+          <SectionTitle>Pièces d'usure</SectionTitle>
+          {pieces.map((x) => (
+            <div key={x.cle} style={{ display: "flex", gap: 10, padding: "5px 0", borderBottom: "1px solid #E2E6EB", fontSize: 12.5, flexWrap: "wrap" }}>
+              <span style={{ fontWeight: 600, flex: "1 1 200px" }}>{x.categorie}{x.marque || x.reference ? ` — ${[x.marque, x.reference].filter(Boolean).join(" ")}` : ""}</span>
+              <span>qté {x.quantite}</span>
+              <span style={{ color: couleurStatut[x.statut.cle], fontWeight: 700 }}>{x.statut.libelle}</span>
+            </div>
+          ))}
+          {remplacements.length > 0 && (
+            <div style={{ marginTop: 10 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#5B6B7D", textTransform: "uppercase", marginBottom: 4 }}>Remplacements effectués</div>
+              {remplacements.map((r) => <div key={r.id} style={{ fontSize: 12.5, padding: "3px 0" }}>✓ {texteRemplacement(r)}</div>)}
+            </div>
+          )}
+        </Card>
+      )}
+
+      {ivs.length > 0 && (
+        <Card style={{ marginBottom: 14 }}>
+          <SectionTitle>Rapports d'intervention ({ivs.length})</SectionTitle>
+          {ivs.sort((a, b) => String(b.date).localeCompare(String(a.date))).map((iv) => {
+            const e = (iv.equipements || []).find((x) => ids.has(x.sourceEquipementId));
+            return (
+              <div key={iv.id} onClick={() => onOpenIntervention(iv.id)} style={{ display: "flex", gap: 10, alignItems: "center", padding: "7px 0", borderBottom: "1px solid #E2E6EB", cursor: "pointer", fontSize: 12.5, flexWrap: "wrap" }}>
+                <b>{iv.numeroRI}</b><span>{dateFrCourte(iv.date)}</span>{e?.etat && <StatusBadge label={e.etat} size="sm" />}
+                <span style={{ color: "#5B6B7D", flex: "1 1 200px" }}>{String(e?.remarque || "").slice(0, 120)}</span>
+                <ChevronRight size={14} color="#9AA5B1" />
+              </div>
+            );
+          })}
+        </Card>
+      )}
+    </div>
+  );
+}
 function PlanifierInterventionPicker({ sites, onCancel, onConfirm }) {
   const [siteId, setSiteId] = useState("");
   const site = sites.find((s) => s.id === siteId) || null;
@@ -11978,10 +12386,7 @@ function PlanifierInterventionPicker({ sites, onCancel, onConfirm }) {
         </div>
         <div style={{ padding: 24 }}>
           <IvField label="Site">
-            <Select value={siteId} onChange={(e) => { setSiteId(e.target.value); setEquipIds([]); }}>
-              <option value="">— Choisir un site —</option>
-              {sites.map((s) => <option key={s.id} value={s.id}>{s.nom || "Site sans nom"} — {s.client}</option>)}
-            </Select>
+            <SelecteurSiteArbre sites={sites} value={siteId} onChange={(id) => { setSiteId(id); setEquipIds([]); }} />
           </IvField>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginTop: 14 }}>
             <IvField label="Date prévue">
@@ -12093,10 +12498,7 @@ function InterventionPrefillPicker({ sites, onCancel, onConfirm }) {
         </div>
         <div style={{ padding: 24 }}>
           <IvField label="Site">
-            <Select value={siteId} onChange={(e) => { setSiteId(e.target.value); setEquipIds([]); }}>
-              <option value="">— Choisir un site —</option>
-              {sites.map((s) => <option key={s.id} value={s.id}>{s.nom || "Site sans nom"} — {s.client}</option>)}
-            </Select>
+            <SelecteurSiteArbre sites={sites} value={siteId} onChange={(id) => { setSiteId(id); setEquipIds([]); }} />
           </IvField>
           {site && equipOptions.length > 0 && (
             <div style={{ marginTop: 14 }}>
@@ -12154,10 +12556,14 @@ function InterventionsOverview({ interventions, sites, onOpen, onCreate, onPlani
   const estCloturee = estInterventionCloturee;
   const estPlanifiee = (iv) => iv.statut === "Planifiée" && !estCloturee(iv);
 
+  // Interventions clôturées : classées à part, Client ▸ Année ▸ Mois (repliable) ; les autres restent en liste.
+  const enCours = useMemo(() => sorted.filter((iv) => !estInterventionCloturee(iv)), [sorted]);
+  const cloturees = useMemo(() => sorted.filter((iv) => estInterventionCloturee(iv)), [sorted]);
+  const [clotureesOuvert, setClotureesOuvert] = useState(false);
   const groupes = useMemo(() => {
     if (groupeMode === "date") return [];
     const parCle = new Map();
-    sorted.forEach((iv) => {
+    enCours.forEach((iv) => {
       let key;
       if (groupeMode === "technicien") key = (iv.technicien || "Non assigné").trim() || "Non assigné";
       else key = (iv.client || "Client non renseigné").trim() || "Client non renseigné";
@@ -12165,7 +12571,7 @@ function InterventionsOverview({ interventions, sites, onOpen, onCreate, onPlani
       parCle.get(key).push(iv);
     });
     return Array.from(parCle.entries()).sort((a, b) => a[0].localeCompare(b[0]));
-  }, [sorted, groupeMode]);
+  }, [enCours, groupeMode]);
 
   const IvRow = ({ iv }) => (
     <div key={iv.id} onClick={() => onOpen(iv.id)} className="iv-row"
@@ -12212,7 +12618,9 @@ function InterventionsOverview({ interventions, sites, onOpen, onCreate, onPlani
           </div>
           <div style={{ fontSize: 12.5, color: "#8B96A3" }}>Créez votre premier rapport à transmettre au client.</div>
         </div>
-      ) : groupeMode !== "date" ? (
+      ) : (
+      <>
+      {enCours.length === 0 ? null : groupeMode !== "date" ? (
         <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
           {groupes.map(([cle, ivs]) => (
             <div key={cle}>
@@ -12227,8 +12635,22 @@ function InterventionsOverview({ interventions, sites, onOpen, onCreate, onPlani
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {sorted.map((iv) => <IvRow key={iv.id} iv={iv} />)}
+          {enCours.map((iv) => <IvRow key={iv.id} iv={iv} />)}
         </div>
+      )}
+      {cloturees.length > 0 && (
+        <div style={{ marginTop: 26 }}>
+          <div onClick={() => setClotureesOuvert(!clotureesOuvert)} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 12.5, fontWeight: 700, color: "#0F8A5F", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 8, userSelect: "none" }}>
+            {clotureesOuvert || query.trim() ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+            Interventions clôturées <span style={{ fontWeight: 400, color: "#8B96A3", textTransform: "none" }}>({cloturees.length}) — classées par client, année et mois</span>
+          </div>
+          {(clotureesOuvert || query.trim()) && (
+            <ArbreClientAnneeMois items={cloturees} getClient={(iv) => iv.client} getDate={(iv) => iv.date} unite="intervention" toutOuvert={!!query.trim()}
+              renderItem={(iv) => <IvRow key={iv.id} iv={iv} />} />
+          )}
+        </div>
+      )}
+      </>
       )}
 
       {planifierOpen && (
@@ -16110,30 +16532,32 @@ async function generateInterventionDocx(iv, sites = []) {
     children.push(docxSpacer(120));
   }
 
-  // 4. Conclusion
-  const concl = iv.conclusion || "Conforme";
-  const cc = DOCX_ETAT_COULEURS[cleEtatDocx(concl)] || { bord: "7A8794", fond: DOCX_LIGHT, texte: "555555" };
-  // Phrase de conclusion déduite du rang de l'état (et non du libellé exact) : « Dégradé »,
-  // « À corriger », « Défaillant »… ne retombent plus sur la phrase « conforme » par défaut.
-  const rangConcl = RANK_OF[concl] ?? 0;
-  const motConcl = { "Non conforme": "non conforme", "Défaillant": "défaillante", "Défaillant (actions urgentes)": "défaillante", "Dégradé": "dégradée", "Dégradé (actions à prévoir)": "dégradée", "À corriger": "à corriger", "Conforme avec réserves": "conforme avec réserves" }[concl];
-  const phraseConcl = rangConcl >= 2
-    ? `Au terme de l'intervention, l'installation est jugée ${motConcl || "non conforme"} : des actions correctives sont à prévoir rapidement (voir la synthèse ci-dessus).`
-    : rangConcl === 1
-      ? `Au terme de l'intervention, l'installation est jugée ${motConcl || "dégradée"} : les points signalés ci-dessus sont à traiter ou à surveiller.`
-      : rangConcl < 0
-        ? "Au terme de l'intervention, la maintenance n'a pas pu être réalisée sur l'ensemble des équipements (voir la synthèse ci-dessus)."
-        : "Au terme de l'intervention, l'installation est jugée conforme : aucune anomalie nécessitant une action n'a été relevée.";
-  const bordC = { style: DOCX.BorderStyle.SINGLE, size: 6, color: cc.bord };
-  children.push(docxTable({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: [TABLE_WIDTH], rows: [new DOCX.TableRow({ children: [new DOCX.TableCell({
-    width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, margins: { top: 90, bottom: 90, left: 160, right: 160 },
-    shading: { type: DOCX.ShadingType.CLEAR, fill: cc.fond }, borders: { top: bordC, bottom: bordC, left: bordC, right: bordC },
-    children: [
-      new DOCX.Paragraph({ spacing: { after: 40 }, children: [new DOCX.TextRun({ text: "CONCLUSION : " + concl.toUpperCase(), bold: true, size: 20, color: cc.texte })] }),
-      new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: phraseConcl, size: 18, color: DOCX_DARK })] }),
-    ],
-  })] })] }));
-  children.push(docxSpacer(140));
+  // 4. Conclusion — uniquement s'il n'y a pas d'encadré « Synthèse générale » (sinon doublon).
+  if (!phrasesRI.length) {
+    const concl = iv.conclusion || "Conforme";
+    const cc = DOCX_ETAT_COULEURS[cleEtatDocx(concl)] || { bord: "7A8794", fond: DOCX_LIGHT, texte: "555555" };
+    // Phrase de conclusion déduite du rang de l'état (et non du libellé exact) : « Dégradé »,
+    // « À corriger », « Défaillant »… ne retombent plus sur la phrase « conforme » par défaut.
+    const rangConcl = RANK_OF[concl] ?? 0;
+    const motConcl = { "Non conforme": "non conforme", "Défaillant": "défaillante", "Défaillant (actions urgentes)": "défaillante", "Dégradé": "dégradée", "Dégradé (actions à prévoir)": "dégradée", "À corriger": "à corriger", "Conforme avec réserves": "conforme avec réserves" }[concl];
+    const phraseConcl = rangConcl >= 2
+      ? `Au terme de l'intervention, l'installation est jugée ${motConcl || "non conforme"} : des actions correctives sont à prévoir rapidement (voir la synthèse ci-dessus).`
+      : rangConcl === 1
+        ? `Au terme de l'intervention, l'installation est jugée ${motConcl || "dégradée"} : les points signalés ci-dessus sont à traiter ou à surveiller.`
+        : rangConcl < 0
+          ? "Au terme de l'intervention, la maintenance n'a pas pu être réalisée sur l'ensemble des équipements (voir la synthèse ci-dessus)."
+          : "Au terme de l'intervention, l'installation est jugée conforme : aucune anomalie nécessitant une action n'a été relevée.";
+    const bordC = { style: DOCX.BorderStyle.SINGLE, size: 6, color: cc.bord };
+    children.push(docxTable({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: [TABLE_WIDTH], rows: [new DOCX.TableRow({ children: [new DOCX.TableCell({
+      width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, margins: { top: 90, bottom: 90, left: 160, right: 160 },
+      shading: { type: DOCX.ShadingType.CLEAR, fill: cc.fond }, borders: { top: bordC, bottom: bordC, left: bordC, right: bordC },
+      children: [
+        new DOCX.Paragraph({ spacing: { after: 40 }, children: [new DOCX.TextRun({ text: "CONCLUSION : " + concl.toUpperCase(), bold: true, size: 20, color: cc.texte })] }),
+        new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: phraseConcl, size: 18, color: DOCX_DARK })] }),
+      ],
+    })] })] }));
+    children.push(docxSpacer(140));
+  }
 
   // 5. Signatures (client | technicien) — cadre vide conservé si non signé, pour signature sur papier
   children.push(docxHeading("Validation"));
@@ -16649,7 +17073,7 @@ export default function App({ currentUser, onLogout }) {
   // Demande au navigateur de ne pas purger la copie locale quand l'appareil manque de place.
   useEffect(() => { try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) { /* facultatif */ } }, []);
 
-  const [view, setView] = useState("sites"); // "sites" | "interventions" | "calendrier"
+  const [view, setView] = useState("sites"); // "sites" | "interventions" | "calendrier" | "rapports"
   const [interventions, setInterventions] = useState([]);
   const ivRefForPoll = useRef([]);
   const aDejaChargeDesIv = useRef(false);
@@ -17485,6 +17909,13 @@ export default function App({ currentUser, onLogout }) {
               }}>
                 <Clock size={13} /> Calendrier
               </button>
+              <button onClick={() => setView("rapports")} style={{
+                display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: 999,
+                border: view === "rapports" ? "1px solid #FFC10755" : "1px solid #D8DEE5", background: view === "rapports" ? "rgba(255,193,7,0.12)" : "transparent",
+                color: view === "rapports" ? BRAND.amber : "#5B6B7D", fontSize: 12.5, fontWeight: 600, cursor: "pointer",
+              }}>
+                <FileText size={13} /> Rapports
+              </button>
             </div>
           )}
 
@@ -17511,6 +17942,10 @@ export default function App({ currentUser, onLogout }) {
             !loaded ? <div style={{ textAlign: "center", padding: 60, color: "#8B96A3", fontSize: 13 }}>{enLigne ? "Chargement…" : "Hors connexion — les données se chargeront dès le retour du réseau."}</div> : <Overview sites={sites} interventions={interventions} onOpen={setSelectedId} onNew={addSite} onOpenIntervention={setSelectedIvId} />
           ) : view === "interventions" ? (
             !ivLoaded ? <div style={{ textAlign: "center", padding: 60, color: "#8B96A3", fontSize: 13 }}>{enLigne ? "Chargement…" : "Hors connexion — les données se chargeront dès le retour du réseau."}</div> : <InterventionsOverview interventions={interventions} sites={sites} onOpen={setSelectedIvId} onCreate={createIntervention} onPlanifier={planifierIntervention} />
+          ) : view === "rapports" ? (
+            !loaded || !ivLoaded ? <div style={{ textAlign: "center", padding: 60, color: "#8B96A3", fontSize: 13 }}>{enLigne ? "Chargement…" : "Hors connexion — les données se chargeront dès le retour du réseau."}</div> : (
+              <RapportsView sites={sites} interventions={interventions} onOpenSite={setSelectedId} onOpenIntervention={setSelectedIvId} onPrintSite={requestPrintSite} onPrintAnnexe={setPrintAnnexeSite} />
+            )
           ) : (
             !loaded || !ivLoaded ? <div style={{ textAlign: "center", padding: 60, color: "#8B96A3", fontSize: 13 }}>{enLigne ? "Chargement…" : "Hors connexion — les données se chargeront dès le retour du réseau."}</div> : (
               <CalendarView sites={sites} interventions={interventions} onOpenSite={setSelectedId} onOpenIntervention={setSelectedIvId} onCreateForDate={addSiteForDate} onCreateInterventionForDate={addInterventionForDate} />
