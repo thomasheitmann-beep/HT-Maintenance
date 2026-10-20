@@ -14,7 +14,7 @@ import {
   Plus, Search, AlertTriangle, CheckCircle2, AlertOctagon,
   Trash2, ArrowLeft, Building2, Clock, ChevronRight, ChevronDown,
   MapPin, ShieldCheck, FileText, Settings2, Printer, ImagePlus,
-  Mail, PenLine, RotateCcw, ClipboardList, X, MinusCircle, Download, Upload, Copy, RefreshCw, Users, Phone, Crop,
+  Mail, PenLine, RotateCcw, ClipboardList, X, MinusCircle, Download, Upload, Copy, RefreshCw, Users, Phone, Crop, QrCode,
 } from "lucide-react";
 
 /* =========================================================================
@@ -3639,6 +3639,7 @@ function dupliquerEquipementPourNouvelleVisite(source) {
   fresh.identification = { ...source.identification };
   fresh.niveauMaintenance = source.niveauMaintenance || "1-4";
   fresh.lignageId = source.lignageId || source.id;
+  if (source.qrCode) fresh.qrCode = source.qrCode; // l'étiquette posée reste valable d'une visite à l'autre
   // Pièces d'usure et fiche batterie reprises telles quelles (années de mise en service, références,
   // historique des remplacements) : elles évoluent d'une visite à l'autre sans ressaisie.
   const src = source.controles || {};
@@ -10016,7 +10017,7 @@ function genererSyntheseSite(site) {
   return ["Synthèse générale :\n" + phrases.join(" "), ...blocs].join("\n\n");
 }
 
-const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, removable = true, onDuplicate, locaux = [], allEquipements = [], allSites = [], caracteristiquesLibrary = {}, apprendreCaracteristique, remplacementsEnAttente = [], rapportDate = "" }) {
+const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, removable = true, onDuplicate, locaux = [], allEquipements = [], allSites = [], caracteristiquesLibrary = {}, apprendreCaracteristique, remplacementsEnAttente = [], rapportDate = "", prochaineMaintenance = "" }) {
   const [open, setOpen] = useState(true);
   const schema = schemaFiltreeParNiveau(getSchema(eq), eq.niveauMaintenance);
   const setIdentification = (k, v) => update(repairEquipementControles({ ...eq, identification: { ...eq.identification, [k]: v } }));
@@ -10095,6 +10096,7 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
             />
           </div>
           <StatusBadge label={eq.etatFinal} size="sm" gender={equipGender(eq.type)} />
+          <BoutonEtiquetteQR eq={eq} update={update} info={{ date: rapportDate, prochaine: prochaineMaintenance }} />
           {onDuplicate && (
             <button onClick={onDuplicate} style={{ background: "none", border: "none", color: "#0A5DA8", cursor: "pointer", padding: 4 }} title="Dupliquer cet équipement">
               <Copy size={15} />
@@ -11489,9 +11491,26 @@ function SiteDetail({ site, allSites, update, onBack, onDelete, onPrint, onPrint
   const dupliquerEquipement = (eq) => {
     const copy = JSON.parse(JSON.stringify(eq));
     copy.id = uid();
+    copy.lignageId = uid(); // autre équipement physique : historique, étiquette QR et remplacements propres
+    delete copy.qrCode;
+    copy.remplacementsPieces = [];
+    copy.remplacementsIgnores = [];
     update((d) => ({ ...d, equipements: [...d.equipements, { ...copy, ordre: (d.equipements.length + 1) * 10 }] }));
     setActiveTab(copy.id);
   };
+  const [scannerRMP, setScannerRMP] = useState(false);
+  function ajouterEquipementScanne(source) {
+    const eq = dupliquerEquipementPourNouvelleVisite(source);
+    // Local : même nom que dans la visite d'origine si présent, sinon le premier local du site.
+    const srcSite = (allSites || []).find((s) => (s.equipements || []).some((e) => e.id === source.id));
+    const nomLocal = srcSite && (srcSite.locaux || []).find((l) => l.id === source.localId)?.nom;
+    const local = (site.locaux || []).find((l) => nomLocal && l.nom === nomLocal) || (site.locaux || [])[0];
+    if (local) eq.localId = local.id;
+    eq.ordre = (site.equipements.length + 1) * 10;
+    update((d) => ({ ...d, equipements: [...d.equipements, eq] }));
+    setActiveTab(eq.id);
+    setScannerRMP(false);
+  }
   function reprendreEquipementsSelectionnes() {
     const sources = equipementsMemeSite.filter(({ eq }) => reprendreSelection.includes(eq.id)).map(({ eq }) => eq);
     if (!sources.length) return;
@@ -11667,6 +11686,19 @@ function SiteDetail({ site, allSites, update, onBack, onDelete, onPrint, onPrint
         </div>
 
         <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 10, gap: 10, flexWrap: "wrap" }}>
+          <button onClick={() => setScannerRMP(true)} style={btnGhost(BRAND.blue)} title="Scanner l'étiquette QR d'un équipement : ouvre son onglet s'il est déjà dans ce rapport, sinon propose de l'ajouter">
+            <QrCode size={13} /> Scanner
+          </button>
+          {scannerRMP && (
+            <ScannerEquipement
+              sites={allSites || []}
+              siteCourant={site}
+              onClose={() => setScannerRMP(false)}
+              onAllerOnglet={(id) => { setActiveTab(id); setScannerRMP(false); }}
+              onAjouter={ajouterEquipementScanne}
+              onOpenSite={() => {}} onReprendre={() => {}} onHistorique={() => {}}
+            />
+          )}
           <div style={{ position: "relative" }}>
             <button onClick={() => setReprendreOpen((o) => !o)} disabled={equipementsMemeSite.length === 0}
               style={{ ...btnGhost("#0F8A5F"), opacity: equipementsMemeSite.length === 0 ? 0.4 : 1, cursor: equipementsMemeSite.length === 0 ? "not-allowed" : "pointer" }}
@@ -11752,6 +11784,7 @@ function SiteDetail({ site, allSites, update, onBack, onDelete, onPrint, onPrint
           apprendreCaracteristique={apprendreCaracteristique}
           remplacementsEnAttente={remplacementsRIEnAttente(equipementActif, interventions, allSites)}
           rapportDate={site.rapport?.date || ""}
+          prochaineMaintenance={site.rapport?.prochaineMaintenance || ""}
         />
       )}
     </div>
@@ -12220,10 +12253,10 @@ function mesuresComparees(visites) {
   });
   return { cols, lignes: [...lignes.values()] };
 }
-function RapportsView({ sites, interventions, onOpenSite, onOpenIntervention, onPrintSite, onPrintAnnexe }) {
-  const [vue, setVue] = useState("rmp");
+function RapportsView({ sites, interventions, onOpenSite, onOpenIntervention, onPrintSite, onPrintAnnexe, ficheInitiale = null }) {
+  const [vue, setVue] = useState(ficheInitiale ? "equipements" : "rmp");
   const [f, setF] = useState({ client: "", site: "", annee: "", mois: "", type: "", etat: "", q: "" });
-  const [fiche, setFiche] = useState(null); // clé de l'équipement physique affiché
+  const [fiche, setFiche] = useState(ficheInitiale); // clé de l'équipement physique affiché
   const set = (k, v) => setF((x) => {
     const n = { ...x, [k]: v };
     if (k === "client") n.site = "";
@@ -12355,7 +12388,7 @@ function FicheEquipementHistorique({ p, interventions, onRetour, onOpenSite, onO
   const couleurStatut = { retard: "#C0392B", annee: "#B5730A", avenir: "#0F8A5F", inconnue: "#8B96A3" };
   const th = { background: "#1A1F26", color: "#fff", padding: "6px 8px", fontSize: 11, textAlign: "left", fontWeight: 700 };
   const td = { padding: "6px 8px", borderBottom: "1px solid #E2E6EB", fontSize: 12, verticalAlign: "top" };
-  const ident = [["Marque", idf.marque], ["Modèle", idf.modele || idf.typeCellule || idf.typeTransformateur], ["N° de série", idf.numeroSerie || idf.numeroSerieDisjoncteur], ["Année de mise en service", idf.anneeMiseEnService || idf.annee], ["Local", local?.nom]].filter(([, v]) => v);
+  const ident = [["Marque", idf.marque], ["Modèle", idf.modele || idf.typeCellule || idf.typeTransformateur], ["N° de série", idf.numeroSerie || idf.numeroSerieDisjoncteur], ["Année de mise en service", idf.anneeMiseEnService || idf.annee], ["Local", local?.nom], ["Code étiquette", eq.qrCode]].filter(([, v]) => v);
   return (
     <div>
       <button onClick={onRetour} style={{ ...btnGhost("#5B6B7D"), marginBottom: 12 }}><ArrowLeft size={13} /> Retour à la liste</button>
@@ -12439,6 +12472,244 @@ function FicheEquipementHistorique({ p, interventions, onRetour, onOpenSite, onO
           })}
         </Card>
       )}
+    </div>
+  );
+}
+// =============================================================================================
+// Étiquettes QR des équipements. Le QR code ne contient qu'un code aléatoire (ex. HTM-7F3K9X2Q) :
+// ni lien, ni adresse, ni information client — scanné par quelqu'un d'autre, il n'affiche qu'un texte
+// sans signification. Seule l'application (connectée) sait à quel équipement il correspond, via son
+// lecteur intégré. Le code suit l'équipement d'une visite à l'autre (reprise de site).
+// Dépendances : « qrcode » (génération) et « jsqr » (lecture) — npm install qrcode jsqr.
+const ALPHABET_CODE_QR = "23456789ABCDEFGHJKMNPQRSTUVWXYZ"; // sans 0/O/1/I/L, ambigus à la lecture
+function genererCodeQR() {
+  const n = 8, out = [];
+  const buf = new Uint32Array(n);
+  if (typeof crypto !== "undefined" && crypto.getRandomValues) crypto.getRandomValues(buf); else for (let i = 0; i < n; i++) buf[i] = Math.floor(Math.random() * 2 ** 32);
+  for (let i = 0; i < n; i++) out.push(ALPHABET_CODE_QR[buf[i] % ALPHABET_CODE_QR.length]);
+  return "HTM-" + out.join("");
+}
+const RE_CODE_QR = /^HTM-[23456789A-HJKMNP-Z]{8}$/;
+function chargerImage(src) { return new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src; }); }
+function moisAnnee(dateISO) { const m = /^(\d{4})-(\d{2})/.exec(String(dateISO || "")); return m ? `${m[2]}/${m[1]}` : "—"; }
+// Image de l'étiquette (noir et blanc, pour imprimante thermique) — ruban 36 mm ou 24 mm.
+async function genererEtiquetteQR(eq, info, format = "36") {
+  const mod = await import("qrcode");
+  const QRCode = mod.default || mod;
+  const code = eq.qrCode;
+  const H = format === "24" ? 300 : 440, W = format === "24" ? 980 : 980; // pixels (~300 dpi) — hauteur = largeur du ruban
+  const canvas = document.createElement("canvas");
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#FFFFFF"; ctx.fillRect(0, 0, W, H);
+  const marge = Math.round(H * 0.06), q = H - 2 * marge;
+  const qrUrl = await QRCode.toDataURL(code, { errorCorrectionLevel: "M", margin: 0, width: q * 2, color: { dark: "#000000", light: "#FFFFFF" } });
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(await chargerImage(qrUrl), marge, marge, q, q);
+  const x = marge * 2 + q, largeurTexte = W - x - marge;
+  let y = marge;
+  try {
+    const logo = await chargerImage(LOGO_DARK);
+    const lh = Math.round(H * (format === "24" ? 0.26 : 0.22)), lw = Math.min(largeurTexte, Math.round(lh * (logo.width / logo.height)));
+    ctx.drawImage(logo, x, y, lw, lh);
+    y += lh + Math.round(H * 0.04);
+  } catch (e) { /* logo indisponible : étiquette sans logo */ }
+  ctx.fillStyle = "#000000"; ctx.textBaseline = "top";
+  const ecrire = (texte, taille, gras) => {
+    let t = taille;
+    ctx.font = `${gras ? "bold " : ""}${t}px Arial, sans-serif`;
+    while (t > 12 && ctx.measureText(texte).width > largeurTexte) { t -= 1; ctx.font = `${gras ? "bold " : ""}${t}px Arial, sans-serif`; }
+    ctx.fillText(texte, x, y);
+    y += Math.round(t * 1.18);
+  };
+  const titre = `${eq.type}${eq.identification?.repere ? " — " + eq.identification.repere : ""}`;
+  if (format === "24") {
+    ecrire(titre, 46, true);
+    ecrire(`Maint. ${moisAnnee(info.date)}  ·  Proch. ${moisAnnee(info.prochaine)}`, 38, false);
+  } else {
+    ecrire(titre, 52, true);
+    ecrire(`Maintenance : ${moisAnnee(info.date)}`, 44, false);
+    ecrire(`Prochaine : ${moisAnnee(info.prochaine)}`, 44, true);
+  }
+  ctx.font = `${format === "24" ? 26 : 30}px "Courier New", monospace`;
+  ctx.fillText(code, x, H - marge - (format === "24" ? 26 : 30));
+  return canvas;
+}
+function BoutonEtiquetteQR({ eq, update, info }) {
+  const [ouvert, setOuvert] = useState(false);
+  const [format, setFormat] = useState("36");
+  const [apercu, setApercu] = useState(null);
+  const [erreur, setErreur] = useState("");
+  const canvasRef = useRef(null);
+  useEffect(() => {
+    if (!ouvert || !eq.qrCode) return;
+    let annule = false;
+    setErreur("");
+    genererEtiquetteQR(eq, info, format).then((c) => { if (!annule) { canvasRef.current = c; setApercu(c.toDataURL("image/png")); } })
+      .catch(() => { if (!annule) setErreur("Génération impossible — vérifiez que la dépendance « qrcode » est installée (npm install qrcode jsqr)."); });
+    return () => { annule = true; };
+  }, [ouvert, format, eq.qrCode, eq.type, eq.identification?.repere, info.date, info.prochaine]);
+  const ouvrir = () => { if (!eq.qrCode) update({ ...eq, qrCode: genererCodeQR() }); setOuvert(true); };
+  const nomFichier = `Etiquette_${(eq.identification?.repere || eq.type || "equipement").replace(/[^a-z0-9]+/gi, "_")}_${eq.qrCode}.png`;
+  const partager = async () => {
+    const c = canvasRef.current; if (!c) return;
+    const blob = await new Promise((r) => c.toBlob(r, "image/png"));
+    const fichier = new File([blob], nomFichier, { type: "image/png" });
+    if (navigator.canShare && navigator.canShare({ files: [fichier] })) {
+      try { await navigator.share({ files: [fichier], title: "Étiquette équipement" }); return; } catch (e) { if (e && e.name === "AbortError") return; }
+    }
+    downloadBlob(blob, nomFichier);
+  };
+  const regenerer = () => {
+    if (!window.confirm("Générer un nouveau code ? L'étiquette déjà posée ne sera plus reconnue : il faudra la remplacer.")) return;
+    update({ ...eq, qrCode: genererCodeQR() });
+  };
+  return (
+    <>
+      <button onClick={ouvrir} style={{ background: "none", border: "none", color: "#0A5DA8", cursor: "pointer", padding: 4 }} title="Étiquette QR de l'équipement (impression sur imprimante d'étiquettes)">
+        <QrCode size={15} />
+      </button>
+      {ouvert && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(4,9,16,0.72)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={() => setOuvert(false)}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 14, padding: 18, width: "min(560px, 100%)", display: "flex", flexDirection: "column", gap: 12 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <b style={{ fontSize: 15 }}>Étiquette QR — {eq.type}{eq.identification?.repere ? ` (${eq.identification.repere})` : ""}</b>
+              <button onClick={() => setOuvert(false)} style={{ background: "none", border: "none", cursor: "pointer", color: "#5B6B7D" }}><X size={18} /></button>
+            </div>
+            <div style={{ display: "flex", gap: 6 }}>
+              {[["36", "Ruban 36 mm"], ["24", "Ruban 24 mm"]].map(([k, l]) => (
+                <button key={k} onClick={() => setFormat(k)} style={{ ...btnGhost(BRAND.blue), background: format === k ? BRAND.blue : "transparent", color: format === k ? "#fff" : BRAND.blue }}>{l}</button>
+              ))}
+            </div>
+            <div style={{ border: "1px dashed #C0C6CE", borderRadius: 8, padding: 8, background: "#F7F8FA", textAlign: "center", minHeight: 80 }}>
+              {erreur ? <span style={{ color: "#C0392B", fontSize: 12.5 }}>{erreur}</span> : apercu ? <img src={apercu} alt="Étiquette" style={{ maxWidth: "100%", border: "1px solid #E2E6EB", background: "#fff" }} /> : <span style={{ fontSize: 12, color: "#8B96A3" }}>Génération…</span>}
+            </div>
+            <div style={{ fontSize: 11.5, color: "#5B6B7D" }}>
+              Code : <b style={{ fontFamily: "monospace" }}>{eq.qrCode}</b> — le QR code ne contient que ce code (aucun lien, aucune information client). Il n'est reconnu que par le lecteur de l'application.
+            </div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+              <button onClick={regenerer} style={btnGhost("#5B6B7D")}><RefreshCw size={13} /> Nouveau code</button>
+              <button onClick={partager} disabled={!apercu} style={{ ...btnGhost(BRAND.blue), background: BRAND.blue, color: "#fff", opacity: apercu ? 1 : 0.5 }}><Download size={13} /> Partager / imprimer</button>
+            </div>
+            <div style={{ fontSize: 11, color: "#8B96A3" }}>Sur iPhone / iPad : « Partager / imprimer » → choisir l'application de l'imprimante (ex. Brother iPrint&amp;Label) → imprimer. Sur ordinateur, l'image est téléchargée.</div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+// Lecteur QR intégré : caméra arrière, lecture continue (BarcodeDetector natif si disponible, sinon jsQR).
+// Avec siteCourant (scan depuis un RMP en cours) : ouvre l'onglet de l'équipement s'il est déjà dans le
+// rapport, sinon propose de l'ajouter (reprise depuis la visite précédente) — refusé s'il appartient à
+// un autre site.
+function ScannerEquipement({ sites, onClose, onOpenSite, onReprendre, onHistorique, siteCourant = null, onAllerOnglet, onAjouter }) {
+  const videoRef = useRef(null);
+  const [code, setCode] = useState("");
+  const [saisie, setSaisie] = useState("");
+  const [erreur, setErreur] = useState("");
+  useEffect(() => {
+    let flux = null, arret = false, raf = null;
+    (async () => {
+      try {
+        flux = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false });
+        const v = videoRef.current; if (!v || arret) return;
+        v.srcObject = flux; v.setAttribute("playsinline", "true"); v.muted = true; await v.play();
+        let detecteur = null, jsQR = null;
+        if ("BarcodeDetector" in window) { try { detecteur = new window.BarcodeDetector({ formats: ["qr_code"] }); } catch (e) { detecteur = null; } }
+        if (!detecteur) { const m = await import("jsqr"); jsQR = m.default || m; }
+        const c = document.createElement("canvas"), ctx = c.getContext("2d", { willReadFrequently: true });
+        const boucle = async () => {
+          if (arret) return;
+          if (v.readyState >= 2 && v.videoWidth) {
+            let texte = null;
+            if (detecteur) { const r = await detecteur.detect(v).catch(() => []); texte = r && r[0] ? r[0].rawValue : null; }
+            else {
+              const w = Math.min(640, v.videoWidth), h = Math.round(v.videoHeight * (w / v.videoWidth));
+              c.width = w; c.height = h; ctx.drawImage(v, 0, 0, w, h);
+              const r = jsQR(ctx.getImageData(0, 0, w, h).data, w, h, { inversionAttempts: "dontInvert" });
+              texte = r ? r.data : null;
+            }
+            if (texte) { setCode(String(texte).trim().toUpperCase()); return; }
+          }
+          raf = requestAnimationFrame(boucle);
+        };
+        boucle();
+      } catch (e) {
+        setErreur("Caméra indisponible (autorisation refusée ou appareil sans caméra) — saisissez le code imprimé sous le QR code.");
+      }
+    })();
+    return () => { arret = true; if (raf) cancelAnimationFrame(raf); if (flux) flux.getTracks().forEach((t) => t.stop()); };
+  }, [code === ""]);
+  const trouves = useMemo(() => {
+    if (!code) return [];
+    const out = [];
+    sites.forEach((s) => (s.equipements || []).forEach((e) => { if (e.qrCode && e.qrCode === code) out.push({ site: s, eq: e }); }));
+    return out.sort((a, b) => String(b.site.rapport?.date || "").localeCompare(String(a.site.rapport?.date || "")));
+  }, [code, sites]);
+  const dernier = trouves[0];
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(4,9,16,0.85)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 14, padding: 16, width: "min(480px, 100%)", display: "flex", flexDirection: "column", gap: 10 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <b style={{ fontSize: 15 }}>Scanner un équipement</b>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "#5B6B7D" }}><X size={18} /></button>
+        </div>
+        {!code && (
+          <>
+            {!erreur && <video ref={videoRef} playsInline muted style={{ width: "100%", borderRadius: 10, background: "#000", aspectRatio: "4 / 3", objectFit: "cover" }} />}
+            {erreur && <div style={{ fontSize: 12.5, color: "#B5730A" }}>{erreur}</div>}
+            <div style={{ display: "flex", gap: 8 }}>
+              <input value={saisie} onChange={(e) => setSaisie(e.target.value.toUpperCase())} placeholder="ou saisir le code : HTM-XXXXXXXX" style={{ ...inputStyle, fontFamily: "monospace" }} />
+              <button onClick={() => saisie.trim() && setCode(saisie.trim())} style={btnGhost(BRAND.blue)}>OK</button>
+            </div>
+          </>
+        )}
+        {code && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <div style={{ fontSize: 12, color: "#5B6B7D" }}>Code lu : <b style={{ fontFamily: "monospace" }}>{code}</b></div>
+            {!RE_CODE_QR.test(code) ? <div style={{ fontSize: 13, color: "#C0392B" }}>Ce QR code n'est pas une étiquette HT Maintenance.</div>
+              : !dernier ? <div style={{ fontSize: 13, color: "#C0392B" }}>Aucun équipement ne correspond à ce code.</div>
+              : siteCourant ? (() => {
+                const lignage = dernier.eq.lignageId || dernier.eq.id;
+                const present = (siteCourant.equipements || []).find((e) => e.qrCode === code || (e.lignageId || e.id) === lignage);
+                const n = (x) => String(x || "").trim().toLowerCase();
+                const memeSite = n(dernier.site.nom || dernier.site.local) === n(siteCourant.nom || siteCourant.local) && (!n(siteCourant.client) || !n(dernier.site.client) || n(dernier.site.client) === n(siteCourant.client) || n(dernier.site.nom) === n(siteCourant.nom));
+                const titre = `${dernier.eq.type}${dernier.eq.identification?.repere ? " — " + dernier.eq.identification.repere : ""}`;
+                return (
+                  <div style={{ border: "1px solid #E2E6EB", borderRadius: 10, padding: 12 }}>
+                    <div style={{ fontWeight: 700, fontSize: 14 }}>{titre}</div>
+                    <div style={{ fontSize: 12.5, color: "#5B6B7D" }}>{dernier.site.client || "—"} › {dernier.site.nom || dernier.site.local || "Site"}</div>
+                    {present ? (
+                      <div style={{ marginTop: 10 }}>
+                        <div style={{ fontSize: 12.5, color: "#0F8A5F", marginBottom: 8 }}>Cet équipement est déjà dans ce rapport.</div>
+                        <button onClick={() => onAllerOnglet(present.id)} style={{ ...btnGhost(BRAND.blue), background: BRAND.blue, color: "#fff" }}>Ouvrir son onglet</button>
+                      </div>
+                    ) : memeSite ? (
+                      <div style={{ marginTop: 10 }}>
+                        <div style={{ fontSize: 12.5, color: "#5B6B7D", marginBottom: 8 }}>Dernière visite le {dateFrCourte(dernier.site.rapport?.date) || "—"} — sera repris avec son identification, ses pièces d'usure, son code QR et son historique (sans les mesures).</div>
+                        <button onClick={() => onAjouter(dernier.eq)} style={{ ...btnGhost(BRAND.blue), background: BRAND.blue, color: "#fff" }}><Plus size={13} /> Ajouter à ce rapport</button>
+                      </div>
+                    ) : (
+                      <div style={{ marginTop: 10, fontSize: 12.5, color: "#C0392B" }}>Cet équipement appartient à un autre site ({dernier.site.client || "—"} › {dernier.site.nom || dernier.site.local || "Site"}) : il n'est pas ajouté à ce rapport.</div>
+                    )}
+                  </div>
+                );
+              })()
+              : (
+                <div style={{ border: "1px solid #E2E6EB", borderRadius: 10, padding: 12 }}>
+                  <div style={{ fontWeight: 700, fontSize: 14 }}>{dernier.eq.type}{dernier.eq.identification?.repere ? ` — ${dernier.eq.identification.repere}` : ""}</div>
+                  <div style={{ fontSize: 12.5, color: "#5B6B7D" }}>{dernier.site.client || "—"} › {dernier.site.nom || dernier.site.local || "Site"} · dernière visite {dateFrCourte(dernier.site.rapport?.date) || "—"} ({trouves.length} visite{trouves.length > 1 ? "s" : ""})</div>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+                    <button onClick={() => onReprendre(dernier.site)} style={{ ...btnGhost(BRAND.blue), background: BRAND.blue, color: "#fff" }}><RefreshCw size={13} /> Reprendre pour une nouvelle visite</button>
+                    <button onClick={() => onOpenSite(dernier.site.id)} style={btnGhost(BRAND.blue)}>Ouvrir la dernière visite</button>
+                    <button onClick={() => onHistorique(dernier)} style={btnGhost("#5B6B7D")}>Historique</button>
+                  </div>
+                </div>
+              )}
+            <button onClick={() => { setCode(""); setSaisie(""); setErreur(""); }} style={btnGhost("#5B6B7D")}>Scanner un autre code</button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -17057,7 +17328,9 @@ export default function App({ currentUser, onLogout }) {
   const [loaded, setLoaded] = useState(false);
   const [selectedId, setSelectedId] = useState(null);
   const [reprendreSiteOpen, setReprendreSiteOpen] = useState(false);
-  const [siteAReprendrePicker, setSiteAReprendrePicker] = useState(null); // site choisi, en attente de sélection des équipements
+  const [siteAReprendrePicker, setSiteAReprendrePicker] = useState(null);
+  const [scannerOuvert, setScannerOuvert] = useState(false);
+  const [ficheInitiale, setFicheInitiale] = useState(null); // fiche équipement à ouvrir dans l'onglet Rapports (après un scan) // site choisi, en attente de sélection des équipements
   const [saveError, setSaveError] = useState(false);
   // État de la connexion et nombre de photos conservées sur l'appareil en attendant le réseau.
   const [enLigne, setEnLigne] = useState(typeof navigator === "undefined" ? true : navigator.onLine !== false);
@@ -17970,8 +18243,20 @@ export default function App({ currentUser, onLogout }) {
                       ))}
                     </div>
                   )}
+                  <button onClick={() => setScannerOuvert(true)} style={btnGhost(BRAND.blue)} title="Scanner l'étiquette QR d'un équipement pour le retrouver ou le reprendre">
+                    <QrCode size={14} /> <span className="hide-mobile">Scanner</span>
+                  </button>
                   <button onClick={addSite} style={btnPrimary()}><Plus size={16} /> Nouvelle intervention</button>
                 </div>
+              )}
+              {scannerOuvert && (
+                <ScannerEquipement
+                  sites={sites}
+                  onClose={() => setScannerOuvert(false)}
+                  onOpenSite={(id) => { setScannerOuvert(false); setSelectedId(id); }}
+                  onReprendre={(site) => { setScannerOuvert(false); setSiteAReprendrePicker(site); }}
+                  onHistorique={({ site, eq }) => { setScannerOuvert(false); setFicheInitiale(cleEquipementPhysique(site, eq)); setView("rapports"); }}
+                />
               )}
               {siteAReprendrePicker && (
                 <ReprendreSiteEquipmentPicker
@@ -18046,7 +18331,7 @@ export default function App({ currentUser, onLogout }) {
             !ivLoaded ? <div style={{ textAlign: "center", padding: 60, color: "#8B96A3", fontSize: 13 }}>{enLigne ? "Chargement…" : "Hors connexion — les données se chargeront dès le retour du réseau."}</div> : <InterventionsOverview interventions={interventions} sites={sites} onOpen={setSelectedIvId} onCreate={createIntervention} onPlanifier={planifierIntervention} />
           ) : view === "rapports" ? (
             !loaded || !ivLoaded ? <div style={{ textAlign: "center", padding: 60, color: "#8B96A3", fontSize: 13 }}>{enLigne ? "Chargement…" : "Hors connexion — les données se chargeront dès le retour du réseau."}</div> : (
-              <RapportsView sites={sites} interventions={interventions} onOpenSite={setSelectedId} onOpenIntervention={setSelectedIvId} onPrintSite={requestPrintSite} onPrintAnnexe={setPrintAnnexeSite} />
+              <RapportsView key={ficheInitiale || "rapports"} ficheInitiale={ficheInitiale} sites={sites} interventions={interventions} onOpenSite={setSelectedId} onOpenIntervention={setSelectedIvId} onPrintSite={requestPrintSite} onPrintAnnexe={setPrintAnnexeSite} />
             )
           ) : (
             !loaded || !ivLoaded ? <div style={{ textAlign: "center", padding: 60, color: "#8B96A3", fontSize: 13 }}>{enLigne ? "Chargement…" : "Hors connexion — les données se chargeront dès le retour du réseau."}</div> : (
