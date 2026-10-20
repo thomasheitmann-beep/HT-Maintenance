@@ -2321,13 +2321,20 @@ function buildOnduleurSchema({ normalMono = false, secoursMono = false, utilisat
 // Redresseur chargeur : même base que l'Onduleur (batterie, état, alarme, décharge, pièces
 // d'usure) mais sans onduleur/by-pass — uniquement le réseau d'entrée (mono/tri) et le continu de
 // sortie. Pas de condensateurs alternatifs dans les pièces d'usure (pas d'étage AC de sortie).
-function buildRedresseurSchema({ reseauMono = false } = {}) {
+// Redresseur chargeur : une ou deux alimentations amont (double alimentation = redondance). La 2e
+// alimentation réutilise la clé « mesures_reseau_secours » / suffixe « secours » (mêmes calculs de
+// puissance, même sélecteur de régime que le réseau secours de l'onduleur).
+const LISTE_CONFIG_REDRESSEUR = ["Unitaire", "Modulaire (plusieurs modules de puissance)"];
+const LISTE_ALIMENTATIONS_REDRESSEUR = ["Simple (1 alimentation)", "Double (2 alimentations)"];
+function redresseurDoubleAlim(eq) { return /^Double/.test(eq?.identification?.alimentationsAmont || ""); }
+function buildRedresseurSchema({ reseauMono = false, reseau2Mono = false, doubleAlim = false } = {}) {
   return {
     identification: [
       { key: "repere", label: "Repère / Nom de l'équipement" },
       { key: "marque", label: "Marque", options: LISTE_MARQUE_REDRESSEUR }, { key: "modele", label: "Modèle", options: LISTE_MODELE_REDRESSEUR_OPTIONS },
       { key: "puissanceKVA", label: "Puissance (kVA)", numeric: true }, { key: "puissanceKW", label: "Puissance (kW)", numeric: true },
       { key: "tensionEntree", label: "Tension d'entrée (V)" }, { key: "tensionSortieContinue", label: "Tension de sortie continue (V)" },
+      { key: "configuration", label: "Configuration", options: LISTE_CONFIG_REDRESSEUR },
       { key: "anneeMiseEnService", label: "Année de mise en service", numeric: true },
     ],
     sections: [
@@ -2360,7 +2367,7 @@ function buildRedresseurSchema({ reseauMono = false } = {}) {
         C("reseau_ethernet_snmp", "Réseau Ethernet / SNMP"),
         C("liaison_modbus_jbus", "Liaison série Modbus / J-Bus"),
       ]},
-      { key: "mesures_reseau_normal", title: "Mesures réseau", items: [
+      { key: "mesures_reseau_normal", title: doubleAlim ? "Mesures — Alimentation 1" : "Mesures réseau", items: [
         C("tension_simple_normal", "Tension simple", tensionCourantItem(reseauMono, "V", "Tension")),
         ...(reseauMono ? [] : [C("tension_normal", "Tension composée", tensionCourantItem(false, "V", "Tension"))]),
         C("thdv_normal", "Taux de distorsion tension", reseauMono ? champsMono("%", "THdV") : champsTriphase("%", "THdV", 1, "max")),
@@ -2369,8 +2376,20 @@ function buildRedresseurSchema({ reseauMono = false } = {}) {
         C("courant_normal", "Courant", tensionCourantItem(reseauMono, "A", "Courant")),
         ...(reseauMono ? [] : [C("courant_neutre_normal", "Courant dans le neutre", [F("in", "IN", "A")])]),
         C("thdi_normal", "Taux de distorsion courant", reseauMono ? champsMono("%", "ThdI") : champsTriphase("%", "ThdI", 1, "moyenne")),
-        C("puissance_fp_normal", "Puissance et facteur de puissance", puissanceFpItem(reseauMono)),
+        C("puissance_fp_normal", "Puissance (P, S relevés — Q calculé) et cos φ fondamental", cosPhiFondamentalItem(reseauMono)),
       ]},
+      ...(doubleAlim ? [{ key: "mesures_reseau_secours", title: "Mesures — Alimentation 2", items: [
+        C("tension_simple_secours", "Tension simple", tensionCourantItem(reseau2Mono, "V", "Tension")),
+        ...(reseau2Mono ? [] : [C("tension_secours", "Tension composée", tensionCourantItem(false, "V", "Tension"))]),
+        C("thdv_secours", "Taux de distorsion tension", reseau2Mono ? champsMono("%", "THdV") : champsTriphase("%", "THdV", 1, "max")),
+        C("frequence_secours", "Fréquence", [F("hz", "Valeur", "Hz")]),
+        C("regime_neutre_secours", "Régime de neutre", [F("valeur", "Valeur", null, LISTE_REGIME_NEUTRE)]),
+        C("courant_secours", "Courant", tensionCourantItem(reseau2Mono, "A", "Courant")),
+        ...(reseau2Mono ? [] : [C("courant_neutre_secours", "Courant dans le neutre", [F("in", "IN", "A")])]),
+        C("thdi_secours", "Taux de distorsion courant", reseau2Mono ? champsMono("%", "ThdI") : champsTriphase("%", "ThdI", 1, "moyenne")),
+        C("puissance_fp_secours", "Puissance (P, S relevés — Q calculé) et cos φ fondamental", cosPhiFondamentalItem(reseau2Mono)),
+        C("basculement_alim", "Essai de basculement / reprise sur l'alimentation 2"),
+      ]}] : []),
       { key: "mesures_continu", title: "Mesures — Continu (sortie)", items: [
         C("tension_continue", "Tension continue", [F("v", "Valeur", "V")]),
         C("courant_charge", "Courant de charge", [F("a", "Valeur", "A")]),
@@ -3383,7 +3402,23 @@ function getSchema(eq) {
     }
     return out;
   }
-  if (eq.type === "Redresseur chargeur") return buildRedresseurSchema({ reseauMono: getOnduleurRegimes(eq).normalMono });
+  if (eq.type === "Redresseur chargeur") {
+    const out = buildRedresseurSchema({ reseauMono: getOnduleurRegimes(eq).normalMono, reseau2Mono: getOnduleurRegimes(eq).secoursMono, doubleAlim: redresseurDoubleAlim(eq) });
+    // Configuration modulaire (même principe que l'onduleur « Parallèle modulaire ») : modules de
+    // puissance installés, puissance / courant par module, redondance N+x et modules en réserve.
+    if (/^Modulaire/.test(eq.identification?.configuration || "")) {
+      const idx = out.identification.findIndex((f) => f.key === "configuration");
+      const champsModulaires = [
+        { key: "nombreModules", label: "Nombre de modules installés", numeric: true },
+        { key: "puissanceParModule", label: "Puissance par module (kW)", numeric: true },
+        { key: "courantParModule", label: "Courant nominal par module (A)", numeric: true },
+        { key: "nombreModulesRedondants", label: "Dont modules redondants (N+x, installés)", numeric: true },
+        { key: "nombreModulesReserve", label: "Modules en réserve (spares non installés)", numeric: true },
+      ];
+      return { ...out, identification: [...out.identification.slice(0, idx + 1), ...champsModulaires, ...out.identification.slice(idx + 1)] };
+    }
+    return out;
+  }
   if (eq.type === "Inverseur de source") {
     const r = (eq.controles && eq.controles.regimes_reseaux) || {};
     return buildInverseurSchema({ source1Mono: r.source1 === "Monophasé", source2Mono: r.source2 === "Monophasé", utilisationMono: r.utilisation === "Monophasé" });
@@ -4510,11 +4545,29 @@ function unitFamilyFor(u) {
 // Largeur d'un champ Action adaptée à son contenu — une largeur fixe de 150px masquait le début du
 // texte dès qu'il dépassait une quinzaine de caractères (ex. "trace de décharge partielle").
 // Bornes min/max pour rester raisonnable sur mobile comme sur desktop.
+// Champ texte sur une ligne qui passe à la ligne et grandit en hauteur quand la saisie dépasse sa
+// largeur (au lieu de défiler à l'intérieur) : toute la saisie reste visible, sur iPhone comme sur iPad.
+// La touche Entrée ne crée pas de saut de ligne (texte destiné à une seule ligne du rapport).
+function AutoTextArea({ value, onChange, style, placeholder, onFocus, onBlur }) {
+  const ref = useRef(null);
+  const ajuster = () => { const el = ref.current; if (!el) return; el.style.height = "auto"; el.style.height = el.scrollHeight + 2 + "px"; };
+  useEffect(ajuster, [value]);
+  useEffect(() => { window.addEventListener("resize", ajuster); return () => window.removeEventListener("resize", ajuster); }, []);
+  return (
+    <textarea
+      ref={ref} rows={1} value={value ?? ""} placeholder={placeholder}
+      onChange={(e) => onChange(e.target.value.replace(/\n/g, " "))}
+      onKeyDown={(e) => { if (e.key === "Enter") e.preventDefault(); }}
+      onFocus={onFocus} onBlur={onBlur}
+      style={{ ...inputStyle, ...(style || {}), resize: "none", overflow: "hidden", lineHeight: 1.35, display: "block", whiteSpace: "pre-wrap", wordBreak: "break-word" }}
+    />
+  );
+}
 function actionInputWidth(texte) {
   const longueur = (texte || "").length;
   return Math.max(150, Math.min(340, longueur * 7 + 40));
 }
-function Combo({ value, onChange, options, listId, style, placeholder, numeric, onBlur }) {
+function Combo({ value, onChange, options, listId, style, placeholder, numeric, onBlur, multiline = false }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
   useEffect(() => {
@@ -4534,6 +4587,16 @@ function Combo({ value, onChange, options, listId, style, placeholder, numeric, 
   const filtered = (value && !options.includes(value)) ? options.filter((o) => String(o).toLowerCase().includes(String(value).toLowerCase())) : options;
   return (
     <div ref={ref} style={{ position: "relative", width: (style && style.width) || "100%" }}>
+      {multiline && !numeric ? (
+        <AutoTextArea
+          value={value}
+          onChange={onChange}
+          onFocus={() => setOpen(true)}
+          onBlur={() => { setTimeout(() => setOpen(false), 120); if (onBlur) onBlur(); }}
+          placeholder={placeholder}
+          style={{ ...(style || {}), width: "100%" }}
+        />
+      ) : (
       <input
         type={numeric ? "number" : "text"}
         step={numeric ? "any" : undefined}
@@ -4544,6 +4607,7 @@ function Combo({ value, onChange, options, listId, style, placeholder, numeric, 
         placeholder={placeholder}
         style={{ ...inputStyle, ...(style || {}), width: "100%" }}
       />
+      )}
       {open && filtered.length > 0 && (
         <div style={{
           position: "absolute", top: "calc(100% + 3px)", left: 0, right: 0, zIndex: 300,
@@ -5989,6 +6053,7 @@ function ControlRow({ item, value, onChange, idPrefix, toleranceOverride }) {
               options={item.actionOptions || ["SANS OBJET"]}
               listId={`${idPrefix}-${item.key}-action`}
               placeholder="Action"
+              multiline
               style={{ width: actionInputWidth(value.action), padding: "5px 7px", fontSize: 12 }}
             />
           )}
@@ -6022,6 +6087,7 @@ function CustomActionsList({ custom, onAdd, onChange, onRemove, idPrefix }) {
                 options={["SANS OBJET"]}
                 listId={`${idPrefix}-custom-${c.id}-action`}
                 placeholder="Action"
+                multiline
                 style={{ width: actionInputWidth(c.action), padding: "5px 7px", fontSize: 12 }}
               />
               <Select value={c.etat} onChange={(e) => onChange(c.id, { etat: e.target.value })} style={{ width: 120, padding: "5px 7px", fontSize: 12 }}>
@@ -6540,12 +6606,12 @@ function MiniComputed({ label, unit, value }) {
     </MiniField>
   );
 }
-function MiniInput({ label, unit, value, onChange, width, validState, type = "number" }) {
+function MiniInput({ label, unit, value, onChange, width, validState, type = "number", multiline = false }) {
   const borderColor = validState === "ok" ? "#0F8A5F" : validState === "warn" ? "#B5730A" : validState === "bad" ? "#C0392B" : "#D8DEE5";
   const bg = validState === "ok" ? "#F0FBF6" : validState === "warn" ? "#FDF6EC" : validState === "bad" ? "#FDF1F0" : inputStyle.background;
   return (
     <MiniField label={label} unit={unit}>
-      <input type={type} step={type === "number" ? "any" : undefined} value={value ?? ""} onChange={(e) => onChange(e.target.value)} style={{ ...inputStyle, width: width || 70, padding: "5px 7px", fontSize: 12, border: `1.5px solid ${borderColor}`, background: bg }} />
+      {multiline ? <AutoTextArea value={value} onChange={onChange} style={{ width: width || 70, padding: "5px 7px", fontSize: 12 }} /> : <input type={type} step={type === "number" ? "any" : undefined} value={value ?? ""} onChange={(e) => onChange(e.target.value)} style={{ ...inputStyle, width: width || 70, padding: "5px 7px", fontSize: 12, border: `1.5px solid ${borderColor}`, background: bg }} />}
     </MiniField>
   );
 }
@@ -6766,7 +6832,7 @@ function GradinsPanel({ eq, update, idPrefix }) {
                 </div>
 
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                  <input placeholder="Action" value={e.action} onChange={(ev) => setEntry(e.id, { action: ev.target.value })} style={{ ...inputStyle, width: actionInputWidth(e.action), padding: "5px 7px", fontSize: 12 }} />
+                  <AutoTextArea placeholder="Action" value={e.action} onChange={(v) => setEntry(e.id, { action: v })} style={{ width: actionInputWidth(e.action), padding: "5px 7px", fontSize: 12 }} />
                   <Select value={e.etat} onChange={(ev) => setEntry(e.id, { etat: ev.target.value })} style={{ width: 120, padding: "5px 7px", fontSize: 12 }}>
                     {EQUIP_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
                   </Select>
@@ -6928,7 +6994,7 @@ function DynamicListPanel({ title, entries, onChange, typeOptions, fieldDefs, wi
                   )}
                   {withActionEtat && (
                     <>
-                      <input placeholder="Action" value={e.action} onChange={(ev) => setEntry(e.id, { action: ev.target.value })} style={{ ...inputStyle, width: actionInputWidth(e.action), padding: "5px 7px", fontSize: 12 }} />
+                      <AutoTextArea placeholder="Action" value={e.action} onChange={(v) => setEntry(e.id, { action: v })} style={{ width: actionInputWidth(e.action), padding: "5px 7px", fontSize: 12 }} />
                       <Select value={e.etat} onChange={(ev) => setEntry(e.id, { etat: ev.target.value })} style={{ width: 120, padding: "5px 7px", fontSize: 12 }}>
                         {EQUIP_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
                       </Select>
@@ -7089,7 +7155,8 @@ function calcPuissanceActive(eq, sectionKey, suffix, mono) {
   const fp = eq.controles[sectionKey]?.[`puissance_fp_${suffix}`]?.fields || {};
   const thdi = eq.controles[sectionKey]?.[`thdi_${suffix}`]?.fields;
   const thdiVal = moyenneDepuisChamps(thdi) ?? (thdi ? numOf(thdi.l1) : null);
-  const fpReel = (cosBrut) => suffix === "utilisation" ? calcFPDepuisCosPhiFondamental(cosBrut, thdiVal) : numOf(cosBrut);
+  // Cos φ fondamental (utilisation, et entrée du redresseur — fortement chargée en harmoniques) : converti en FP réel avec le ThdI.
+  const fpReel = (cosBrut) => suffix === "utilisation" || eq.type === "Redresseur chargeur" ? calcFPDepuisCosPhiFondamental(cosBrut, thdiVal) : numOf(cosBrut);
   if (mono) {
     const cos = fpReel(fp.fp1);
     return cos === null ? null : Math.round(s * cos * 100) / 100;
@@ -7179,7 +7246,7 @@ function RegimeReseauSelector({ eq, update, reseau }) {
   // Le réseau secours (by-pass) est relié directement à la sortie, sans transformation : sa tension
   // — et donc son régime mono/triphasé — est toujours identique à celle de l'utilisation. On
   // affiche cette valeur en lecture seule plutôt que de la faire tracker séparément.
-  if (reseau === "secours") {
+  if (reseau === "secours" && eq.type === "Onduleur") { // redresseur : « secours » = alimentation 2, régime propre
     const value = regimes.utilisation || "Triphasé";
     return (
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
@@ -7296,7 +7363,13 @@ function SchemaOnduleur({ eq, update }) {
                 {miniRegime("Régime utilisation", "utilisation")}
               </>
             )}
-            {eq.type === "Redresseur chargeur" && miniRegime("Régime réseau", "normal")}
+            {eq.type === "Redresseur chargeur" && (
+              <>
+                {miniSelect("Alimentations amont", eq.identification?.alimentationsAmont || LISTE_ALIMENTATIONS_REDRESSEUR[0], (v) => setIdent("alimentationsAmont", v), LISTE_ALIMENTATIONS_REDRESSEUR)}
+                {miniRegime(redresseurDoubleAlim(eq) ? "Régime alimentation 1" : "Régime réseau", "normal")}
+                {redresseurDoubleAlim(eq) && miniRegime("Régime alimentation 2", "secours")}
+              </>
+            )}
             {eq.type === "Inverseur de source" && (
               <>
                 {miniRegime("Régime source 1", "source1")}
@@ -8422,7 +8495,7 @@ function FormulaireRemplacement({ pieces, initial, onValider, onAnnuler, avecDat
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end", marginTop: 8 }}>
           <label style={lab}>Marque (pièce posée)<input value={r.marque} onChange={(e) => set("marque", e.target.value)} style={{ ...inp, width: 140 }} /></label>
           <label style={lab}>Référence (équivalent)<input value={r.reference} onChange={(e) => set("reference", e.target.value)} style={{ ...inp, width: 170 }} /></label>
-          <label style={lab}>Description<input value={r.description} onChange={(e) => set("description", e.target.value)} style={{ ...inp, width: 300 }} /></label>
+          <label style={lab}>Description<AutoTextArea value={r.description} onChange={(v) => set("description", v)} style={{ padding: "6px 8px", fontSize: 12.5, width: 300 }} /></label>
           {kind && <button onClick={() => setCatalogue(!catalogue)} style={btnGhost(BRAND.blue)}><Search size={13} /> Catalogue</button>}
         </div>
       )}
@@ -8580,7 +8653,7 @@ function PiecesUsureUPSPanel({ eq, update, itemFicheBatterie }) {
                         </>
                       ) : (
                         <>
-                          <MiniInput type="text" label="Description" value={m.description} onChange={(v) => setModele(m.id, { description: v })} width={280} />
+                          <MiniInput type="text" multiline label="Description" value={m.description} onChange={(v) => setModele(m.id, { description: v })} width={280} />
                           <MiniInput type="text" label="Marque" value={m.marque} onChange={(v) => setModele(m.id, { marque: v })} width={110} />
                           <MiniInput type="text" label="Modèle" value={m.modele} onChange={(v) => setModele(m.id, { modele: v })} width={150} />
                           <MiniInput label="Quantité" value={m.quantite} onChange={(v) => setModele(m.id, { quantite: v })} width={60} />
@@ -9268,7 +9341,7 @@ function DisjoncteurRelaisPanel({ eq, update, custom, onAddCustom, onChangeCusto
                     );
                   })()}
                   {tol && <MiniComputed label="Tolérance attendue" unit={tol.unite} value={`${tol.min} – ${tol.max}`} />}
-                  <input placeholder="Action" value={s.essai.action} onChange={(e) => setEssai(s.id, { action: e.target.value })} style={{ ...inputStyle, width: actionInputWidth(s.essai.action), padding: "5px 7px", fontSize: 12 }} />
+                  <AutoTextArea placeholder="Action" value={s.essai.action} onChange={(v) => setEssai(s.id, { action: v })} style={{ width: actionInputWidth(s.essai.action), padding: "5px 7px", fontSize: 12 }} />
                   <Select value={s.essai.etat} onChange={(e) => setEssai(s.id, { etat: e.target.value })} style={{ width: 120, padding: "5px 7px", fontSize: 12 }}>
                     {EQUIP_STATUSES.map((st) => <option key={st} value={st}>{st}</option>)}
                   </Select>
@@ -9281,7 +9354,7 @@ function DisjoncteurRelaisPanel({ eq, update, custom, onAddCustom, onChangeCusto
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
             <span style={{ fontSize: 12.5, color: "#3E4A5C", flex: "1 1 240px" }}>Contrôle du circuit de mesures et commande</span>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-              <input placeholder="Action" value={circuit.action} onChange={(e) => setCircuit({ action: e.target.value })} style={{ ...inputStyle, width: actionInputWidth(circuit.action), padding: "5px 7px", fontSize: 12 }} />
+              <AutoTextArea placeholder="Action" value={circuit.action} onChange={(v) => setCircuit({ action: v })} style={{ width: actionInputWidth(circuit.action), padding: "5px 7px", fontSize: 12 }} />
               <Select value={circuit.etat} onChange={(e) => setCircuit({ etat: e.target.value })} style={{ width: 120, padding: "5px 7px", fontSize: 12 }}>
                 {EQUIP_STATUSES.map((st) => <option key={st} value={st}>{st}</option>)}
               </Select>
@@ -10530,23 +10603,26 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
                     onRemoveCustom={(id) => removeCustomAction(sec.key, id)}
                   />
                   <PuissanceApparenteCalculee eq={eq} sectionKey={sec.key} suffix={sec.key === "mesures_reseau_normal" ? "normal" : "secours"} mono={sec.key === "mesures_reseau_normal" ? eq.controles?.regimes_reseaux?.normal === "Monophasé" : eq.controles?.regimes_reseaux?.secours === "Monophasé"} />
-                  {eq.type === "Redresseur chargeur" && sec.key === "mesures_reseau_normal" && (
+                  {eq.type === "Redresseur chargeur" && (sec.key === "mesures_reseau_normal" || sec.key === "mesures_reseau_secours") && (() => {
+                    const cle = sec.key === "mesures_reseau_normal" ? "photos_reseau_entree" : "photos_reseau_entree2";
+                    return (
                     <Card style={{ marginBottom: 14 }}>
-                      <SectionTitle>Photo par phase — réseau d'entrée (tension + courant)</SectionTitle>
+                      <SectionTitle>Photo par phase — {sec.key === "mesures_reseau_normal" ? (redresseurDoubleAlim(eq) ? "alimentation 1" : "réseau d'entrée") : "alimentation 2"} (tension + courant)</SectionTitle>
                       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10 }}>
                         {["l1", "l2", "l3"].map((ph) => (
                           <div key={ph}>
                             <div style={{ fontSize: 10.5, fontWeight: 700, color: "#8B96A3", marginBottom: 4 }}>{ph.toUpperCase()}</div>
                             <FileGallery
-                              files={(eq.controles.photos_reseau_entree || {})[ph] || []}
-                              onChange={(files) => update({ ...eq, controles: { ...eq.controles, photos_reseau_entree: { ...(eq.controles.photos_reseau_entree || {}), [ph]: files } } })}
-                              idPrefix={`${eq.id}-photos-entree-${ph}`}
+                              files={(eq.controles[cle] || {})[ph] || []}
+                              onChange={(files) => update({ ...eq, controles: { ...eq.controles, [cle]: { ...(eq.controles[cle] || {}), [ph]: files } } })}
+                              idPrefix={`${eq.id}-${cle}-${ph}`}
                             />
                           </div>
                         ))}
                       </div>
                     </Card>
-                  )}
+                    );
+                  })()}
                 </React.Fragment>
               );
             }
@@ -11598,7 +11674,7 @@ function SiteDetail({ site, allSites, update, onBack, onDelete, onPrint, onPrint
               <RefreshCw size={13} /> Reprendre un équipement existant
             </button>
             {reprendreOpen && equipementsMemeSite.length > 0 && (
-              <div style={{ position: "absolute", right: 0, top: "110%", background: "#F7F8FA", border: "1px solid #D8DEE5", borderRadius: 10, overflow: "hidden", zIndex: 50, minWidth: 320, maxHeight: 360, display: "flex", flexDirection: "column", boxShadow: "0 12px 30px rgba(0,0,0,0.4)" }}>
+              <div style={{ position: "absolute", right: 0, top: "110%", background: "#F7F8FA", border: "1px solid #D8DEE5", borderRadius: 10, overflow: "hidden", zIndex: 50, minWidth: "min(320px, calc(100vw - 32px))", maxHeight: 360, display: "flex", flexDirection: "column", boxShadow: "0 12px 30px rgba(0,0,0,0.4)" }}>
                 <div style={{ overflowY: "auto", flex: "1 1 auto" }}>
                   {equipementsMemeSite.map(({ eq, site: s }) => (
                     <label key={eq.id} style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "9px 14px", fontSize: 12, color: "#3E4A5C", cursor: "pointer", borderBottom: "1px solid #E2E6EB" }}
@@ -15050,11 +15126,22 @@ function genererSchemaRedresseurChargeur(eq) {
     const LABEL_MARGIN = 14;
 
     let y = 20;
-    ctx.fillStyle = SCHEMA_TRAIT; ctx.fillText("R1", cx, y);
-    y += 25; line(cx, y, cx, y + 20); y += 20;
-    ctx.fillStyle = "#5B6B7D"; ctx.font = "10.5px Arial, sans-serif"; ctx.fillText(`Réseau ${regime("normal")}`, cx, y + 10);
-    y += 22; line(cx, y - 22, cx, y);
-    line(cx, y, cx, y + 20); y += 20;
+    if (redresseurDoubleAlim(eq)) {
+      // Double alimentation amont : R1 et R2 se rejoignent avant le redresseur.
+      ctx.fillStyle = SCHEMA_TRAIT; ctx.fillText("R1", cx - 75, y); ctx.fillText("R2", cx + 75, y);
+      y += 25; line(cx - 75, y, cx - 75, y + 20); line(cx + 75, y, cx + 75, y + 20); y += 20;
+      ctx.fillStyle = "#5B6B7D"; ctx.font = "10.5px Arial, sans-serif";
+      ctx.fillText(`Alim. 1 ${regime("normal")}`, cx - 75, y + 10); ctx.fillText(`Alim. 2 ${regime("secours")}`, cx + 75, y + 10);
+      y += 22; line(cx - 75, y - 22, cx - 75, y); line(cx + 75, y - 22, cx + 75, y);
+      line(cx - 75, y, cx + 75, y);
+      line(cx, y, cx, y + 20); y += 20;
+    } else {
+      ctx.fillStyle = SCHEMA_TRAIT; ctx.fillText("R1", cx, y);
+      y += 25; line(cx, y, cx, y + 20); y += 20;
+      ctx.fillStyle = "#5B6B7D"; ctx.font = "10.5px Arial, sans-serif"; ctx.fillText(`Réseau ${regime("normal")}`, cx, y + 10);
+      y += 22; line(cx, y - 22, cx, y);
+      line(cx, y, cx, y + 20); y += 20;
+    }
     y += boxDepth(redW, bh) + LABEL_MARGIN + 6;
     ctx.fillStyle = "#5B6B7D"; ctx.fillText("Redresseur / Chargeur", cx, y - boxDepth(redW, bh) - LABEL_MARGIN);
     drawIconRedresseur(ctx, cx - redW / 2, y, redW, bh);
@@ -15653,8 +15740,10 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
         if (pCalc !== null) elements.push(new DOCX.Paragraph({ spacing: { before: 0, after: 40 }, children: [new DOCX.TextRun({ text: `Puissance active calculée (P = S × FP) : ${pCalc} kW`, bold: true, size: 17, color: DOCX_DARK })] }));
         else elements.push(docxSpacer(40));
       } else elements.push(docxSpacer(40));
-      if (eq.type === "Redresseur chargeur" && sec.key === "mesures_reseau_normal") {
-        const tablePhotosE = docxPhotosParPhase("Réseau d'entrée", eq.controles.photos_reseau_entree);
+      if (eq.type === "Redresseur chargeur") {
+        const tablePhotosE = sec.key === "mesures_reseau_normal"
+          ? docxPhotosParPhase(redresseurDoubleAlim(eq) ? "Alimentation 1" : "Réseau d'entrée", eq.controles.photos_reseau_entree)
+          : docxPhotosParPhase("Alimentation 2", eq.controles.photos_reseau_entree2);
         if (tablePhotosE) { elements.push(docxSpacer(20)); elements.push(tablePhotosE); }
       }
       elements.push(docxSpacer());
@@ -15963,7 +16052,7 @@ function collectPhotosEquipement(eq) {
     const item = sec && sec.items && sec.items.find((i) => i.key === itemKey);
     return item ? item.label : itemKey;
   };
-  const PHASE_SECTION_LABEL = { photos_utilisation: "Utilisation", photos_reseau_entree: "Réseau d'entrée" };
+  const PHASE_SECTION_LABEL = { photos_utilisation: "Utilisation", photos_reseau_entree: "Réseau d'entrée", photos_reseau_entree2: "Alimentation 2" };
   const controles = eq.controles || {};
   Object.keys(controles).forEach((secKey) => {
     const val = controles[secKey];
@@ -17793,7 +17882,20 @@ export default function App({ currentUser, onLogout }) {
           .no-print { display: none !important; }
           .print-only { display: block !important; }
         }
-        .app-shell { padding: 24px; }
+        .app-shell { padding: 24px; overflow-wrap: anywhere; }
+        /* Petits écrans (iPhone / iPad) : aucun champ ne doit dépasser de son cadre.
+           - champs : jamais plus larges que leur conteneur ;
+           - date / heure : Safari iOS leur impose une largeur minimale native (cause du débordement
+             de « Heure d'arrivée ») — apparence native neutralisée, largeur pilotée par la mise en page ;
+           - grilles : un enfant de grille peut rétrécir sous la largeur de son contenu (min-width: 0). */
+        .app-shell input, .app-shell select, .app-shell textarea { max-width: 100%; min-width: 0; box-sizing: border-box; }
+        .app-shell input[type="date"], .app-shell input[type="time"], .app-shell input[type="datetime-local"], .app-shell input[type="month"] {
+          -webkit-appearance: none; appearance: none; display: block; width: 100%; min-height: 38px; line-height: 1.2;
+        }
+        .app-shell input[type="date"]::-webkit-date-and-time-value, .app-shell input[type="time"]::-webkit-date-and-time-value { text-align: left; margin: 0; }
+        .app-shell [style*="display: grid"] > * { min-width: 0; }
+        .app-shell img, .app-shell canvas, .app-shell video { max-width: 100%; }
+        .app-shell table { max-width: none; }
         .site-row, .iv-row { display: flex; align-items: center; gap: 14px; }
         .site-row-meta, .iv-row-meta { flex: 0 0 130px; }
         @media (max-width: 720px) {
