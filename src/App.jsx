@@ -17422,6 +17422,116 @@ async function lireJsonDistant(docPath, idToken) {
   const data = await firestoreRestGet(docPath, idToken);
   return (data && data.fields && data.fields.value && data.fields.value.stringValue) || null;
 }
+// =============================================================================================
+// Stockage fragmenté : un document Firestore PAR site (RMP) / PAR intervention, au lieu d'un seul
+// document contenant toute la liste — un document Firestore est plafonné à 1 Mo, ce qui aurait
+// bloqué tout enregistrement au fil des RMP. Un petit document « index » garde l'ordre des éléments
+// et la version de chacun : la relecture périodique ne télécharge que ce qui a changé, et chaque
+// enregistrement n'envoie que les éléments modifiés (écriture atomique, avec contrôle de version de
+// l'index pour ne jamais écraser en silence la modification d'un collègue).
+// L'interface reste celle d'avant (texte JSON de la liste complète) : toute la logique existante
+// (hors connexion, fusion, sondage) est inchangée.
+// Migration automatique : au premier chargement, si l'index n'existe pas encore, l'ancien document
+// unique est lu puis réparti en documents individuels ; l'ancien document est conservé intact
+// (sauvegarde). Si les nouvelles collections sont refusées par les règles Firestore, l'app continue
+// sur l'ancien document unique (aucune perte, message dans la console).
+const FIRESTORE_DOC_PREFIX = "projects/ht-maintenance/databases/(default)/documents/";
+async function firestoreRestCommit(writes, idToken) {
+  const res = await fetch(`${FIRESTORE_REST_BASE}:commit`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${idToken}` }, body: JSON.stringify({ writes }) });
+  if (!res.ok) {
+    const txt = await res.text().catch(() => "");
+    if (/FAILED_PRECONDITION|ALREADY_EXISTS|NOT_FOUND/.test(txt) || res.status === 409) { const e = new Error("Conflit d'écriture : l'index a été modifié par un autre appareil"); e.conflit = true; throw e; }
+    const e = new Error(`Firestore REST commit ${res.status} ${txt.slice(0, 300)}`); e.status = res.status; throw e;
+  }
+  return res.json();
+}
+async function firestoreRestBatchGet(paths, idToken) {
+  const out = new Map();
+  for (let i = 0; i < paths.length; i += 100) {
+    const res = await fetch(`${FIRESTORE_REST_BASE}:batchGet`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${idToken}` }, body: JSON.stringify({ documents: paths.slice(i, i + 100).map((p) => FIRESTORE_DOC_PREFIX + p) }) });
+    if (!res.ok) { const e = new Error(`Firestore REST batchGet ${res.status}`); e.status = res.status; throw e; }
+    (await res.json()).forEach((r) => { if (r.found) out.set(r.found.name.slice(FIRESTORE_DOC_PREFIX.length), r.found); });
+  }
+  return out;
+}
+function creerStockFragmente({ cheminLegacy, cheminIndex, collection }) {
+  const cache = new Map(); // id → { v, json } (dernière version connue du serveur)
+  let indexJson = null, indexUpdateTime = null, modeLegacy = false;
+  const champsDoc = (json, user) => ({ value: { stringValue: json }, updatedAt: { integerValue: String(Date.now()) }, updatedBy: { stringValue: user || "" } });
+  const cheminDoc = (id) => `${collection}/${encodeURIComponent(String(id))}`;
+  async function ecrireFragments(liste, idToken, user, { creationIndex = false } = {}) {
+    const writes = [], nouveauCache = new Map(), entrees = [];
+    let n = 0;
+    liste.forEach((el) => {
+      if (!el || el.id === undefined) return;
+      const json = JSON.stringify(el);
+      if (json.length > 1000000) { const e = new Error(`Élément trop volumineux (maximum size) : ${el.nom || el.numeroRI || el.id}`); throw e; }
+      const c = cache.get(el.id);
+      const v = c && c.json === json ? c.v : `${Date.now().toString(36)}-${(n++).toString(36)}`;
+      if (!c || c.json !== json) writes.push({ update: { name: FIRESTORE_DOC_PREFIX + cheminDoc(el.id), fields: champsDoc(json, user) } });
+      nouveauCache.set(el.id, { v, json });
+      entrees.push({ id: el.id, v });
+    });
+    cache.forEach((_, id) => { if (!nouveauCache.has(id)) writes.push({ delete: FIRESTORE_DOC_PREFIX + cheminDoc(id) }); });
+    const nouvelIndex = JSON.stringify(entrees);
+    if (!writes.length && nouvelIndex === indexJson) return;
+    const ecritureIndex = { update: { name: FIRESTORE_DOC_PREFIX + cheminIndex, fields: champsDoc(nouvelIndex, user) }, currentDocument: creationIndex || !indexUpdateTime ? { exists: false } : { updateTime: indexUpdateTime } };
+    // Lots : jusqu'à 400 écritures / ~8 Mo par envoi ; l'index (avec son contrôle de version) part toujours en dernier.
+    const lots = []; let lot = [], taille = 0;
+    writes.forEach((w) => { const t = JSON.stringify(w).length; if (lot.length && (lot.length >= 400 || taille + t > 8000000)) { lots.push(lot); lot = []; taille = 0; } lot.push(w); taille += t; });
+    if (lot.length) lots.push(lot);
+    for (let i = 0; i < lots.length - 1; i++) await firestoreRestCommit(lots[i], idToken);
+    const dernier = [...(lots[lots.length - 1] || []), ecritureIndex];
+    const r = await firestoreRestCommit(dernier, idToken);
+    const res = r && r.writeResults;
+    indexUpdateTime = (res && res[res.length - 1] && res[res.length - 1].updateTime) || (r && r.commitTime) || indexUpdateTime;
+    cache.clear(); nouveauCache.forEach((val, id) => cache.set(id, val));
+    indexJson = nouvelIndex;
+  }
+  async function lire(idToken, user) {
+    if (modeLegacy) return lireJsonDistant(cheminLegacy, idToken);
+    let idx;
+    try { idx = await firestoreRestGet(cheminIndex, idToken); }
+    catch (e) {
+      if (/ 403/.test(String(e.message))) { console.warn(`[Stockage] ${cheminIndex} refusé par les règles Firestore — poursuite sur l'ancien document unique ${cheminLegacy}.`); modeLegacy = true; return lireJsonDistant(cheminLegacy, idToken); }
+      throw e;
+    }
+    if (!idx || !idx.fields) {
+      // Pas encore d'index : migration depuis l'ancien document unique (conservé tel quel).
+      const legacy = await lireJsonDistant(cheminLegacy, idToken);
+      if (legacy === null) return null;
+      try {
+        cache.clear(); indexJson = null; indexUpdateTime = null;
+        await ecrireFragments(JSON.parse(legacy), idToken, user, { creationIndex: true });
+        console.info(`[Stockage] migration de ${cheminLegacy} vers ${collection} terminée.`);
+      } catch (e) {
+        if (e.status === 403) { console.warn(`[Stockage] écriture refusée par les règles Firestore sur ${collection} — poursuite sur l'ancien document unique.`); modeLegacy = true; }
+        else if (!e.conflit) console.error("[Stockage] migration reportée :", e);
+        cache.clear(); indexJson = null; indexUpdateTime = null;
+      }
+      return legacy;
+    }
+    const brut = (idx.fields.value && idx.fields.value.stringValue) || "[]";
+    const entrees = JSON.parse(brut);
+    const aCharger = entrees.filter((e) => { const c = cache.get(e.id); return !c || c.v !== e.v; }).map((e) => cheminDoc(e.id));
+    if (aCharger.length) {
+      const docs = await firestoreRestBatchGet(aCharger, idToken);
+      entrees.forEach((e) => { const d = docs.get(cheminDoc(e.id)); if (d) cache.set(e.id, { v: e.v, json: (d.fields && d.fields.value && d.fields.value.stringValue) || "null" }); });
+    }
+    const presents = new Set(entrees.map((e) => e.id));
+    Array.from(cache.keys()).forEach((id) => { if (!presents.has(id)) cache.delete(id); });
+    indexJson = brut; indexUpdateTime = idx.updateTime || indexUpdateTime;
+    return "[" + entrees.filter((e) => cache.has(e.id) && cache.get(e.id).json !== "null").map((e) => cache.get(e.id).json).join(",") + "]";
+  }
+  async function ecrire(json, idToken, user) {
+    if (modeLegacy) return firestoreRestSet(cheminLegacy, json, Date.now(), user, idToken);
+    if (indexJson === null) { const r = await lire(idToken, user); if (modeLegacy) return firestoreRestSet(cheminLegacy, json, Date.now(), user, idToken); if (r === null) { cache.clear(); return ecrireFragments(JSON.parse(json), idToken, user, { creationIndex: true }); } }
+    return ecrireFragments(JSON.parse(json), idToken, user);
+  }
+  return { lire, ecrire };
+}
+const STOCK_SITES = creerStockFragmente({ cheminLegacy: "app-data/sites", cheminIndex: "app-data/sites-index", collection: "app-data/sites/rmp" });
+const STOCK_INTERVENTIONS = creerStockFragmente({ cheminLegacy: "app-data/interventions", cheminIndex: "app-data/interventions-index", collection: "app-data/interventions/ri" });
 // Mise à niveau des anciens enregistrements de sites (anciens types d'onduleur, champs manquants) :
 // factorisée pour servir à la lecture du serveur comme à la copie locale et à la fusion.
 const REGIMES_PAR_ANCIEN_TYPE_ONDULEUR = {
@@ -17494,8 +17604,8 @@ export default function App({ currentUser, onLogout }) {
   const envoyerSites = async (serialized) => {
     const idToken = await currentUser.getIdToken();
     return ecrireEnFusionnant({
-      lireDistant: () => lireJsonDistant("app-data/sites", idToken),
-      ecrireDistant: (json) => firestoreRestSet("app-data/sites", json, Date.now(), currentUser?.email, idToken),
+      lireDistant: () => STOCK_SITES.lire(idToken, currentUser?.email),
+      ecrireDistant: (json) => STOCK_SITES.ecrire(json, idToken, currentUser?.email),
       serialized, baseRef: baseSites, aReconcilierRef: aReconcilierSites, valeurVide: "[]",
       fusionner: (b, l, d) => normaliserSites(fusionnerParId(b, l, d)),
       appliquerFusion: (fusion, fusionJson, envoye) => {
@@ -17507,8 +17617,8 @@ export default function App({ currentUser, onLogout }) {
   const envoyerIv = async (serialized) => {
     const idToken = await currentUser.getIdToken();
     return ecrireEnFusionnant({
-      lireDistant: () => lireJsonDistant("app-data/interventions", idToken),
-      ecrireDistant: (json) => firestoreRestSet("app-data/interventions", json, Date.now(), currentUser?.email, idToken),
+      lireDistant: () => STOCK_INTERVENTIONS.lire(idToken, currentUser?.email),
+      ecrireDistant: (json) => STOCK_INTERVENTIONS.ecrire(json, idToken, currentUser?.email),
       serialized, baseRef: baseIv, aReconcilierRef: aReconcilierIv, valeurVide: "[]",
       fusionner: fusionnerParId,
       appliquerFusion: (fusion, fusionJson, envoye) => {
@@ -17620,18 +17730,18 @@ export default function App({ currentUser, onLogout }) {
       try {
         const versionDepart = editVersionSites.current;
         const idToken = await currentUser.getIdToken();
-        const data = await firestoreRestGet("app-data/sites", idToken);
+        const rawDistant = await STOCK_SITES.lire(idToken, currentUser?.email);
         if (cancelled) return;
         // Une modification locale a pu survenir PENDANT la lecture réseau : la réponse du serveur est
         // alors périmée, et l'appliquer ferait revenir en arrière le texte tout juste saisi.
         if (editVersionSites.current !== versionDepart || savePendingSites.current || writeInFlight.current) { setLoaded(true); return; }
-        if (!data || !data.fields) {
+        if (rawDistant === null) {
           if (lastSyncedSites.current === null) lastSyncedSites.current = "[]";
           if (baseSites.current === null) baseSites.current = "[]";
           setLoaded(true);
           return;
         }
-        const rawValue = (data.fields.value && data.fields.value.stringValue) || "[]";
+        const rawValue = rawDistant || "[]";
         if (rawValue === lastSyncedSites.current) { baseSites.current = rawValue; setLoaded(true); return; }
         const parsed = JSON.parse(rawValue);
         // Filet de sécurité supplémentaire : si l'état local diffère déjà de la dernière version
@@ -17801,11 +17911,11 @@ export default function App({ currentUser, onLogout }) {
       try {
         const versionDepart = editVersionIv.current;
         const idToken = await currentUser.getIdToken();
-        const data = await firestoreRestGet("app-data/interventions", idToken);
+        const rawDistant = await STOCK_INTERVENTIONS.lire(idToken, currentUser?.email);
         if (cancelled) return;
         if (editVersionIv.current !== versionDepart || ivSavePending.current || ivWriteInFlight.current) { setIvLoaded(true); return; }
-        if (!data || !data.fields) { if (lastSyncedIv.current === null) lastSyncedIv.current = "[]"; if (baseIv.current === null) baseIv.current = "[]"; setIvLoaded(true); return; }
-        const rawValue = (data.fields.value && data.fields.value.stringValue) || "[]";
+        if (rawDistant === null) { if (lastSyncedIv.current === null) lastSyncedIv.current = "[]"; if (baseIv.current === null) baseIv.current = "[]"; setIvLoaded(true); return; }
+        const rawValue = rawDistant || "[]";
         if (rawValue === lastSyncedIv.current) { baseIv.current = rawValue; setIvLoaded(true); return; }
         // Même protection que pour les sites : ne pas écraser une saisie en attente d'enregistrement.
         if (lastSyncedIv.current !== null && JSON.stringify(ivRefForPoll.current) !== lastSyncedIv.current) { setIvLoaded(true); return; }
