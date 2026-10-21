@@ -3426,6 +3426,40 @@ function getSchema(eq) {
   if (eq.type === "Transformateur") return buildTransformateurSchema({ sec: eq.identification?.typeIsolation === "Sec (résine/enrobé)", classeIsolation: eq.identification?.classeIsolation, deuxSecondaires: eq.identification?.deuxEnroulementsSecondaires === "Oui" });
   if (eq.type === "Interrupteur HTA") return buildInterrupteurHTASchema({ avecRelais: eq.identification?.presenceRelais === "Oui" });
   if (eq.type === "Interrupteur Fusible HTA") return buildInterrupteurFusibleHTASchema({ avecRelais: eq.identification?.presenceRelais === "Oui" });
+  // Bilan de puissance : écrans de mesure adaptés au régime (triphasé / monophasé) du point de mesure.
+  if (eq.type === "Bilan de puissance" && eq.controles?.regimes_reseaux?.utilisation === "Monophasé") {
+    const base = SCHEMAS[eq.type];
+    const mono = {
+      tension_simple_utilisation: C("tension_simple_utilisation", "Tension", champsMono("V", "Tension")),
+      thdv_utilisation: C("thdv_utilisation", "Taux de distorsion tension", champsSeuilThdv(champsMono("%", "THdV"))),
+      courant_utilisation: C("courant_utilisation", "Courant", champsMono("A", "Courant")),
+      thdi_utilisation: C("thdi_utilisation", "Taux de distorsion courant", champsSeuilThdi(champsMono("%", "ThdI"))),
+    };
+    const sections = base.sections.map((sec) => sec.key !== "mesures_utilisation" ? sec : {
+      ...sec,
+      items: sec.items
+        .filter((it) => it.key !== "tension_utilisation" && it.key !== "courant_neutre_utilisation")
+        .map((it) => mono[it.key] || (it.key === "puissance_fp_utilisation"
+          ? { ...it, fields: it.fields.filter((f) => /1$/.test(f.key)).map((f) => ({ ...f, label: f.label.replace(/ L1\b/, "") })) }
+          : it)),
+    });
+    return { ...base, sections };
+  }
+  // Batterie de compensation monophasée : mesures réseau amont / aval sur une seule phase.
+  if (eq.type === "Batterie de compensation" && eq.identification?.triphase === "Monophasé") {
+    const base = SCHEMAS[eq.type];
+    const garder = { tensions: ["u12", "thdv1"], courants: ["i1", "thdi1"] };
+    const libelles = { u12: "U", thdv1: "THdV", i1: "I", thdi1: "ThdI" };
+    const sections = base.sections.map((sec) => (sec.key !== "mesures_amont" && sec.key !== "mesures_aval") ? sec : {
+      ...sec,
+      items: sec.items.map((it) => {
+        const g = /^tensions_/.test(it.key) ? garder.tensions : /^courants_/.test(it.key) ? garder.courants : null;
+        if (!g) return it;
+        return { ...it, fields: it.fields.filter((f) => g.includes(f.key) || f.key === "tol_max").map((f) => libelles[f.key] ? { ...f, label: libelles[f.key] } : (f.phaseKeys ? { ...f, phaseKeys: f.phaseKeys.filter((k) => g.includes(k)) } : f)) };
+      }),
+    });
+    return { ...base, sections };
+  }
   return SCHEMAS[eq.type];
 }
 // Classement d'un contrôle selon les niveaux de maintenance AFNOR (NF X60-000), par règle générique
@@ -3545,6 +3579,32 @@ function repairEquipementControles(eq) {
   const schema = getSchema(eq);
   if (!schema) return eq;
   const controles = { ...eq.controles };
+  // Migration unique : avant, la valeur était enregistrée dans l'unité choisie à l'écran ; elle est
+  // désormais toujours enregistrée dans l'unité de base du champ (l'unité choisie reste l'affichage).
+  if (!eq.unitesEnBase) {
+    const faits = new Set();
+    schema.sections.forEach((sec) => (sec.items || []).forEach((item) => {
+      const v = controles[sec.key]?.[item.key];
+      if (!v || !v.fields) return;
+      let fields = null;
+      (item.fields || []).forEach((f) => {
+        const u = v.fields[f.key + "Unite"];
+        if (!f.unit || !u || u === f.unit || unitFamilyFor(u) !== unitFamilyFor(f.unit) || numOf(v.fields[f.key]) === null) return;
+        fields = fields || { ...v.fields };
+        fields[f.key] = versUniteBase(String(v.fields[f.key]), u, f.unit);
+        faits.add(`${sec.key}|${item.key}|${f.key}`);
+      });
+      if (fields) controles[sec.key] = { ...controles[sec.key], [item.key]: { ...v, fields } };
+    }));
+    [["surcharge_longue", "inominal", "A"], ["surcharge_longue", "ineutre", "A"], ["instantane", "ii", "kA"], ["pouvoir_coupure", "icu", "kA"]].forEach(([it, k, base]) => {
+      const v = controles.reglage_disjoncteur?.[it];
+      if (!v || !v.fields || faits.has(`reglage_disjoncteur|${it}|${k}`)) return;
+      const u = v.fields[k + "Unite"];
+      if (!u || u === base || numOf(v.fields[k]) === null) return;
+      controles.reglage_disjoncteur = { ...controles.reglage_disjoncteur, [it]: { ...v, fields: { ...v.fields, [k]: versUniteBase(String(v.fields[k]), u, base) } } };
+    });
+    eq = { ...eq, unitesEnBase: true };
+  }
   schema.sections.forEach((sec) => {
     controles[sec.key] = { ...(controles[sec.key] || {}) };
     sec.items.forEach((item) => {
@@ -3629,6 +3689,7 @@ function emptyEquipement(type) {
     courbeDechargeFiles: [],
     courbeDechargeDonnees: null, // tensions mesurées pendant l'essai de décharge → courbe tracée par l'app
     rapportLaboFiles: [],
+    unitesEnBase: true, // valeurs enregistrées dans l'unité de base de chaque champ (voir UNIT_FAMILIES)
   };
 }
 // Reprend un équipement existant (visite précédente) pour une nouvelle visite : conserve
@@ -4530,12 +4591,46 @@ function TextArea(props) { return <textarea {...props} style={{ ...inputStyle, r
 
 // Familles de grandeurs : un champ dont l'unité appartient à l'une de ces familles propose
 // un sélecteur pour changer d'échelle (ex. mV / V / kV) au lieu d'une unité figée.
+// Toutes les grandeurs électriques proposent le même choix d'échelle. La valeur est TOUJOURS
+// enregistrée dans l'unité prévue par le formulaire (unité de base du champ) ; l'unité choisie
+// (champ « …Unite ») ne sert qu'à l'affichage et à la saisie — tous les calculs, tolérances et
+// comparaisons restent donc justes quelle que soit l'échelle choisie (ex. 20 kV saisis = 20 000 V).
 const UNIT_FAMILIES = {
   tension: ["mV", "V", "kV"],
   courant: ["mA", "A", "kA"],
   resistance: ["µΩ", "mΩ", "Ω", "kΩ"],
   puissance: ["VA", "kVA", "MVA"],
+  puissanceActive: ["mW", "W", "kW", "MW"],
+  puissanceReactive: ["VAR", "kVAR", "MVAR"],
+  energie: ["Wh", "kWh", "MWh"],
+  inductance: ["µH", "mH", "H"],
+  capacite: ["nF", "µF", "mF"],
 };
+const FACTEUR_PREFIXE = { "µ": 1e-6, "m": 1e-3, "": 1, "k": 1e3, "M": 1e6, "G": 1e9, "n": 1e-9 };
+function facteurUnite(u) {
+  const fam = unitFamilyFor(u);
+  if (!fam) return null;
+  const racine = { tension: "V", courant: "A", resistance: "Ω", puissance: "VA", puissanceActive: "W", puissanceReactive: "VAR", energie: "Wh", inductance: "H", capacite: "F" }[Object.keys(UNIT_FAMILIES).find((k) => UNIT_FAMILIES[k] === fam)];
+  const prefixe = u.slice(0, u.length - racine.length);
+  return FACTEUR_PREFIXE[prefixe] ?? null;
+}
+// Saisie dans l'unité affichée → valeur enregistrée dans l'unité de base (chaîne, saisie partielle conservée).
+function versUniteBase(texte, uniteChoisie, uniteBase) {
+  if (!uniteBase || !uniteChoisie || uniteChoisie === uniteBase) return texte;
+  const v = numOf(texte);
+  const fc = facteurUnite(uniteChoisie), fb = facteurUnite(uniteBase);
+  if (v === null || fc === null || fb === null) return texte;
+  return String(Number((v * fc / fb).toPrecision(10)));
+}
+// Valeur enregistrée (unité de base) → valeur affichée dans l'unité choisie.
+function depuisUniteBase(valeur, uniteBase, uniteChoisie) {
+  if (valeur === "" || valeur === null || valeur === undefined) return valeur;
+  if (!uniteBase || !uniteChoisie || uniteChoisie === uniteBase) return valeur;
+  const v = numOf(valeur);
+  const fc = facteurUnite(uniteChoisie), fb = facteurUnite(uniteBase);
+  if (v === null || fc === null || fb === null) return valeur;
+  return String(Number((v * fb / fc).toPrecision(8)));
+}
 function unitFamilyFor(u) {
   for (const fam of Object.values(UNIT_FAMILIES)) if (fam.includes(u)) return fam;
   return null;
@@ -4632,16 +4727,22 @@ function Combo({ value, onChange, options, listId, style, placeholder, numeric, 
 
 // Valeur numérique + unité : si l'unité appartient à une famille (V/A/Ω/VA), un sélecteur
 // permet de changer d'échelle (mV/V/kV…) ; sinon l'unité reste affichée telle quelle.
-function NumberWithUnit({ value, unit, onValueChange, onUnitChange, width, fontSize, validState }) {
+function NumberWithUnit({ value, unit, onValueChange, onUnitChange, width, fontSize, validState, baseUnit }) {
   const family = unitFamilyFor(unit);
+  // Brouillon pendant la saisie (évite qu'une conversion ne réécrive « 0, » en « 0 ») ; hors saisie,
+  // la valeur enregistrée (unité de base) est affichée dans l'unité choisie.
+  const [brouillon, setBrouillon] = useState(null);
+  const base = baseUnit && unitFamilyFor(baseUnit) === family ? baseUnit : null;
+  const affiche = brouillon !== null ? brouillon : (base ? depuisUniteBase(value, base, unit || base) : value);
   const borderColor = validState === "ok" ? "#0F8A5F" : validState === "bad" ? "#C0392B" : validState === "warning" ? "#B5730A" : "#D8DEE5";
   const bgColor = validState === "ok" ? "#F0FBF6" : validState === "bad" ? "#FDF1F0" : validState === "warning" ? "#FDF3E3" : inputStyle.background;
   return (
     <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
       <input
         type="number" step="any"
-        value={value ?? ""}
-        onChange={(e) => onValueChange(e.target.value)}
+        value={affiche ?? ""}
+        onChange={(e) => { const t = e.target.value; if (base) { setBrouillon(t); onValueChange(versUniteBase(t, unit || base, base)); } else onValueChange(t); }}
+        onBlur={() => setBrouillon(null)}
         style={{ ...inputStyle, width: width || 66, padding: fontSize ? "8px 10px" : "5px 7px", fontSize: fontSize || 12, fontWeight: fontSize ? 600 : 400, border: `1.5px solid ${borderColor}`, background: bgColor }}
       />
       {family ? (
@@ -5858,6 +5959,15 @@ function ControlRow({ item, value, onChange, idPrefix, toleranceOverride }) {
   if (!value) return null; // donnée incompatible (ancien format) : on ignore plutôt que de planter
   const fields = value.fields || {};
   const setField = (k, v) => onChange({ ...value, fields: { ...fields, [k]: v } });
+  // Changer l'échelle d'un champ (ex. V → kV sur L1) l'applique à toutes les grandeurs de même nature
+  // du contrôle (L1, L2, L3, moyenne…) : un seul choix, cohérent sur toute la ligne.
+  const setUniteGroupe = (f, u) => {
+    const fam = unitFamilyFor(f.unit);
+    const maj = { ...fields };
+    (item.fields || []).forEach((x) => { if (x.unit && !x.compute && unitFamilyFor(x.unit) === fam) maj[x.key + "Unite"] = u; });
+    maj[f.key + "Unite"] = u;
+    onChange({ ...value, fields: maj });
+  };
   const hasToleranceField = (item.fields || []).some((f) => f.key === "tolerance");
   const toleranceMax = hasToleranceField ? numOf(fields.tolerance) : null;
   const tolMinField = (item.fields || []).find((f) => f.key === "tol_min" && f.compute);
@@ -5932,7 +6042,7 @@ function ControlRow({ item, value, onChange, idPrefix, toleranceOverride }) {
               <label key={f.key} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#8B96A3" }}>
                 {f.label}
                 <span style={{ ...inputStyle, width: 66, padding: "5px 7px", fontSize: 12, background: "#EEF2F6", color: "#0A5DA8", fontWeight: 700, display: "inline-block", textAlign: "center" }}>
-                  {f.compute(fields) || "—"}
+                  {(f.unitFrom && f.unit ? depuisUniteBase(f.compute(fields), f.unit, fields[f.unitFrom + "Unite"] || f.unit) : f.compute(fields)) || "—"}
                 </span>
                 {(() => {
                   const u = f.unitFrom ? (fields[f.unitFrom + "Unite"] || f.unit) : f.unit;
@@ -6020,8 +6130,9 @@ function ControlRow({ item, value, onChange, idPrefix, toleranceOverride }) {
                   <NumberWithUnit
                     value={fields[f.key]}
                     unit={fields[f.key + "Unite"] || f.unit}
+                    baseUnit={f.unit}
                     onValueChange={(v) => setField(f.key, v)}
-                    onUnitChange={(u) => setField(f.key + "Unite", u)}
+                    onUnitChange={(u) => setUniteGroupe(f, u)}
                     validState={fieldValidState(f.key)}
                     width={f.unit === "kWh" ? 140 : undefined}
                   />
@@ -6590,11 +6701,11 @@ function MiniField({ label, unit, children }) {
     </label>
   );
 }
-function MiniInputUnit({ label, value, unit, onValueChange, onUnitChange }) {
+function MiniInputUnit({ label, value, unit, onValueChange, onUnitChange, baseUnit }) {
   return (
     <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#8B96A3" }}>
       {label}
-      <NumberWithUnit value={value} unit={unit} onValueChange={onValueChange} onUnitChange={onUnitChange} />
+      <NumberWithUnit value={value} unit={unit} onValueChange={onValueChange} onUnitChange={onUnitChange} baseUnit={baseUnit} />
     </label>
   );
 }
@@ -6669,7 +6780,7 @@ function AnalyseHuilePanel({ eq, update, idPrefix }) {
                           {f.unit && <span>{f.unit}</span>}
                         </>
                       ) : f.unit ? (
-                        <NumberWithUnit value={v.fields[f.key]} unit={v.fields[f.key + "Unite"] || f.unit} onValueChange={(val) => setField(item.key, f.key, val)} onUnitChange={(u) => setField(item.key, f.key + "Unite", u)} />
+                        <NumberWithUnit value={v.fields[f.key]} unit={v.fields[f.key + "Unite"] || f.unit} baseUnit={f.unit} onValueChange={(val) => setField(item.key, f.key, val)} onUnitChange={(u) => setField(item.key, f.key + "Unite", u)} />
                       ) : (
                         <input value={v.fields[f.key] ?? ""} onChange={(e) => setField(item.key, f.key, e.target.value)} style={{ ...inputStyle, width: 90, padding: "5px 7px", fontSize: 12 }} />
                       )}
@@ -7242,7 +7353,7 @@ function AutonomieCalculee({ eq }) {
 // Sélecteur de régime (Monophasé/Triphasé) pour une section de mesures de l'Onduleur — change le
 // schéma affiché dynamiquement (getSchema) sans perdre les valeurs déjà saisies.
 function RegimeReseauSelector({ eq, update, reseau }) {
-  if (eq.type !== "Onduleur" && eq.type !== "Redresseur chargeur" && eq.type !== "Inverseur de source") return null;
+  if (eq.type !== "Onduleur" && eq.type !== "Redresseur chargeur" && eq.type !== "Inverseur de source" && eq.type !== "Bilan de puissance") return null;
   const regimes = eq.controles.regimes_reseaux || {};
   // Le réseau secours (by-pass) est relié directement à la sortie, sans transformation : sa tension
   // — et donc son régime mono/triphasé — est toujours identique à celle de l'utilisation. On
@@ -7494,7 +7605,7 @@ function sourcesTransfosAmont(eq, allEquipements) {
     if (a.source === "suivi" && a.repere) {
       const tr = (allEquipements || []).find((e) => e.type === "Transformateur" && (e.identification?.repere || "").trim() === String(a.repere).trim());
       const id = (tr && tr.identification) || {};
-      sources.push({ libelle: `transformateur « ${a.repere} »`, sn: numOf(id.puissance), u2: numOf(id.tensionSecondaire), ucc: numOf(id.ucc), n: nbExemplaires(a.nombre), deux: id.deuxEnroulementsSecondaires === "Oui", introuvable: !tr });
+      sources.push({ introuvable: !tr, libelle: `transformateur « ${a.repere} »`, sn: numOf(id.puissance), u2: numOf(id.tensionSecondaire), ucc: numOf(id.ucc), n: nbExemplaires(a.nombre), deux: id.deuxEnroulementsSecondaires === "Oui", introuvable: !tr });
     } else {
       sources.push({ libelle: `transformateur ${i + 2} (saisi manuellement)`, sn: numOf(a.sn), u2: numOf(a.u2), ucc: numOf(a.ucc), n: nbExemplaires(a.nombre), deux: false });
     }
@@ -9413,10 +9524,10 @@ function BRKReglagePanel({ eq, update, custom, onAddCustom, onChangeCustom, onRe
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "8px 0", borderBottom: "1px solid #E2E6EB" }}>
             <span style={{ fontSize: 12.5, color: "#3E4A5C", flex: "1 1 160px" }}>Surcharge longue</span>
-            <MiniInputUnit label="I nominal" value={sl.inominal} unit={sl.inominalUnite || "A"} onValueChange={(v) => setR("surcharge_longue", "inominal", v)} onUnitChange={(u) => setR("surcharge_longue", "inominalUnite", u)} />
+            <MiniInputUnit label="I nominal" value={sl.inominal} unit={sl.inominalUnite || "A"} baseUnit="A" onValueChange={(v) => setR("surcharge_longue", "inominal", v)} onUnitChange={(u) => setR("surcharge_longue", "inominalUnite", u)} />
             <MiniInput label="K1" value={sl.k1} onChange={(v) => setR("surcharge_longue", "k1", v)} />
             <MiniInput label="K2" value={sl.k2} onChange={(v) => setR("surcharge_longue", "k2", v)} />
-            <MiniInputUnit label="Ineutre" value={sl.ineutre} unit={sl.ineutreUnite || "A"} onValueChange={(v) => setR("surcharge_longue", "ineutre", v)} onUnitChange={(u) => setR("surcharge_longue", "ineutreUnite", u)} />
+            <MiniInputUnit label="Ineutre" value={sl.ineutre} unit={sl.ineutreUnite || "A"} baseUnit="A" onValueChange={(v) => setR("surcharge_longue", "ineutre", v)} onUnitChange={(u) => setR("surcharge_longue", "ineutreUnite", u)} />
             <MiniSelect label="tr" options={LISTE_TR_MODE} value={sl.tr_mode} onChange={(v) => setR("surcharge_longue", "tr_mode", v)} />
             <MiniInput label="tr" unit="s" value={sl.tr} onChange={(v) => setR("surcharge_longue", "tr", v)} />
             <MiniCombo label="à (x Ir)" options={LISTE_TR_CLASSE} value={sl.tr_classe} onChange={(v) => setR("surcharge_longue", "tr_classe", v)} listId="brk-tr-classe" />
@@ -9432,13 +9543,13 @@ function BRKReglagePanel({ eq, update, custom, onAddCustom, onChangeCustom, onRe
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "8px 0", borderBottom: "1px solid #E2E6EB" }}>
             <span style={{ fontSize: 12.5, color: "#3E4A5C", flex: "1 1 160px" }}>Instantané</span>
-            <MiniInputUnit label="Ii" value={inst.ii} unit={inst.iiUnite || "kA"} onValueChange={(v) => setR("instantane", "ii", v)} onUnitChange={(u) => setR("instantane", "iiUnite", u)} />
+            <MiniInputUnit label="Ii" value={inst.ii} unit={inst.iiUnite || "kA"} baseUnit="kA" onValueChange={(v) => setR("instantane", "ii", v)} onUnitChange={(u) => setR("instantane", "iiUnite", u)} />
             {seuilInst && <div style={{ flex: "1 1 100%", fontSize: 11.5, color: "#5B6B7D", lineHeight: 1.5 }}>{seuilInst.texte} Valeur de la documentation constructeur, à confirmer sur l'appareil.</div>}
             {reglagesETU && <div style={{ flex: "1 1 100%", fontSize: 11.5, color: "#5B6B7D", lineHeight: 1.5 }}>{reglagesETU.marque} {reglagesETU.nom} — plages de réglage de la notice {reglagesETU.source} : {reglagesETU.texte} La notice ne donne pas de tolérances chiffrées : limites génériques de l'app.</div>}
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "8px 0" }}>
             <span style={{ fontSize: 12.5, color: "#3E4A5C", flex: "1 1 160px" }}>Pouvoir de coupure</span>
-            <MiniInputUnit label="Icu" value={reglage.pouvoir_coupure.fields.icu} unit={reglage.pouvoir_coupure.fields.icuUnite || "kA"} onValueChange={(v) => setR("pouvoir_coupure", "icu", v)} onUnitChange={(u) => setR("pouvoir_coupure", "icuUnite", u)} />
+            <MiniInputUnit label="Icu" value={reglage.pouvoir_coupure.fields.icu} unit={reglage.pouvoir_coupure.fields.icuUnite || "kA"} baseUnit="kA" onValueChange={(v) => setR("pouvoir_coupure", "icu", v)} onUnitChange={(u) => setR("pouvoir_coupure", "icuUnite", u)} />
             {perf && (
               <div style={{ flex: "1 1 100%", fontSize: 11.5, color: "#5B6B7D", lineHeight: 1.5 }}>
                 {perf.selection && perf.selection.icu != null
@@ -11056,9 +11167,11 @@ function printFieldParts(item, value) {
   (item.fields || []).forEach((f) => {
     if (f.key === "realise") return; // sa présence même dans le rapport indique déjà que c'est réalisé
     if (f.key === "aide") return; // aide technicien (couple de serrage indicatif) : utile en saisie, pas dans le rapport — seule la valeur de couple renseignée par le technicien doit y figurer
-    const v = f.compute ? f.compute(fields) : fields[f.key];
     const unitKey = f.unitFrom ? f.unitFrom + "Unite" : f.key + "Unite";
     const unit = f.unit ? fields[unitKey] || f.unit : "";
+    // Valeur enregistrée dans l'unité de base du champ → affichée dans l'unité choisie.
+    const brut = f.compute ? f.compute(fields) : fields[f.key];
+    const v = f.unit && unit !== f.unit && unitFamilyFor(unit) === unitFamilyFor(f.unit) ? depuisUniteBase(brut, f.unit, unit) : brut;
     if (v !== "" && v !== null && v !== undefined) {
       // Pour un champ texte calculé (longText), l'état se déduit du marqueur ✓/⚠/🔴 en tête du
       // texte plutôt que de champTolStatus (qui ne s'applique pas à ce type de champ).
@@ -13864,14 +13977,22 @@ function docxTableauMesures(items, controlesSection) {
   const rows = [];
   items.forEach((item) => {
     const value = controlesSection[item.key] || { fields: {} };
-    const f = value.fields || {};
-    const computeField = (k) => { const fd = (item.fields || []).find((x) => x.key === k && x.compute); return fd ? fd.compute(f) : ""; };
+    const fBrut = value.fields || {};
+    // Valeurs converties dans l'unité choisie par le technicien (celle du 1er champ de la ligne :
+    // L1, P L1…) — les calculs et tolérances restent faits sur les valeurs enregistrées (unité de base).
+    const def = (k) => (item.fields || []).find((x) => x.key === k) || {};
+    const uniteLigne = (k) => fBrut[k + "Unite"] || def(k).unit;
+    const f = { ...fBrut };
+    const conv = (cles, ref) => cles.forEach((k) => { if (def(k).unit && fBrut[k] !== undefined) f[k] = depuisUniteBase(fBrut[k], def(k).unit, uniteLigne(ref) || def(k).unit); });
+    conv(["l1", "l2", "l3"], "l1"); conv(["p1", "p2", "p3"], "p1"); conv(["s1", "s2", "s3"], "s1");
+    const libU = (k, defaut) => uniteLigne(k) || defaut;
+    const computeField = (k) => { const fd = (item.fields || []).find((x) => x.key === k && x.compute); return fd ? fd.compute(fBrut) : ""; };
     let matched = false;
     if (f.p1 !== undefined || f.s1 !== undefined) {
-      rows.push(["P relevé (kW)", f.p1, f.p2, f.p3, moyenneOf(f.p1, f.p2, f.p3)]);
-      rows.push(["S relevé (kVA)", f.s1, f.s2, f.s3, moyenneOf(f.s1, f.s2, f.s3)]);
+      rows.push([`P relevé (${libU("p1", "kW")})`, f.p1, f.p2, f.p3, moyenneOf(f.p1, f.p2, f.p3)]);
+      rows.push([`S relevé (${libU("s1", "kVA")})`, f.s1, f.s2, f.s3, moyenneOf(f.s1, f.s2, f.s3)]);
       if ((item.fields || []).some((x) => x.key === "q1")) {
-        rows.push(["Q calculé (kVAR)", computeField("q1"), computeField("q2"), computeField("q3"), moyenneOf(computeField("q1"), computeField("q2"), computeField("q3"))]);
+        rows.push(["Q calculé (kVAR)", computeField("q1"), computeField("q2"), computeField("q3"), moyenneOf(computeField("q1"), computeField("q2"), computeField("q3"))]); // Q calculé depuis les valeurs de base (kW / kVA)
       }
       if (f.cosphi1 !== undefined) {
         rows.push(["Cos φ (calculé)", computeField("cosphi1"), computeField("cosphi2"), computeField("cosphi3"), moyenneOf(computeField("cosphi1"), computeField("cosphi2"), computeField("cosphi3"))]);
@@ -13894,12 +14015,15 @@ function docxTableauMesures(items, controlesSection) {
     if (f.l1 !== undefined && f.l2 !== undefined && f.l3 !== undefined) {
       let calc = "";
       (item.fields || []).forEach((ff) => {
-        if (!ff.compute) return;
-        const v = ff.compute(f);
-        if (v !== "" && v !== null && v !== undefined) calc += (calc ? "  ·  " : "") + `${v}${ff.unit ? " " + ff.unit : ""}`;
+        if (!ff.compute || ff.hidden) return;
+        const brut = ff.compute(fBrut);
+        const u = ff.unitFrom && ff.unit ? (fBrut[ff.unitFrom + "Unite"] || ff.unit) : ff.unit;
+        const v = ff.unitFrom && ff.unit ? depuisUniteBase(brut, ff.unit, u) : brut;
+        if (v !== "" && v !== null && v !== undefined) calc += (calc ? "  ·  " : "") + `${v}${u ? " " + u : ""}`;
       });
-      const etats = [champTolStatus(item, f, "l1", value.etat), champTolStatus(item, f, "l2", value.etat), champTolStatus(item, f, "l3", value.etat)];
-      rows.push([item.label, f.l1, f.l2, f.l3, calc, etats]);
+      const etats = [champTolStatus(item, fBrut, "l1", value.etat), champTolStatus(item, fBrut, "l2", value.etat), champTolStatus(item, fBrut, "l3", value.etat)];
+      const uL = uniteLigne("l1");
+      rows.push([uL && unitFamilyFor(uL) ? `${item.label} (${uL})` : item.label, f.l1, f.l2, f.l3, calc, etats]);
       return;
     }
     const parts = printFieldParts(item, value).map((p) => p.text);
