@@ -1609,10 +1609,12 @@ function gradinFrequenceAccordTheorique(q, u, selfMH) {
   if (c <= 0) return null;
   return Math.round((1 / (2 * Math.PI * Math.sqrt(l * c))) * 100) / 100;
 }
-function gradinIntensiteTheorique(q, u) {
+const estBatterieMono = (eq) => eq?.type === "Batterie de compensation" && eq?.identification?.triphase === "Monophasé";
+// Triphasé : I = Q / (√3·U) ; monophasé : I = Q / U.
+function gradinIntensiteTheorique(q, u, mono) {
   const qn = numOf(q), un = numOf(u);
   if (qn === null || un === null || un === 0) return null;
-  return Math.round(((qn * 1000) / (Math.sqrt(3) * un)) * 100) / 100;
+  return Math.round(((qn * 1000) / ((mono ? 1 : Math.sqrt(3)) * un)) * 100) / 100;
 }
 // Vrai si au moins un élément de batterie (Onduleur, Redresseur chargeur) est hors tolérance par
 // rapport à la moyenne relevée — utilisé pour rappeler au technicien de bien répercuter l'anomalie
@@ -1683,7 +1685,7 @@ function rapportTransformationHorsTolerance(eq) {
 function gradinsHorsTolerance(eq) {
   if (eq.type !== "Batterie de compensation") return false;
   return (eq.controles.gradins_dynamique || []).some((g) => {
-    const iTheo = gradinIntensiteTheorique(g.fields.q, g.fields.u);
+    const iTheo = gradinIntensiteTheorique(g.fields.q, g.fields.u, estBatterieMono(eq));
     if (iTheo === null) return false;
     const tolMin = Math.round(iTheo * 0.9 * 100) / 100, tolMax = Math.round(iTheo * 1.1 * 100) / 100;
     return ["i1", "i2", "i3"].some((k) => toleranceState(g.fields[k], tolMin, tolMax) === "bad");
@@ -1712,10 +1714,10 @@ function gradinCapacite(i, u, f) {
 }
 // Puissance réactive (kVAR) déduite du courant mesuré sur une phase — inverse de gradinIntensiteTheorique,
 // utile pour comparer phase par phase et au total avec la valeur théorique déclarée du gradin (Q).
-function gradinQMesuree(i, u) {
+function gradinQMesuree(i, u, mono) {
   const ii = numOf(i), uu = numOf(u);
   if (ii === null || uu === null) return null;
-  return Math.round(((ii * Math.sqrt(3) * uu) / 1000) * 100) / 100;
+  return Math.round(((ii * (mono ? 1 : Math.sqrt(3)) * uu) / 1000) * 100) / 100;
 }
 const LISTE_NOM_GRADIN = Array.from({ length: 24 }, (_, i) => `Gradin ${i + 1}`);
 function emptyDynamicEntry(label, fieldDefs, withActionEtat) {
@@ -6840,7 +6842,7 @@ function GradinsPanel({ eq, update, idPrefix }) {
           {entries.map((e) => {
             const used = entries.filter((x) => x.id !== e.id).map((x) => x.label);
             const options = LISTE_NOM_GRADIN.filter((t) => !used.includes(t));
-            const iTheo = gradinIntensiteTheorique(e.fields.q, e.fields.u);
+            const iTheo = gradinIntensiteTheorique(e.fields.q, e.fields.u, estBatterieMono(eq));
             const tolMin = iTheo !== null ? Math.round(iTheo * 0.9 * 100) / 100 : null;
             const tolMax = iTheo !== null ? Math.round(iTheo * 1.1 * 100) / 100 : null;
             const iStatus = (v) => (iTheo === null ? null : toleranceState(v, tolMin, tolMax));
@@ -6848,9 +6850,9 @@ function GradinsPanel({ eq, update, idPrefix }) {
             const c1 = gradinCapacite(e.fields.i1, e.fields.u, freqReseau);
             const c2 = gradinCapacite(e.fields.i2, e.fields.u, freqReseau);
             const c3 = gradinCapacite(e.fields.i3, e.fields.u, freqReseau);
-            const q1 = gradinQMesuree(e.fields.i1, e.fields.u);
-            const q2 = gradinQMesuree(e.fields.i2, e.fields.u);
-            const q3 = gradinQMesuree(e.fields.i3, e.fields.u);
+            const q1 = gradinQMesuree(e.fields.i1, e.fields.u, estBatterieMono(eq));
+            const q2 = gradinQMesuree(e.fields.i2, e.fields.u, estBatterieMono(eq));
+            const q3 = gradinQMesuree(e.fields.i3, e.fields.u, estBatterieMono(eq));
             const qMesures = [q1, q2, q3].filter((v) => v !== null);
             const qTotalMesure = qMesures.length ? Math.round((qMesures.reduce((a, b) => a + b, 0) / qMesures.length) * 100) / 100 : null;
             const qStatus = qTotalMesure === null ? null : toleranceState(e.fields.q, Math.round(qTotalMesure * 0.9 * 100) / 100, Math.round(qTotalMesure * 1.1 * 100) / 100);
@@ -6873,10 +6875,10 @@ function GradinsPanel({ eq, update, idPrefix }) {
 
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(105px, 1fr))", gap: 10, marginBottom: 8 }}>
                   {[
-                    { phase: "L1", i: "i1", iVal: e.fields.i1, c: c1, q: q1 },
+                    { phase: estBatterieMono(eq) ? "Phase" : "L1", i: "i1", iVal: e.fields.i1, c: c1, q: q1 },
                     { phase: "L2", i: "i2", iVal: e.fields.i2, c: c2, q: q2 },
                     { phase: "L3", i: "i3", iVal: e.fields.i3, c: c3, q: q3 },
-                  ].map((ph) => (
+                  ].filter((ph) => !estBatterieMono(eq) || ph.i === "i1").map((ph) => (
                     <div key={ph.phase} style={{ border: "1px solid #E2E6EB", borderRadius: 8, padding: 8 }}>
                       <div style={{ fontSize: 10.5, fontWeight: 700, color: "#8B96A3", marginBottom: 6 }}>{ph.phase}</div>
                       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -7938,7 +7940,7 @@ function analyseResonanceBatterie(eq, allEquipements) {
   }
   // Surcharge des condensateurs (courant max mesuré / courant théorique)
   const surcharges = gradins.map((g) => {
-    const it = gradinIntensiteTheorique(g.fields?.q, g.fields?.u);
+    const it = gradinIntensiteTheorique(g.fields?.q, g.fields?.u, estBatterieMono(eq));
     const imax = maxDe(g.fields?.i1, g.fields?.i2, g.fields?.i3);
     if (it === null || imax === null || !it) return null;
     const ratio = arrondi(imax / it);
@@ -9895,7 +9897,7 @@ function analyserAnomaliesEquipement(eq, contexte) {
   }
   // Gradins de batterie de compensation : courant par phase comparé au courant théorique (Q/U).
   (eq.controles.gradins_dynamique || []).filter((g) => g.label).forEach((g) => {
-    const iTheo = gradinIntensiteTheorique(g.fields.q, g.fields.u);
+    const iTheo = gradinIntensiteTheorique(g.fields.q, g.fields.u, estBatterieMono(eq));
     if (iTheo === null) return;
     const tolMin = Math.round(iTheo * 0.9 * 100) / 100, tolMax = Math.round(iTheo * 1.1 * 100) / 100;
     [["I1", "i1"], ["I2", "i2"], ["I3", "i3"]].forEach(([nom, key]) => {
@@ -16060,13 +16062,13 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
       elements.push(docxHeading(sec.title));
       const freqReseau = numOf(eq.controles.mesures_amont?.frequence_amont?.fields?.hz) || 50;
       (eq.controles.gradins_dynamique || []).filter((g) => g.label).forEach((g) => {
-        const iTheo = gradinIntensiteTheorique(g.fields.q, g.fields.u);
+        const iTheo = gradinIntensiteTheorique(g.fields.q, g.fields.u, estBatterieMono(eq));
         const c1 = gradinCapacite(g.fields.i1, g.fields.u, freqReseau);
         const c2 = gradinCapacite(g.fields.i2, g.fields.u, freqReseau);
         const c3 = gradinCapacite(g.fields.i3, g.fields.u, freqReseau);
-        const q1 = gradinQMesuree(g.fields.i1, g.fields.u);
-        const q2 = gradinQMesuree(g.fields.i2, g.fields.u);
-        const q3 = gradinQMesuree(g.fields.i3, g.fields.u);
+        const q1 = gradinQMesuree(g.fields.i1, g.fields.u, estBatterieMono(eq));
+        const q2 = gradinQMesuree(g.fields.i2, g.fields.u, estBatterieMono(eq));
+        const q3 = gradinQMesuree(g.fields.i3, g.fields.u, estBatterieMono(eq));
         const qMesures = [q1, q2, q3].filter((v) => v !== null);
         const qTotalMesure = qMesures.length ? Math.round((qMesures.reduce((a, b) => a + b, 0) / qMesures.length) * 100) / 100 : null;
 
@@ -16083,7 +16085,11 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
         ].filter(Boolean).join("   ·   ");
         if (summary) elements.push(new DOCX.Paragraph({ spacing: { after: 6 }, children: [new DOCX.TextRun({ text: summary, size: 16, color: "666666" })] }));
 
-        elements.push(docxPhaseTable([
+        if (estBatterieMono(eq)) {
+          const mesMono = [g.fields.i1 && `I mesuré : ${g.fields.i1} A`, c1 !== null && `C : ${c1} µF`, q1 !== null && `Q : ${q1} kVAR`].filter(Boolean).join("   ·   ");
+          const horsTol = iTheo !== null && toleranceState(g.fields.i1, Math.round(iTheo * 0.9 * 100) / 100, Math.round(iTheo * 1.1 * 100) / 100) === "bad";
+          if (mesMono) elements.push(new DOCX.Paragraph({ spacing: { after: 6 }, children: [new DOCX.TextRun({ text: mesMono, size: 16, color: horsTol ? DOCX_ORANGE : "333333", bold: horsTol })] }));
+        } else elements.push(docxPhaseTable([
           ["I (A)", g.fields.i1, g.fields.i2, g.fields.i3],
           ["C (µF)", c1, c2, c3],
           ["Q (kVAR)", q1, q2, q3],
@@ -16106,7 +16112,10 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
       sec.items.forEach((item) => {
         const value = eq.controles[sec.key][item.key] || { action: "", etat: "", fields: {} };
         const fields = value.fields || {};
-        if (item.key.startsWith("tensions_")) {
+        if (estBatterieMono(eq) && (item.key.startsWith("tensions_") || item.key.startsWith("courants_"))) {
+          if (item.key.startsWith("tensions_")) { rows.push(["Tension U", fields.u12, "", "", fields.u12]); rows.push(["THdV (%)", fields.thdv1, "", "", fields.thdv1]); }
+          else { rows.push(["Courant I", fields.i1, "", "", fields.i1]); rows.push(["ThdI (%)", fields.thdi1, "", "", fields.thdi1]); }
+        } else if (item.key.startsWith("tensions_")) {
           rows.push(["Tension (U12/U23/U31)", fields.u12, fields.u23, fields.u31, moyenneOf(fields.u12, fields.u23, fields.u31)]);
           rows.push(["THdV (%)", fields.thdv1, fields.thdv2, fields.thdv3, moyenneOf(fields.thdv1, fields.thdv2, fields.thdv3)]);
         } else if (item.key.startsWith("courants_")) {
@@ -17140,6 +17149,9 @@ let CURRENT_USER_FOR_STORAGE = null;
 // place (writeInFlight, comparaison avec le dernier état connu comme synchronisé) qui empêchent
 // normalement un sondage d'écraser une saisie non encore enregistrée.
 const REST_POLL_INTERVAL_MS = 20000;
+// Pas de relecture du serveur tant que l'app est en arrière-plan (onglet masqué, PWA réduite) :
+// économise les lectures Firestore ; une relecture est faite dès que l'app redevient visible.
+const pageMasquee = () => typeof document !== "undefined" && document.visibilityState === "hidden";
 // Écriture différée SANS PERTE : regroupe les modifications rapprochées (saisie au clavier) en une
 // seule écriture 500 ms après la dernière, puis garantit que cette dernière modification est bien
 // enregistrée. Trois protections contre ce qui faisait « revenir en arrière » un texte long :
@@ -17787,9 +17799,12 @@ export default function App({ currentUser, onLogout }) {
       await restaurerCache();
       if (cancelled) return;
       poll();
-      intervalId = setInterval(poll, REST_POLL_INTERVAL_MS);
+      intervalId = setInterval(() => { if (!pageMasquee()) poll(); }, REST_POLL_INTERVAL_MS);
     })();
-    return () => { cancelled = true; clearInterval(intervalId); };
+    // Retour sur l'app (onglet / PWA réaffichés) : synchronisation immédiate.
+    const surVisibilite = () => { if (!pageMasquee() && !cancelled) poll(); };
+    if (typeof document !== "undefined") document.addEventListener("visibilitychange", surVisibilite);
+    return () => { cancelled = true; clearInterval(intervalId); if (typeof document !== "undefined") document.removeEventListener("visibilitychange", surVisibilite); };
   }, [currentUser]);
 
   // Migration automatique des anciennes photos stockées en base64 (avant le passage à Firebase
@@ -17949,9 +17964,12 @@ export default function App({ currentUser, onLogout }) {
       await restaurerCache();
       if (cancelled) return;
       poll();
-      intervalId = setInterval(poll, REST_POLL_INTERVAL_MS);
+      intervalId = setInterval(() => { if (!pageMasquee()) poll(); }, REST_POLL_INTERVAL_MS);
     })();
-    return () => { cancelled = true; clearInterval(intervalId); };
+    // Retour sur l'app (onglet / PWA réaffichés) : synchronisation immédiate.
+    const surVisibilite = () => { if (!pageMasquee() && !cancelled) poll(); };
+    if (typeof document !== "undefined") document.addEventListener("visibilitychange", surVisibilite);
+    return () => { cancelled = true; clearInterval(intervalId); if (typeof document !== "undefined") document.removeEventListener("visibilitychange", surVisibilite); };
   }, [currentUser]);
 
   useEffect(() => {
@@ -18120,9 +18138,12 @@ export default function App({ currentUser, onLogout }) {
       await restaurerCache();
       if (cancelled) return;
       poll();
-      intervalId = setInterval(poll, REST_POLL_INTERVAL_MS);
+      intervalId = setInterval(() => { if (!pageMasquee()) poll(); }, REST_POLL_INTERVAL_MS);
     })();
-    return () => { cancelled = true; clearInterval(intervalId); };
+    // Retour sur l'app (onglet / PWA réaffichés) : synchronisation immédiate.
+    const surVisibilite = () => { if (!pageMasquee() && !cancelled) poll(); };
+    if (typeof document !== "undefined") document.addEventListener("visibilitychange", surVisibilite);
+    return () => { cancelled = true; clearInterval(intervalId); if (typeof document !== "undefined") document.removeEventListener("visibilitychange", surVisibilite); };
   }, [currentUser]);
 
   useEffect(() => {
@@ -18197,9 +18218,12 @@ export default function App({ currentUser, onLogout }) {
       await restaurerCache();
       if (cancelled) return;
       poll();
-      intervalId = setInterval(poll, REST_POLL_INTERVAL_MS);
+      intervalId = setInterval(() => { if (!pageMasquee()) poll(); }, REST_POLL_INTERVAL_MS);
     })();
-    return () => { cancelled = true; clearInterval(intervalId); };
+    // Retour sur l'app (onglet / PWA réaffichés) : synchronisation immédiate.
+    const surVisibilite = () => { if (!pageMasquee() && !cancelled) poll(); };
+    if (typeof document !== "undefined") document.addEventListener("visibilitychange", surVisibilite);
+    return () => { cancelled = true; clearInterval(intervalId); if (typeof document !== "undefined") document.removeEventListener("visibilitychange", surVisibilite); };
   }, [currentUser]);
 
   useEffect(() => {
@@ -18467,14 +18491,9 @@ export default function App({ currentUser, onLogout }) {
                     <RefreshCw size={14} /> <span className="hide-mobile">Reprendre un site existant</span>
                   </button>
                   {reprendreSiteOpen && sites.length > 0 && (
-                    <div style={{ position: "absolute", right: 0, top: "110%", background: "#F7F8FA", border: "1px solid #D8DEE5", borderRadius: 10, overflow: "hidden", zIndex: 50, minWidth: 260, maxHeight: 320, overflowY: "auto", boxShadow: "0 12px 30px rgba(0,0,0,0.4)" }}>
-                      {sites.map((s) => (
-                        <div key={s.id} onClick={() => { setSiteAReprendrePicker(s); setReprendreSiteOpen(false); }} style={{ padding: "9px 14px", fontSize: 12, color: "#3E4A5C", cursor: "pointer", borderBottom: "1px solid #E2E6EB" }}
-                          onMouseEnter={(e) => (e.currentTarget.style.background = "#E2E6EB")} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
-                          <div style={{ fontWeight: 700 }}>{s.nom || s.local || "Site sans nom"}</div>
-                          <div style={{ fontSize: 10.5, color: "#8B96A3" }}>{s.client || "Client non renseigné"} · {s.rapport?.date || "date inconnue"}</div>
-                        </div>
-                      ))}
+                    <div style={{ position: "absolute", right: 0, top: "110%", background: "#F7F8FA", border: "1px solid #D8DEE5", borderRadius: 10, zIndex: 50, width: "min(380px, calc(100vw - 32px))", maxHeight: 420, overflowY: "auto", boxShadow: "0 12px 30px rgba(0,0,0,0.4)", padding: 10 }}>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: "#5B6B7D", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 8 }}>Site à reprendre</div>
+                      <SelecteurSiteArbre sites={sites} value="" onChange={(id) => { const s = sites.find((x) => x.id === id); if (s) { setSiteAReprendrePicker(s); setReprendreSiteOpen(false); } }} />
                     </div>
                   )}
                   <button onClick={() => setScannerOuvert(true)} style={btnGhost(BRAND.blue)} title="Scanner l'étiquette QR d'un équipement pour le retrouver ou le reprendre">
