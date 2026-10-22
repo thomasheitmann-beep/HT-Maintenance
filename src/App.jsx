@@ -12368,7 +12368,27 @@ function mesuresComparees(visites) {
   });
   return { cols, lignes: [...lignes.values()] };
 }
-function RapportsView({ sites, interventions, onOpenSite, onOpenIntervention, onPrintSite, onPrintAnnexe, ficheInitiale = null }) {
+// Bandeau « archives » : nombre de RMP anciens restés sur le serveur, et bouton pour les charger.
+function BandeauArchives({ archives, compact = false }) {
+  if (!archives || !archives.nombre) return null;
+  const tousCharges = archives.charges >= archives.nombre;
+  return (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap", padding: compact ? "7px 10px" : "10px 14px", marginBottom: compact ? 8 : 14, border: "1px solid #D8DEE5", borderRadius: 10, background: "#F3F6FA", fontSize: compact ? 11.5 : 12.5, color: "#3E4A5C" }}>
+      <span>
+        {tousCharges
+          ? <>Archives affichées : <b>{archives.nombre}</b> RMP antérieur{archives.nombre > 1 ? "s" : ""} à {archives.annee} (pour cette session).</>
+          : <><b>{archives.nombre}</b> RMP antérieur{archives.nombre > 1 ? "s" : ""} à {archives.annee} archivé{archives.nombre > 1 ? "s" : ""} sur le serveur (non chargé{archives.nombre > 1 ? "s" : ""} sur l'appareil).</>}
+        {archives.erreur && <span style={{ display: "block", color: "#C0392B", marginTop: 4 }}>{archives.erreur}</span>}
+      </span>
+      {!tousCharges && (
+        <button onClick={() => archives.charger()} disabled={archives.enCours} style={{ ...btnGhost(BRAND.blue), padding: compact ? "4px 9px" : undefined, opacity: archives.enCours ? 0.6 : 1 }}>
+          <Download size={13} /> {archives.enCours ? "Chargement…" : "Afficher les archives"}
+        </button>
+      )}
+    </div>
+  );
+}
+function RapportsView({ sites, archives = null, interventions, onOpenSite, onOpenIntervention, onPrintSite, onPrintAnnexe, ficheInitiale = null }) {
   const [vue, setVue] = useState(ficheInitiale ? "equipements" : "rmp");
   const [f, setF] = useState({ client: "", site: "", annee: "", mois: "", type: "", etat: "", q: "" });
   const [fiche, setFiche] = useState(ficheInitiale); // clé de l'équipement physique affiché
@@ -12426,6 +12446,7 @@ function RapportsView({ sites, interventions, onOpenSite, onOpenIntervention, on
 
   return (
     <div>
+      <BandeauArchives archives={archives} />
       <Card style={{ marginBottom: 14 }}>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
           {sel("client", "Client", opts.client)}
@@ -12492,11 +12513,28 @@ function RapportsView({ sites, interventions, onOpenSite, onOpenIntervention, on
     </div>
   );
 }
+// Rattachement d'un équipement de RI à un équipement physique suivi (p = fiche de
+// construireEquipementsPhysiques). Lien explicite (sourceEquipementId / linkedEquipementId) en priorité ;
+// sinon, pour les anciens RI sans lien : même client, même site, même type, et même n° de série
+// (si renseigné des deux côtés) ou, à défaut, même repère. Lecture seule : aucune donnée modifiée.
+function equipementRICorrespond(iv, e, p, ids) {
+  if (e.sourceEquipementId) return ids.has(e.sourceEquipementId) ? "lien" : null;
+  if (iv.linkedEquipementId && ids.has(iv.linkedEquipementId)) return "lien";
+  if (!e.type || e.type !== p.type) return null;
+  if (normTxt(iv.client) !== normTxt(p.client)) return null;
+  const sitesFiche = new Set(p.visites.map((v) => normTxt(v.site.nom || v.site.local)));
+  if (normTxt(iv.site) && !sitesFiche.has(normTxt(iv.site))) return null;
+  const nsRI = normTxt(e.numeroSerie).replace(/\s/g, "");
+  const nsEq = new Set(p.visites.map((v) => { const f = v.eq.identification || {}; return normTxt(f.numeroSerie || f.numeroSerieDisjoncteur || f.numeroSerieContacteur || f.numeroSerieRelais).replace(/\s/g, ""); }).filter(Boolean));
+  if (nsRI && nsEq.size) return nsEq.has(nsRI) ? "auto" : null;
+  const rep = normTxt(e.reference);
+  return rep && rep === normTxt(p.repere) ? "auto" : null;
+}
 function FicheEquipementHistorique({ p, interventions, onRetour, onOpenSite, onOpenIntervention }) {
   const eq = p.dernier.eq, idf = eq.identification || {};
   const local = (p.dernier.site.locaux || []).find((l) => l.id === eq.localId);
   const ids = new Set(p.visites.map((v) => v.eq.id));
-  const ivs = interventions.filter((iv) => (iv.equipements || []).some((e) => ids.has(e.sourceEquipementId)));
+  const ivs = interventions.filter((iv) => (iv.equipements || []).some((e) => equipementRICorrespond(iv, e, p, ids)));
   const remplacements = [...new Map(p.visites.flatMap((v) => v.eq.remplacementsPieces || []).map((r) => [r.id, r])).values()].sort((a, b) => String(b.date).localeCompare(String(a.date)));
   const pieces = piecesUsureEquipement(eq).map((x) => ({ ...x, statut: statutEcheance(x.echeance, new Date().getFullYear()) }));
   const { cols, lignes } = mesuresComparees(p.visites);
@@ -12576,10 +12614,12 @@ function FicheEquipementHistorique({ p, interventions, onRetour, onOpenSite, onO
         <Card style={{ marginBottom: 14 }}>
           <SectionTitle>Rapports d'intervention ({ivs.length})</SectionTitle>
           {ivs.sort((a, b) => String(b.date).localeCompare(String(a.date))).map((iv) => {
-            const e = (iv.equipements || []).find((x) => ids.has(x.sourceEquipementId));
+            const e = (iv.equipements || []).find((x) => equipementRICorrespond(iv, x, p, ids));
+            const auto = e && equipementRICorrespond(iv, e, p, ids) === "auto";
             return (
               <div key={iv.id} onClick={() => onOpenIntervention(iv.id)} style={{ display: "flex", gap: 10, alignItems: "center", padding: "7px 0", borderBottom: "1px solid #E2E6EB", cursor: "pointer", fontSize: 12.5, flexWrap: "wrap" }}>
                 <b>{iv.numeroRI}</b><span>{dateFrCourte(iv.date)}</span>{e?.etat && <StatusBadge label={e.etat} size="sm" />}
+                {auto && <span title="Ancien RI sans lien direct : rattaché par client, site, type et n° de série / repère" style={{ fontSize: 10.5, color: "#8B96A3", border: "1px solid #D8DEE5", borderRadius: 999, padding: "1px 7px" }}>rapprochement auto</span>}
                 <span style={{ color: "#5B6B7D", flex: "1 1 200px" }}>{String(e?.remarque || "").slice(0, 120)}</span>
                 <ChevronRight size={14} color="#9AA5B1" />
               </div>
@@ -12717,7 +12757,7 @@ function BoutonEtiquetteQR({ eq, update, info }) {
 // Avec siteCourant (scan depuis un RMP en cours) : ouvre l'onglet de l'équipement s'il est déjà dans le
 // rapport, sinon propose de l'ajouter (reprise depuis la visite précédente) — refusé s'il appartient à
 // un autre site.
-function ScannerEquipement({ sites, onClose, onOpenSite, onReprendre, onHistorique, siteCourant = null, onAllerOnglet, onAjouter }) {
+function ScannerEquipement({ sites, archives = null, onClose, onOpenSite, onReprendre, onHistorique, siteCourant = null, onAllerOnglet, onAjouter }) {
   const videoRef = useRef(null);
   const [code, setCode] = useState("");
   const [saisie, setSaisie] = useState("");
@@ -12783,7 +12823,7 @@ function ScannerEquipement({ sites, onClose, onOpenSite, onReprendre, onHistoriq
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             <div style={{ fontSize: 12, color: "#5B6B7D" }}>Code lu : <b style={{ fontFamily: "monospace" }}>{code}</b></div>
             {!RE_CODE_QR.test(code) ? <div style={{ fontSize: 13, color: "#C0392B" }}>Ce QR code n'est pas une étiquette HT Maintenance.</div>
-              : !dernier ? <div style={{ fontSize: 13, color: "#C0392B" }}>Aucun équipement ne correspond à ce code.</div>
+              : !dernier ? <div><div style={{ fontSize: 13, color: "#C0392B" }}>Aucun équipement ne correspond à ce code.</div>{archives && archives.nombre > archives.charges && <div style={{ marginTop: 8 }}><BandeauArchives archives={archives} compact /></div>}</div>
               : siteCourant ? (() => {
                 const lignage = dernier.eq.lignageId || dernier.eq.id;
                 const present = (siteCourant.equipements || []).find((e) => e.qrCode === code || (e.lignageId || e.id) === lignage);
@@ -17466,11 +17506,21 @@ async function firestoreRestBatchGet(paths, idToken) {
   }
   return out;
 }
-function creerStockFragmente({ cheminLegacy, cheminIndex, collection }) {
-  const cache = new Map(); // id → { v, json } (dernière version connue du serveur)
+// Archivage (option `meta` + `estActif`) : l'index porte aussi quelques métadonnées par élément
+// (date, client, nom). Les éléments jugés « archivés » ne sont ni téléchargés ni gardés en mémoire :
+// ils restent sur le serveur, sont conservés tels quels dans l'index à chaque enregistrement (jamais
+// supprimés) et peuvent être chargés à la demande (chargerArchives). forcerActif(id) garde un élément
+// archivé chargé pour la session (ex. RMP ancien rouvert pour modification).
+function creerStockFragmente({ cheminLegacy, cheminIndex, collection, meta = null, estActif = null }) {
+  const cache = new Map(); // id → { v, json } (dernière version connue du serveur) — éléments actifs uniquement
+  const archives = new Map(); // id → entrée d'index des éléments archivés (non chargés)
+  const metaConnue = new Map(); // id → { v, m } : métadonnées déjà calculées (évite de relire un document)
+  const forces = new Set();
   let indexJson = null, indexUpdateTime = null, modeLegacy = false;
+  const actif = (e) => !meta || !estActif || forces.has(e.id) || estActif(e);
   const champsDoc = (json, user) => ({ value: { stringValue: json }, updatedAt: { integerValue: String(Date.now()) }, updatedBy: { stringValue: user || "" } });
   const cheminDoc = (id) => `${collection}/${encodeURIComponent(String(id))}`;
+  const metaDe = (el) => { try { return meta ? meta(el) : {}; } catch (e) { return {}; } };
   async function ecrireFragments(liste, idToken, user, { creationIndex = false } = {}) {
     const writes = [], nouveauCache = new Map(), entrees = [];
     let n = 0;
@@ -17482,9 +17532,11 @@ function creerStockFragmente({ cheminLegacy, cheminIndex, collection }) {
       const v = c && c.json === json ? c.v : `${Date.now().toString(36)}-${(n++).toString(36)}`;
       if (!c || c.json !== json) writes.push({ update: { name: FIRESTORE_DOC_PREFIX + cheminDoc(el.id), fields: champsDoc(json, user) } });
       nouveauCache.set(el.id, { v, json });
-      entrees.push({ id: el.id, v });
+      entrees.push({ id: el.id, v, ...metaDe(el) });
     });
     cache.forEach((_, id) => { if (!nouveauCache.has(id)) writes.push({ delete: FIRESTORE_DOC_PREFIX + cheminDoc(id) }); });
+    // Les éléments archivés (non chargés) sont toujours conservés dans l'index, à l'identique.
+    archives.forEach((e, id) => { if (!nouveauCache.has(id)) entrees.push(e); });
     const nouvelIndex = JSON.stringify(entrees);
     if (!writes.length && nouvelIndex === indexJson) return;
     const ecritureIndex = { update: { name: FIRESTORE_DOC_PREFIX + cheminIndex, fields: champsDoc(nouvelIndex, user) }, currentDocument: creationIndex || !indexUpdateTime ? { exists: false } : { updateTime: indexUpdateTime } };
@@ -17497,7 +17549,7 @@ function creerStockFragmente({ cheminLegacy, cheminIndex, collection }) {
     const r = await firestoreRestCommit(dernier, idToken);
     const res = r && r.writeResults;
     indexUpdateTime = (res && res[res.length - 1] && res[res.length - 1].updateTime) || (r && r.commitTime) || indexUpdateTime;
-    cache.clear(); nouveauCache.forEach((val, id) => cache.set(id, val));
+    cache.clear(); nouveauCache.forEach((val, id) => { cache.set(id, val); archives.delete(id); });
     indexJson = nouvelIndex;
   }
   async function lire(idToken, user) {
@@ -17513,7 +17565,7 @@ function creerStockFragmente({ cheminLegacy, cheminIndex, collection }) {
       const legacy = await lireJsonDistant(cheminLegacy, idToken);
       if (legacy === null) return null;
       try {
-        cache.clear(); indexJson = null; indexUpdateTime = null;
+        cache.clear(); archives.clear(); indexJson = null; indexUpdateTime = null;
         await ecrireFragments(JSON.parse(legacy), idToken, user, { creationIndex: true });
         console.info(`[Stockage] migration de ${cheminLegacy} vers ${collection} terminée.`);
       } catch (e) {
@@ -17524,25 +17576,72 @@ function creerStockFragmente({ cheminLegacy, cheminIndex, collection }) {
       return legacy;
     }
     const brut = (idx.fields.value && idx.fields.value.stringValue) || "[]";
-    const entrees = JSON.parse(brut);
-    const aCharger = entrees.filter((e) => { const c = cache.get(e.id); return !c || c.v !== e.v; }).map((e) => cheminDoc(e.id));
+    const lues = JSON.parse(brut);
+    // Métadonnées absentes (index écrit avant l'archivage ou par une ancienne version de l'app) :
+    // reprises de ce qui est déjà connu, sinon calculées en lisant le document une fois.
+    let manquaitMeta = false;
+    const entrees = lues.map((e) => {
+      if (!meta || "d" in e) return e;
+      manquaitMeta = true;
+      const k = metaConnue.get(e.id);
+      return k && k.v === e.v ? { ...e, ...k.m } : e;
+    });
+    archives.clear();
+    const actives = [];
+    entrees.forEach((e) => { if (meta && "d" in e && !actif(e)) archives.set(e.id, e); else actives.push(e); });
+    const aCharger = actives.filter((e) => { const c = cache.get(e.id); return !c || c.v !== e.v; }).map((e) => cheminDoc(e.id));
     if (aCharger.length) {
       const docs = await firestoreRestBatchGet(aCharger, idToken);
-      entrees.forEach((e) => { const d = docs.get(cheminDoc(e.id)); if (d) cache.set(e.id, { v: e.v, json: (d.fields && d.fields.value && d.fields.value.stringValue) || "null" }); });
+      actives.forEach((e) => { const d = docs.get(cheminDoc(e.id)); if (d) cache.set(e.id, { v: e.v, json: (d.fields && d.fields.value && d.fields.value.stringValue) || "null" }); });
     }
-    const presents = new Set(entrees.map((e) => e.id));
+    // Classement des éléments dont les métadonnées viennent d'être calculées.
+    const gardes = [];
+    actives.forEach((e) => {
+      if (meta && !("d" in e) && cache.has(e.id)) {
+        let m = {};
+        try { m = metaDe(JSON.parse(cache.get(e.id).json) || {}); } catch (err) { m = {}; }
+        metaConnue.set(e.id, { v: e.v, m });
+        const e2 = { ...e, ...m };
+        if ("d" in e2 && !actif(e2)) { archives.set(e.id, e2); cache.delete(e.id); return; }
+      }
+      gardes.push(e);
+    });
+    const presents = new Set(gardes.map((e) => e.id));
     Array.from(cache.keys()).forEach((id) => { if (!presents.has(id)) cache.delete(id); });
     indexJson = brut; indexUpdateTime = idx.updateTime || indexUpdateTime;
-    return "[" + entrees.filter((e) => cache.has(e.id) && cache.get(e.id).json !== "null").map((e) => cache.get(e.id).json).join(",") + "]";
+    const json = "[" + gardes.filter((e) => cache.has(e.id) && cache.get(e.id).json !== "null").map((e) => cache.get(e.id).json).join(",") + "]";
+    // Mise à niveau de l'index (ajout des métadonnées) : n'envoie que l'index, aucun document.
+    if (manquaitMeta) {
+      try { await ecrireFragments(JSON.parse(json), idToken, user); }
+      catch (e) { if (!e.conflit) console.warn("[Stockage] mise à niveau de l'index reportée :", e); }
+    }
+    return json;
   }
   async function ecrire(json, idToken, user) {
     if (modeLegacy) return firestoreRestSet(cheminLegacy, json, Date.now(), user, idToken);
     if (indexJson === null) { const r = await lire(idToken, user); if (modeLegacy) return firestoreRestSet(cheminLegacy, json, Date.now(), user, idToken); if (r === null) { cache.clear(); return ecrireFragments(JSON.parse(json), idToken, user, { creationIndex: true }); } }
     return ecrireFragments(JSON.parse(json), idToken, user);
   }
-  return { lire, ecrire };
+  // Liste des éléments archivés (métadonnées seulement) et chargement à la demande (lecture seule).
+  const archivesListe = () => Array.from(archives.values());
+  async function chargerArchives(idToken, ids) {
+    const liste = (ids || Array.from(archives.keys())).filter((id) => archives.has(id));
+    if (!liste.length) return [];
+    const docs = await firestoreRestBatchGet(liste.map(cheminDoc), idToken);
+    const out = [];
+    liste.forEach((id) => { const d = docs.get(cheminDoc(id)); const j = d && d.fields && d.fields.value && d.fields.value.stringValue; if (j && j !== "null") { try { out.push(JSON.parse(j)); } catch (e) { /* ignoré */ } } });
+    return out;
+  }
+  const forcerActif = (id) => { forces.add(id); };
+  return { lire, ecrire, archivesListe, chargerArchives, forcerActif };
 }
-const STOCK_SITES = creerStockFragmente({ cheminLegacy: "app-data/sites", cheminIndex: "app-data/sites-index", collection: "app-data/sites/rmp" });
+// RMP gardés sur l'appareil : année en cours + 3 années précédentes (rythme annuel ou triennal),
+// ainsi que tout RMP sans date. Les plus anciens restent sur le serveur, chargeables à la demande.
+const ANNEES_RMP_ACTIFS = 3;
+const anneeLimiteRmpActifs = () => new Date().getFullYear() - ANNEES_RMP_ACTIFS;
+const metaSite = (s) => ({ d: String(s?.rapport?.date || ""), c: String(s?.client || "").slice(0, 80), n: String(s?.nom || s?.local || "").slice(0, 80) });
+const siteEstActif = (e) => { const a = parseInt(String(e.d || "").slice(0, 4), 10); return !a || a >= anneeLimiteRmpActifs(); };
+const STOCK_SITES = creerStockFragmente({ cheminLegacy: "app-data/sites", cheminIndex: "app-data/sites-index", collection: "app-data/sites/rmp", meta: metaSite, estActif: siteEstActif });
 const STOCK_INTERVENTIONS = creerStockFragmente({ cheminLegacy: "app-data/interventions", cheminIndex: "app-data/interventions-index", collection: "app-data/interventions/ri" });
 // Mise à niveau des anciens enregistrements de sites (anciens types d'onduleur, champs manquants) :
 // factorisée pour servir à la lecture du serveur comme à la copie locale et à la fusion.
@@ -17570,6 +17669,16 @@ export default function App({ currentUser, onLogout }) {
   // immédiatement (contrairement à une closure capturée au moment de la création de l'effet).
   const sitesRefForPoll = useRef([]);
   useEffect(() => { sitesRefForPoll.current = sites; }, [sites]);
+  // Archives : RMP antérieurs à la limite (année en cours − 3), restés sur le serveur. archivesInfo =
+  // métadonnées issues de l'index ; sitesArchives = RMP effectivement chargés pour la session (lecture).
+  const [archivesInfo, setArchivesInfo] = useState([]);
+  const [sitesArchives, setSitesArchives] = useState([]);
+  const [chargementArchives, setChargementArchives] = useState(false);
+  const [erreurArchives, setErreurArchives] = useState("");
+  const rafraichirArchives = () => {
+    const liste = STOCK_SITES.archivesListe();
+    setArchivesInfo((cur) => (cur.length === liste.length && cur.every((e, i) => e.id === liste[i].id && e.v === liste[i].v) ? cur : liste));
+  };
   const aDejaChargeDesSites = useRef(false); // mémorise si un chargement (lecture OU écriture) a déjà ramené/envoyé des sites non vides — voir le filet de sécurité dans l'effet d'écriture plus bas
   const [loaded, setLoaded] = useState(false);
   const [selectedId, setSelectedId] = useState(null);
@@ -17744,6 +17853,7 @@ export default function App({ currentUser, onLogout }) {
         const idToken = await currentUser.getIdToken();
         const rawDistant = await STOCK_SITES.lire(idToken, currentUser?.email);
         if (cancelled) return;
+        rafraichirArchives();
         // Une modification locale a pu survenir PENDANT la lecture réseau : la réponse du serveur est
         // alors périmée, et l'appliquer ferait revenir en arrière le texte tout juste saisi.
         if (editVersionSites.current !== versionDepart || savePendingSites.current || writeInFlight.current) { setLoaded(true); return; }
@@ -18376,8 +18486,52 @@ export default function App({ currentUser, onLogout }) {
   const importInputRef = useRef(null);
   const [importError, setImportError] = useState(false);
 
-  function exportData() {
-    const payload = { app: "HT Maintenance", version: 1, exportedAt: new Date().toISOString(), sites, interventions };
+  // Charge les RMP archivés (lecture seule, pour la session) — renvoie la liste chargée.
+  async function chargerArchives() {
+    if (!currentUser) return sitesArchives;
+    const dejaCharges = new Set(sitesArchives.map((s) => s.id));
+    const ids = archivesInfo.map((e) => e.id).filter((id) => !dejaCharges.has(id));
+    if (!ids.length) return sitesArchives;
+    setChargementArchives(true); setErreurArchives("");
+    try {
+      const idToken = await currentUser.getIdToken();
+      const charges = normaliserSites(await STOCK_SITES.chargerArchives(idToken, ids));
+      const tous = [...sitesArchives, ...charges];
+      setSitesArchives(tous);
+      return tous;
+    } catch (e) {
+      console.error("[Archives] chargement impossible :", e);
+      setErreurArchives("Chargement des archives impossible (réseau indisponible ?). Réessayez une fois connecté.");
+      return null;
+    } finally {
+      setChargementArchives(false);
+    }
+  }
+  // Ouvre un RMP : s'il fait partie des archives chargées, il est réintégré aux RMP actifs pour la
+  // session (modifiable, enregistré normalement) puis rouvert.
+  function ouvrirSite(id) {
+    if (!sites.some((s) => s.id === id)) {
+      const archive = sitesArchives.find((s) => s.id === id);
+      if (archive) {
+        STOCK_SITES.forcerActif(id);
+        setSites((cur) => (cur.some((s) => s.id === id) ? cur : [...cur, archive]));
+        setSitesArchives((cur) => cur.filter((s) => s.id !== id));
+      }
+    }
+    setSelectedId(id);
+  }
+
+  async function exportData() {
+    // La sauvegarde doit être complète : les RMP archivés sont chargés au préalable.
+    let archivesPourExport = sitesArchives;
+    if (archivesInfo.length > sitesArchives.length) {
+      const r = await chargerArchives();
+      if (r === null && !window.confirm("Les RMP archivés n'ont pas pu être chargés (réseau ?). Télécharger une sauvegarde SANS ces archives ?")) return;
+      archivesPourExport = r || sitesArchives;
+    }
+    const idsActifs = new Set(sites.map((s) => s.id));
+    const tousSites = [...sites, ...archivesPourExport.filter((s) => !idsActifs.has(s.id))];
+    const payload = { app: "HT Maintenance", version: 1, exportedAt: new Date().toISOString(), sites: tousSites, interventions };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
     const filename = `HT-Maintenance_sauvegarde_${todayISO()}.json`;
     downloadBlob(blob, filename);
@@ -18402,6 +18556,13 @@ export default function App({ currentUser, onLogout }) {
   }
 
   const selected = sites.find((s) => s.id === selectedId) || null;
+  // Sites consultables (onglet Rapports, scanner, reprise) : actifs + archives chargées.
+  const sitesConsultation = useMemo(() => {
+    if (!sitesArchives.length) return sites;
+    const ids = new Set(sites.map((s) => s.id));
+    return [...sites, ...sitesArchives.filter((s) => !ids.has(s.id))];
+  }, [sites, sitesArchives]);
+  const infoArchives = { nombre: archivesInfo.length, charges: sitesArchives.length, enCours: chargementArchives, erreur: erreurArchives, annee: anneeLimiteRmpActifs(), charger: chargerArchives };
   const selectedIv = interventions.find((iv) => iv.id === selectedIvId) || null;
 
   return (
@@ -18485,15 +18646,16 @@ export default function App({ currentUser, onLogout }) {
                   <button onClick={() => setGererClientsOpen(true)} style={btnGhost(BRAND.blue)} title="Gérer les clients (organisations) et les contacts (personnes), avec export complet">
                     <Users size={14} /> <span className="hide-mobile">Gérer les clients et contacts</span>
                   </button>
-                  <button onClick={() => setReprendreSiteOpen((o) => !o)} disabled={sites.length === 0}
-                    style={{ ...btnGhost(BRAND.blue), opacity: sites.length === 0 ? 0.4 : 1, cursor: sites.length === 0 ? "not-allowed" : "pointer" }}
+                  <button onClick={() => setReprendreSiteOpen((o) => !o)} disabled={sitesConsultation.length === 0 && archivesInfo.length === 0}
+                    style={{ ...btnGhost(BRAND.blue), opacity: sitesConsultation.length === 0 && archivesInfo.length === 0 ? 0.4 : 1, cursor: sitesConsultation.length === 0 && archivesInfo.length === 0 ? "not-allowed" : "pointer" }}
                     title="Reprendre un site déjà créé (nom, locaux et équipements) pour une nouvelle visite">
                     <RefreshCw size={14} /> <span className="hide-mobile">Reprendre un site existant</span>
                   </button>
-                  {reprendreSiteOpen && sites.length > 0 && (
+                  {reprendreSiteOpen && (sitesConsultation.length > 0 || archivesInfo.length > 0) && (
                     <div style={{ position: "absolute", right: 0, top: "110%", background: "#F7F8FA", border: "1px solid #D8DEE5", borderRadius: 10, zIndex: 50, width: "min(380px, calc(100vw - 32px))", maxHeight: 420, overflowY: "auto", boxShadow: "0 12px 30px rgba(0,0,0,0.4)", padding: 10 }}>
                       <div style={{ fontSize: 11, fontWeight: 700, color: "#5B6B7D", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 8 }}>Site à reprendre</div>
-                      <SelecteurSiteArbre sites={sites} value="" onChange={(id) => { const s = sites.find((x) => x.id === id); if (s) { setSiteAReprendrePicker(s); setReprendreSiteOpen(false); } }} />
+                      <BandeauArchives archives={infoArchives} compact />
+                      <SelecteurSiteArbre sites={sitesConsultation} value="" onChange={(id) => { const s = sitesConsultation.find((x) => x.id === id); if (s) { setSiteAReprendrePicker(s); setReprendreSiteOpen(false); } }} />
                     </div>
                   )}
                   <button onClick={() => setScannerOuvert(true)} style={btnGhost(BRAND.blue)} title="Scanner l'étiquette QR d'un équipement pour le retrouver ou le reprendre">
@@ -18504,9 +18666,10 @@ export default function App({ currentUser, onLogout }) {
               )}
               {scannerOuvert && (
                 <ScannerEquipement
-                  sites={sites}
+                  sites={sitesConsultation}
+                  archives={infoArchives}
                   onClose={() => setScannerOuvert(false)}
-                  onOpenSite={(id) => { setScannerOuvert(false); setSelectedId(id); }}
+                  onOpenSite={(id) => { setScannerOuvert(false); ouvrirSite(id); }}
                   onReprendre={(site) => { setScannerOuvert(false); setSiteAReprendrePicker(site); }}
                   onHistorique={({ site, eq }) => { setScannerOuvert(false); setFicheInitiale(cleEquipementPhysique(site, eq)); setView("rapports"); }}
                 />
@@ -18584,7 +18747,7 @@ export default function App({ currentUser, onLogout }) {
             !ivLoaded ? <div style={{ textAlign: "center", padding: 60, color: "#8B96A3", fontSize: 13 }}>{enLigne ? "Chargement…" : "Hors connexion — les données se chargeront dès le retour du réseau."}</div> : <InterventionsOverview interventions={interventions} sites={sites} onOpen={setSelectedIvId} onCreate={createIntervention} onPlanifier={planifierIntervention} />
           ) : view === "rapports" ? (
             !loaded || !ivLoaded ? <div style={{ textAlign: "center", padding: 60, color: "#8B96A3", fontSize: 13 }}>{enLigne ? "Chargement…" : "Hors connexion — les données se chargeront dès le retour du réseau."}</div> : (
-              <RapportsView key={ficheInitiale || "rapports"} ficheInitiale={ficheInitiale} sites={sites} interventions={interventions} onOpenSite={setSelectedId} onOpenIntervention={setSelectedIvId} onPrintSite={requestPrintSite} onPrintAnnexe={setPrintAnnexeSite} />
+              <RapportsView key={ficheInitiale || "rapports"} ficheInitiale={ficheInitiale} sites={sitesConsultation} archives={infoArchives} interventions={interventions} onOpenSite={ouvrirSite} onOpenIntervention={setSelectedIvId} onPrintSite={requestPrintSite} onPrintAnnexe={setPrintAnnexeSite} />
             )
           ) : (
             !loaded || !ivLoaded ? <div style={{ textAlign: "center", padding: 60, color: "#8B96A3", fontSize: 13 }}>{enLigne ? "Chargement…" : "Hors connexion — les données se chargeront dès le retour du réseau."}</div> : (
