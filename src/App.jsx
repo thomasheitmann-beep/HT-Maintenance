@@ -14,7 +14,7 @@ import {
   Plus, Search, AlertTriangle, CheckCircle2, AlertOctagon,
   Trash2, ArrowLeft, Building2, Clock, ChevronRight, ChevronDown,
   MapPin, ShieldCheck, FileText, Settings2, Printer, ImagePlus,
-  Mail, PenLine, RotateCcw, ClipboardList, X, MinusCircle, Download, Upload, Copy, RefreshCw, Users, Phone, Crop, QrCode,
+  Mail, PenLine, RotateCcw, ClipboardList, X, MinusCircle, Download, Upload, Copy, RefreshCw, Users, Phone, Crop, QrCode, Camera,
 } from "lucide-react";
 
 /* =========================================================================
@@ -117,12 +117,12 @@ function pointsControleRegimeBT(regimeNeutre, normeTableau) {
 }
 // --- Régime de neutre séparé HTA / BT (un local peut avoir les deux) ---------------------------
 const LISTE_REGIME_NEUTRE_HTA = ["Neutre isolé (HTA)", "Neutre compensé / résonnant (HTA)", "Neutre résistant (HTA)"];
-const LISTE_REGIME_NEUTRE_BT = ["TT (BT)", "TN-S (BT)", "TN-C (BT)", "TN-C-S (BT)", "IT (BT)"];
+const LISTE_REGIME_NEUTRE_BT_LOCAL = ["TT (BT)", "TN-S (BT)", "TN-C (BT)", "TN-C-S (BT)", "IT (BT)"];
 // Anciennes fiches : un seul champ « regimeNeutre » (HTA ou BT) — réparti à la volée.
 function regimesNeutreDuLocal(l) {
   const ancien = String(l?.regimeNeutre || "");
   const hta = l?.regimeNeutreHTA !== undefined ? l.regimeNeutreHTA : (/HTA/i.test(ancien) && !/\//.test(ancien) ? ancien : "");
-  const bt = l?.regimeNeutreBT !== undefined ? l.regimeNeutreBT : (regimeBTDuLocal(ancien) ? (LISTE_REGIME_NEUTRE_BT.find((x) => x.startsWith(regimeBTDuLocal(ancien) + " ")) || ancien) : "");
+  const bt = l?.regimeNeutreBT !== undefined ? l.regimeNeutreBT : (regimeBTDuLocal(ancien) ? (LISTE_REGIME_NEUTRE_BT_LOCAL.find((x) => x.startsWith(regimeBTDuLocal(ancien) + " ")) || ancien) : "");
   return { hta, bt };
 }
 const texteRegimesNeutre = (l) => { const { hta, bt } = regimesNeutreDuLocal(l); return [hta && `HTA : ${hta.replace(/ \(HTA\)$/, "")}`, bt && `BT : ${bt.replace(/ \(BT\)$/, "")}`].filter(Boolean).join(" · "); };
@@ -6769,7 +6769,7 @@ function RapportTab({ site, update }) {
               </Field>
               <Field label="Régime de neutre BT (SLT)">
                 {(() => { const { bt } = regimesNeutreDuLocal(l); return (<>
-                  <Combo value={bt} onChange={(v) => setRegimeLocal(l.id, "bt", v)} options={LISTE_REGIME_NEUTRE_BT} listId={`${l.id}-regimebt`} placeholder="Côté BT" />
+                  <Combo value={bt} onChange={(v) => setRegimeLocal(l.id, "bt", v)} options={LISTE_REGIME_NEUTRE_BT_LOCAL} listId={`${l.id}-regimebt`} placeholder="Côté BT" />
                   {bt && REGIME_NEUTRE_DESCRIPTIONS[bt] && <div style={{ fontSize: 11, color: "#8B96A3", marginTop: 6, lineHeight: 1.4 }}>{REGIME_NEUTRE_DESCRIPTIONS[bt]}</div>}
                   {pointsControleRegimeBT(bt, normesTableauDuLocal(l)) && (
                     <div style={{ fontSize: 11, color: "#0A5DA8", background: "#EEF2F6", borderRadius: 6, padding: "6px 8px", marginTop: 6, lineHeight: 1.45 }}>
@@ -7040,8 +7040,21 @@ function GradinsPanel({ eq, update, idPrefix }) {
                   )}
                 </div>
 
-                <div style={{ fontSize: 10.5, fontWeight: 700, color: "#8B96A3", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>
-                  Pièces d'usure (usage interne — non affiché au client)
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap", marginBottom: 6 }}>
+                  <div style={{ fontSize: 10.5, fontWeight: 700, color: "#8B96A3", textTransform: "uppercase", letterSpacing: 0.5 }}>
+                    Pièces d'usure (usage interne — non affiché au client)
+                  </div>
+                  <BoutonLirePlaque compact libelle="Lire une plaque" typeEquipement="Batterie de compensation"
+                    contexte={`Composant d'un gradin de batterie de compensation (condensateur, contacteur ou fusible) — une seule pièce par photo en général. Tension du réseau : ${e.fields.u || 400} V. Pour un condensateur, la référence doit inclure marque et référence suivies entre parenthèses de la puissance à la tension du réseau et de la capacité (ex. « Multicond UHPC-37,0-525-3P (21,5 kvar sous 400 V, 3 × 142,4 µF) »).`}
+                    champs={[
+                      { key: "condensateursRef", label: "Condensateurs — marque, référence et caractéristiques" },
+                      { key: "condensateursAnnee", label: "Condensateurs — année de fabrication (si lisible)" },
+                      { key: "contacteurRef", label: "Contacteur — marque et référence" },
+                      { key: "contacteurAnnee", label: "Contacteur — année de fabrication (si lisible)" },
+                      { key: "fusiblesRef", label: "Fusibles — marque, référence et calibre" },
+                      { key: "fusiblesAnnee", label: "Fusibles — année de fabrication (si lisible)" },
+                    ]}
+                    valeursActuelles={e.fields} onAppliquer={(patch) => setEntry(e.id, { fields: { ...e.fields, ...patch } })} />
                 </div>
                 {(() => {
                   // Pièces d'usure du gradin : une ligne par pièce, référence en grand, durée de vie 10 ans par défaut (modifiable), échéance calculée.
@@ -7739,7 +7752,7 @@ function sourcesTransfosAmont(eq, allEquipements) {
     if (a.source === "suivi" && a.repere) {
       const tr = (allEquipements || []).find((e) => e.type === "Transformateur" && (e.identification?.repere || "").trim() === String(a.repere).trim());
       const id = (tr && tr.identification) || {};
-      sources.push({ introuvable: !tr, libelle: `transformateur « ${a.repere} »`, sn: numOf(id.puissance), u2: numOf(id.tensionSecondaire), ucc: numOf(id.ucc), n: nbExemplaires(a.nombre), deux: id.deuxEnroulementsSecondaires === "Oui", introuvable: !tr });
+      sources.push({ introuvable: !tr, libelle: `transformateur « ${a.repere} »`, sn: numOf(id.puissance), u2: numOf(id.tensionSecondaire), ucc: numOf(id.ucc), n: nbExemplaires(a.nombre), deux: id.deuxEnroulementsSecondaires === "Oui" });
     } else {
       sources.push({ libelle: `transformateur ${i + 2} (saisi manuellement)`, sn: numOf(a.sn), u2: numOf(a.u2), ucc: numOf(a.ucc), n: nbExemplaires(a.nombre), deux: false });
     }
@@ -8873,6 +8886,106 @@ function VentilationCatalogueCompensation({ eq, update }) {
   );
 }
 const CATALOGUE_PAR_CATEGORIE_USURE = { condensateursAlternatifs: "ac", condensateursContinus: "dc", ventilateurs: "ventil" };
+// =============================================================================================
+// Lecture de plaque signalétique par IA (photo → champs pré-remplis). L'appel passe par la fonction
+// serveur /api/lire-plaque (clé API côté Vercel, utilisateur vérifié). Les valeurs lues ne sont
+// qu'une proposition : un écran de validation champ par champ précède toute modification.
+async function lirePlaqueIA({ file, typeEquipement, contexte, champs }) {
+  if (!CURRENT_USER_FOR_STORAGE) throw new Error("Connexion requise.");
+  if (typeof navigator !== "undefined" && navigator.onLine === false) throw new Error("Pas de réseau : la lecture de plaque nécessite une connexion. La photo peut être relue plus tard.");
+  const blob = await compressImageToBlob(file, 1600, 0.82);
+  const dataUrl = await blobToDataUrl(blob);
+  const idToken = await CURRENT_USER_FOR_STORAGE.getIdToken();
+  const res = await fetch("/api/lire-plaque", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${idToken}` },
+    body: JSON.stringify({
+      image: String(dataUrl).split(",")[1], mediaType: "image/jpeg", typeEquipement, contexte,
+      champs: champs.map((c) => ({ key: c.key, label: c.label, ...(Array.isArray(c.options) && c.options.length ? { options: c.options.slice(0, 150) } : {}) })),
+    }),
+  });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(j.erreur || `Lecture impossible (erreur ${res.status}).`);
+  return j;
+}
+function BoutonLirePlaque({ champs, valeursActuelles = {}, onAppliquer, typeEquipement, contexte = "", libelle = "Lire la plaque", compact = false }) {
+  const inputRef = useRef(null);
+  const [lecture, setLecture] = useState(false);
+  const [erreur, setErreur] = useState("");
+  const [resultat, setResultat] = useState(null); // { lignes: [{key,label,lu,actuel,coche,incertain}], texte, commentaire }
+  const [voirTexte, setVoirTexte] = useState(false);
+  async function surFichier(file) {
+    if (!file) return;
+    setErreur(""); setLecture(true);
+    try {
+      const r = await lirePlaqueIA({ file, typeEquipement, contexte, champs });
+      const lignes = champs.filter((c) => r.valeurs && r.valeurs[c.key] !== undefined).map((c) => {
+        const lu = String(r.valeurs[c.key]);
+        const brut = valeursActuelles ? valeursActuelles[c.key] : undefined;
+        const actuel = brut === undefined || brut === null ? "" : String(brut);
+        // Coché d'office si le champ est vide ; une valeur déjà saisie n'est remplacée que sur décision.
+        return { key: c.key, label: c.label, lu, actuel, incertain: (r.incertains || []).includes(c.key), coche: !actuel.trim() };
+      });
+      setResultat({ lignes, texte: r.texte || "", commentaire: r.commentaire || "" });
+    } catch (e) {
+      setErreur(e.message || "Lecture impossible.");
+    } finally {
+      setLecture(false);
+    }
+  }
+  const majLigne = (key, patch) => setResultat((r) => ({ ...r, lignes: r.lignes.map((l) => (l.key === key ? { ...l, ...patch } : l)) }));
+  function appliquer() {
+    const patch = {};
+    resultat.lignes.filter((l) => l.coche && l.lu.trim()).forEach((l) => { patch[l.key] = l.lu.trim(); });
+    if (Object.keys(patch).length) onAppliquer(patch);
+    setResultat(null); setVoirTexte(false);
+  }
+  return (
+    <span style={{ display: "inline-flex", flexDirection: "column", gap: 4 }} onClick={(e) => e.stopPropagation()}>
+      <input ref={inputRef} type="file" accept="image/*" capture="environment" style={{ display: "none" }}
+        onChange={(e) => { const f = e.target.files && e.target.files[0]; e.target.value = ""; surFichier(f); }} />
+      <button onClick={() => inputRef.current && inputRef.current.click()} disabled={lecture} style={{ ...btnGhost(BRAND.blue), ...(compact ? { padding: "5px 9px" } : {}), opacity: lecture ? 0.6 : 1 }}
+        title="Photographier la plaque signalétique : les informations lisibles sont proposées pour remplir les champs">
+        <Camera size={13} /> {lecture ? "Lecture en cours…" : libelle}
+      </button>
+      {erreur && <span style={{ fontSize: 11, color: "#C0392B", maxWidth: 260 }}>{erreur}</span>}
+      {resultat && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <div style={{ background: "#fff", borderRadius: 12, width: "min(560px, 100%)", maxHeight: "90vh", overflowY: "auto", padding: 16, boxShadow: "0 20px 50px rgba(0,0,0,0.35)" }}>
+            <div style={{ fontWeight: 800, fontSize: 15, marginBottom: 4, color: "#1A1F26" }}>Informations lues sur la plaque</div>
+            <div style={{ fontSize: 11.5, color: "#5B6B7D", marginBottom: 10 }}>Cochez les valeurs à reprendre (modifiables avant validation). Orange : lecture incertaine, à vérifier.</div>
+            {resultat.lignes.length === 0 ? (
+              <div style={{ fontSize: 13, color: "#B5730A", padding: "10px 0" }}>Aucune information exploitable n'a été trouvée pour ces champs. Essayez une photo plus nette, de face et sans reflet.</div>
+            ) : resultat.lignes.map((l) => (
+              <div key={l.key} style={{ display: "grid", gridTemplateColumns: "26px 1fr", gap: 6, alignItems: "start", padding: "8px 0", borderBottom: "1px solid #E2E6EB" }}>
+                <input type="checkbox" checked={l.coche} onChange={(e) => majLigne(l.key, { coche: e.target.checked })} style={{ marginTop: 6 }} />
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "#5B6B7D", textTransform: "uppercase", letterSpacing: 0.3 }}>{l.label}</div>
+                  <input type="text" value={l.lu} onChange={(e) => majLigne(l.key, { lu: e.target.value, coche: true })}
+                    style={{ ...inputStyle, width: "100%", boxSizing: "border-box", padding: "6px 8px", fontSize: 13, marginTop: 3, ...(l.incertain ? { borderColor: "#E0A040", background: "#FDF6EC" } : {}) }} />
+                  <div style={{ fontSize: 11, color: "#8B96A3", marginTop: 2 }}>Actuel : {l.actuel || "—"}{l.incertain ? " · lecture incertaine" : ""}</div>
+                </div>
+              </div>
+            ))}
+            {resultat.commentaire && <div style={{ fontSize: 12, color: "#3E4A5C", background: "#EEF2F6", borderRadius: 6, padding: "6px 8px", marginTop: 10 }}>{resultat.commentaire}</div>}
+            {resultat.texte && (
+              <div style={{ marginTop: 8 }}>
+                <span onClick={() => setVoirTexte((v) => !v)} style={{ fontSize: 11.5, color: "#0A5DA8", cursor: "pointer" }}>{voirTexte ? "Masquer" : "Voir"} le texte lu sur la plaque</span>
+                {voirTexte && <pre style={{ whiteSpace: "pre-wrap", fontSize: 11.5, background: "#F7F8FA", border: "1px solid #E2E6EB", borderRadius: 6, padding: 8, marginTop: 4 }}>{resultat.texte}</pre>}
+              </div>
+            )}
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 14 }}>
+              <button onClick={() => { setResultat(null); setVoirTexte(false); }} style={btnGhost()}>Annuler</button>
+              {resultat.lignes.length > 0 && <button onClick={appliquer} style={btnPrimary()}><CheckCircle2 size={14} /> Appliquer la sélection</button>}
+            </div>
+          </div>
+        </div>
+      )}
+    </span>
+  );
+}
+// Champs d'identification jamais lus sur une plaque (repère interne, liens vers d'autres équipements, choix d'app).
+const CHAMPS_IDENTIFICATION_HORS_PLAQUE = ["repere", "transformateurAssocie", "transfoManuel", "presenceRelais", "presenceTC", "transfoSnManuel", "transfoUccManuel"];
 function PiecesUsureUPSPanel({ eq, update, itemFicheBatterie }) {
   const [catalogueOuvert, setCatalogueOuvert] = useState(null); // id du modèle dont le catalogue est ouvert
   const valeurFiche = eq.controles.batterie_id?.batterie_caracteristiques || { fields: {} };
@@ -8932,6 +9045,17 @@ function PiecesUsureUPSPanel({ eq, update, itemFicheBatterie }) {
                         <button onClick={() => setCatalogueOuvert(catalogueOuvert === m.id ? null : m.id)} style={btnGhost(BRAND.blue)} title="Rechercher la pièce dans le catalogue (caractéristiques, dimensions, équivalences)">
                           <Search size={13} /> Catalogue
                         </button>
+                      )}
+                      {!isAutoBatterie && (
+                        <BoutonLirePlaque compact libelle="Photo" typeEquipement={eq.type}
+                          contexte={`Pièce d'usure « ${cat.label} » d'un équipement « ${eq.type} ». Pour la description, rédiger une description technique courte comme dans un catalogue (ex. capacité µF, tension V, dimensions Ø×H mm, type).`}
+                          champs={[
+                            { key: "description", label: "Description technique (capacité, tension, dimensions, type…)" },
+                            { key: "marque", label: "Marque / fabricant" },
+                            { key: "modele", label: "Modèle / référence exacte" },
+                            { key: "anneeMiseEnService", label: "Année de fabrication (seulement si un code date est lisible)" },
+                          ]}
+                          valeursActuelles={m} onAppliquer={(patch) => setModele(m.id, patch)} />
                       )}
                       {modeles.length > 1 && !(cat.key === "batteries" && idx === 0) && (
                         <button onClick={() => removeModele(m.id)} style={{ background: "none", border: "none", color: "#EF4444", cursor: "pointer", padding: 4 }} title="Retirer">
@@ -10414,7 +10538,14 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
             <div style={{ marginBottom: 16 }} onPaste={(e) => { const f = imageDuPressePapiers(e); if (f) { e.preventDefault(); photoEquipementDepuisFichier(f).then((p) => update({ ...eq, photoEquipement: p })).catch(() => {}); } }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap", marginBottom: 4 }}>
                 <SectionTitle>Identification</SectionTitle>
-                <PhotoEquipementField photo={eq.photoEquipement} onChange={(p) => update({ ...eq, photoEquipement: p })} idPrefix={eq.id} />
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <BoutonLirePlaque typeEquipement={eq.type}
+                    contexte={`Plaque signalétique d'un équipement « ${eq.type} ». Un équipement peut porter plusieurs plaques (cellule, appareil de coupure, relais de protection, TC…) : ne remplir que ce qui est lisible sur cette photo.`}
+                    champs={schema.identification.filter((f) => !f.multi && !CHAMPS_IDENTIFICATION_HORS_PLAQUE.includes(f.key) && !champIdentificationMasque(eq, f.key)).map((f) => ({ key: f.key, label: f.label, options: optionsFusionnees[f.key] }))}
+                    valeursActuelles={eq.identification}
+                    onAppliquer={(patch) => update(repairEquipementControles({ ...eq, identification: { ...eq.identification, ...patch } }))} />
+                  <PhotoEquipementField photo={eq.photoEquipement} onChange={(p) => update({ ...eq, photoEquipement: p })} idPrefix={eq.id} />
+                </div>
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 14 }}>
                 {schema.identification.map((f) => {
