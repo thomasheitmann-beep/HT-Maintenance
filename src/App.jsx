@@ -112,7 +112,37 @@ const REFERENCE_NORME_REGIME_BT = {
 function pointsControleRegimeBT(regimeNeutre, normeTableau) {
   const regime = regimeBTDuLocal(regimeNeutre);
   if (!regime) return null;
-  return POINTS_CONTROLE_REGIME_BT[regime] + (REFERENCE_NORME_REGIME_BT[normeTableau || "NF C 15-100"] || "");
+  const normes = Array.isArray(normeTableau) ? (normeTableau.length ? normeTableau : ["NF C 15-100"]) : [normeTableau || "NF C 15-100"];
+  return POINTS_CONTROLE_REGIME_BT[regime] + normes.map((n) => REFERENCE_NORME_REGIME_BT[n] || "").join("");
+}
+// --- Régime de neutre séparé HTA / BT (un local peut avoir les deux) ---------------------------
+const LISTE_REGIME_NEUTRE_HTA = ["Neutre isolé (HTA)", "Neutre compensé / résonnant (HTA)", "Neutre résistant (HTA)"];
+const LISTE_REGIME_NEUTRE_BT = ["TT (BT)", "TN-S (BT)", "TN-C (BT)", "TN-C-S (BT)", "IT (BT)"];
+// Anciennes fiches : un seul champ « regimeNeutre » (HTA ou BT) — réparti à la volée.
+function regimesNeutreDuLocal(l) {
+  const ancien = String(l?.regimeNeutre || "");
+  const hta = l?.regimeNeutreHTA !== undefined ? l.regimeNeutreHTA : (/HTA/i.test(ancien) && !/\//.test(ancien) ? ancien : "");
+  const bt = l?.regimeNeutreBT !== undefined ? l.regimeNeutreBT : (regimeBTDuLocal(ancien) ? (LISTE_REGIME_NEUTRE_BT.find((x) => x.startsWith(regimeBTDuLocal(ancien) + " ")) || ancien) : "");
+  return { hta, bt };
+}
+const texteRegimesNeutre = (l) => { const { hta, bt } = regimesNeutreDuLocal(l); return [hta && `HTA : ${hta.replace(/ \(HTA\)$/, "")}`, bt && `BT : ${bt.replace(/ \(BT\)$/, "")}`].filter(Boolean).join(" · "); };
+// --- Normes du tableau BT (plusieurs possibles, ex. NF C 15-100 + NF EN 61439) -------------------
+function normesTableauDuLocal(l) {
+  if (Array.isArray(l?.normesTableauBT) && l.normesTableauBT.length) return l.normesTableauBT;
+  return l?.normeTableauBT ? [l.normeTableauBT] : [];
+}
+const NORMES_ENSEMBLE = ["NF EN 61439", "NF EN 60439 (ancienne)"];
+const localEnsembleNormalise = (l) => normesTableauDuLocal(l).some((n) => NORMES_ENSEMBLE.includes(n));
+const LISTE_FORME_SEPARATION = ["Forme 1", "Forme 2a", "Forme 2b", "Forme 3a", "Forme 3b", "Forme 4a", "Forme 4b"];
+// Rôle de chaque norme quand le tableau est déclaré selon les deux référentiels.
+const TEXTE_DOUBLE_NORME = "Double référence : la NF C 15-100 encadre l'installation (choix et réglage des protections, sections des canalisations, protection contre les contacts indirects selon le schéma de liaison à la terre) ; la NF EN 61439 encadre le tableau lui-même, conçu et vérifié par le tableautier (courant assigné InA et échauffement, tenue au court-circuit Icw/Ipk, forme de séparation, indice IP, plaque signalétique, dossier et essais individuels). Les deux contrôles s'appliquent : appareils adaptés au courant de court-circuit présumé ET tableau capable de le supporter.";
+// Points de contrôle propres à un ensemble NF EN 61439 (relevé sur site), avec les caractéristiques saisies.
+function pointsControleEnsemble61439(l) {
+  if (!localEnsembleNormalise(l)) return null;
+  const e = l.ensemble61439 || {};
+  const car = [e.tableautier && `tableautier : ${e.tableautier}`, e.ina && `InA = ${e.ina} A`, e.icw && `Icw = ${e.icw} kA (1 s)`, e.ipk && `Ipk = ${e.ipk} kA`, e.forme && e.forme, e.ip && e.ip].filter(Boolean).join(", ");
+  const manques = [e.plaque === "Non" && "plaque signalétique absente ou illisible", e.dossier === "Non" && "dossier technique / rapport d'essais individuels non disponible"].filter(Boolean);
+  return `Tableau selon NF EN 61439${car ? ` (${car})` : ""} : vérifier la présence et la lisibilité de la plaque signalétique (constructeur, norme, InA, Icw/Ipk, IP), la disponibilité du dossier technique et du rapport d'essais individuels, le maintien de la forme de séparation et de l'indice IP (capots, obturateurs, presse-étoupes), le serrage et l'échauffement des connexions (thermographie) au regard de InA.${manques.length ? ` ⚠ Constaté : ${manques.join(" ; ")}.` : ""}`;
 }
 // Codes IP courants sur l'appareillage HTA/BT (cellules, coffrets, armoires) — CEI 60529.
 const LISTE_INDICE_PROTECTION = ["IP2X", "IP3X", "IP4X", "IPXXB", "IPXXC", "IPXXD", "IP20", "IP21", "IP23", "IP30", "IP31", "IP40", "IP44", "IP54", "IP55", "IP65", "IP66", "IP67", "IP68"];
@@ -169,38 +199,25 @@ const LISTE_MODELE_FUSIBLE_OPTIONS = optionsParChamp("fabricant", MARQUE_MODELE_
 // "conforme" par construction). Couvre les combinaisons les plus courantes du catalogue.
 const REFERENCE_FUSIBLE_CONSTRUCTEUR = {
   "Fusarc CF": {
-    "7.2": {
-      "4": ["51311006M0", 796.0], "6.3": ["51006500M0", 186.4], "10": ["51006501M0", 110.5], "16": ["51006502M0", 68.5],
-      "20": ["51006503M0", 53.5], "25": ["51006504M0", 36.5], "31.5": ["51006505M0", 26.1], "40": ["51006506M0", 18.1],
-      "50": ["51006507M0", 12.5], "63": ["51006508M0", 9.9], "80": ["51006509M0", 7.4], "100": ["51006510M0", 6.2],
-    },
-    "12": {
-      "4": ["51311007M0", 1177.0], "6.3": ["51006511M0", 283.4], "10": ["51006512M0", 165.5], "16": ["51006513M0", 106.0],
-      "20": ["51006514M0", 82.0], "25": ["51006515M0", 56.0], "31.5": ["51006516M0", 40.0], "40": ["51006517M0", 28.0],
-      "50": ["51006518M0", 18.5], "63": ["51006519M0", 14.8], "80": ["51006520M0", 11.1], "100": ["51006521M0", 8.9],
-    },
-    "17.5": {
-      "4": ["51311008M0", 1487.0], "6.3": ["51006527M0", 369.3], "10": ["51006522M0", 212.2], "16": ["51006523M0", 132.0],
-      "20": ["51006529M0", 103.0], "25": ["51006524M0", 71.0], "31.5": ["51006525M0", 51.0], "40": ["51006526M0", 35.0],
-      "50": ["51006534M0", 23.4], "63": ["51006535M0", 19.4], "80": ["51006536M0", 13.5], "100": ["51006537M0", 11.0],
-    },
-    "24": {
-      "6.3": ["51108815M0", 455.0], "10": ["51108816M0", 257.3], "16": ["51108817M0", 158.0], "20": ["51108818M0", 123.0],
-      "25": ["51108819M0", 88.0], "31.5": ["51108820M0", 61.0], "40": ["51108821M0", 45.0], "50": ["51108822M0", 33.6], "63": ["51108823M0", 22.6],
-    },
-    "36": {
-      "4": ["51311010M0", 2209.0], "6.3": ["51006549M0", 714.0], "10": ["51006550M0", 392.2], "16": ["51006551M0", 252.0],
-      "20": ["51006552M0", 197.0], "25": ["51006553M0", 133.0], "31.5": ["51006554M0", 103.0], "40": ["51006555M0", 70.0],
-      "50": ["51006556M0", 47.0], "63": ["51006557M0", 35.0],
-    },
+    "3.6": { "125": [["757352BN", 3.6, "L 292 mm"]], "160": [["757352BP", 2.3, "L 292 mm"]], "200": [["757352BQ", 1.8, "L 292 mm"]], "250": [["757372AR", 0.7, "L 292 mm"],["757374BR", 1, "L 442 mm"]] },
+    "7.2": { "2.5": [["51311002M0", 1278, "L 192 mm, TT mesure, sans percuteur"]], "4": [["51311006M0", 796, "L 192 mm"]], "6.3": [["51006500M0", 186.4, "L 192 mm"],["51100049MB", 186.4, "L 292 mm"]], "10": [["51006501M0", 110.5, "L 192 mm"],["51100049MC", 110.5, "L 292 mm"]], "16": [["51006502M0", 68.5, "L 192 mm"],["51100049MD", 68.5, "L 292 mm"]], "20": [["51006503M0", 53.5, "L 192 mm"],["51100049ME", 53.5, "L 292 mm"]], "25": [["51006504M0", 36.5, "L 192 mm"],["51100049MF", 36.5, "L 292 mm"]], "31.5": [["51006505M0", 26.1, "L 192 mm"],["51100049MG", 26.1, "L 292 mm"]], "40": [["51006506M0", 18.1, "L 192 mm"],["51100049MH", 18.1, "L 292 mm"]], "50": [["51006507M0", 12.5, "L 192 mm"],["51100049MJ", 12.5, "L 292 mm"]], "63": [["51006508M0", 9.9, "L 192 mm"],["51100049MK", 9.9, "L 292 mm"]], "80": [["51006509M0", 7.4, "L 192 mm"],["51100049ML", 7.4, "L 292 mm"]], "100": [["51006510M0", 6.2, "L 192 mm"],["51100049MM", 6.2, "L 292 mm"]] },
+    "12": { "1": [["51311000M0", 3834, "L 292 mm, TT mesure, sans percuteur"]], "2.5": [["51311003M0", 1917, "L 292 mm, TT mesure, sans percuteur"]], "4": [["51311007M0", 1177, "L 292 mm"]], "6.3": [["51006511M0", 283.4, "L 292 mm"]], "10": [["51006512M0", 165.5, "L 292 mm"]], "16": [["51006513M0", 106, "L 292 mm"]], "20": [["51006514M0", 82, "L 292 mm"]], "25": [["51006515M0", 56, "L 292 mm"]], "31.5": [["51006516M0", 40, "L 292 mm"]], "40": [["51006517M0", 28, "L 292 mm"]], "50": [["51006518M0", 18.5, "L 292 mm"]], "63": [["51006519M0", 14.8, "L 292 mm"]], "80": [["51006520M0", 11.1, "L 292 mm"]], "100": [["51006521M0", 8.9, "L 292 mm"]], "125": [["757364CN", 5.3]], "160": [["757354CP", 3.5, "L 442 mm"]], "200": [["757354CQ", 2.8, "L 442 mm"]] },
+    "17.5": { "2.5": [["51311011M0", 2407, "L 367 mm, TT mesure, sans percuteur"]], "4": [["51311008M0", 1487, "L 367 mm"]], "6.3": [["51006527M0", 369.3, "L 367 mm"]], "10": [["51006522M0", 212.2, "L 292 mm"],["51006528M0", 212.2, "L 367 mm"]], "16": [["51006523M0", 132, "L 292 mm"],["51006529M0", 132, "L 367 mm"]], "20": [["51006530M0", 103, "L 367 mm"]], "25": [["51006524M0", 71, "L 292 mm"],["51006531M0", 71, "L 367 mm"]], "31.5": [["51006525M0", 51, "L 292 mm"],["51006532M0", 51, "L 367 mm"]], "40": [["51006526M0", 35, "L 292 mm"],["51006533M0", 35, "L 367 mm"]], "50": [["51006534M0", 23.4, "L 367 mm"]], "63": [["51006535M0", 19.4, "L 367 mm"]], "80": [["51006536M0", 13.5, "L 367 mm"]], "100": [["51006537M0", 11, "L 367 mm"]] },
+    "24": { "1": [["51311001M0", 4815, "L 442 mm, TT mesure, sans percuteur"]], "2.5": [["51311004M0", 2407, "L 442 mm, TT mesure, sans percuteur"]], "4": [["51311009M0", 1505, "L 442 mm"]], "6.3": [["51108815M0", 455, "L 292 mm"],["51108807M0", 455, "L 367 mm"],["51006538M0", 455, "L 442 mm"]], "10": [["51108816M0", 257.3, "L 292 mm"],["51006539M0", 257.5, "L 442 mm"]], "16": [["51108817M0", 158, "L 292 mm"],["51108808M0", 158, "L 367 mm"],["51006540M0", 158, "L 442 mm"]], "20": [["51108818M0", 123, "L 292 mm"],["51108813M0", 123, "L 367 mm"],["51006541M0", 123, "L 442 mm"]], "25": [["51108819M0", 88, "L 292 mm"],["51108814M0", 88, "L 367 mm"],["51006542M0", 88, "L 442 mm"]], "31.5": [["51108820M0", 61, "L 292 mm"],["51108809M0", 61, "L 367 mm"],["51006543M0", 61, "L 442 mm"]], "40": [["51108821M0", 45, "L 292 mm"],["51108810M0", 44.5, "L 367 mm"],["51006544M0", 44.5, "L 442 mm"]], "50": [["51108822M0", 33.6, "L 292 mm"],["51006545M0", 33.6, "L 442 mm"]], "63": [["51108823M0", 22.6, "L 292 mm"],["51006546M0", 25.2, "L 442 mm"]], "80": [["51006547M0", 18, "L 442 mm"]], "100": [["51006548M0", 13.5, "L 442 mm"]] },
+    "36": { "2.5": [["51311005M0", 3537, "L 537 mm, TT mesure, sans percuteur"]], "4": [["51311010M0", 2209, "L 537 mm"]], "6.3": [["51006549M0", 714, "L 537 mm"]], "10": [["51006550M0", 392.2, "L 537 mm"]], "16": [["51006551M0", 252, "L 537 mm"]], "20": [["51006552M0", 197, "L 537 mm"]], "25": [["51006553M0", 133, "L 537 mm"]], "31.5": [["51006554M0", 103, "L 537 mm"]], "40": [["51006555M0", 70, "L 537 mm"]], "50": [["51006556M0", 47, "L 537 mm"]], "63": [["51006557M0", 35, "L 537 mm"]] },
   },
   "Soléfuse": {
-    "7.2": { "6.3": ["757328 BC", 192.7], "16": ["757328 BE", 59.3], "31.5": ["757328 BH", 24.5], "43": ["757328 BJ", 16.15], "63": ["757328 BK", 11.3], "125": ["757328 BN", 4.8] },
-    "24": { "6.3": ["757328 EC", 454.3], "10": ["757328 ED", 241.9], "16": ["757328 EE", 117.3], "25": ["757328 EG", 69.1], "31.5": ["757328 EH", 45.77], "43": ["757328 EJ", 33.6], "50": ["757328 EL", 37], "63": ["757328 EK", 19.9] },
-    "36": { "6.3": ["757328 FC", 762.6], "10": ["757328 FD", 252.9], "16": ["757328 FE", 207.8], "20": ["757328 FF", 133.2], "25": ["757328 FG", 124], "31.5": ["757328 FH", 93] },
+    "7.2": { "6.3": [["757328 BC", 192.7]], "16": [["757328 BE", 59.3]], "31.5": [["757328 BH", 24.5]], "43": [["757328 BJ", 16.15]], "63": [["757328 BK", 11.3]], "80": [["757328 DL", 15.1, "tension 7.2/17.5 kV"]], "100": [["757328 CM", 7.7, "tension 7.2/12 kV"]], "125": [["757328 BN", 4.8]] },
+    "12": { "6.3": [["757328 EC", 454.3, "tension 12/24 kV"],["757331 GC", 463, "tension 12/24 kV"]], "10": [["757328 ED", 241.9, "tension 12/24 kV"],["757331 GD", 244.6, "tension 12/24 kV"]], "16": [["757328 EE", 117.3, "tension 12/24 kV"],["757331 GE", 118, "tension 12/24 kV"]], "25": [["757328 EG", 69.1, "tension 12/24 kV"],["757331 GG", 69.3, "tension 12/24 kV"]], "31.5": [["757328 EH", 45.77, "tension 12/24 kV"],["757331 GH", 46.2, "tension 12/24 kV"]], "43": [["757328 EJ", 33.6, "tension 12/24 kV"],["757331 GJ", 34.3, "tension 12/24 kV"]], "50": [["757328 EL", 37, "tension 12/24 kV"],["757331 GL", 37, "tension 12/24 kV"]], "63": [["757328 EK", 19.9, "tension 12/24 kV"],["757331 GK", 19.9, "tension 12/24 kV"]], "100": [["757328 CM", 7.7, "tension 7.2/12 kV"]] },
+    "17.5": { "80": [["757328 DL", 15.1, "tension 7.2/17.5 kV"]] },
+    "24": { "6.3": [["757328 EC", 454.3, "tension 12/24 kV"],["757331 GC", 463, "tension 12/24 kV"]], "10": [["757328 ED", 241.9, "tension 12/24 kV"],["757331 GD", 244.6, "tension 12/24 kV"]], "16": [["757328 EE", 117.3, "tension 12/24 kV"],["757331 GE", 118, "tension 12/24 kV"]], "25": [["757328 EG", 69.1, "tension 12/24 kV"],["757331 GG", 69.3, "tension 12/24 kV"]], "31.5": [["757328 EH", 45.77, "tension 12/24 kV"],["757331 GH", 46.2, "tension 12/24 kV"]], "43": [["757328 EJ", 33.6, "tension 12/24 kV"],["757331 GJ", 34.3, "tension 12/24 kV"]], "50": [["757328 EL", 37, "tension 12/24 kV"],["757331 GL", 37, "tension 12/24 kV"]], "63": [["757328 EK", 19.9, "tension 12/24 kV"],["757331 GK", 19.9, "tension 12/24 kV"]] },
+    "36": { "6.3": [["757328 FC", 762.6]], "10": [["757328 FD", 252.9]], "16": [["757328 FE", 207.8]], "20": [["757328 FF", 133.2]], "25": [["757328 FG", 124]], "31.5": [["757328 FH", 93]] },
+  },
+  "Tépéfuse": {
+    "12": { "0.3": [["781825A", 6100, "L 301 mm, Ø 27,5 mm"]] },
   },
   "MGK": {
-    "7.2": { "100": ["757314", 6.4], "125": ["757315", 4.6], "160": ["757316", 2.4], "200": ["757317", 1.53], "250": ["757318", 0.98] },
+    "7.2": { "100": [["757314", 6.4]], "125": [["757315", 4.6]], "160": [["757316", 2.4]], "200": [["757317", 1.53]], "250": [["757318", 0.98]] },
   },
   // Mersen Limitor — PT/PTS/P vérifiées avec résistance R20 (feuille "Catalogue complet" fournie
   // par l'utilisateur, sourcée sur fiches techniques officielles Mersen). FR : référence seule, la
@@ -393,15 +410,22 @@ const REFERENCE_FUSIBLE_CONSTRUCTEUR = {
     },
   },
 };
+// Une entrée de catalogue est soit [réf, R] (une seule référence), soit une liste [[réf, R, note], …]
+// quand plusieurs références existent pour un même calibre (longueurs différentes, sans percuteur…).
+const entreesCatalogueFusible = (entree) => (!entree ? [] : Array.isArray(entree[0]) ? entree : [entree]);
 // Résistance à froid de référence constructeur (mΩ, ± 10 % à 20 °C) — sert à calculer une tolérance
-// réelle, indépendante de la valeur mesurée sur site.
-function resistanceFroidConnue(modele, un, in_) {
+// réelle, indépendante de la valeur mesurée sur site. Si la référence saisie est connue, sa valeur
+// propre est retenue (elle peut différer selon la longueur du fusible).
+function resistanceFroidConnue(modele, un, in_, reference) {
   const gamme = REFERENCE_FUSIBLE_CONSTRUCTEUR[modele];
   if (!gamme) return null;
   const parTension = gamme[String(un).trim()];
   if (!parTension) return null;
-  const entree = parTension[String(in_).trim()];
-  return entree ? entree[1] : null;
+  const entrees = entreesCatalogueFusible(parTension[String(in_).trim()]);
+  if (!entrees.length) return null;
+  const norm = (x) => String(x || "").toUpperCase().replace(/\s/g, "");
+  const exacte = reference && entrees.find((e) => norm(e[0]) === norm(reference));
+  return (exacte || entrees[0])[1];
 }
 // Toutes les références connues pour un modèle + tension donnés, triées par calibre croissant —
 // alimente la liste déroulante du champ Référence, plutôt qu'une simple suggestion au coup par coup.
@@ -411,10 +435,10 @@ function referencesConnuesPourModeleTension(modele, un) {
   const parTension = gamme[String(un).trim()];
   if (!parTension) return [];
   return Object.entries(parTension)
-    .map(([in_, [ref, r]]) => ({ in: in_, reference: ref, resistance: r }))
+    .flatMap(([in_, entree]) => entreesCatalogueFusible(entree).map(([ref, r, note]) => ({ in: in_, reference: ref, resistance: r, note: note || "" })))
     .sort((a, b) => numOf(a.in) - numOf(b.in));
 }
-const LISTE_IN_FUSIBLE = ["4", "6.3", "10", "16", "20", "25", "31.5", "40", "50", "63", "80", "100", "125", "160", "200", "250"];
+const LISTE_IN_FUSIBLE = ["0.3", "1", "2.5", "4", "6.3", "10", "16", "20", "25", "31.5", "40", "50", "63", "80", "100", "125", "160", "200", "250"];
 const LISTE_UN_FUSIBLE = ["3.6", "7.2", "12", "17.5", "24", "36"];
 const LISTE_DUREE_VIE_FUSIBLE = ["10", "15", "20", "25", "30"];
 const LISTE_ANNEES_MES = Array.from({ length: 41 }, (_, i) => String(new Date().getFullYear() - i));
@@ -1287,9 +1311,10 @@ function toleranceState(value, min, max) {
 const FUSIBLE_FIELDS = [
   F("fabricant", "Fabricant", null, LISTE_FABRICANT_FUSIBLE),
   F("modele", "Modèle", null, LISTE_MODELE_FUSIBLE_OPTIONS),
-  F("reference", "Référence"),
-  F("in", "In", "A", LISTE_IN_FUSIBLE),
+  // Tension puis calibre AVANT la référence : ils filtrent la liste des références du catalogue.
   F("un", "Un", "kV", LISTE_UN_FUSIBLE),
+  F("in", "In", "A", LISTE_IN_FUSIBLE),
+  F("reference", "Référence"),
   F("anneeMiseEnService", "Année de mise en service", null, LISTE_ANNEES_MES),
   F("dureeVieConstructeur", "Durée de vie constructeur", "ans", LISTE_DUREE_VIE_FUSIBLE, "10"),
   {
@@ -1308,7 +1333,7 @@ const FUSIBLE_FIELDS = [
     compute: (f) => {
       // Priorité à la résistance de référence constructeur (catalogue vérifié) quand connue — une
       // tolérance dérivée de la valeur mesurée elle-même serait toujours "conforme" par définition.
-      const rRef = resistanceFroidConnue(f.modele, f.un, f.in);
+      const rRef = resistanceFroidConnue(f.modele, f.un, f.in, f.reference);
       if (rRef !== null) return Math.round(rRef * 0.9 * 100) / 100;
       const v = numOf(f.valeur);
       return v === null ? "" : Math.floor(v * 0.9);
@@ -1317,7 +1342,7 @@ const FUSIBLE_FIELDS = [
   {
     key: "tol_max", label: "Tolérance max", unit: "mΩ", unitFrom: "valeur",
     compute: (f) => {
-      const rRef = resistanceFroidConnue(f.modele, f.un, f.in);
+      const rRef = resistanceFroidConnue(f.modele, f.un, f.in, f.reference);
       if (rRef !== null) return Math.round(rRef * 1.1 * 100) / 100;
       const v = numOf(f.valeur);
       return v === null ? "" : Math.ceil(v * 1.1);
@@ -2795,7 +2820,10 @@ function buildInterrupteurHTASchema({ avecRelais = false } = {}) {
       { key: "repere", label: "Repère / Nom de l'équipement" }, { key: "marque", label: "Marque", options: LISTE_MARQUE_CELLULE_HTA }, { key: "modele", label: "Modèle", options: LISTE_MODELE_CELLULE_HTA_OPTIONS },
       { key: "typeCellule", label: "Type de cellule", options: typeCelluleParGamme("Interrupteur HTA") }, { key: "numeroSerie", label: "Numéro de série" },
       { key: "presenceRelais", label: "Présence d'un relais de protection", options: ["Non", "Oui"] },
-      ...(avecRelais ? [{ key: "rapportTPProtection", label: "Rapport TP de protection", options: LISTE_RAPPORT_TP }] : []),
+      ...(avecRelais ? [
+        { key: "marqueRelais", label: "Marque du relais de protection", options: LISTE_MARQUE_RELAIS_HTA }, { key: "referenceRelais", label: "Référence du relais", options: LISTE_REFERENCE_RELAIS_HTA_OPTIONS }, { key: "numeroSerieRelais", label: "Numéro de série (relais)" },
+        { key: "rapportTPProtection", label: "Rapport TP de protection", options: LISTE_RAPPORT_TP },
+      ] : []),
     ],
     sections: [
       { key: "mecaniques", title: "Contrôles mécaniques", items: [
@@ -2828,7 +2856,10 @@ function buildInterrupteurFusibleHTASchema({ avecRelais = false } = {}) {
       { key: "repere", label: "Repère / Nom de l'équipement" }, { key: "marque", label: "Marque", options: LISTE_MARQUE_CELLULE_HTA }, { key: "modele", label: "Modèle", options: LISTE_MODELE_CELLULE_HTA_OPTIONS },
       { key: "typeCellule", label: "Type de cellule", options: typeCelluleParGamme("Interrupteur Fusible HTA") }, { key: "numeroSerie", label: "Numéro de série" },
       { key: "presenceRelais", label: "Présence d'un relais de protection", options: ["Non", "Oui"] },
-      ...(avecRelais ? [{ key: "rapportTPProtection", label: "Rapport TP de protection", options: LISTE_RAPPORT_TP }] : []),
+      ...(avecRelais ? [
+        { key: "marqueRelais", label: "Marque du relais de protection", options: LISTE_MARQUE_RELAIS_HTA }, { key: "referenceRelais", label: "Référence du relais", options: LISTE_REFERENCE_RELAIS_HTA_OPTIONS }, { key: "numeroSerieRelais", label: "Numéro de série (relais)" },
+        { key: "rapportTPProtection", label: "Rapport TP de protection", options: LISTE_RAPPORT_TP },
+      ] : []),
       { key: "transformateurAssocie", label: "Transformateur associé (repère, pour le contrôle du calibre fusible)" },
       { key: "transfoManuel", label: "Transformateur saisi manuellement", options: ["Non", "Oui"] },
       { key: "transfoSnManuel", label: "Puissance du transformateur (kVA) — saisie manuelle", numeric: true },
@@ -3924,7 +3955,7 @@ function StatusBadge({ label, size = "md", gender = "m", plural = false }) {
 
 function Field({ label, children, span }) {
   return (
-    <div style={{ gridColumn: span ? `span ${span}` : undefined }}>
+    <div style={{ gridColumn: typeof span === "string" ? span : span ? `span ${span}` : undefined }}>
       <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#5B6B7D", letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 6 }}>
         {label}
       </label>
@@ -6007,8 +6038,17 @@ function ControlRow({ item, value, onChange, idPrefix, toleranceOverride }) {
   const valueRef = useRef(value);
   useEffect(() => { valueRef.current = value; }, [value]);
   const uneMesureHorsTolerance = (item.fields || []).some((f) => ["warning", "bad"].includes(fieldValidState(f.key)));
+  // Évalué seulement une fois la saisie terminée (pause de 0,8 s) : une valeur incomplète en cours de
+  // frappe ne fait plus basculer l'état. Un passage automatique en « Dégradé » est marqué (etatAuto) :
+  // si la valeur finale revient dans la tolérance, l'état repasse en « Conforme ». Un état choisi à la
+  // main n'est jamais modifié.
   useEffect(() => {
-    if (uneMesureHorsTolerance && valueRef.current.etat === "Conforme") onChange({ ...valueRef.current, etat: "Dégradé" });
+    const t = setTimeout(() => {
+      const v = valueRef.current;
+      if (uneMesureHorsTolerance && v.etat === "Conforme") onChange({ ...v, etat: "Dégradé", etatAuto: true });
+      else if (!uneMesureHorsTolerance && v.etatAuto && v.etat === "Dégradé") { const { etatAuto, ...reste } = v; onChange({ ...reste, etat: "Conforme" }); }
+    }, 800);
+    return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uneMesureHorsTolerance, value.etat]);
   return (
@@ -6078,25 +6118,41 @@ function ControlRow({ item, value, onChange, idPrefix, toleranceOverride }) {
                 // Liste déroulante des références connues (catalogue constructeur vérifié) pour le
                 // modèle et la tension déjà choisis — sélectionner une référence renseigne aussi le
                 // calibre automatiquement. Retombe sur une saisie libre si rien n'est répertorié.
-                const refsConnues = referencesConnuesPourModeleTension(fields.modele, fields.un);
+                const refsTension = referencesConnuesPourModeleTension(fields.modele, fields.un);
+                // Calibre renseigné : seules ses références sont proposées (toutes sinon, ou si aucune ne correspond).
+                const refsCalibre = fields.in ? refsTension.filter((r) => numOf(r.in) === numOf(fields.in)) : [];
+                const refsConnues = refsCalibre.length ? refsCalibre : refsTension;
                 if (refsConnues.length > 0) {
                   return (
                     <label key={f.key} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#8B96A3" }}>
                       {f.label}
-                      <select
-                        value={refsConnues.some((r) => r.reference === fields.reference) ? fields.reference : ""}
-                        onChange={(e) => {
-                          const choisie = refsConnues.find((r) => r.reference === e.target.value);
-                          // Une seule mise à jour combinée (pas deux setField successifs) : setField
-                          // capture "fields" au moment du rendu, donc un second appel écraserait le
-                          // premier en repartant du même état non rafraîchi.
-                          if (choisie) onChange({ ...value, fields: { ...fields, reference: choisie.reference, in: choisie.in } });
-                        }}
-                        style={{ ...inputStyle, width: 190, padding: "5px 7px", fontSize: 12 }}
-                      >
-                        <option value="">— choisir —</option>
-                        {refsConnues.map((r) => <option key={r.reference} value={r.reference}>{r.in}A — {r.reference}</option>)}
-                      </select>
+                      {(() => {
+                        // Référence hors catalogue (ancienne, autre gamme, plaque illisible…) : saisie libre.
+                        const connue = refsConnues.some((r) => r.reference === fields.reference);
+                        const libre = !connue && (fields.referenceLibre || !!fields.reference);
+                        return (<>
+                          <select
+                            value={connue ? fields.reference : libre ? "__autre" : ""}
+                            onChange={(e) => {
+                              if (e.target.value === "__autre") { onChange({ ...value, fields: { ...fields, referenceLibre: true, reference: connue ? "" : fields.reference || "" } }); return; }
+                              const choisie = refsConnues.find((r) => r.reference === e.target.value);
+                              // Une seule mise à jour combinée (pas deux setField successifs) : setField
+                              // capture "fields" au moment du rendu, donc un second appel écraserait le
+                              // premier en repartant du même état non rafraîchi.
+                              if (choisie) onChange({ ...value, fields: { ...fields, reference: choisie.reference, in: choisie.in, referenceLibre: false } });
+                            }}
+                            style={{ ...inputStyle, width: 230, padding: "5px 7px", fontSize: 12 }}
+                          >
+                            <option value="">— choisir —</option>
+                            {refsConnues.map((r) => <option key={r.reference} value={r.reference}>{r.in}A — {r.reference}{r.note ? ` (${r.note})` : ""}</option>)}
+                            <option value="__autre">✎ Autre référence (saisie libre)</option>
+                          </select>
+                          {libre && (
+                            <input type="text" value={fields.reference ?? ""} placeholder="Référence relevée" onChange={(e) => setField("reference", e.target.value)}
+                              style={{ ...inputStyle, width: 130, padding: "5px 7px", fontSize: 12 }} />
+                          )}
+                        </>);
+                      })()}
                     </label>
                   );
                 }
@@ -6110,7 +6166,7 @@ function ControlRow({ item, value, onChange, idPrefix, toleranceOverride }) {
                       style={{ ...inputStyle, width: 110, padding: "5px 7px", fontSize: 12 }}
                     />
                     {fields.modele && REFERENCE_FUSIBLE_CONSTRUCTEUR[fields.modele] && !fields.un && (
-                      <span style={{ fontSize: 10, color: "#B5730A", whiteSpace: "nowrap" }}>renseignez Un pour la liste</span>
+                      <span style={{ fontSize: 10, color: "#B5730A", whiteSpace: "nowrap" }}>renseignez Un et In pour la liste</span>
                     )}
                   </label>
                 );
@@ -6172,7 +6228,7 @@ function ControlRow({ item, value, onChange, idPrefix, toleranceOverride }) {
             />
           )}
           {value.etat !== undefined && (
-            <Select value={value.etat} onChange={(e) => onChange({ ...value, etat: e.target.value })} style={{ width: 120, padding: "5px 7px", fontSize: 12 }}>
+            <Select value={value.etat} onChange={(e) => { const { etatAuto, ...reste } = value; onChange({ ...reste, etat: e.target.value }); }} style={{ width: 120, padding: "5px 7px", fontSize: 12 }}>
               {EQUIP_STATUSES.map((s) => <option key={s} value={s}>{agree(s, itemAgreement(item.label).gender, itemAgreement(item.label).plural)}</option>)}
             </Select>
           )}
@@ -6469,9 +6525,40 @@ function RapportTab({ site, update }) {
   function addLocal() {
     update((d) => ({ ...d, locaux: [...(d.locaux || []), emptyLocal("")] }));
   }
+  // Duplique les caractéristiques d'un local (normes, régimes, ensemble 61439…), inséré juste après
+  // lui — les équipements ne sont pas copiés.
+  function dupliquerLocal(id) {
+    update((d) => {
+      const i = (d.locaux || []).findIndex((l) => l.id === id);
+      if (i < 0) return d;
+      const copie = { ...JSON.parse(JSON.stringify(d.locaux[i])), id: uid(), nom: d.locaux[i].nom ? `${d.locaux[i].nom} (copie)` : "" };
+      const locaux = [...d.locaux];
+      locaux.splice(i + 1, 0, copie);
+      return { ...d, locaux };
+    });
+  }
   function setLocalField(id, k, v) {
     update((d) => ({ ...d, locaux: d.locaux.map((l) => (l.id === id ? { ...l, [k]: v } : l)) }));
   }
+  function patchLocal(id, f) {
+    update((d) => ({ ...d, locaux: d.locaux.map((l) => (l.id === id ? { ...l, ...f(l) } : l)) }));
+  }
+  // Normes du tableau BT : plusieurs cochables ; « normeTableauBT » garde la première (compatibilité).
+  function basculerNormeTableau(id, n) {
+    patchLocal(id, (l) => {
+      const cur = normesTableauDuLocal(l);
+      const next = cur.includes(n) ? cur.filter((x) => x !== n) : LISTE_NORME_TABLEAU_BT.filter((x) => x === n || cur.includes(x));
+      return { normesTableauBT: next, normeTableauBT: next[0] || "" };
+    });
+  }
+  // Régimes de neutre HTA et BT séparés ; « regimeNeutre » garde le texte combiné (compatibilité).
+  function setRegimeLocal(id, cote, v) {
+    patchLocal(id, (l) => {
+      const r = { ...regimesNeutreDuLocal(l), [cote]: v };
+      return { regimeNeutreHTA: r.hta, regimeNeutreBT: r.bt, regimeNeutre: [r.hta, r.bt].filter(Boolean).join(" / ") };
+    });
+  }
+  const setEnsemble = (id, k, v) => patchLocal(id, (l) => ({ ensemble61439: { ...(l.ensemble61439 || {}), [k]: v } }));
   function removeLocal(id) {
     update((d) => ({ ...d, locaux: d.locaux.filter((l) => l.id !== id) }));
   }
@@ -6600,6 +6687,9 @@ function RapportTab({ site, update }) {
               <div style={{ flex: "1 1 200px" }}>
                 <TextInput value={l.nom} onChange={(e) => setLocalField(l.id, "nom", e.target.value)} placeholder="Nom du local (ex. Local HTA)" />
               </div>
+              <button onClick={() => dupliquerLocal(l.id)} style={{ background: "none", border: "none", color: "#0A5DA8", cursor: "pointer", padding: 4 }} title="Dupliquer ce local (caractéristiques, sans les équipements)">
+                <Copy size={15} />
+              </button>
               {site.locaux.length > 1 && (
                 <button onClick={() => removeLocal(l.id)} style={{ background: "none", border: "none", color: "#EF4444", cursor: "pointer", padding: 4 }} title="Retirer ce local">
                   <Trash2 size={15} />
@@ -6618,12 +6708,48 @@ function RapportTab({ site, update }) {
                 </Select>
                 <div style={{ fontSize: 10.5, color: "#8B96A3", marginTop: 4 }}>Caractéristique générale du poste — utilisée actuellement pour le contrôle du calibre fusible HTA.</div>
               </Field>
-              <Field label="Norme du tableau BT">
-                <Select value={l.normeTableauBT || ""} onChange={(e) => setLocalField(l.id, "normeTableauBT", e.target.value)}>
-                  <option value="">—</option>
-                  {LISTE_NORME_TABLEAU_BT.map((n) => <option key={n} value={n}>{n}</option>)}
-                </Select>
-                <div style={{ fontSize: 10.5, color: "#8B96A3", marginTop: 4 }}>Norme applicable au tableau basse tension de ce local — utilisée pour le contrôle du pouvoir de coupure des disjoncteurs BT rattachés à un transformateur (à défaut : NF C 15-100).</div>
+              <Field label="Norme(s) du tableau BT" span="1 / -1">
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {LISTE_NORME_TABLEAU_BT.map((n) => {
+                    const actif = normesTableauDuLocal(l).includes(n);
+                    return (
+                      <span key={n} onClick={() => basculerNormeTableau(l.id, n)} style={{ cursor: "pointer", userSelect: "none", fontSize: 12, padding: "5px 10px", borderRadius: 999, border: `1.5px solid ${actif ? BRAND.blue : "#D8DEE5"}`, background: actif ? "#EEF4FB" : "#fff", color: actif ? "#0A5DA8" : "#5B6B7D", fontWeight: actif ? 700 : 500 }}>
+                        {actif ? "✓ " : ""}{n}
+                      </span>
+                    );
+                  })}
+                </div>
+                <div style={{ fontSize: 10.5, color: "#8B96A3", marginTop: 4 }}>Plusieurs normes possibles (ex. NF C 15-100 + NF EN 61439) — utilisées pour les contrôles du pouvoir de coupure, du courant assigné des jeux de barres et du schéma de liaison à la terre (à défaut : NF C 15-100).</div>
+                {normesTableauDuLocal(l).includes("NF C 15-100") && localEnsembleNormalise(l) && (
+                  <div style={{ fontSize: 11, color: "#0A5DA8", background: "#EEF2F6", borderRadius: 6, padding: "6px 8px", marginTop: 6, lineHeight: 1.45 }}>{TEXTE_DOUBLE_NORME}</div>
+                )}
+                {localEnsembleNormalise(l) && (() => {
+                  const e = l.ensemble61439 || {};
+                  return (
+                    <div style={{ marginTop: 8, padding: 10, border: "1px solid #D8DEE5", borderRadius: 8, background: "#fff" }}>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: "#5B6B7D", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 8 }}>Ensemble NF EN 61439 — caractéristiques assignées (plaque signalétique)</div>
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10 }}>
+                        <Field label="Tableautier"><TextInput value={e.tableautier || ""} onChange={(ev) => setEnsemble(l.id, "tableautier", ev.target.value)} /></Field>
+                        <Field label="InA (A)"><TextInput inputMode="decimal" value={e.ina || ""} onChange={(ev) => setEnsemble(l.id, "ina", ev.target.value)} /></Field>
+                        <Field label="Icw (kA, 1 s)"><TextInput inputMode="decimal" value={e.icw || ""} onChange={(ev) => setEnsemble(l.id, "icw", ev.target.value)} /></Field>
+                        <Field label="Ipk (kA crête)"><TextInput inputMode="decimal" value={e.ipk || ""} onChange={(ev) => setEnsemble(l.id, "ipk", ev.target.value)} /></Field>
+                        <Field label="Forme de séparation">
+                          <Select value={e.forme || ""} onChange={(ev) => setEnsemble(l.id, "forme", ev.target.value)}><option value="">—</option>{LISTE_FORME_SEPARATION.map((f) => <option key={f} value={f}>{f}</option>)}</Select>
+                        </Field>
+                        <Field label="Indice IP">
+                          <Combo value={e.ip || ""} onChange={(v) => setEnsemble(l.id, "ip", v)} options={LISTE_INDICE_PROTECTION} listId={`${l.id}-ens-ip`} />
+                        </Field>
+                        <Field label="Plaque signalétique">
+                          <Select value={e.plaque || ""} onChange={(ev) => setEnsemble(l.id, "plaque", ev.target.value)}><option value="">—</option><option>Oui</option><option>Non</option></Select>
+                        </Field>
+                        <Field label="Dossier / essais individuels">
+                          <Select value={e.dossier || ""} onChange={(ev) => setEnsemble(l.id, "dossier", ev.target.value)}><option value="">—</option><option>Oui</option><option>Non</option></Select>
+                        </Field>
+                      </div>
+                      <div style={{ fontSize: 11, color: "#0A5DA8", background: "#EEF2F6", borderRadius: 6, padding: "6px 8px", marginTop: 8, lineHeight: 1.45 }}>{pointsControleEnsemble61439(l)}</div>
+                    </div>
+                  );
+                })()}
               </Field>
               <Field label="Type de protection de découplage (UTE/NF C15-400)">
                 <Select value={l.typeDecouplage || ""} onChange={(e) => setLocalField(l.id, "typeDecouplage", e.target.value)}>
@@ -6635,16 +6761,22 @@ function RapportTab({ site, update }) {
               <Field label="Type de poste">
                 <Combo value={l.typeDePoste} onChange={(v) => setLocalField(l.id, "typeDePoste", v)} options={LISTE_TYPE_POSTE} listId={`${l.id}-typeposte`} />
               </Field>
-              <Field label="Régime de neutre">
-                <Combo value={l.regimeNeutre} onChange={(v) => setLocalField(l.id, "regimeNeutre", v)} options={LISTE_REGIME_NEUTRE} listId={`${l.id}-regimeneutre`} placeholder="HTA et/ou BT" />
-                {l.regimeNeutre && REGIME_NEUTRE_DESCRIPTIONS[l.regimeNeutre] && (
-                  <div style={{ fontSize: 11, color: "#8B96A3", marginTop: 6, lineHeight: 1.4 }}>{REGIME_NEUTRE_DESCRIPTIONS[l.regimeNeutre]}</div>
-                )}
-                {pointsControleRegimeBT(l.regimeNeutre, l.normeTableauBT) && (
-                  <div style={{ fontSize: 11, color: "#0A5DA8", background: "#EEF2F6", borderRadius: 6, padding: "6px 8px", marginTop: 6, lineHeight: 1.45 }}>
-                    <b>Tableau BT de ce local — points de contrôle :</b> {pointsControleRegimeBT(l.regimeNeutre, l.normeTableauBT)}
-                  </div>
-                )}
+              <Field label="Régime de neutre HTA">
+                {(() => { const { hta } = regimesNeutreDuLocal(l); return (<>
+                  <Combo value={hta} onChange={(v) => setRegimeLocal(l.id, "hta", v)} options={LISTE_REGIME_NEUTRE_HTA} listId={`${l.id}-regimehta`} placeholder="Côté HTA" />
+                  {hta && REGIME_NEUTRE_DESCRIPTIONS[hta] && <div style={{ fontSize: 11, color: "#8B96A3", marginTop: 6, lineHeight: 1.4 }}>{REGIME_NEUTRE_DESCRIPTIONS[hta]}</div>}
+                </>); })()}
+              </Field>
+              <Field label="Régime de neutre BT (SLT)">
+                {(() => { const { bt } = regimesNeutreDuLocal(l); return (<>
+                  <Combo value={bt} onChange={(v) => setRegimeLocal(l.id, "bt", v)} options={LISTE_REGIME_NEUTRE_BT} listId={`${l.id}-regimebt`} placeholder="Côté BT" />
+                  {bt && REGIME_NEUTRE_DESCRIPTIONS[bt] && <div style={{ fontSize: 11, color: "#8B96A3", marginTop: 6, lineHeight: 1.4 }}>{REGIME_NEUTRE_DESCRIPTIONS[bt]}</div>}
+                  {pointsControleRegimeBT(bt, normesTableauDuLocal(l)) && (
+                    <div style={{ fontSize: 11, color: "#0A5DA8", background: "#EEF2F6", borderRadius: 6, padding: "6px 8px", marginTop: 6, lineHeight: 1.45 }}>
+                      <b>Tableau BT de ce local — points de contrôle :</b> {pointsControleRegimeBT(bt, normesTableauDuLocal(l))}
+                    </div>
+                  )}
+                </>); })()}
               </Field>
             </div>
           </Card>
@@ -7614,15 +7746,34 @@ function sourcesTransfosAmont(eq, allEquipements) {
   });
   return sources;
 }
+// Normes du tableau BT du local (plusieurs possibles) + caractéristiques de l'ensemble NF EN 61439.
+function normesVerification(local) {
+  const n = normesTableauDuLocal(local);
+  const normes = n.length ? n : ["NF C 15-100"];
+  return { norme: normes.join(" + "), normes, ensemble: local && localEnsembleNormalise(local) ? (local.ensemble61439 || {}) : null };
+}
+const referencesNormes = (dict, v) => (v.normes || [v.norme]).map((n) => dict[n] || "").join("");
+// Tenue au court-circuit du tableau (NF EN 61439) : Icw assigné comparé à l'Icc présumé.
+function tenueEnsemble(ensemble, iccKa) {
+  const icw = ensemble ? numOf(ensemble.icw) : null;
+  return { icw, icwInsuffisant: icw !== null && iccKa !== null && icw < iccKa };
+}
+function texteTenueEnsemble(v) {
+  if (!v.ensemble) return "";
+  if (v.icw === null) return " Tableau NF EN 61439 : tenue au court-circuit (Icw) non renseignée dans le local — à relever sur la plaque signalétique.";
+  return v.icwInsuffisant
+    ? ` ⚠ Tableau NF EN 61439 : Icw = ${v.icw} kA inférieur à l'Icc présumé (${v.iccKa} kA) — tenue du tableau à justifier (protection amont limitant le courant, courant de court-circuit conditionnel Icc garanti par le constructeur) ou tableau à mettre à niveau.`
+    : ` Tableau NF EN 61439 : Icw = ${v.icw} kA ≥ Icc présumé — tenue du tableau cohérente.`;
+}
 function calcVerificationPouvoirCoupureMulti(eq, allEquipements, locaux) {
   const sources = sourcesTransfosAmont(eq, allEquipements);
   if (!sources.length) return null;
   const local = (locaux || []).find((l) => l.id === eq.localId);
-  const norme = (local && local.normeTableauBT) || "NF C 15-100";
+  const { norme, normes, ensemble } = normesVerification(local);
   const icu = numOf(eq.controles?.reglage_disjoncteur?.pouvoir_coupure?.fields?.icu); // kA
   const couplage = transfosParalleles(eq).couplage;
   const nbUnites = sources.reduce((s, x) => s + x.n, 0);
-  const base = { multi: true, nbUnites, norme, icu, couplage, manuel: false, transfoRepere: "" };
+  const base = { multi: true, nbUnites, norme, normes, ensemble, icu, couplage, manuel: false, transfoRepere: "" };
   const pb = sources.find((x) => x.introuvable);
   if (pb) return { ...base, manque: `${pb.libelle} introuvable parmi les équipements du site` };
   if (sources.some((x) => x.deux)) return { ...base, manque: "un des transformateurs a deux enroulements secondaires : la répartition de la puissance n'étant pas connue, le courant de court-circuit n'est pas calculé" };
@@ -7633,7 +7784,7 @@ function calcVerificationPouvoirCoupureMulti(eq, allEquipements, locaux) {
   const iccUnitMax = Math.round(Math.max(...detail.map((x) => x.icc)) * 100) / 100;
   const iccKa = couplage === "ouvert" ? iccUnitMax : iccSomme;
   const u2s = detail.map((x) => x.u2), desaccord = Math.max(...u2s) > 1.1 * Math.min(...u2s);
-  return { ...base, sources: detail, iccSomme, iccUnitMax, iccKa, desaccord, insuffisant: icu !== null && icu < iccKa };
+  return { ...base, sources: detail, iccSomme, iccUnitMax, iccKa, desaccord, insuffisant: icu !== null && icu < iccKa, ...tenueEnsemble(ensemble, iccKa) };
 }
 function calcVerificationPouvoirCoupure(eq, allEquipements, locaux) {
   if (eq.type !== "Disjoncteur BT") return null;
@@ -7641,9 +7792,9 @@ function calcVerificationPouvoirCoupure(eq, allEquipements, locaux) {
   const tr = donneesTransformateurAssocie(eq, allEquipements);
   if (!tr) return null;
   const local = (locaux || []).find((l) => l.id === eq.localId);
-  const norme = (local && local.normeTableauBT) || "NF C 15-100";
+  const { norme, normes, ensemble } = normesVerification(local);
   const icu = numOf(eq.controles?.reglage_disjoncteur?.pouvoir_coupure?.fields?.icu); // kA
-  const base = { transfoRepere: tr.repere, manuel: tr.source === "manuel", norme, icu };
+  const base = { transfoRepere: tr.repere, manuel: tr.source === "manuel", norme, normes, ensemble, icu };
   if (tr.deuxSecondaires) {
     return { ...base, manque: "transformateur à deux enroulements secondaires : la répartition de la puissance entre les deux n'étant pas connue, le courant de court-circuit n'est pas calculé" };
   }
@@ -7655,7 +7806,7 @@ function calcVerificationPouvoirCoupure(eq, allEquipements, locaux) {
   }
   const i2n = (sn * 1000) / (Math.sqrt(3) * u2); // A
   const iccKa = Math.round(((i2n * 100) / ucc / 1000) * 100) / 100;
-  return { ...base, sn, u2, ucc, i2n: Math.round(i2n), iccKa, insuffisant: icu !== null && icu < iccKa };
+  return { ...base, sn, u2, ucc, i2n: Math.round(i2n), iccKa, insuffisant: icu !== null && icu < iccKa, ...tenueEnsemble(ensemble, iccKa) };
 }
 const REFERENCE_NORME_POUVOIR_COUPURE = {
   "NF C 15-100": " NF C 15-100 (article 434) : le pouvoir de coupure d'un dispositif de protection ne doit pas être inférieur au courant de court-circuit présumé à l'endroit où il est installé.",
@@ -7676,7 +7827,7 @@ function texteVerificationPouvoirCoupure(v) {
     if (v.insuffisant) t += " Icu inférieur à l'Icc maximal : à confirmer selon la position du disjoncteur (un départ en aval voit un courant plus faible, atténué par les câbles) — sinon remplacer l'appareil ou justifier une filiation avec la protection amont.";
     else if (v.icu !== null) t += " Cohérent : Icu ≥ Icc maximal.";
     if (v.couplage !== "ouvert") t += " Pour l'arrivée d'un transformateur, retenir la plus grande valeur entre l'Icc de ce transformateur et la somme des autres (défaut entre le transformateur et son disjoncteur).";
-    return t + " Source amont supposée infinie et câbles ignorés : repère indicatif." + (REFERENCE_NORME_POUVOIR_COUPURE[v.norme] || "");
+    return (v.icwInsuffisant && !t.startsWith("⚠") ? "⚠ " : "") + t + texteTenueEnsemble(v) + " Source amont supposée infinie et câbles ignorés : repère indicatif." + referencesNormes(REFERENCE_NORME_POUVOIR_COUPURE, v);
   }
   if (v.manque) return `Contrôle du pouvoir de coupure / ${libelleTransfo(v)} : ${v.manque}.`;
   // Le « ⚠ » en tête de texte fait passer l'encart Word en orange (voir docxNormeNote).
@@ -7687,7 +7838,7 @@ function texteVerificationPouvoirCoupure(v) {
   } else if (v.icu !== null) {
     t += " Cohérent : Icu ≥ Icc maximal.";
   }
-  return t + (REFERENCE_NORME_POUVOIR_COUPURE[v.norme] || "");
+  return (v.icwInsuffisant && !t.startsWith("⚠") ? "⚠ " : "") + t + texteTenueEnsemble(v) + referencesNormes(REFERENCE_NORME_POUVOIR_COUPURE, v);
 }
 // Équipements du site auquel appartient `eq` (rapport Word : on reçoit tous les sites, pas seulement le courant).
 function equipementsDuSiteDe(eq, allSites) {
@@ -7705,17 +7856,18 @@ function calcVerificationJeuDeBarre(eq, allEquipements, locaux) {
   const tr = donneesTransformateurAssocie(eq, allEquipements);
   if (!tr) return null;
   const local = (locaux || []).find((l) => l.id === eq.localId);
-  const norme = (local && local.normeTableauBT) || "NF C 15-100";
+  const { norme, normes, ensemble } = normesVerification(local);
   const iAssigne = numOf(eq.identification?.courantAssigne); // A
   const tension = numOf(eq.identification?.tensionAssignee); // kV
-  const base = { transfoRepere: tr.repere, manuel: tr.source === "manuel", norme, iAssigne };
+  const base = { transfoRepere: tr.repere, manuel: tr.source === "manuel", norme, normes, ensemble, iAssigne };
   if (tension !== null && tension > 1) return { ...base, manque: "jeu de barre HTA (tension assignée supérieure à 1 kV) : ce contrôle ne concerne que les jeux de barres basse tension alimentés par le secondaire d'un transformateur" };
   if (tr.deuxSecondaires) return { ...base, manque: "transformateur à deux enroulements secondaires : la répartition de la puissance entre les deux n'étant pas connue, le courant nominal n'est pas calculé" };
   const sn = tr.sn; // kVA
   const u2 = tr.u2; // V
   if (sn === null || !u2) return { ...base, manque: "renseigner la puissance et la tension secondaire du transformateur pour calculer son courant nominal" };
   const i2n = Math.round((sn * 1000) / (Math.sqrt(3) * u2)); // A
-  return { ...base, sn, u2, i2n, insuffisant: iAssigne !== null && iAssigne < i2n };
+  const ina = ensemble ? numOf(ensemble.ina) : null;
+  return { ...base, sn, u2, i2n, insuffisant: iAssigne !== null && iAssigne < i2n, ina, inaInsuffisant: ina !== null && ina < i2n };
 }
 const REFERENCE_NORME_JEU_DE_BARRE = {
   "NF C 15-100": " NF C 15-100 (article 433) : le courant admissible d'une canalisation doit être au moins égal au courant d'emploi et au calibre de la protection placée en amont.",
@@ -7731,7 +7883,8 @@ function texteVerificationJeuDeBarre(v) {
   t += v.iAssigne !== null ? ` Courant assigné du jeu de barre : ${v.iAssigne} A.` : " Courant assigné du jeu de barre non renseigné dans l'identification.";
   if (v.insuffisant) t += " Courant assigné inférieur au courant nominal du transformateur : à vérifier — cohérent seulement si le jeu de barre est protégé par un disjoncteur de calibre inférieur ou n'alimente qu'une partie de la charge, sinon il est sous-dimensionné.";
   else if (v.iAssigne !== null) t += " Cohérent : courant assigné ≥ courant nominal du transformateur.";
-  return t + (REFERENCE_NORME_JEU_DE_BARRE[v.norme] || "");
+  if (v.ina !== null && v.ina !== undefined) t += v.inaInsuffisant ? ` ⚠ Courant assigné du tableau (InA, NF EN 61439) = ${v.ina} A, inférieur au courant nominal du transformateur — à vérifier.` : ` Courant assigné du tableau (InA, NF EN 61439) = ${v.ina} A : cohérent.`;
+  return (v.inaInsuffisant && !t.startsWith("⚠") ? "⚠ " : "") + t + referencesNormes(REFERENCE_NORME_JEU_DE_BARRE, v);
 }
 function VerificationJeuDeBarre({ eq, allEquipements, locaux }) {
   const v = calcVerificationJeuDeBarre(eq, allEquipements, locaux);
@@ -10161,10 +10314,24 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
   const gradinsEnDefaut = gradinsHorsTolerance(eq);
   const rapportEnDefaut = rapportTransformationHorsTolerance(eq);
   const pireControle = pireRangControles(eq);
+  // etatFinalAuto mémorise l'état d'avant une remontée automatique : si les contrôles redeviennent
+  // conformes (ex. valeur corrigée en fin de saisie), l'état final y revient. Un choix manuel efface ce repère.
   useEffect(() => {
-    const rangCible = Math.max(pireControle, (gradinsEnDefaut || rapportEnDefaut) ? 1 : -1);
-    const cible = rangCible >= 2 ? "Défaillant" : rangCible >= 1 ? "Dégradé" : null;
-    if (cible && (RANK_OF[cible] ?? 0) > (RANK_OF[eqRef.current.etatFinal] ?? 0)) update({ ...eqRef.current, etatFinal: cible });
+    const t = setTimeout(() => {
+      const cur = eqRef.current;
+      const rangCible = Math.max(pireControle, (gradinsEnDefaut || rapportEnDefaut) ? 1 : -1);
+      const cible = rangCible >= 2 ? "Défaillant" : rangCible >= 1 ? "Dégradé" : null;
+      const rang = (x) => RANK_OF[x] ?? 0;
+      if (cible && rang(cible) > rang(cur.etatFinal)) {
+        update({ ...cur, etatFinal: cible, etatFinalAuto: cur.etatFinalAuto || cur.etatFinal || "Conforme" });
+      } else if (cur.etatFinalAuto && rang(cur.etatFinal) > Math.max(rangCible, rang(cur.etatFinalAuto))) {
+        const avant = cur.etatFinalAuto;
+        const nouvel = cible && rang(cible) > rang(avant) ? cible : avant;
+        const { etatFinalAuto, ...reste } = cur;
+        update(nouvel === avant ? { ...reste, etatFinal: avant } : { ...cur, etatFinal: nouvel });
+      }
+    }, 800);
+    return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gradinsEnDefaut, rapportEnDefaut, pireControle, eq.etatFinal]);
 
@@ -11091,7 +11258,7 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
           <Card>
             <div style={{ display: "flex", flexDirection: "column", gap: 18, width: "100%" }}>
               <Field label="Synthèse de l'état — à l'issue de la maintenance">
-                <Select value={eq.etatFinal} onChange={(e) => update({ ...eq, etatFinal: e.target.value })} style={{ maxWidth: 320 }}>
+                <Select value={eq.etatFinal} onChange={(e) => { const { etatFinalAuto, ...reste } = eq; update({ ...reste, etatFinal: e.target.value }); }} style={{ maxWidth: 320 }}>
                   {EQUIP_STATUSES.map((s) => <option key={s} value={s}>{agree(s, equipGender(eq.type), false)}</option>)}
                 </Select>
               </Field>
@@ -16743,8 +16910,8 @@ async function generateSiteDocx(site, allSites) {
   ];
   const locauxRows = (site.locaux || []).map((l) => ({
     nom: l.nom || "Local sans nom",
-    resume: [l.typeDePoste && `Type de poste : ${l.typeDePoste}`, l.regimeNeutre && `Régime de neutre : ${l.regimeNeutre}`, l.normeFusible && `Norme du poste : ${l.normeFusible}`, l.normeTableauBT && `Norme du tableau BT : ${l.normeTableauBT}`, l.marque && `Marque : ${l.marque}`, l.anneeMiseEnService && `Mise en service : ${l.anneeMiseEnService}`].filter(Boolean).join(" · "),
-    definitions: [l.regimeNeutre ? REGIME_NEUTRE_DESCRIPTIONS[l.regimeNeutre] : null, pointsControleRegimeBT(l.regimeNeutre, l.normeTableauBT)].filter(Boolean),
+    resume: [l.typeDePoste && `Type de poste : ${l.typeDePoste}`, texteRegimesNeutre(l) && `Régime de neutre — ${texteRegimesNeutre(l)}`, l.normeFusible && `Norme du poste : ${l.normeFusible}`, normesTableauDuLocal(l).length && `Norme${normesTableauDuLocal(l).length > 1 ? "s" : ""} du tableau BT : ${normesTableauDuLocal(l).join(" + ")}`, l.marque && `Marque : ${l.marque}`, l.anneeMiseEnService && `Mise en service : ${l.anneeMiseEnService}`].filter(Boolean).join(" · "),
+    definitions: [regimesNeutreDuLocal(l).hta ? REGIME_NEUTRE_DESCRIPTIONS[regimesNeutreDuLocal(l).hta] : null, regimesNeutreDuLocal(l).bt ? REGIME_NEUTRE_DESCRIPTIONS[regimesNeutreDuLocal(l).bt] : null, pointsControleRegimeBT(regimesNeutreDuLocal(l).bt, normesTableauDuLocal(l)), normesTableauDuLocal(l).includes("NF C 15-100") && localEnsembleNormalise(l) ? TEXTE_DOUBLE_NORME : null, pointsControleEnsemble61439(l)].filter(Boolean),
   }));
   const locauxTable = locauxRows.length && locauxRows.some((l) => l.resume) ? docxTable({
     width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: [3400, 6200],
