@@ -595,6 +595,18 @@ DECLENCHEURS_SCHNEIDER["Digitrip 520 (Magnum MDSX / SBSE)"] = {
   instantane: { precision: 0.10, non: 0, max: 0.065 },
   noteNature: "surcharge longue en temps maximums (+0 / −30 %), court retard et instantané (≤ 65 ms) relevés sur les courbes 70C1006 et 70C1585",
 };
+// Eaton PXR 20 (type V) / PXR 25 (type U) des IZMX16 / IZMX40 — catalogue IZMX, notes des courbes « PXR20/25 » (L, S, I, G) :
+// surcharge longue I²t, tr à 6 × Ir (0,5 à 24 s) +0 / −30 %, seuil 110 % de Ir ±5 % ; court retard Isd 1,5–10 × Ir ±10 %,
+// temps fixe +0 / −80 ms (0,1 s : 60–100 ms ; 0 s : 60 ms avec alimentation auxiliaire, 120 ms sans), I²t défini à 8 × Ir
+// +0 / −30 % (0,1 s : −40 %), bas de bande limité par le minimum du temps fixe ; instantané ±10 %, 60 ms (100 ms sans aux.).
+DECLENCHEURS_SCHNEIDER["PXR 20 / PXR 25 (Eaton IZMX16 / IZMX40)"] = {
+  marque: "Eaton", court: "PXR 20 / 25", source: "Eaton — catalogue IZMX16 / IZMX40, courbes PXR20/25 (L, S, I, G) et caractéristiques du déclencheur",
+  c: 0, refX: 6, trImpose: true, tr6Fixe: null, tolLong: () => 0.7,
+  courtRetard: { modele: "pxr", precision: 0.10, i2t: true, refI2tIr: 8 },
+  instantane: { precision: 0.10, non: 0, max: 0.10 },
+  noteNature: "surcharge longue en temps maximums (+0 / −30 %), court retard et instantané d'après les notes des courbes PXR20/25",
+  texteLong: "PXR 20 / 25 : surcharge longue en I²t, tr défini à 6 × Ir (0,5 / 1 / 2 / 4 / 7 / 10 / 12 / 15 / 20 / 24 s) — le réglage « à (x Ir) » est ignoré — tolérance +0 / −30 % ; Ir = 0,4 / 0,5 / 0,6 / 0,7 / 0,75 / 0,8 / 0,9 / 0,95 / 0,98 / 1,0 × In, seuil de déclenchement 110 % de Ir ±5 % ; mémoire thermique : temps plus courts possibles en essais répétés. Court retard : Isd = 1,5 / 2 / 2,5 / 3 / 4 / 5 / 6 / 7 / 8 / 10 × Ir ±10 % ; temps fixe 0 à 0,5 s, tolérance +0 / −80 ms (0,1 s : 60 à 100 ms ; 0 s : 60 ms avec alimentation auxiliaire 24 V, 120 ms sans) ; I²t (0,1 / 0,3 / 0,4 / 0,5 s définis à 8 × Ir) +0 / −30 % (0,1 s : −40 %), bas de bande limité au minimum du temps fixe. Instantané : Ii = 2 / 4 / 5 / 6 / 7 / 8 / 10 / 12 / 15 × In ou OFF, ±10 % ; temps nominal 60 ms avec alimentation auxiliaire, 100 ms sans ; déclenchement instantané haut fixe à 90 kA crête (IZMX16) / 167 kA crête (IZMX40), actif même en OFF. Terre : Ig = 0,2 à 1,0 × In ±10 %, temps fixe 0,1 à 0,5 s +0 / −80 ms (0,1 s : 60–100 ms), I²t défini à 0,625 × In +0 / −40 % (0,1 et 0,2 s) ou −30 % (0,3 à 0,5 s).",
+};
 // Entrée de la bibliothèque correspondant à la « Marque » et à la « Référence de l'unité de déclenchement » déjà saisies dans
 // l'identification (aucun champ supplémentaire à remplir) ; null si la référence n'est pas documentée → courbe générique.
 // Non couverts : Micrologic 3.0 (instantané seul), moteur (M), 2.3 G, STR 68 U, Ekip Dip, Ekip Touch hors Emax 2 (le modèle doit indiquer Emax 2).
@@ -620,6 +632,7 @@ function cleDeclencheurBibliotheque(id) {
     if (str === "str38s") return "STR 38 S (Masterpact M)";
     if (str === "str58u") return "STR 58 U (Masterpact M)";
   }
+  if ((!marque || /eaton|moeller|cutler/.test(marque)) && /^pxr ?2[05]\b/.test(ref)) return "PXR 20 / PXR 25 (Eaton IZMX16 / IZMX40)";
   if ((!marque || /eaton|moeller|cutler/.test(marque)) && /^digitrip 520(i|li|m|mi|mc|mci)?( |$)/.test(ref)) {
     return /mdsx|sbse/.test(disjoncteur) ? "Digitrip 520 (Magnum MDSX / SBSE)" : "Digitrip 520 / 520M / 520MC (Eaton Magnum, Moeller IZM)";
   }
@@ -666,6 +679,19 @@ function fenetreCourtRetardSchneider(d, tsd, I, Ir, i2tActif, In) {
     // PR111/P : courbes A à D, I²t OFF = temps défini (0,05 / 0,1 / 0,25 / 0,5 s), I²t ON = temps défini à 8 × In (t = T·(8 In/I)², plancher 20 / 30 / 80 / 150 ms) ; tolérance ±20 %.
     const t = tempsNominalCourtRetardPR111(tsd, I / (In || Ir), i2tActif);
     return { non: t * 0.8, max: t * 1.2 };
+  }
+  if (cr.modele === "pxr") {
+    // PXR 20 / 25 : temps fixe +0 / −80 ms (0,1 s : 60–100 ms ; 0 s : ≤ 120 ms) ; I²t défini à 8 × Ir, +0 / −30 % (0,1 s : −40 %),
+    // bas de bande jamais sous le minimum du temps fixe.
+    const x = I / Ir;
+    const fixeMin = tsd <= 0 ? 0 : Math.abs(tsd - 0.1) < 1e-6 ? 0.06 : Math.max(0, tsd - 0.08);
+    const fixeMax = tsd <= 0 ? 0.12 : tsd;
+    if (i2tActif && tsd > 0) {
+      const haut = x < 8 ? tsd * Math.pow(8 / x, 2) : tsd;
+      const tol = Math.abs(tsd - 0.1) < 1e-6 ? 0.4 : 0.3;
+      return { non: Math.max(fixeMin, haut * (1 - tol)), max: Math.max(haut, fixeMax) };
+    }
+    return { non: fixeMin, max: fixeMax };
   }
   if (cr.modele === "digitrip") {
     // Digitrip 520 : bandes relevées sur les tracés de la courbe 70C1006 (07/2024) — temps total de coupure minimal / maximal.
@@ -760,14 +786,15 @@ const EATON_IZM = ["XZMA", "XZMV", "XZMU", "XZMR", "XZMD"]; // unités de contr�
 const EATON_ZM_ANCIEN = ["ZM 12", "ZM 12V", "ZM 124", "ZM 124V", "ZM 24", "ZM 24V"]; // déclencheurs des anciens NZM 12 / 124 / 24
 const EATON_NZM = ["Magnétothermique (-A)", "Électronique (-VE)", "Électronique (-VX)", "Moteur (-ME)"];
 // Eaton Digitrip (disjoncteurs Magnum / Magnum DS et IZM93-97-99 de première génération) — notices IL70C1037H05 et AWB1230-1605.
+const EATON_PXR = ["PXR20 (V)", "PXR25 (U)"]; // Power Xpert Release — IZMX16 / IZMX40 (Series NRX NF / RF), catalogue IZMX
 const EATON_DIGITRIP = ["Digitrip 520", "Digitrip 520i", "Digitrip 520Li", "Digitrip 520M", "Digitrip 520Mi", "Digitrip 520MC", "Digitrip 520MCi", "Digitrip 220+", "Digitrip 1150", "Digitrip 1150i"];
 const MARQUE_GAMME_RELAIS_BT = {
   "Schneider Electric": [...MICROLOGIC_2_7, ...MICROLOGIC_X, ...MICROLOGIC_NSX, ...STR_COMPACT_NS, ...STR_MASTERPACT_M, ...ST_MASTERPACT_M, ...TM_SCHNEIDER],
   "Merlin Gerin": [...MICROLOGIC_2_7, ...MICROLOGIC_NSX, ...STR_COMPACT_NS, ...STR_MASTERPACT_M, ...ST_MASTERPACT_M, ...TM_SCHNEIDER],
   "ABB": [...ABB_TM, ...ABB_PR_ISOMAX, ...ABB_PR_TMAX, ...ABB_PR_EMAX, ...ABB_EKIP],
   "Siemens": [...SIEMENS_3WL, ...SIEMENS_3WA, ...SIEMENS_3VA1, ...SIEMENS_3VA2],
-  "Eaton": [...EATON_NZM, ...EATON_ZM_ANCIEN, ...EATON_IZM, ...EATON_DIGITRIP, "Digitrip 3000", "IZM trip unit"],
-  "Moeller": [...EATON_NZM, ...EATON_ZM_ANCIEN, ...EATON_IZM, ...EATON_DIGITRIP, "IZM trip unit"],
+  "Eaton": [...EATON_NZM, ...EATON_ZM_ANCIEN, ...EATON_IZM, ...EATON_PXR, ...EATON_DIGITRIP, "Digitrip 3000", "IZM trip unit"],
+  "Moeller": [...EATON_NZM, ...EATON_ZM_ANCIEN, ...EATON_IZM, ...EATON_PXR, ...EATON_DIGITRIP, "IZM trip unit"],
   "Legrand": [...LEGRAND_DMX, ...LEGRAND_DPX],
   "General Electric": ["Entelliguard TU"],
 };
@@ -800,6 +827,7 @@ const DECLENCHEURS_BT_REGLES = [
   [/3va2|3va6|3va27/, SIEMENS_3VA2],
   [/dmx/, LEGRAND_DMX],
   [/dpx/, LEGRAND_DPX],
+  [/izmx|nrx/, EATON_PXR],
   [/izm\s*(93|20|97|32|99|63)\b|izme\s*40/, ["Digitrip 520Li", "Digitrip 520i", "Digitrip 520Mi", "Digitrip 520MCi", "Digitrip 1150i"]],
   [/magnum/, EATON_DIGITRIP],
   [/izm/, [...EATON_IZM, "IZM trip unit"]],
@@ -1111,7 +1139,9 @@ const MODELES_IZM_DIGITRIP = [
   ["IZM93", [800, 1250, 1600, 2000]], ["IZM20", [800, 1250, 1600, 2000]],
   ["IZM97", [800, 1250, 1600, 2000, 2500, 3200, 4000]], ["IZM32", [800, 1250, 1600, 2000, 2500, 3200]], ["IZME40", [4000]],
   ["IZM99", [4000, 5000, 6300]], ["IZM63", [4000, 5000, 6300]],
-].flatMap(([taille, calibres]) => calibres.map((c) => `${taille} ${c}`)).concat(["Magnum", "Magnum DS", "Magnum SB", "Magnum MDSX", "Magnum SBSE"]);
+].flatMap(([taille, calibres]) => calibres.map((c) => `${taille} ${c}`)).concat(["Magnum", "Magnum DS", "Magnum SB", "Magnum MDSX", "Magnum SBSE"])
+  // IZMX16 (630-1600 A) et IZMX40 (800-4000 A) — catalogue IZMX ; le niveau B / N / H se choisit dans « Niveau de performance ».
+  .concat([630, 800, 1000, 1250, 1600].map((c) => `IZMX16 ${c}`), [800, 1000, 1250, 1600, 2000, 2500, 3200, 4000].map((c) => `IZMX40 ${c}`));
 // Legrand : DPX 160 et DPX 250 ER (guide puissance 2007), DPX 630 de 250 à 630 A (fiche technique F00692FR/03), DMX³ 2500 de 630 à 2500 A (fiche technique F01800FR/01).
 const MODELES_LEGRAND = ["DPX 160", "DPX 250 ER", ...[250, 320, 400, 500, 630].map((c) => `DPX 630 ${c}`), ...[630, 800, 1000, 1250, 1600, 2000, 2500].map((c) => `DMX3 2500 ${c}`)];
 const MODELES_COMPACT_C = ["Compact C801", "Compact C1001", "Compact C1251"];
@@ -1180,7 +1210,12 @@ function seuilInstantaneMasterpactM(identification, inominal) {
 // Niveau = [nom, Icu en kA (null si non documenté), tension de référence].
 const SRC_IZM = "notice IZM AWB1230-1605 (Moeller / Eaton, 10/2009), tableau 1 — Icu = Ics à 690 V";
 const PERF_IZM = (re, gamme, niveaux) => ({ re, gamme, marques: /eaton|moeller/, source: SRC_IZM, niveaux });
+const SRC_IZMX = "catalogue Eaton IZMX16 / IZMX40 (Series NRX), caractéristiques techniques";
 const PERFORMANCES_BT = [
+  { re: /^izmx16/, gamme: "IZMX16", marques: /eaton|moeller/, source: SRC_IZMX, niveaux: [
+    ["B", 42, "440/480 V (Ics 42 kA ; 690 V : 42 kA) — Icw 42 kA 1 s"], ["N", 50, "440/480 V (Ics 50 kA ; 690 V : 42 kA) — Icw 42 kA 1 s"], ["H", 66, "440/480 V (Ics 50 kA ; 690 V : 42 kA) — Icw 42 kA 1 s"]] },
+  { re: /^izmx40/, gamme: "IZMX40", marques: /eaton|moeller/, source: SRC_IZMX, niveaux: [
+    ["B", 66, "440/480 V (Ics 66 kA ; 690 V : 66 kA) — Icw 66 kA 1 s / 53 kA 3 s"], ["N", 85, "440/480 V (Ics 85 kA ; 690 V : 75 kA) — Icw 85 kA 1 s / 66 kA 3 s (75 kA à 690 V)"], ["H", 105, "440/480 V (Ics 105 kA ; 690 V : 75 kA) — Icw 85 kA 1 s / 66 kA 3 s (75 kA à 690 V)"]] },
   PERF_IZM(/^izm(93|20)2000/, "IZM93 / IZM20 2000 A", [["50 kA", 50, "690 V — Icw 50 kA 1 s / 30 kA 3 s"], ["65 kA", 65, "690 V — Icw 65 kA 1 s / 40 kA 3 s"]]),
   PERF_IZM(/^izm(93|20)/, "IZM93 / IZM20 (800 à 1600 A)", [["50 kA", 50, "690 V — Icw 50 kA 1 s"], ["65 kA", 65, "690 V — Icw 65 kA 1 s / 40 kA 3 s"]]),
   PERF_IZM(/^izm(97|32)(800|1250)/, "IZM97 / IZM32 800-1250 A", [["40 kA", 40, "690 V — Icw 40 kA 1 s"], ["65 kA", 65, "690 V — Icw 65 kA 1 s / 50 kA 3 s"], ["85 kA", 85, "690 V — Icw 85 kA 1 s / 65 kA 3 s"], ["100 kA", 100, "440 V (selon version 85 kA à 690 V, voir plaque) — Icw 85 kA 1 s / 65 kA 3 s"]]),
@@ -15411,7 +15446,7 @@ function parametresCourbeDeclenchement(eq) {
     bandeLong: d && tr6 ? (x) => bandeLongRetard(d, tr6, x, n(sl.k1) * n(sl.k2)) : null,
     fenCC: d && d.courtRetard && Im > 0 ? (I) => fenetreCourtRetardSchneider(d, n(cc.tsd) / 1000, I, Ir, modeEssaiOn, n(sl.inominal)) : null,
     // ABB : à I²t ON la courbe de court retard est t = 100·t2 / (I/In)² sur toute la plage (pas de palier à 10 Ir).
-    tCourt: d && d.courtRetard && d.courtRetard.modele === "digitrip" ? (I) => (i2t && I < 8 * Ir ? tsd * Math.pow((8 * Ir) / I, 2) : tsd) : d && d.courtRetard && d.courtRetard.modele === "abb" ? (I) => (i2t ? (100 * tsd) / Math.pow(I / n(sl.inominal), 2) : tsd) : d && d.courtRetard && d.courtRetard.modele === "pr111" ? (I) => tempsNominalCourtRetardPR111(tsd, I / n(sl.inominal), i2t) : null,
+    tCourt: d && d.courtRetard && (d.courtRetard.modele === "digitrip" || d.courtRetard.modele === "pxr") ? (I) => (i2t && I < 8 * Ir ? tsd * Math.pow((8 * Ir) / I, 2) : tsd) : d && d.courtRetard && d.courtRetard.modele === "abb" ? (I) => (i2t ? (100 * tsd) / Math.pow(I / n(sl.inominal), 2) : tsd) : d && d.courtRetard && d.courtRetard.modele === "pr111" ? (I) => tempsNominalCourtRetardPR111(tsd, I / n(sl.inominal), i2t) : null,
     fenInst: d && d.instantane && Ii > 0 ? { x0: Ii * (1 - d.instantane.precision), non: d.instantane.non, max: d.instantane.max } : null,
     noteDoc: d ? `Courbe constructeur ${d.marque || "Schneider"} — ${d.court} : ${d.noteNature || (d.nature === "moyen" ? "temps moyens avec tolérance" : "temps maximums à froid")}, zones admises d'après la documentation.` : "",
     titre: ("Courbe de déclenchement" + (repere ? " · " + repere : "")).toUpperCase(),
