@@ -6054,7 +6054,15 @@ function ControlRow({ item, value, onChange, idPrefix, toleranceOverride }) {
   return (
     <div style={{ padding: "10px 0", borderBottom: "1px solid #E2E6EB" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-        <span style={{ fontSize: 12.5, color: "#3E4A5C", flex: "1 1 240px" }}>{item.label}</span>
+        <span style={{ fontSize: 12.5, color: "#3E4A5C", flex: "1 1 240px", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          {item.label}
+          {aDesChampsPlaque(item.fields) && (
+            <BoutonLirePlaque compact libelle="Plaque" typeEquipement={item.label}
+              contexte={contextePlaqueComposant(item.label)}
+              champs={champsPlaqueDepuisDefs(item.fields, fields)}
+              valeursActuelles={fields} onAppliquer={(patch) => onChange({ ...valueRef.current, fields: { ...(valueRef.current.fields || {}), ...patch } })} />
+          )}
+        </span>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
           {(item.fields || []).map((f) =>
             f.hidden ? null :
@@ -7237,6 +7245,12 @@ function DynamicListPanel({ title, entries, onChange, typeOptions, fieldDefs, wi
                   <div style={{ flex: "1 1 200px" }}>
                     <Combo value={e.label} onChange={(v) => setEntry(e.id, { label: v })} options={options} listId={`${idPrefix}-${e.id}`} placeholder="Type (ou saisie libre)" />
                   </div>
+                  {aDesChampsPlaque(typeof fieldDefs === "function" ? fieldDefs(e.fields) : fieldDefs) && (
+                    <BoutonLirePlaque compact libelle="Plaque" typeEquipement={`${title} — ${e.label || ""}`}
+                      contexte={contextePlaqueComposant(`${title} ${e.label || ""}`)}
+                      champs={champsPlaqueDepuisDefs(typeof fieldDefs === "function" ? fieldDefs(e.fields) : fieldDefs, e.fields)}
+                      valeursActuelles={e.fields} onAppliquer={(patch) => setEntry(e.id, { fields: { ...e.fields, ...patch } })} />
+                  )}
                   {entries.length > 1 && (
                     <button onClick={() => removeEntry(e.id)} style={{ background: "none", border: "none", color: "#EF4444", cursor: "pointer", padding: 4 }} title="Retirer">
                       <Trash2 size={15} />
@@ -8983,6 +8997,28 @@ function BoutonLirePlaque({ champs, valeursActuelles = {}, onAppliquer, typeEqui
       )}
     </span>
   );
+}
+// Composants avec plaque (fusibles HTA, TC, TP, organes…) : bouton « Plaque » proposé dès que la
+// ligne comporte des champs d'identification ; seuls les champs de caractéristiques sont envoyés
+// (jamais les mesures, calculs ou états).
+const CLES_IDENTITE_PLAQUE = /^(marque|modele|modeleTore|reference|fabricant|numeroSerie)$/;
+const CLES_CARACTERISTIQUES_PLAQUE = /^(marque|modele|modeleTore|reference|fabricant|numeroSerie|fonction|type|un|in|tensionAssignee|tension|puissance|classe\d?|rapport|rapportPrimaire\d?|secondaire\d?|couplage|calibre|courantAssigne|anneeMiseEnService|anneeFabrication)$/;
+// « reference » n'est une référence produit que si son libellé est exactement « Référence » (ailleurs :
+// valeur de référence constructeur d'une mesure, commentaire, fichier joint…).
+const estChampPlaque = (f, re) => !!f && re.test(f.key) && (f.key !== "reference" || String(f.label || "").trim() === "Référence");
+const aDesChampsPlaque = (defs) => Array.isArray(defs) && defs.some((f) => estChampPlaque(f, CLES_IDENTITE_PLAQUE));
+function champsPlaqueDepuisDefs(defs, fields) {
+  return (defs || []).filter((f) => !f.compute && !f.longText && !f.hidden && estChampPlaque(f, CLES_CARACTERISTIQUES_PLAQUE)).map((f) => ({
+    key: f.key, label: `${f.label}${f.unit ? ` (${f.unit})` : ""}`,
+    options: typeof f.options === "function" ? f.options(fields || {}) || [] : f.options,
+  }));
+}
+function contextePlaqueComposant(libelle) {
+  const l = String(libelle || "").toLowerCase();
+  if (l.includes("fusible")) return `Fusible HTA (${libelle}) : lire le fabricant, la gamme (modèle), la tension assignée Un en kV, le calibre In en A et la référence catalogue exacte. Une photo peut montrer un seul fusible représentatif du jeu.`;
+  if (/\btc\b|courant/.test(l)) return `Transformateur de courant ou tore homopolaire (${libelle}) : lire marque, modèle, rapport (primaire/secondaire), classe(s) de précision, puissance (VA), tension assignée. Fonction : « Protection » si classe de type 5P/10P, « Mesure » si 0.2/0.5/1, « Protection / Mesure » si deux enroulements.`;
+  if (/\btp\b|potentiel|tension/.test(l)) return `Transformateur de tension / potentiel (${libelle}) : lire marque, modèle, référence, rapport de transformation, classe de précision, puissance (VA), tension assignée (kV).`;
+  return `Plaque signalétique du composant « ${libelle} » : ne remplir que ce qui est lisible.`;
 }
 // Champs d'identification jamais lus sur une plaque (repère interne, liens vers d'autres équipements, choix d'app).
 const CHAMPS_IDENTIFICATION_HORS_PLAQUE = ["repere", "transformateurAssocie", "transfoManuel", "presenceRelais", "presenceTC", "transfoSnManuel", "transfoUccManuel"];
