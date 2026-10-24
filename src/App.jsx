@@ -568,6 +568,33 @@ DECLENCHEURS_SCHNEIDER["PR111/P (ABB SACE Emax)"] = {
   instantane: { precision: 0.20, non: 0.028, max: 0.042 },
   texteLong: "PR111/P : surcharge longue à I² constant, courbes A à D = 3 / 6 / 12 / 18 s à 6 × I1 (tr saisi à 6 × Ir), jamais moins de 750 ms, tolérance ±10 % jusqu'à 2 × In puis ±20 %. Court retard : seuil en multiple de In, courbes A à D à temps défini (50 / 100 / 250 / 500 ms) ou en I²t défini à 8 × In, ±20 %. Instantané : 35 ms ±20 %.",
 };
+// Eaton Digitrip 520 / 520M / 520MC (et 520i / 520Mi / 520MCi IEC) — notice IL70C1037H05, courbes 70C1006 (long et court retard),
+// 70C1585 (instantané), 70C1008 (terre) : surcharge longue en I²t, tr = temps à 6 × Ir (2 / 4 / 7 / 10 / 12 / 15 / 20 / 24 s), +0 / −30 % ;
+// seuil 110 % de Ir ±5 %. Court retard : seuil 2 à 10 × Ir (ou M1) ±5 %, temps fixe 0,1 à 0,5 s ou I²t (0,1* / 0,3* / 0,5*) défini à 8 × Ir.
+// Les courbes ne donnent PAS de bande de temps chiffrée pour le court retard ni pour l'instantané : repères génériques de l'app.
+// Bandes du court retard relevées sur les tracés vectoriels de la courbe 70C1006 (révision 07/2024, axes log calibrés sur la grille,
+// écart de lecture ≈ 2 %) : temps total de coupure minimal et maximal (s). FLAT : bande horizontale par réglage. I²t (0,1* / 0,3* / 0,5*) :
+// maximum = fmax × (8 Ir / I)² sous 8 × Ir (point d'inflexion de la note 6), minimum = kmin / (I/Ir)², jamais sous fmin.
+const BANDES_DIGITRIP_FLAT = { 0.1: [0.060, 0.128], 0.2: [0.148, 0.214], 0.3: [0.234, 0.300], 0.4: [0.326, 0.403], 0.5: [0.426, 0.497] };
+const BANDES_DIGITRIP_I2T = { 0.1: { fmin: 0.060, fmax: 0.131, kmin: 4.6 }, 0.3: { fmin: 0.234, fmax: 0.300, kmin: 13.0 }, 0.5: { fmin: 0.427, fmax: 0.498, kmin: 22.4 } };
+DECLENCHEURS_SCHNEIDER["Digitrip 520 / 520M / 520MC (Eaton Magnum, Moeller IZM)"] = {
+  marque: "Eaton", court: "Digitrip 520", source: "Eaton — notice IL70C1037H05 ; courbes 70C1006 (long et court retard), 70C1585 (instantané), 70C1008 (terre)",
+  c: 0, refX: 6, trImpose: true, tr6Fixe: null, tolLong: () => 0.7,
+  courtRetard: { modele: "digitrip", precision: 0.05, i2t: true, refI2tIr: 8 },
+  instantane: null,
+  noteNature: "surcharge longue en temps maximums (+0 / −30 %), court retard en bandes relevées sur la courbe 70C1006, instantané en repère générique",
+  texteLong: "Digitrip 520 : surcharge longue en I²t, temporisation tr définie à 6 × Ir (2 / 4 / 7 / 10 / 12 / 15 / 20 / 24 s) — le réglage « à (x Ir) » est ignoré — tolérance +0 / −30 % ; Ir = 0,4 / 0,5 / 0,6 / 0,7 / 0,8 / 0,9 / 0,95 / 1,0 × In, seuil de déclenchement 110 % de Ir ±5 %. Mémoire thermique (LTM) : placer le cavalier en position inactive avant les essais (sinon temps plus courts), puis le remettre en l'état. Court retard : Isd = 2 / 2,5 / 3 / 4 / 5 / 6 / 8 / 10 × Ir ou M1, ±5 % ; tsd = 0,1 à 0,5 s à temps fixe ou 0,1* / 0,3* / 0,5* en I²t défini à 8 × Ir (temps fixe au-delà) ; bandes de coupure relevées sur la courbe 70C1006 : 0,1 s → 60–128 ms, 0,2 s → 148–214 ms, 0,3 s → 234–300 ms, 0,4 s → 326–403 ms, 0,5 s → 426–497 ms. Instantané : Ii = 2 / 3 / 4 / 5 / 6 / 8 / 10 × In, M1 ou OFF, ±10 % — temps : ≤ 65 ms sur Magnum MDSX / SBSE (courbe 70C1585) ; repère générique sur Magnum / Magnum DS et IZM (courbe 70C1007 non fournie). M1 = 14 / 12 / 10 × In selon le calibre (indiqué sur le rating plug). Terre : 0,25 à 1,0 × In ±10 % (1 200 A max. en version UL), temps fixe 0,1 à 0,5 s ou I²t défini à 0,625 × In ; essai par injection primaire à 125 % du seuil : déclenchement en moins de 1 s.",
+};
+// Magnum MDSX / SBSE (limiteurs) : courbe instantanée 70C1585 (07/2024) — seuil ±10 %, temps total de coupure maximal 65 ms relevé
+// sur le tracé (palier horizontal au-dessus du seuil). Pour les Magnum / Magnum DS standard et les IZM, la courbe instantanée est
+// la 70C1007 (non fournie) : l'instantané y reste en repère générique.
+DECLENCHEURS_SCHNEIDER["Digitrip 520 (Magnum MDSX / SBSE)"] = {
+  ...DECLENCHEURS_SCHNEIDER["Digitrip 520 / 520M / 520MC (Eaton Magnum, Moeller IZM)"],
+  court: "Digitrip 520 (MDSX / SBSE)",
+  source: "Eaton — notice IL70C1037H05 ; courbes 70C1006 (long et court retard), 70C1585 (instantané MDSX / SBSE), 70C1008 (terre)",
+  instantane: { precision: 0.10, non: 0, max: 0.065 },
+  noteNature: "surcharge longue en temps maximums (+0 / −30 %), court retard et instantané (≤ 65 ms) relevés sur les courbes 70C1006 et 70C1585",
+};
 // Entrée de la bibliothèque correspondant à la « Marque » et à la « Référence de l'unité de déclenchement » déjà saisies dans
 // l'identification (aucun champ supplémentaire à remplir) ; null si la référence n'est pas documentée → courbe générique.
 // Non couverts : Micrologic 3.0 (instantané seul), moteur (M), 2.3 G, STR 68 U, Ekip Dip, Ekip Touch hors Emax 2 (le modèle doit indiquer Emax 2).
@@ -592,6 +619,9 @@ function cleDeclencheurBibliotheque(id) {
     if (str === "str28d") return "STR 28 D (Masterpact M)";
     if (str === "str38s") return "STR 38 S (Masterpact M)";
     if (str === "str58u") return "STR 58 U (Masterpact M)";
+  }
+  if ((!marque || /eaton|moeller|cutler/.test(marque)) && /^digitrip 520(i|li|m|mi|mc|mci)?( |$)/.test(ref)) {
+    return /mdsx|sbse/.test(disjoncteur) ? "Digitrip 520 (Magnum MDSX / SBSE)" : "Digitrip 520 / 520M / 520MC (Eaton Magnum, Moeller IZM)";
   }
   if ((!marque || /abb/.test(marque)) && /^pr111/.test(ref)) return "PR111/P (ABB SACE Emax)";
   if ((!marque || /abb/.test(marque)) && /^pr12[123] ?\/ ?p$/.test(ref)) return `${ref.replace(/ /g, "").toUpperCase()} (ABB SACE Emax)`;
@@ -636,6 +666,17 @@ function fenetreCourtRetardSchneider(d, tsd, I, Ir, i2tActif, In) {
     // PR111/P : courbes A à D, I²t OFF = temps défini (0,05 / 0,1 / 0,25 / 0,5 s), I²t ON = temps défini à 8 × In (t = T·(8 In/I)², plancher 20 / 30 / 80 / 150 ms) ; tolérance ±20 %.
     const t = tempsNominalCourtRetardPR111(tsd, I / (In || Ir), i2tActif);
     return { non: t * 0.8, max: t * 1.2 };
+  }
+  if (cr.modele === "digitrip") {
+    // Digitrip 520 : bandes relevées sur les tracés de la courbe 70C1006 (07/2024) — temps total de coupure minimal / maximal.
+    const x = I / Ir;
+    const proche = (table) => table[Object.keys(table).reduce((a, b) => (Math.abs(Number(b) - tsd) < Math.abs(Number(a) - tsd) ? b : a))];
+    if (i2tActif) {
+      const b = proche(BANDES_DIGITRIP_I2T);
+      return { non: Math.max(b.fmin, b.kmin / (x * x)), max: b.fmax * Math.max(1, Math.pow(8 / x, 2)) };
+    }
+    const b = proche(BANDES_DIGITRIP_FLAT);
+    return { non: b[0], max: b[1] };
   }
   if (cr.modele === "abb") {
     // ABB Ekip Touch : t = k (I²t OFF) → t2 ± le meilleur de 10 % ou 40 ms ; t = k / I² (I²t ON) → t = 100·t2 / (I/In)², ±15 % (±20 % au-delà de 6 In).
@@ -718,13 +759,15 @@ const LEGRAND_DPX = ["Magnétothermique", "Électronique", "Électronique HP (S1
 const EATON_IZM = ["XZMA", "XZMV", "XZMU", "XZMR", "XZMD"]; // unités de contrôle électroniques IZM (manuel IZM § 9.1)
 const EATON_ZM_ANCIEN = ["ZM 12", "ZM 12V", "ZM 124", "ZM 124V", "ZM 24", "ZM 24V"]; // déclencheurs des anciens NZM 12 / 124 / 24
 const EATON_NZM = ["Magnétothermique (-A)", "Électronique (-VE)", "Électronique (-VX)", "Moteur (-ME)"];
+// Eaton Digitrip (disjoncteurs Magnum / Magnum DS et IZM93-97-99 de première génération) — notices IL70C1037H05 et AWB1230-1605.
+const EATON_DIGITRIP = ["Digitrip 520", "Digitrip 520i", "Digitrip 520Li", "Digitrip 520M", "Digitrip 520Mi", "Digitrip 520MC", "Digitrip 520MCi", "Digitrip 220+", "Digitrip 1150", "Digitrip 1150i"];
 const MARQUE_GAMME_RELAIS_BT = {
   "Schneider Electric": [...MICROLOGIC_2_7, ...MICROLOGIC_X, ...MICROLOGIC_NSX, ...STR_COMPACT_NS, ...STR_MASTERPACT_M, ...ST_MASTERPACT_M, ...TM_SCHNEIDER],
   "Merlin Gerin": [...MICROLOGIC_2_7, ...MICROLOGIC_NSX, ...STR_COMPACT_NS, ...STR_MASTERPACT_M, ...ST_MASTERPACT_M, ...TM_SCHNEIDER],
   "ABB": [...ABB_TM, ...ABB_PR_ISOMAX, ...ABB_PR_TMAX, ...ABB_PR_EMAX, ...ABB_EKIP],
   "Siemens": [...SIEMENS_3WL, ...SIEMENS_3WA, ...SIEMENS_3VA1, ...SIEMENS_3VA2],
-  "Eaton": [...EATON_NZM, ...EATON_ZM_ANCIEN, ...EATON_IZM, "Digitrip 3000", "IZM trip unit"],
-  "Moeller": [...EATON_NZM, ...EATON_ZM_ANCIEN, ...EATON_IZM, "IZM trip unit"],
+  "Eaton": [...EATON_NZM, ...EATON_ZM_ANCIEN, ...EATON_IZM, ...EATON_DIGITRIP, "Digitrip 3000", "IZM trip unit"],
+  "Moeller": [...EATON_NZM, ...EATON_ZM_ANCIEN, ...EATON_IZM, ...EATON_DIGITRIP, "IZM trip unit"],
   "Legrand": [...LEGRAND_DMX, ...LEGRAND_DPX],
   "General Electric": ["Entelliguard TU"],
 };
@@ -757,6 +800,8 @@ const DECLENCHEURS_BT_REGLES = [
   [/3va2|3va6|3va27/, SIEMENS_3VA2],
   [/dmx/, LEGRAND_DMX],
   [/dpx/, LEGRAND_DPX],
+  [/izm\s*(93|20|97|32|99|63)\b|izme\s*40/, ["Digitrip 520Li", "Digitrip 520i", "Digitrip 520Mi", "Digitrip 520MCi", "Digitrip 1150i"]],
+  [/magnum/, EATON_DIGITRIP],
   [/izm/, [...EATON_IZM, "IZM trip unit"]],
   [/nzm\s*(12|124|24)(?!\d)/, EATON_ZM_ANCIEN],
   [/nzm/, EATON_NZM],
@@ -1061,6 +1106,12 @@ const MODELES_NZM_IZM = [
   ["NZM4", [550, 600, 630, 700, 800, 875, 900, 1000, 1200, 1250, 1400, 1600]],
   ["IZM1", [1000, 1600]], ["IZM2", [2000, 2500, 3200]], ["IZM3", [4000, 5000]],
 ].flatMap(([taille, calibres]) => calibres.map((c) => `${taille} ${c}`)).concat(["NZM 12", "NZM 124", "NZM 24"]);
+// IZM de première génération à déclencheurs Digitrip (notice AWB1230-1605, 10/2009, tableau 1) et disjoncteurs Eaton Magnum.
+const MODELES_IZM_DIGITRIP = [
+  ["IZM93", [800, 1250, 1600, 2000]], ["IZM20", [800, 1250, 1600, 2000]],
+  ["IZM97", [800, 1250, 1600, 2000, 2500, 3200, 4000]], ["IZM32", [800, 1250, 1600, 2000, 2500, 3200]], ["IZME40", [4000]],
+  ["IZM99", [4000, 5000, 6300]], ["IZM63", [4000, 5000, 6300]],
+].flatMap(([taille, calibres]) => calibres.map((c) => `${taille} ${c}`)).concat(["Magnum", "Magnum DS", "Magnum SB", "Magnum MDSX", "Magnum SBSE"]);
 // Legrand : DPX 160 et DPX 250 ER (guide puissance 2007), DPX 630 de 250 à 630 A (fiche technique F00692FR/03), DMX³ 2500 de 630 à 2500 A (fiche technique F01800FR/01).
 const MODELES_LEGRAND = ["DPX 160", "DPX 250 ER", ...[250, 320, 400, 500, 630].map((c) => `DPX 630 ${c}`), ...[630, 800, 1000, 1250, 1600, 2000, 2500].map((c) => `DMX3 2500 ${c}`)];
 const MODELES_COMPACT_C = ["Compact C801", "Compact C1001", "Compact C1251"];
@@ -1071,8 +1122,8 @@ const MARQUE_MODELE_BT = {
   "Merlin Gerin": [...MODELES_COMPACT_NS, ...MODELES_COMPACT_C, ...MODELES_MASTERPACT_NT_NW, ...MODELES_MASTERPACT_M],
   "ABB": ["Tmax T1", "Tmax T2", "Tmax T3", "Tmax T4", "Tmax T5", "Tmax T6", "Tmax T7", "Tmax T8", "Tmax XT1", "Tmax XT2", "Tmax XT3", "Tmax XT4", "Tmax XT5", "Tmax XT6", "Tmax XT7", "Isomax S1", "Isomax S2", "Isomax S3", "Isomax S4", "Isomax S5", "Isomax S6", "Isomax S7", "Isomax S8", "Emax E1", "Emax E2", "Emax E3", "Emax E4", "Emax E6", ...MODELES_EMAX, "Emax X1", "Emax 2 E1.2", "Emax 2 E2.2", "Emax 2 E4.2", "Emax 2 E6.2"],
   "Siemens": ["3VA1", "3VA2", "3VA6", "3VA27", "3WL04", "3WL08", "3WL10", "3WL11", "3WL12", "3WL Taille I", "3WL Taille II", "3WL Taille III", "3WA"],
-  "Eaton": ["NZM1", "NZM2", "NZM3", "NZM4", "NZML2", "NZML3", "IZM16", "IZM26", ...MODELES_NZM_IZM],
-  "Moeller": ["NZM", "IZM", ...MODELES_NZM_IZM],
+  "Eaton": ["NZM1", "NZM2", "NZM3", "NZM4", "NZML2", "NZML3", "IZM16", "IZM26", ...MODELES_NZM_IZM, ...MODELES_IZM_DIGITRIP],
+  "Moeller": ["NZM", "IZM", ...MODELES_NZM_IZM, ...MODELES_IZM_DIGITRIP],
   "Legrand": ["DPX 125", "DPX 250", "DPX 630", "DPX 1600", "DPX3 160", "DPX3 250", "DPX3 630", "DPX3 1600", "DMX3 1600", "DMX3 2500", "DMX3 4000", ...MODELES_LEGRAND],
   "General Electric": ["Record Plus", "Entelliguard G"],
 };
@@ -1127,7 +1178,17 @@ function seuilInstantaneMasterpactM(identification, inominal) {
 // (DOCA0140EN-03, plaque avant) ; notice Masterpact M (types N1, H1, H2, L1 — pas de tableau d'Icu : valeurs non renseignées).
 // Valeurs de gamme : elles varient avec la tension d'emploi et le calibre, la plaque de performance de l'appareil fait foi.
 // Niveau = [nom, Icu en kA (null si non documenté), tension de référence].
+const SRC_IZM = "notice IZM AWB1230-1605 (Moeller / Eaton, 10/2009), tableau 1 — Icu = Ics à 690 V";
+const PERF_IZM = (re, gamme, niveaux) => ({ re, gamme, marques: /eaton|moeller/, source: SRC_IZM, niveaux });
 const PERFORMANCES_BT = [
+  PERF_IZM(/^izm(93|20)2000/, "IZM93 / IZM20 2000 A", [["50 kA", 50, "690 V — Icw 50 kA 1 s / 30 kA 3 s"], ["65 kA", 65, "690 V — Icw 65 kA 1 s / 40 kA 3 s"]]),
+  PERF_IZM(/^izm(93|20)/, "IZM93 / IZM20 (800 à 1600 A)", [["50 kA", 50, "690 V — Icw 50 kA 1 s"], ["65 kA", 65, "690 V — Icw 65 kA 1 s / 40 kA 3 s"]]),
+  PERF_IZM(/^izm(97|32)(800|1250)/, "IZM97 / IZM32 800-1250 A", [["40 kA", 40, "690 V — Icw 40 kA 1 s"], ["65 kA", 65, "690 V — Icw 65 kA 1 s / 50 kA 3 s"], ["85 kA", 85, "690 V — Icw 85 kA 1 s / 65 kA 3 s"], ["100 kA", 100, "440 V (selon version 85 kA à 690 V, voir plaque) — Icw 85 kA 1 s / 65 kA 3 s"]]),
+  PERF_IZM(/^izm(97|32)3200/, "IZM97 / IZM32 3200 A", [["65 kA", 65, "690 V — Icw 65 kA 1 s / 50 kA 3 s"], ["85 kA", 85, "690 V — Icw 85 kA 1 s / 65 kA 3 s"], ["100 kA", 100, "440 V (85 kA à 690 V) — Icw 100 kA 1 s / 65 kA 3 s"]]),
+  PERF_IZM(/^(izm97|izme40)4000/, "IZM97 / IZME40 4000 A", [["65 kA", 65, "690 V"], ["85 kA", 85, "690 V"]]),
+  PERF_IZM(/^izm(97|32)/, "IZM97 / IZM32 1600-2500 A", [["65 kA", 65, "690 V — Icw 65 kA 1 s / 50 kA 3 s"], ["85 kA", 85, "690 V — Icw 85 kA 1 s / 65 kA 3 s"], ["100 kA", 100, "440 V (selon version 85 kA à 690 V, voir plaque) — Icw 85 kA 1 s / 65 kA 3 s"]]),
+  PERF_IZM(/^izm(99|63)4000/, "IZM99 / IZM63 4000 A", [["65 kA", 65, "690 V — Icw 65 kA 1 s"], ["85 kA", 85, "690 V — Icw 85 kA 1 s / 65 kA 3 s"], ["100 kA", 100, "690 V — Icw 100 kA 1 s / 85 kA 3 s"]]),
+  PERF_IZM(/^izm(99|63)/, "IZM99 / IZM63 5000-6300 A", [["85 kA", 85, "690 V — Icw 85 kA 1 s / 65 kA 3 s"], ["100 kA", 100, "690 V — Icw 100 kA 1 s / 85 kA 3 s"]]),
   { re: /mtz1/, gamme: "Masterpact MTZ1", source: "guide MTZ1 (DOCA0100FR-06)", niveaux: [["H1", 42, "415 V"], ["H2", 50, "415 V"], ["H3", 66, "415 V"], ["L1", 150, "415 V"]] },
   { re: /mtz[23]/, gamme: "Masterpact MTZ2 / MTZ3", source: "guide MTZ2/MTZ3 (DOCA0101FR-07)", niveaux: [["N1", 42, "440 V"], ["H1", 66, "440 V"], ["H2", 100, "440 V"], ["H2V", 100, "440 V (Ue limitée à 440 V)"], ["H3", 150, "440 V"], ["L1", 150, "440 V"]] },
   { re: /masterpactnt(12|16)/, gamme: "Masterpact NT12 / NT16", source: "catalogue NT/NW 2004", niveaux: [["H1", 42, "415 V"], ["H2", 50, "415 V"], ["H10", 20, "1000 V"]] },
@@ -2600,6 +2661,23 @@ const COUPLE_SERRAGE_CONDUCTEUR = {
   "1,5 mm²": "1,5 – 2,0", "2,5 mm²": "2,0 – 2,5", "4 mm²": "2,0 – 2,5", "6 mm²": "2,0 – 3,0",
   "10 mm²": "2,5 – 3,5", "16 mm²": "3,0 – 4,0", "25 mm²": "4 – 5", "35 mm²": "5 – 6",
 };
+// Couples de serrage préconisés par SERMES Electric Systems pour ses équipements de compensation
+// (notice constructeur « Couples de serrage pour équipements de compensation », photo fournie par
+// l'utilisateur) — en N·m. Contacteurs : [bornes de puissance, bornes de commande].
+const COUPLES_SERMES_COMPENSATION = {
+  "Contacteur BJ K3-18": [1.3, 1.0], "Contacteur BJ K3-32": [2.8, 1.0], "Contacteur BJ K3-62 / BJ K3-74": [4.0, 1.0], "Contacteur BJ K3-90": [6.5, 1.0],
+  "Condensateur — bornes jusqu'à 16 mm²": 1.3, "Condensateur — bornes de 25 mm²": 2.5, "Condensateur — boulon de mise à la terre": 10.0,
+  "Coupe-circuit fusibles — embase NH-00, étrier M5": 3.0, "Coupe-circuit fusibles — sectionneur NH-00, étrier M5": 3.0,
+  "Coupe-circuit fusibles — embase NH-00, étrier M8": 12.0, "Coupe-circuit fusibles — sectionneur NH-00, étrier M8": 12.0,
+  "Bornes de puissance — borne à vis 16 mm²": 1.6, "Bornes de puissance — borne à vis 35 mm²": 3.0,
+  "Jeu de barres / barre PE / PEN — Tensilock M10": 49, "Jeu de barres / barre PE / PEN — Tensilock M12": 85,
+};
+const frNm = (v) => String(v).replace(".", ",");
+const texteCoupleSermes = (k) => { const v = COUPLES_SERMES_COMPENSATION[k]; return Array.isArray(v) ? `${k} : puissance ${frNm(v[0])} N·m, commande ${frNm(v[1])} N·m` : `${k} : ${frNm(v)} N·m`; };
+function aideCoupleSermes(element) {
+  if (element && COUPLES_SERMES_COMPENSATION[element] !== undefined) return `Couple préconisé SERMES — ${texteCoupleSermes(element)}.`;
+  return "Couples préconisés SERMES Electric Systems (équipements de compensation) — " + Object.keys(COUPLES_SERMES_COMPENSATION).map(texteCoupleSermes).join(" · ") + ". Choisir l'élément serré pour n'afficher que sa valeur ; pour une autre marque, se référer à sa notice.";
+}
 function coupleSerrageFields(typeConnexion) {
   return [
     F("taille", "Taille vis/écrou", null, LISTE_TAILLE_VIS),
@@ -3133,7 +3211,11 @@ const SCHEMAS = {
         I("charges_reactives", "Principales charges réactives", [{ key: "valeur", label: "Description" }]),
       ]},
       { key: "mecaniques", title: "Contrôles mécaniques", items: [
-        C("serrage_connexions_batt", "Serrage des connexions"),
+        C("serrage_connexions_batt", "Serrage des connexions", [
+          F("element", "Élément serré", null, Object.keys(COUPLES_SERMES_COMPENSATION)),
+          F("couple", "Couple de serrage appliqué", "N.m"),
+          { key: "aide", label: "Aide technicien", longText: true, compute: (f) => aideCoupleSermes(f.element) },
+        ]),
         C("etat_cables_batt", "État des câbles"),
         C("etat_contacts_batt", "État des contacts, contacteurs et interrupteurs"),
         C("resistances_decharge", "Résistances de décharge"),
@@ -8956,10 +9038,10 @@ function BoutonLirePlaque({ champs, valeursActuelles = {}, onAppliquer, typeEqui
   }
   return (
     <span style={{ display: "inline-flex", flexDirection: "column", gap: 4 }} onClick={(e) => e.stopPropagation()}>
-      <input ref={inputRef} type="file" accept="image/*" capture="environment" style={{ display: "none" }}
+      <input ref={inputRef} type="file" accept="image/*" style={{ display: "none" }}
         onChange={(e) => { const f = e.target.files && e.target.files[0]; e.target.value = ""; surFichier(f); }} />
       <button onClick={() => inputRef.current && inputRef.current.click()} disabled={lecture} style={{ ...btnGhost(BRAND.blue), ...(compact ? { padding: "5px 9px" } : {}), opacity: lecture ? 0.6 : 1 }}
-        title="Photographier la plaque signalétique : les informations lisibles sont proposées pour remplir les champs">
+        title="Prendre la plaque ou l'étiquette en photo, ou choisir une photo existante (photothèque, fichiers) : les informations lisibles sont proposées pour remplir les champs">
         <Camera size={13} /> {lecture ? "Lecture en cours…" : libelle}
       </button>
       {erreur && <span style={{ fontSize: 11, color: "#C0392B", maxWidth: 260 }}>{erreur}</span>}
@@ -13091,11 +13173,49 @@ function BoutonEtiquetteQR({ eq, update, info }) {
 // Avec siteCourant (scan depuis un RMP en cours) : ouvre l'onglet de l'équipement s'il est déjà dans le
 // rapport, sinon propose de l'ajouter (reprise depuis la visite précédente) — refusé s'il appartient à
 // un autre site.
+// Lecture d'une étiquette à partir d'une PHOTO (et non du flux caméra) : QR code décodé dans l'image ;
+// à défaut (QR abîmé, flou, reflet), lecture du code imprimé « HTM-XXXXXXXX » par l'IA (réseau requis).
+async function lireEtiquetteDepuisPhoto(file) {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => rej(new Error("image illisible")); i.src = url; });
+    for (const maxDim of [1600, 900, 2400]) {
+      const k = Math.min(1, maxDim / Math.max(img.naturalWidth, img.naturalHeight));
+      const w = Math.round(img.naturalWidth * k), h = Math.round(img.naturalHeight * k);
+      const c = document.createElement("canvas"); c.width = w; c.height = h;
+      const ctx = c.getContext("2d", { willReadFrequently: true }); ctx.drawImage(img, 0, 0, w, h);
+      if ("BarcodeDetector" in window) {
+        try { const r = await new window.BarcodeDetector({ formats: ["qr_code"] }).detect(c); if (r && r[0]) return { code: String(r[0].rawValue).trim().toUpperCase(), via: "qr" }; } catch (e) { /* repli jsQR */ }
+      }
+      const m = await import("jsqr"); const jsQR = m.default || m;
+      const r = jsQR(ctx.getImageData(0, 0, w, h).data, w, h, { inversionAttempts: "attemptBoth" });
+      if (r && r.data) return { code: String(r.data).trim().toUpperCase(), via: "qr" };
+    }
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+  const r = await lirePlaqueIA({ file, typeEquipement: "Étiquette QR HT Maintenance", contexte: "Étiquette d'équipement HT Maintenance : lire le code imprimé sous le QR code, au format HTM- suivi de 8 caractères (lettres majuscules et chiffres, sans 0, 1, I, L ni O).", champs: [{ key: "code", label: "Code imprimé de l'étiquette (HTM-XXXXXXXX)" }] });
+  const brut = String((r.valeurs && r.valeurs.code) || "").toUpperCase().replace(/\s/g, "");
+  return brut ? { code: brut, via: "ia" } : null;
+}
 function ScannerEquipement({ sites, archives = null, onClose, onOpenSite, onReprendre, onHistorique, siteCourant = null, onAllerOnglet, onAjouter }) {
   const videoRef = useRef(null);
+  const photoRef = useRef(null);
   const [code, setCode] = useState("");
   const [saisie, setSaisie] = useState("");
   const [erreur, setErreur] = useState("");
+  const [lecturePhoto, setLecturePhoto] = useState("");
+  async function surPhoto(file) {
+    if (!file) return;
+    setLecturePhoto("Lecture de la photo…");
+    try {
+      const r = await lireEtiquetteDepuisPhoto(file);
+      if (r && r.code) { setLecturePhoto(r.via === "ia" ? "QR code illisible : code imprimé lu sur la photo — vérifiez-le." : ""); setSaisie(r.code); setCode(r.code); }
+      else setLecturePhoto("Aucun QR code ni code lisible sur la photo : reprenez-la de plus près, de face et sans reflet, ou saisissez le code.");
+    } catch (e) {
+      setLecturePhoto(e.message || "Lecture impossible.");
+    }
+  }
   useEffect(() => {
     let flux = null, arret = false, raf = null;
     (async () => {
@@ -13147,6 +13267,13 @@ function ScannerEquipement({ sites, archives = null, onClose, onOpenSite, onRepr
           <>
             {!erreur && <video ref={videoRef} playsInline muted style={{ width: "100%", borderRadius: 10, background: "#000", aspectRatio: "4 / 3", objectFit: "cover" }} />}
             {erreur && <div style={{ fontSize: 12.5, color: "#B5730A" }}>{erreur}</div>}
+            <input ref={photoRef} type="file" accept="image/*" style={{ display: "none" }}
+              onChange={(e) => { const f = e.target.files && e.target.files[0]; e.target.value = ""; surPhoto(f); }} />
+            <button onClick={() => photoRef.current && photoRef.current.click()} style={{ ...btnGhost(BRAND.blue), justifyContent: "center" }}
+              title="Prendre l'étiquette en photo (ou choisir une photo existante) : utile si la caméra en direct ne lit pas le QR code">
+              <Camera size={14} /> Photo de l'étiquette
+            </button>
+            {lecturePhoto && <div style={{ fontSize: 12, color: "#5B6B7D" }}>{lecturePhoto}</div>}
             <div style={{ display: "flex", gap: 8 }}>
               <input value={saisie} onChange={(e) => setSaisie(e.target.value.toUpperCase())} placeholder="ou saisir le code : HTM-XXXXXXXX" style={{ ...inputStyle, fontFamily: "monospace" }} />
               <button onClick={() => saisie.trim() && setCode(saisie.trim())} style={btnGhost(BRAND.blue)}>OK</button>
@@ -13156,6 +13283,7 @@ function ScannerEquipement({ sites, archives = null, onClose, onOpenSite, onRepr
         {code && (
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             <div style={{ fontSize: 12, color: "#5B6B7D" }}>Code lu : <b style={{ fontFamily: "monospace" }}>{code}</b></div>
+            {lecturePhoto && <div style={{ fontSize: 12, color: "#B5730A" }}>{lecturePhoto}</div>}
             {!RE_CODE_QR.test(code) ? <div style={{ fontSize: 13, color: "#C0392B" }}>Ce QR code n'est pas une étiquette HT Maintenance.</div>
               : !dernier ? <div><div style={{ fontSize: 13, color: "#C0392B" }}>Aucun équipement ne correspond à ce code.</div>{archives && archives.nombre > archives.charges && <div style={{ marginTop: 8 }}><BandeauArchives archives={archives} compact /></div>}</div>
               : siteCourant ? (() => {
@@ -13519,6 +13647,231 @@ function parseIso(s) { const [y, m, d] = s.split("-").map(Number); return new Da
 function addDays(d, n) { const r = new Date(d); r.setDate(r.getDate() + n); return r; }
 function startOfWeekMon(d) { const r = new Date(d); const day = (r.getDay() + 6) % 7; r.setDate(r.getDate() - day); r.setHours(0, 0, 0, 0); return r; }
 
+// =============================================================================================
+// Calendriers abonnables (Apple Calendrier, Outlook, Google…) : un fichier .ics par technicien (et un
+// fichier « Tous »), publié dans Firebase Storage sous un dossier secret (calendriers/<clé>/<tech>.ics),
+// régénéré automatiquement à chaque modification du planning. Lecture publique de CE fichier seulement
+// (règle Storage « allow get » sur calendriers/{cle}/{fichier}) : le lien n'est connu que des abonnés et
+// peut être renouvelé à tout moment (nouvelle clé). Sens unique : l'app alimente l'agenda.
+const CALENDRIER_FENETRE_PASSE_JOURS = 30; // interventions récentes conservées dans l'agenda
+const slugTechnicien = (nom) => String(nom || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "sans-nom";
+const urlCalendrier = (cle, slug) => `https://firebasestorage.googleapis.com/v0/b/${STORAGE_BUCKET}/o/${encodeURIComponent(`calendriers/${cle}/${slug}.ics`)}?alt=media`;
+const icsEchapper = (t) => String(t || "").replace(/\\/g, "\\\\").replace(/;/g, "\;").replace(/,/g, "\\,").replace(/\r?\n/g, "\\n");
+// Repli des lignes longues (RFC 5545 : 75 octets) — coupe sur des caractères, marge pour l'UTF-8.
+function icsPlier(ligne) {
+  const out = []; let reste = ligne;
+  while (reste.length > 60) { out.push(reste.slice(0, 60)); reste = " " + reste.slice(60); }
+  out.push(reste);
+  return out.join("\r\n");
+}
+const icsDate = (iso) => String(iso || "").replace(/-/g, "");
+const icsDateHeure = (iso, hhmm) => `${icsDate(iso)}T${String(hhmm).replace(":", "").padEnd(4, "0")}00`;
+const lendemain = (iso) => { const d = new Date(`${iso}T12:00:00`); d.setDate(d.getDate() + 1); return d.toISOString().slice(0, 10); };
+const lienItineraire = (adresse) => `https://maps.apple.com/?daddr=${encodeURIComponent(adresse)}`;
+const lienGoogleMaps = (adresse) => `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(adresse)}`;
+function lignesContact(c) {
+  if (!c) return [];
+  const nom = [c.prenom, c.nom].filter(Boolean).join(" ");
+  const l = [];
+  if (nom) l.push(`Contact sur site : ${nom}`);
+  if (c.portable) l.push(`Portable : ${c.portable}`);
+  if (c.fixe) l.push(`Fixe : ${c.fixe}`);
+  if (c.email) l.push(`E-mail : ${c.email}`);
+  return l;
+}
+// Récapitulatif des équipements et des pièces d'usure à remplacer (échéance atteinte l'année de l'intervention).
+function lignesEquipementsCalendrier(equipements, annee) {
+  const l = [];
+  (equipements || []).forEach((eq) => {
+    const rep = eq.identification?.repere || eq.reference || "";
+    l.push(`• ${eq.type || "Équipement"}${rep ? ` — ${rep}` : ""}`);
+    let alertes = [];
+    try { alertes = alertesUsureEquipement(eq, annee); } catch (e) { alertes = []; }
+    alertes.forEach((a) => l.push(`    ↳ À remplacer : ${a.type} (échéance ${a.annee}${a.enRetard ? ", dépassée" : ""})`));
+  });
+  return l;
+}
+// Site physique lié à un rapport d'intervention (lien direct, sinon client + nom du site).
+function siteDeIntervention(iv, sites) {
+  const id = iv.linkedSiteId || (iv.equipements || []).map((e) => e.sourceSiteId).find(Boolean);
+  if (id) { const s = sites.find((x) => x.id === id); if (s) return s; }
+  const n = (x) => String(x || "").trim().toLowerCase();
+  return sites.filter((s) => n(s.client) === n(iv.client) && (!n(iv.site) || n(s.nom || s.local) === n(iv.site)))
+    .sort((a, b) => String(b.rapport?.date || "").localeCompare(String(a.rapport?.date || "")))[0] || null;
+}
+// Événements de l'agenda : RMP (sites) et rapports d'intervention, du passé récent à l'avenir.
+function evenementsCalendrier(sites, interventions) {
+  const limite = new Date(); limite.setDate(limite.getDate() - CALENDRIER_FENETRE_PASSE_JOURS);
+  const depuis = limite.toISOString().slice(0, 10);
+  const out = [];
+  (sites || []).forEach((s) => {
+    const r = s.rapport || {};
+    if (!r.date || r.date < depuis) return;
+    const techniciens = [r.intervenant, ...(r.intervenantsSupplementaires || [])].map((t) => String(t || "").trim()).filter(Boolean);
+    const annee = Number(String(r.date).slice(0, 4));
+    const siteNom = s.nom || s.local || "Site sans nom";
+    out.push({
+      uid: `rmp-${s.id}@ht-maintenance`, techniciens, date: r.date, dateFin: r.dateFin || "", heureDebut: r.heureArrivee || "", heureFin: r.heureFin || "",
+      titre: `${siteNom}${s.client ? ` — ${s.client}` : ""} · Maintenance préventive`,
+      adresse: s.adresse || "",
+      description: [
+        `Site : ${siteNom}`, s.client && `Client : ${s.client}`, s.adresse && `Adresse : ${s.adresse}`,
+        s.adresse && `Itinéraire (Plans) : ${lienItineraire(s.adresse)}`, s.adresse && `Itinéraire (Google Maps) : ${lienGoogleMaps(s.adresse)}`,
+        ...lignesContact(s.contactSite),
+        techniciens.length && `Technicien(s) : ${techniciens.join(", ")}`,
+        "", `Équipements (${(s.equipements || []).length}) :`, ...lignesEquipementsCalendrier(s.equipements, annee),
+      ].filter((x) => x !== false && x !== null && x !== undefined && x !== 0).join("\n"),
+    });
+  });
+  (interventions || []).forEach((iv) => {
+    if (!iv.date || iv.date < depuis) return;
+    const s = siteDeIntervention(iv, sites || []);
+    const techniciens = [iv.technicien, ...(iv.techniciensSupplementaires || [])].map((t) => String(t || "").trim()).filter(Boolean);
+    const annee = Number(String(iv.date).slice(0, 4));
+    const siteNom = iv.site || (s && (s.nom || s.local)) || "Site non renseigné";
+    const adresse = (s && s.adresse) || "";
+    // Équipements du RI, enrichis de l'équipement suivi (pièces d'usure) quand le lien existe.
+    const equipements = (iv.equipements || []).map((e) => {
+      const suivi = e.sourceEquipementId && (sites || []).flatMap((x) => x.equipements || []).find((x) => x.id === e.sourceEquipementId);
+      return suivi ? { ...suivi, reference: e.reference } : { type: e.type, reference: e.reference, identification: { repere: e.reference } };
+    });
+    out.push({
+      uid: `ri-${iv.id}@ht-maintenance`, techniciens, date: iv.date, dateFin: iv.dateFin || "", heureDebut: iv.heureDebut || "", heureFin: iv.heureFin || "",
+      titre: `${siteNom}${iv.client ? ` — ${iv.client}` : ""} · Intervention ${iv.numeroRI || ""}`.trim(),
+      adresse,
+      description: [
+        `Site : ${siteNom}`, iv.client && `Client : ${iv.client}`, iv.numeroRI && `Rapport : ${iv.numeroRI}${iv.statut ? ` (${iv.statut})` : ""}`,
+        adresse && `Adresse : ${adresse}`, adresse && `Itinéraire (Plans) : ${lienItineraire(adresse)}`, adresse && `Itinéraire (Google Maps) : ${lienGoogleMaps(adresse)}`,
+        ...lignesContact(s && s.contactSite), !(s && s.contactSite && s.contactSite.email) && iv.emailClient && `E-mail : ${iv.emailClient}`,
+        techniciens.length && `Technicien(s) : ${techniciens.join(", ")}`,
+        "", `Équipements (${equipements.length}) :`, ...lignesEquipementsCalendrier(equipements, annee),
+      ].filter((x) => x !== false && x !== null && x !== undefined && x !== 0).join("\n"),
+    });
+  });
+  return out.sort((a, b) => String(a.date).localeCompare(String(b.date)));
+}
+function genererIcs(nomCalendrier, evenements) {
+  const maintenant = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z");
+  const l = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//HT Maintenance//Planning//FR", "CALSCALE:GREGORIAN", "METHOD:PUBLISH",
+    `X-WR-CALNAME:${icsEchapper(nomCalendrier)}`, "X-WR-TIMEZONE:Europe/Paris", "REFRESH-INTERVAL;VALUE=DURATION:PT1H", "X-PUBLISHED-TTL:PT1H"];
+  evenements.forEach((e) => {
+    const avecHeure = /^\d{1,2}:\d{2}$/.test(e.heureDebut);
+    const fin = e.dateFin && e.dateFin > e.date ? e.dateFin : e.date;
+    l.push("BEGIN:VEVENT", `UID:${e.uid}`, `DTSTAMP:${maintenant}`);
+    if (avecHeure) {
+      l.push(`DTSTART:${icsDateHeure(e.date, e.heureDebut)}`);
+      const hf = /^\d{1,2}:\d{2}$/.test(e.heureFin) ? e.heureFin : null;
+      l.push(`DTEND:${hf ? icsDateHeure(fin, hf) : icsDateHeure(e.date, `${String(Math.min(23, Number(e.heureDebut.split(":")[0]) + 4)).padStart(2, "0")}:${e.heureDebut.split(":")[1]}`)}`);
+    } else {
+      l.push(`DTSTART;VALUE=DATE:${icsDate(e.date)}`, `DTEND;VALUE=DATE:${icsDate(lendemain(fin))}`);
+    }
+    l.push(`SUMMARY:${icsEchapper(e.titre)}`);
+    if (e.adresse) l.push(`LOCATION:${icsEchapper(e.adresse)}`);
+    l.push(`DESCRIPTION:${icsEchapper(e.description)}`, "END:VEVENT");
+  });
+  l.push("END:VCALENDAR");
+  return l.map(icsPlier).join("\r\n") + "\r\n";
+}
+// Fichiers à publier : un par technicien + « tous ».
+function fichiersCalendrier(sites, interventions, techniciensConnus = []) {
+  const evs = evenementsCalendrier(sites, interventions);
+  const noms = new Set([...techniciensConnus, ...evs.flatMap((e) => e.techniciens)].map((t) => String(t || "").trim()).filter(Boolean));
+  const out = { tous: { nom: "Tous les techniciens", ics: genererIcs("HT Maintenance — Planning", evs) } };
+  noms.forEach((t) => {
+    const slug = slugTechnicien(t);
+    const n = slugTechnicien(t);
+    out[slug] = { nom: t, ics: genererIcs(`HT Maintenance — ${t}`, evs.filter((e) => e.techniciens.some((x) => slugTechnicien(x) === n))) };
+  });
+  return out;
+}
+// Clé secrète des liens (document app-data/calendrier) : créée au premier besoin, renouvelable.
+const nouvelleCleCalendrier = () => Array.from(crypto.getRandomValues(new Uint8Array(18))).map((b) => b.toString(16).padStart(2, "0")).join("");
+let cleCalendrierCache = null;
+async function cleCalendrier(idToken, user, { renouveler = false, creer = true } = {}) {
+  if (cleCalendrierCache && !renouveler) return cleCalendrierCache;
+  if (!renouveler) {
+    const brut = await lireJsonDistant("app-data/calendrier", idToken);
+    const cfg = brut ? JSON.parse(brut) : null;
+    if (cfg && cfg.cle) { cleCalendrierCache = cfg.cle; return cfg.cle; }
+    if (!creer) return null; // aucun abonnement créé : rien à publier automatiquement
+  }
+  const cle = nouvelleCleCalendrier();
+  await firestoreRestSet("app-data/calendrier", JSON.stringify({ cle, creeLe: new Date().toISOString() }), Date.now(), user, idToken);
+  cleCalendrierCache = cle;
+  return cle;
+}
+const derniersIcsPublies = {}; // `${cle}/${slug}` → contenu publié (évite les envois inutiles)
+// Le DTSTAMP change à chaque génération : comparaison sans cette ligne.
+const sansDtstamp = (ics) => ics.replace(/\r\nDTSTAMP:[^\r]*/g, "");
+async function publierCalendriers(sites, interventions, techniciensConnus, user, { creer = true } = {}) {
+  if (!user || (typeof navigator !== "undefined" && navigator.onLine === false)) return null;
+  const idToken = await user.getIdToken();
+  const cle = await cleCalendrier(idToken, user.email, { creer });
+  if (!cle) return null;
+  const fichiers = fichiersCalendrier(sites, interventions, techniciensConnus);
+  for (const [slug, f] of Object.entries(fichiers)) {
+    const k = `${cle}/${slug}`;
+    if (derniersIcsPublies[k] === sansDtstamp(f.ics)) continue;
+    await firebaseStorageUpload(`calendriers/${cle}/${slug}.ics`, new Blob([f.ics], { type: "text/calendar; charset=utf-8" }), idToken);
+    derniersIcsPublies[k] = sansDtstamp(f.ics);
+  }
+  return { cle, fichiers };
+}
+// Fenêtre « Synchroniser avec mon agenda » : liens d'abonnement par technicien.
+function AbonnementCalendrierModal({ sites, interventions, techniciensConnus, user, onFermer }) {
+  const [etat, setEtat] = useState({ chargement: true, erreur: "", cle: null, fichiers: null });
+  const [copie, setCopie] = useState("");
+  const publier = async (renouveler = false) => {
+    setEtat((e) => ({ ...e, chargement: true, erreur: "" }));
+    try {
+      if (renouveler) { const idToken = await user.getIdToken(); await cleCalendrier(idToken, user.email, { renouveler: true }); }
+      const r = await publierCalendriers(sites, interventions, techniciensConnus, user);
+      setEtat({ chargement: false, erreur: "", cle: r.cle, fichiers: r.fichiers });
+    } catch (e) {
+      setEtat({ chargement: false, erreur: "Publication impossible (réseau, ou règle Storage « calendriers » absente).", cle: null, fichiers: null });
+    }
+  };
+  useEffect(() => { publier(false); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const copier = async (texte, cle) => { try { await navigator.clipboard.writeText(texte); setCopie(cle); setTimeout(() => setCopie(""), 2000); } catch (e) { window.prompt("Copiez le lien :", texte); } };
+  const entrees = etat.fichiers ? Object.entries(etat.fichiers).sort((a, b) => (a[0] === "tous" ? -1 : b[0] === "tous" ? 1 : a[1].nom.localeCompare(b[1].nom))) : [];
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={onFermer}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 12, width: "min(600px, 100%)", maxHeight: "90vh", overflowY: "auto", padding: 16 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+          <b style={{ fontSize: 15 }}>Synchroniser avec mon agenda</b>
+          <button onClick={onFermer} style={{ background: "none", border: "none", cursor: "pointer", color: "#5B6B7D" }}><X size={18} /></button>
+        </div>
+        <div style={{ fontSize: 12, color: "#5B6B7D", lineHeight: 1.5, marginBottom: 10 }}>
+          Chaque technicien s'abonne à SON calendrier (une seule fois) : les interventions planifiées y apparaissent et se mettent à jour automatiquement — site, adresse avec itinéraire, contact sur site (appel / e-mail), équipements et pièces d'usure à remplacer. Sens unique : l'app alimente l'agenda.
+        </div>
+        {etat.chargement && <div style={{ fontSize: 13, color: "#5B6B7D", padding: 10 }}>Publication des calendriers…</div>}
+        {etat.erreur && <div style={{ fontSize: 13, color: "#C0392B", padding: 10 }}>{etat.erreur}</div>}
+        {entrees.map(([slug, f]) => {
+          const url = urlCalendrier(etat.cle, slug);
+          return (
+            <div key={slug} style={{ border: "1px solid #E2E6EB", borderRadius: 10, padding: 10, marginBottom: 8 }}>
+              <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 6 }}>{f.nom} <span style={{ fontWeight: 400, color: "#8B96A3", fontSize: 11.5 }}>({(f.ics.match(/BEGIN:VEVENT/g) || []).length} intervention(s))</span></div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <a href={url.replace(/^https:/, "webcal:")} style={{ ...btnGhost(BRAND.blue), textDecoration: "none" }}><Clock size={13} /> S'abonner (iPhone / Mac)</a>
+                <button onClick={() => copier(url, slug)} style={btnGhost()}><Copy size={13} /> {copie === slug ? "Lien copié" : "Copier le lien (Outlook, Google…)"}</button>
+              </div>
+            </div>
+          );
+        })}
+        {etat.fichiers && (
+          <div style={{ fontSize: 11.5, color: "#5B6B7D", lineHeight: 1.5, marginTop: 6 }}>
+            <b>Outlook</b> : Calendrier → Ajouter un calendrier → « S'abonner à partir du web » / « Depuis Internet », puis coller le lien. <b>Google Agenda</b> : Autres agendas → « À partir de l'URL ».
+            Délai de mise à jour : quelques minutes sur iPhone / Mac (réglable : Réglages → Calendrier → Comptes → Calendriers avec abonnement), jusqu'à plusieurs heures sur Outlook et Google.
+          </div>
+        )}
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+          <button onClick={() => { if (window.confirm("Générer de nouveaux liens ? Les anciens abonnements cesseront d'être mis à jour : chaque technicien devra se réabonner.")) publier(true); }} style={btnGhost("#C0392B")}><RefreshCw size={13} /> Renouveler les liens</button>
+          <button onClick={onFermer} style={btnPrimary()}>Fermer</button>
+        </div>
+      </div>
+    </div>
+  );
+}
 function buildCalendarEvents(sites, interventions) {
   const events = [];
   sites.forEach((s) => {
@@ -13585,6 +13938,7 @@ function DayDetailPanel({ dateISO, events, onOpenSite, onOpenIntervention, onCre
 
 function CalendarView({ sites, interventions, onOpenSite, onOpenIntervention, onCreateForDate, onCreateInterventionForDate }) {
   const [mode, setMode] = useState("month");
+  const [abonnementOuvert, setAbonnementOuvert] = useState(false);
   const [ref, setRef] = useState(new Date());
   const [selectedDay, setSelectedDay] = useState(null);
   const todayIso = todayISO();
@@ -13646,7 +14000,9 @@ function CalendarView({ sites, interventions, onOpenSite, onOpenIntervention, on
           <button onClick={() => shift(1)} style={{ ...btnGhost(), transform: "scaleX(-1)" }}><ArrowLeft size={14} /></button>
           <button onClick={() => { setRef(new Date()); setSelectedDay(todayIso); }} style={btnGhost()}>Aujourd'hui</button>
         </div>
-        <div style={{ display: "flex", gap: 6, alignItems: "center", position: "relative" }}>
+        <div style={{ display: "flex", gap: 6, alignItems: "center", position: "relative", flexWrap: "wrap" }}>
+          {CURRENT_USER_FOR_STORAGE && <button onClick={() => setAbonnementOuvert(true)} style={btnGhost(BRAND.blue)} title="S'abonner au planning depuis Calendrier Apple, Outlook ou Google Agenda"><Clock size={14} /> Synchroniser avec mon agenda</button>}
+          {abonnementOuvert && <AbonnementCalendrierModal sites={sites} interventions={interventions} techniciensConnus={[...LISTE_INTERVENANTS, ...techniciensDisponibles]} user={CURRENT_USER_FOR_STORAGE} onFermer={() => setAbonnementOuvert(false)} />}
           {techniciensDisponibles.length > 0 && (
             <>
               <button onClick={() => setFiltreOuvert((o) => !o)} style={btnGhost(techniciensFiltre.length > 0 ? BRAND.blue : undefined)}>
@@ -14910,22 +15266,23 @@ function evaluationEssaiCourtRetard(eq) {
   const modeEssai = reglageI2t && tCC.i2t_essai === "ON" ? "ON" : "OFF";
   const abb = !!(d && d.courtRetard && d.courtRetard.modele === "abb");
   const pr111 = !!(d && d.courtRetard && d.courtRetard.modele === "pr111");
+  const refI2t = (d && d.courtRetard && d.courtRetard.refI2tIr) || 10; // multiple de Ir où la courbe I²t rejoint le temps fixe (10 Schneider, 8 Digitrip)
   // Temps nominal : tsd à temps constant ; à I²t ON, Schneider = tsd × (10 Ir / I)² jusqu'à 10 Ir, ABB = 100 × t2 / (I/In)².
   const attendu = tsd > 0
-    ? (modeEssai === "ON" ? (pr111 ? tempsNominalCourtRetardPR111(tsd, I / In, true) : abb ? (100 * tsd) / Math.pow(I / In, 2) : (I < 10 * Ir ? tsd * Math.pow((10 * Ir) / I, 2) : tsd)) : tsd)
+    ? (modeEssai === "ON" ? (pr111 ? tempsNominalCourtRetardPR111(tsd, I / In, true) : abb ? (100 * tsd) / Math.pow(I / In, 2) : (I < refI2t * Ir ? tsd * Math.pow((refI2t * Ir) / I, 2) : tsd)) : tsd)
     : null;
   let bas = attendu !== null ? 0.8 * attendu : null, haut = attendu !== null ? 1.2 * attendu : null, source = "generique";
   if (d && d.courtRetard) {
     // Plage constructeur (et non ±20 %) : Schneider = non-déclenchement → coupure maximale ; ABB = tolérance de la notice.
     const fen = fenetreCourtRetardSchneider(d, tsd, I, Ir, modeEssai === "ON", In);
-    bas = fen.non; haut = fen.max; source = "constructeur";
+    bas = fen.non; haut = fen.max; source = d.courtRetard.generique ? "generique" : "constructeur";
   }
   const mesure = n(tCC.declenchement_treg) > 0 ? n(tCC.declenchement_treg) / 1000 : null;
   return {
     Ir, Im, I, x, tsd, reglageI2t, modeEssai, attendu, bas, haut, source, mesure, declencheur: d ? d.nom : null,
     horsLimites: mesure !== null && bas !== null && (mesure < bas - 1e-9 || mesure > haut + 1e-9),
     // Les deux modes donnent des temps différents : réglage ON, et (Schneider) Im sous 10 Ir ou (ABB) Im sous 10 In.
-    modesDifferent: reglageI2t && tsd > 0 && (pr111 ? Im < 8 * In * 0.9999 : abb ? Im < 10 * In * 0.9999 : Im < 10 * Ir),
+    modesDifferent: reglageI2t && tsd > 0 && (pr111 ? Im < 8 * In * 0.9999 : abb ? Im < 10 * In * 0.9999 : Im < refI2t * Ir),
   };
 }
 // Essai de surcharge longue : temps maximal attendu. Constructeur (déclencheur connu) : maximum de la courbe au courant d'essai ;
@@ -15054,7 +15411,7 @@ function parametresCourbeDeclenchement(eq) {
     bandeLong: d && tr6 ? (x) => bandeLongRetard(d, tr6, x, n(sl.k1) * n(sl.k2)) : null,
     fenCC: d && d.courtRetard && Im > 0 ? (I) => fenetreCourtRetardSchneider(d, n(cc.tsd) / 1000, I, Ir, modeEssaiOn, n(sl.inominal)) : null,
     // ABB : à I²t ON la courbe de court retard est t = 100·t2 / (I/In)² sur toute la plage (pas de palier à 10 Ir).
-    tCourt: d && d.courtRetard && d.courtRetard.modele === "abb" ? (I) => (i2t ? (100 * tsd) / Math.pow(I / n(sl.inominal), 2) : tsd) : d && d.courtRetard && d.courtRetard.modele === "pr111" ? (I) => tempsNominalCourtRetardPR111(tsd, I / n(sl.inominal), i2t) : null,
+    tCourt: d && d.courtRetard && d.courtRetard.modele === "digitrip" ? (I) => (i2t && I < 8 * Ir ? tsd * Math.pow((8 * Ir) / I, 2) : tsd) : d && d.courtRetard && d.courtRetard.modele === "abb" ? (I) => (i2t ? (100 * tsd) / Math.pow(I / n(sl.inominal), 2) : tsd) : d && d.courtRetard && d.courtRetard.modele === "pr111" ? (I) => tempsNominalCourtRetardPR111(tsd, I / n(sl.inominal), i2t) : null,
     fenInst: d && d.instantane && Ii > 0 ? { x0: Ii * (1 - d.instantane.precision), non: d.instantane.non, max: d.instantane.max } : null,
     noteDoc: d ? `Courbe constructeur ${d.marque || "Schneider"} — ${d.court} : ${d.noteNature || (d.nature === "moyen" ? "temps moyens avec tolérance" : "temps maximums à froid")}, zones admises d'après la documentation.` : "",
     titre: ("Courbe de déclenchement" + (repere ? " · " + repere : "")).toUpperCase(),
@@ -18896,6 +19253,15 @@ export default function App({ currentUser, onLogout }) {
     const ids = new Set(sites.map((s) => s.id));
     return [...sites, ...sitesArchives.filter((s) => !ids.has(s.id))];
   }, [sites, sitesArchives]);
+  // Agendas abonnés (Apple / Outlook) : republication automatique 30 s après la dernière modification
+  // du planning — seulement si des liens d'abonnement ont déjà été créés, et seulement les fichiers modifiés.
+  useEffect(() => {
+    if (!currentUser || !loaded || !ivLoaded) return;
+    const t = setTimeout(() => {
+      publierCalendriers(sites, interventions, LISTE_INTERVENANTS, currentUser, { creer: false }).catch((e) => console.warn("[Agenda] publication reportée :", e));
+    }, 30000);
+    return () => clearTimeout(t);
+  }, [sites, interventions, loaded, ivLoaded, currentUser]);
   const infoArchives = { nombre: archivesInfo.length, charges: sitesArchives.length, enCours: chargementArchives, erreur: erreurArchives, annee: anneeLimiteRmpActifs(), charger: chargerArchives };
   const selectedIv = interventions.find((iv) => iv.id === selectedIvId) || null;
 
