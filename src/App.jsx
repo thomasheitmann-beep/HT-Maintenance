@@ -14201,8 +14201,11 @@ const DOCX_BLUE = "0A5DA8", DOCX_DARK = "1A1F26", DOCX_SILVER = "C0C6CE", DOCX_A
 // des cellules (un peu plus aérées que le rendu compact précédent).
 const TABLE_WIDTH = 9600;
 const CELL_MARGINS = { top: 130, bottom: 130, left: 130, right: 120 };
-const CELL_MARGINS_UNE_LIGNE = { top: 45, bottom: 45, left: 130, right: 120 };
+const CELL_MARGINS_UNE_LIGNE = { top: 85, bottom: 85, left: 130, right: 120 };
 const DOCX_GREEN = "0F8A5F", DOCX_ORANGE = "B5730A", DOCX_RED = "C0392B", DOCX_WHITE = "FFFFFF", DOCX_LIGHT = "F4F6F8";
+// Tableaux modernisés : en-têtes bleu marine plus fins, lignes alternées très légères, états en pastilles.
+const DOCX_ENTETE = "26364A", DOCX_ZEBRE = "F7F9FB";
+const CELL_MARGINS_ENTETE = { top: 70, bottom: 70, left: 130, right: 120 };
 // ----- Charte graphique du rapport — reprise de la présentation commerciale HT Maintenance -----
 // Fond sombre #1A1F26, bleu #0A5DA8, ambre #FFC107, gris argent #C0C6CE ; barre bleue verticale devant les titres, cartes à filet de couleur,
 // mot-symbole « HT MAINTENANCE » à barre bleue, bande ambre en pied de couverture. Police Calibri (présente dans Word) en capitales espacées pour les titres.
@@ -14220,12 +14223,13 @@ const docxAucuneBordure = () => ({ style: DOCX.BorderStyle.NONE, size: 0, color:
 const docxToutesAucune = () => { const a = docxAucuneBordure(); return { top: a, bottom: a, left: a, right: a }; };
 const docxMiniParagraphe = () => new DOCX.Paragraph({ spacing: { before: 0, after: 0 }, children: [new DOCX.TextRun({ text: "", size: 4 })] });
 // Carte : fond clair ou blanc, filet de couleur en haut, petit libellé en capitales puis valeur en gras.
-function docxCarte({ label, valeur, couleur, taille = 30, sousTexte, fond = DOCX_WHITE }, largeur) {
+function docxCarte({ label, valeur, couleur, taille = 30, sousTexte, fond = DOCX_WHITE, filet = "haut" }, largeur) {
   const a = docxAucuneBordure();
+  const trait = { style: DOCX.BorderStyle.SINGLE, size: filet === "gauche" ? 48 : 36, color: couleur };
   return new DOCX.TableCell({
     width: { size: largeur, type: DOCX.WidthType.DXA }, shading: { type: DOCX.ShadingType.CLEAR, fill: fond },
-    margins: { top: 190, bottom: 210, left: 260, right: 200 },
-    borders: { top: { style: DOCX.BorderStyle.SINGLE, size: 36, color: couleur }, bottom: a, left: a, right: a },
+    margins: { top: 190, bottom: 210, left: filet === "gauche" ? 300 : 260, right: 200 }, verticalAlign: DOCX.VerticalAlign.CENTER,
+    borders: filet === "gauche" ? { top: a, bottom: a, left: trait, right: a } : { top: trait, bottom: a, left: a, right: a },
     children: [
       new DOCX.Paragraph({ spacing: { after: 50 }, children: [new DOCX.TextRun({ text: String(label || "").toUpperCase(), bold: true, size: 15, color: "8B96A3", characterSpacing: 30 })] }),
       new DOCX.Paragraph({ spacing: { after: 0 }, children: [new DOCX.TextRun({ text: String(valeur === undefined || valeur === null || valeur === "" ? "—" : valeur), bold: true, size: taille, color: DOCX_DARK })] }),
@@ -14349,7 +14353,7 @@ function docxSyntheseSiteStructuree(texte, site) {
     const a = docxAucuneBordure();
     const cellule = (i, enfants, extra = {}) => new DOCX.TableCell({ width: { size: W[i], type: DOCX.WidthType.DXA }, margins: marge, ...extra, children: enfants });
     const texte1 = (t, couleur) => new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: t, size: 20, color: couleur })] });
-    const entete = new DOCX.TableRow({ tableHeader: true, cantSplit: true, children: ["Équipement", "Constats", "Préconisations"].map((t, i) => cellule(i, [new DOCX.Paragraph({ keepNext: true, children: [new DOCX.TextRun({ text: t, bold: true, size: 19, color: DOCX_WHITE })] })], { shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_DARK } })) });
+    const entete = new DOCX.TableRow({ tableHeader: true, cantSplit: true, children: ["Équipement", "Constats", "Préconisations"].map((t, i) => cellule(i, [new DOCX.Paragraph({ keepNext: true, children: [new DOCX.TextRun({ text: t, bold: true, size: 19, color: DOCX_WHITE })] })], { shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_ENTETE }, margins: CELL_MARGINS_ENTETE })) });
     // Une ligne par équipement du site, du plus critique au conforme, chacune à la couleur de son
     // état réel. Remarques : celles du texte de synthèse (éventuellement retouchées à la main), sinon
     // celles de la fiche équipement, sinon une mention « aucune remarque ».
@@ -14479,6 +14483,22 @@ function docxAnalyseResonance(a, eq) {
   out.push(docxSpacer());
   return out;
 }
+// Encart à liseré coloré à gauche : petit libellé en capitales, puis l'état en grand, couleur de l'état.
+function docxEncartEtat(titre, etat) {
+  const c = DOCX_ETAT_COULEURS[cleEtatDocx(etat)];
+  const a = docxAucuneBordure();
+  return docxTable({
+    width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: [TABLE_WIDTH], borders: { ...docxToutesAucune(), insideHorizontal: a, insideVertical: a },
+    rows: [new DOCX.TableRow({ cantSplit: true, children: [new DOCX.TableCell({
+      width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, shading: { type: DOCX.ShadingType.CLEAR, fill: c ? c.fond : DOCX_LIGHT },
+      margins: { top: 150, bottom: 150, left: 280, right: 200 }, borders: { top: a, bottom: a, right: a, left: { style: DOCX.BorderStyle.SINGLE, size: 48, color: c ? c.bord : "8B96A3" } },
+      children: [
+        new DOCX.Paragraph({ keepNext: true, spacing: { before: 0, after: 40 }, children: [new DOCX.TextRun({ text: String(titre || "").toUpperCase(), bold: true, size: 15, color: "6B7785", characterSpacing: 30 })] }),
+        new DOCX.Paragraph({ spacing: { before: 0, after: 0 }, children: [new DOCX.TextRun({ text: String(etat || "—").toUpperCase(), bold: true, size: 30, color: c ? c.texte : DOCX_DARK, characterSpacing: 20 })] }),
+      ],
+    })] })],
+  });
+}
 function docxNormeNote(texte) {
   const alerte = typeof texte === "string" && texte.trim().startsWith("⚠");
   const accent = alerte ? "B5730A" : "0A5DA8";
@@ -14487,8 +14507,8 @@ function docxNormeNote(texte) {
     width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: [TABLE_WIDTH],
     rows: [new DOCX.TableRow({ children: [new DOCX.TableCell({
       width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, shading: { type: DOCX.ShadingType.CLEAR, fill: fond },
-      borders: { left: { style: DOCX.BorderStyle.SINGLE, size: 24, color: accent } },
-      margins: { top: 90, bottom: 90, left: 140, right: 140 },
+      borders: { top: docxAucuneBordure(), bottom: docxAucuneBordure(), right: docxAucuneBordure(), left: { style: DOCX.BorderStyle.SINGLE, size: 36, color: accent } },
+      margins: { top: 110, bottom: 110, left: 220, right: 160 },
       children: [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: texte, size: 16, color: DOCX_DARK })] })],
     })] })],
   });
@@ -14529,14 +14549,15 @@ function docxComparaisonEnergieBox(c) {
     })] })],
   });
 }
-function docxFieldCellules(label, value, largeurLabel = 3400, largeurValeur = 6200) {
+function docxFieldCellules(label, value, largeurLabel = 3400, largeurValeur = 6200, alterne = false) {
+  const fond = alterne ? { type: DOCX.ShadingType.CLEAR, fill: DOCX_ZEBRE } : undefined;
   return [
-    new DOCX.TableCell({ width: { size: largeurLabel, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_LIGHT }, children: [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: label, size: 18, color: "555555" })] })] }),
-    new DOCX.TableCell({ width: { size: largeurValeur, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, children: [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: value || "—", size: 18, bold: true, color: DOCX_DARK })] })] }),
+    new DOCX.TableCell({ width: { size: largeurLabel, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, verticalAlign: DOCX.VerticalAlign.CENTER, shading: fond, children: [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: label, size: 17, color: "6B7785" })] })] }),
+    new DOCX.TableCell({ width: { size: largeurValeur, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, verticalAlign: DOCX.VerticalAlign.CENTER, shading: fond, children: [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: value || "—", size: 18, bold: true, color: DOCX_DARK })] })] }),
   ];
 }
-function docxFieldRow(label, value) {
-  return new DOCX.TableRow({ children: docxFieldCellules(label, value) });
+function docxFieldRow(label, value, alterne = false) {
+  return new DOCX.TableRow({ children: docxFieldCellules(label, value, 3400, 6200, alterne) });
 }
 // Image de la photo d'équipement, à l'échelle de la colonne de droite (largeur max 176 px, hauteur max 200 px, proportions conservées).
 function docxImagePhotoEquipement(photo) {
@@ -14551,12 +14572,12 @@ function docxFieldTable(rows, photo) {
   const filtered = rows.filter((r) => r[1]);
   if (filtered.length === 0) return null;
   const img = docxImagePhotoEquipement(photo);
-  if (!img) return docxTable({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: [3400, 6200], rows: filtered.map(([l, v]) => docxFieldRow(l, v)) });
+  if (!img) return docxTable({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: [3400, 6200], rows: filtered.map(([l, v], i) => docxFieldRow(l, v, i % 2 === 1)) });
   const wl = 2300, wv = 4300, wp = TABLE_WIDTH - wl - wv;
   return docxTable({
     width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: [wl, wv, wp],
     rows: filtered.map(([l, v], i) => new DOCX.TableRow({ cantSplit: String(v ?? "").length < 700, children: [
-      ...docxFieldCellules(l, v, wl, wv),
+      ...docxFieldCellules(l, v, wl, wv, i % 2 === 1),
       ...(i === 0 ? [new DOCX.TableCell({
         rowSpan: filtered.length, width: { size: wp, type: DOCX.WidthType.DXA }, verticalAlign: DOCX.VerticalAlign.CENTER, margins: { top: 100, bottom: 100, left: 120, right: 120 },
         children: [new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, spacing: { before: 0, after: 0 }, children: [img] })],
@@ -14581,11 +14602,11 @@ function docxPrevisionRemplacementTable(lignes) {
   const largeurs = [3500, 1000, 1275, 1275, 1275, 1275];
   const enTete = new DOCX.TableRow({ tableHeader: true, cantSplit: true, children: [
     ...["Pièce", "Échéance"].map((h, i) => new DOCX.TableCell({
-      width: { size: largeurs[i], type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_DARK }, verticalAlign: DOCX.VerticalAlign.CENTER,
+      width: { size: largeurs[i], type: DOCX.WidthType.DXA }, margins: CELL_MARGINS_ENTETE, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_ENTETE }, verticalAlign: DOCX.VerticalAlign.CENTER,
       children: [new DOCX.Paragraph({ keepNext: true, alignment: i === 0 ? DOCX.AlignmentType.LEFT : DOCX.AlignmentType.CENTER, children: [new DOCX.TextRun({ text: h, bold: true, size: 17, color: DOCX_WHITE })] })],
     })),
     ...p.annees.map((a, i) => new DOCX.TableCell({
-      width: { size: largeurs[i + 2], type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_DARK }, verticalAlign: DOCX.VerticalAlign.CENTER,
+      width: { size: largeurs[i + 2], type: DOCX.WidthType.DXA }, margins: CELL_MARGINS_ENTETE, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_ENTETE }, verticalAlign: DOCX.VerticalAlign.CENTER,
       children: [new DOCX.Paragraph({ keepNext: true, alignment: DOCX.AlignmentType.CENTER, children: [new DOCX.TextRun({ text: String(a), bold: true, size: 17, color: DOCX_WHITE })] }),
         ...(i === 0 ? [new DOCX.Paragraph({ keepNext: true, alignment: DOCX.AlignmentType.CENTER, children: [new DOCX.TextRun({ text: "en cours", size: 13, color: DOCX_SILVER })] })] : [])],
     })),
@@ -14623,6 +14644,9 @@ function docxEcheancesUsureTable(lignes) {
   });
 }
 function docxControlRow(label, detail, action, etat, isAlternate, garderAvecSuite = false) {
+  // Valeur vide ou faite d'espaces : aucune seconde ligne (sinon le libellé remonte en haut de la rangée, décalé par rapport à la pastille d'état).
+  detail = Array.isArray(detail) ? detail.filter((p) => p && String(p.text ?? "").trim()) : (typeof detail === "string" ? detail.trim() : detail);
+  action = typeof action === "string" ? action.trim() : action;
   // Contrôle sur une seule ligne d'écriture (ni valeur, ni action) : rangée resserrée, marges et
   // pastille d'état réduites. Avec une valeur ou une action, la rangée garde sa hauteur normale.
   const uneLigne = !(Array.isArray(detail) ? detail.length : detail) && !action;
@@ -14639,26 +14663,20 @@ function docxControlRow(label, detail, action, etat, isAlternate, garderAvecSuit
       runs.push(new DOCX.TextRun({ text: p.text, size: 16, color: couleur, italics: true, ...(p.etat === "bad" ? { bold: true } : {}) }));
     });
     children.push(new DOCX.Paragraph({ keepNext: garderAvecSuite, spacing: { after: action ? 40 : 0 }, children: runs }));
-  } else if (detail) {
+  } else if (detail && !Array.isArray(detail)) {
     children.push(new DOCX.Paragraph({ keepNext: garderAvecSuite, spacing: { after: action ? 40 : 0 }, children: [new DOCX.TextRun({ text: detail, size: 16, color: "666666", italics: true })] }));
   }
   if (action) children.push(new DOCX.Paragraph({ keepNext: garderAvecSuite, children: [new DOCX.TextRun({ text: "Action : " + action, size: 16, color: "666666" })] }));
   // Fond gris très clair en alternance une ligne sur deux — casse la monotonie du blanc uniforme
   // sans nuire à la lisibilité ni gêner l'impression.
-  const fondAlterne = isAlternate ? "FAFBFC" : undefined;
-  const etatKey = etat === "Conforme" ? "ok" : (etat === "Dégradé" ? "warning" : (etat === "Défaillant" ? "bad" : null));
-  const c = etatKey && DOCX_ETAT_COULEURS[etatKey];
+  const fondAlterne = isAlternate ? DOCX_ZEBRE : undefined;
   return new DOCX.TableRow({ children: [
     new DOCX.TableCell({ width: { size: 7600, type: DOCX.WidthType.DXA }, margins: marges, verticalAlign: DOCX.VerticalAlign.CENTER, shading: fondAlterne ? { type: DOCX.ShadingType.CLEAR, fill: fondAlterne } : undefined, children }),
     etat
       ? new DOCX.TableCell({
           width: { size: 2000, type: DOCX.WidthType.DXA }, margins: marges, verticalAlign: DOCX.VerticalAlign.CENTER,
-          shading: { type: DOCX.ShadingType.CLEAR, fill: c ? c.fond : DOCX_LIGHT },
-          borders: c ? {
-            top: { style: DOCX.BorderStyle.SINGLE, size: 6, color: c.bord }, bottom: { style: DOCX.BorderStyle.SINGLE, size: 6, color: c.bord },
-            left: { style: DOCX.BorderStyle.SINGLE, size: 6, color: c.bord }, right: { style: DOCX.BorderStyle.SINGLE, size: 6, color: c.bord },
-          } : undefined,
-          children: [new DOCX.Paragraph({ keepNext: garderAvecSuite, alignment: DOCX.AlignmentType.CENTER, children: [new DOCX.TextRun({ text: (etat || "").toUpperCase(), bold: true, color: c ? c.texte : "555555", size: 16 })] })],
+          shading: fondAlterne ? { type: DOCX.ShadingType.CLEAR, fill: fondAlterne } : undefined,
+          children: [docxPastilleEtat(etat, { garder: garderAvecSuite })],
         })
       : new DOCX.TableCell({ width: { size: 2000, type: DOCX.WidthType.DXA }, margins: marges, shading: fondAlterne ? { type: DOCX.ShadingType.CLEAR, fill: fondAlterne } : undefined, children: [new DOCX.Paragraph("")] }),
   ]});
@@ -14674,18 +14692,14 @@ function docxControlTableCompact(rows) {
   const aucune = docxAucuneBordure();
   // Un contrôle se place en demi-largeur s'il n'a pas d'action et au plus une courte valeur (ex. « Valeur : 24 °C ») ; sinon il garde une ligne pleine largeur.
   const longueurDetail = (r) => (Array.isArray(r[1]) ? r[1].reduce((s, p) => s + String((p && p.text) || "").length + 5, 0) : String(r[1] || "").length);
+  rows = rows.map((r) => [r[0], Array.isArray(r[1]) ? r[1].filter((p) => p && String(p.text ?? "").trim()) : (typeof r[1] === "string" ? r[1].trim() : r[1]), typeof r[2] === "string" ? r[2].trim() : r[2], r[3]]);
   const simple = (r) => !r[2] && longueurDetail(r) <= 45;
-  const cellEtat = (etat, largeur) => {
-    const key = etat === "Conforme" ? "ok" : etat === "Dégradé" ? "warning" : etat === "Défaillant" ? "bad" : null;
-    const c = key && DOCX_ETAT_COULEURS[key];
-    return new DOCX.TableCell({
-      width: { size: largeur, type: DOCX.WidthType.DXA }, margins: { top: 40, bottom: 40, left: 60, right: 60 }, verticalAlign: DOCX.VerticalAlign.CENTER,
-      shading: etat ? { type: DOCX.ShadingType.CLEAR, fill: c ? c.fond : DOCX_LIGHT } : undefined,
-      borders: c ? { top: { style: DOCX.BorderStyle.SINGLE, size: 4, color: c.bord }, bottom: { style: DOCX.BorderStyle.SINGLE, size: 4, color: c.bord }, left: { style: DOCX.BorderStyle.SINGLE, size: 4, color: c.bord }, right: { style: DOCX.BorderStyle.SINGLE, size: 4, color: c.bord } } : undefined,
-      children: [new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, spacing: { before: 0, after: 0 }, children: [new DOCX.TextRun({ text: (etat || "").toUpperCase(), bold: true, size: 16, color: c ? c.texte : "555555" })] })],
-    });
-  };
-  const cellLabel = (r, largeur, span, separateur) => {
+  const cellEtat = (etat, largeur, fond) => new DOCX.TableCell({
+    width: { size: largeur, type: DOCX.WidthType.DXA }, margins: { top: 40, bottom: 40, left: 60, right: 60 }, verticalAlign: DOCX.VerticalAlign.CENTER,
+    shading: fond ? { type: DOCX.ShadingType.CLEAR, fill: fond } : undefined,
+    children: [etat ? docxPastilleEtat(etat, { taille: 14 }) : docxMiniParagraphe()],
+  });
+  const cellLabel = (r, largeur, span, separateur, fond) => {
     const detail = r ? r[1] : null, action = r ? r[2] : "";
     const paragraphes = [new DOCX.Paragraph({ spacing: { before: 0, after: (detail && (Array.isArray(detail) ? detail.length : detail)) || action ? 20 : 0 }, children: [new DOCX.TextRun({ text: r ? r[0] : "", size: 17, color: DOCX_DARK })] })];
     if (Array.isArray(detail) && detail.length) {
@@ -14696,12 +14710,13 @@ function docxControlTableCompact(rows) {
         runs.push(new DOCX.TextRun({ text: p.text, size: 15, color: couleur, italics: true, ...(p.etat === "bad" ? { bold: true } : {}) }));
       });
       paragraphes.push(new DOCX.Paragraph({ spacing: { before: 0, after: action ? 20 : 0 }, children: runs }));
-    } else if (detail) {
+    } else if (detail && !Array.isArray(detail)) {
       paragraphes.push(new DOCX.Paragraph({ spacing: { before: 0, after: action ? 20 : 0 }, children: [new DOCX.TextRun({ text: detail, size: 15, color: "666666", italics: true })] }));
     }
     if (action) paragraphes.push(new DOCX.Paragraph({ spacing: { before: 0, after: 0 }, children: [new DOCX.TextRun({ text: "Action : " + action, size: 15, color: "666666" })] }));
     return new DOCX.TableCell({
       width: { size: largeur, type: DOCX.WidthType.DXA }, columnSpan: span, margins: marges, verticalAlign: DOCX.VerticalAlign.CENTER,
+      shading: fond ? { type: DOCX.ShadingType.CLEAR, fill: fond } : undefined,
       borders: separateur ? { top: aucune, bottom: aucune, right: aucune, left: { style: DOCX.BorderStyle.SINGLE, size: 4, color: "E2E6EB" } } : undefined,
       children: paragraphes,
     });
@@ -14715,9 +14730,9 @@ function docxControlTableCompact(rows) {
   if (attente) lignes.push({ paire: [attente, null] });
   return docxTable({
     width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: L,
-    rows: lignes.map((l) => new DOCX.TableRow({ cantSplit: true, children: l.pleine
-      ? [cellLabel(l.pleine, L[0] + L[1] + L[2], 3, false), cellEtat(l.pleine[3], L[3])]
-      : [cellLabel(l.paire[0], L[0], 1, false), cellEtat(l.paire[0][3], L[1]), cellLabel(l.paire[1], L[2], 1, true), l.paire[1] ? cellEtat(l.paire[1][3], L[3]) : new DOCX.TableCell({ width: { size: L[3], type: DOCX.WidthType.DXA }, borders: { top: aucune, bottom: aucune, left: aucune, right: aucune }, children: [docxMiniParagraphe()] })] })),
+    rows: lignes.map((l, i) => { const z = i % 2 === 1 ? DOCX_ZEBRE : undefined; return new DOCX.TableRow({ cantSplit: true, children: l.pleine
+      ? [cellLabel(l.pleine, L[0] + L[1] + L[2], 3, false, z), cellEtat(l.pleine[3], L[3], z)]
+      : [cellLabel(l.paire[0], L[0], 1, false, z), cellEtat(l.paire[0][3], L[1], z), cellLabel(l.paire[1], L[2], 1, true, z), l.paire[1] ? cellEtat(l.paire[1][3], L[3], z) : new DOCX.TableCell({ width: { size: L[3], type: DOCX.WidthType.DXA }, shading: z ? { type: DOCX.ShadingType.CLEAR, fill: z } : undefined, borders: { top: aucune, bottom: aucune, left: aucune, right: aucune }, children: [docxMiniParagraphe()] })] }); }),
   });
 }
 function docxControlTable(rows, garderAvecSuite = false) {
@@ -14742,16 +14757,23 @@ const DOCX_ETAT_COULEURS = {
   warning: { bord: "B5730A", fond: "FDF3E3", texte: "8A5A0A" },
   bad: { bord: "C0392B", fond: "FDF1F0", texte: "9A2E22" },
 };
+// État en « pastille » : point de couleur + libellé en capitales sur un fond teinté limité au texte (et non plus une case encadrée qui remplit toute la cellule).
+// Le fond est porté par le texte lui-même : si un logiciel l'ignorait, il reste le point et le libellé en couleur, toujours lisibles.
+function docxPastilleEtat(etat, { taille = 15, garder = false } = {}) {
+  const c = DOCX_ETAT_COULEURS[cleEtatDocx(etat)];
+  const texte = c ? c.texte : "5A6573", fond = c ? c.fond : "EEF1F4";
+  const ombre = { type: DOCX.ShadingType.CLEAR, fill: fond, color: "auto" };
+  return new DOCX.Paragraph({ keepNext: garder, alignment: DOCX.AlignmentType.CENTER, spacing: { before: 0, after: 0 }, children: [
+    new DOCX.TextRun({ text: "\u00A0\u00A0●\u00A0", bold: true, size: taille, color: c ? c.bord : "8B96A3", shading: ombre }),
+    new DOCX.TextRun({ text: String(etat || "—").toUpperCase() + "\u00A0\u00A0", bold: true, size: taille, color: texte, characterSpacing: 10, shading: ombre }),
+  ] });
+}
 function docxValCell(text, state, garder = false) {
   const t = text === null || text === undefined || text === "" ? "—" : String(text);
   const c = state && DOCX_ETAT_COULEURS[state];
   return new DOCX.TableCell({
-    width: { size: 1600, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS,
+    width: { size: 1600, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, verticalAlign: DOCX.VerticalAlign.CENTER,
     shading: c ? { type: DOCX.ShadingType.CLEAR, fill: c.fond } : undefined,
-    borders: c ? {
-      top: { style: DOCX.BorderStyle.SINGLE, size: 6, color: c.bord }, bottom: { style: DOCX.BorderStyle.SINGLE, size: 6, color: c.bord },
-      left: { style: DOCX.BorderStyle.SINGLE, size: 6, color: c.bord }, right: { style: DOCX.BorderStyle.SINGLE, size: 6, color: c.bord },
-    } : undefined,
     children: [new DOCX.Paragraph({ keepNext: garder, alignment: DOCX.AlignmentType.CENTER, children: [new DOCX.TextRun({ text: t, size: 17, bold: !!c, color: c ? c.texte : DOCX_DARK })] })],
   });
 }
@@ -14762,12 +14784,12 @@ function docxBuildMesuresTable(rows, headers) {
   const h = headers || ["L1", "L2", "L3"];
   const garderLigne = (idx) => (rows.length <= 14 ? idx < rows.length - 1 : idx < 2); // tableau court : d'un seul tenant
   const headCell = (text, width) => new DOCX.TableCell({
-    width: { size: width, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_DARK },
+    width: { size: width, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS_ENTETE, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_ENTETE },
     children: [new DOCX.Paragraph({ keepNext: true, alignment: DOCX.AlignmentType.CENTER, children: [new DOCX.TextRun({ text, size: 17, bold: true, color: DOCX_WHITE })] })],
   });
   const header = new DOCX.TableRow({ cantSplit: true, tableHeader: true, children: [headCell("Grandeur", 2800), headCell(h[0], 1600), headCell(h[1], 1600), headCell(h[2], 1600), headCell("Moyenne des valeurs", 2000)] });
   const body = rows.map((r, idx) => { const garder = garderLigne(idx); const etats = r[5] || [null, null, null]; return new DOCX.TableRow({ cantSplit: true, children: [
-    new DOCX.TableCell({ width: { size: 2800, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_LIGHT }, children: [new DOCX.Paragraph({ keepNext: garder, children: [new DOCX.TextRun({ text: r[0], size: 17, bold: true, color: "555555" })] })] }),
+    new DOCX.TableCell({ width: { size: 2800, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, verticalAlign: DOCX.VerticalAlign.CENTER, shading: idx % 2 === 1 ? { type: DOCX.ShadingType.CLEAR, fill: DOCX_ZEBRE } : undefined, children: [new DOCX.Paragraph({ keepNext: garder, children: [new DOCX.TextRun({ text: r[0], size: 17, bold: true, color: "4A5563" })] })] }),
     docxValCell(r[1], etats[0], garder), docxValCell(r[2], etats[1], garder), docxValCell(r[3], etats[2], garder),
     new DOCX.TableCell({ width: { size: 2000, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, children: [new DOCX.Paragraph({ keepNext: garder, children: [new DOCX.TextRun({ text: (r[4] === "" || r[4] === null || r[4] === undefined) ? "—" : String(r[4]), size: 16, color: "0A5DA8", bold: true })] })] }),
   ]}); });
@@ -14844,12 +14866,8 @@ function docxPhaseCell(text, header, shaded, color, garder = false) {
   const etat = color && DOCX_COULEUR_VERS_ETAT[color];
   const c = etat && DOCX_ETAT_COULEURS[etat];
   return new DOCX.TableCell({
-    width: { size: 2000, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS,
-    shading: c ? { type: DOCX.ShadingType.CLEAR, fill: c.fond } : (shaded ? { type: DOCX.ShadingType.CLEAR, fill: DOCX_DARK } : undefined),
-    borders: c ? {
-      top: { style: DOCX.BorderStyle.SINGLE, size: 6, color: c.bord }, bottom: { style: DOCX.BorderStyle.SINGLE, size: 6, color: c.bord },
-      left: { style: DOCX.BorderStyle.SINGLE, size: 6, color: c.bord }, right: { style: DOCX.BorderStyle.SINGLE, size: 6, color: c.bord },
-    } : undefined,
+    width: { size: 2000, type: DOCX.WidthType.DXA }, margins: shaded ? CELL_MARGINS_ENTETE : CELL_MARGINS, verticalAlign: DOCX.VerticalAlign.CENTER,
+    shading: c ? { type: DOCX.ShadingType.CLEAR, fill: c.fond } : (shaded ? { type: DOCX.ShadingType.CLEAR, fill: DOCX_ENTETE } : undefined),
     children: [new DOCX.Paragraph({ keepNext: garder, alignment: header || c ? DOCX.AlignmentType.CENTER : DOCX.AlignmentType.LEFT, children: [new DOCX.TextRun({ text: t, size: 17, bold: header || !!c, color: shaded ? DOCX_WHITE : (c ? c.texte : (color || DOCX_DARK)) })] })],
   });
 }
@@ -14862,33 +14880,24 @@ function docxPhaseTable(rows, headers, colors) {
     const rc = (colors && colors[i]) || [null, null, null];
     const garder = rows.length <= 14 ? i < rows.length - 1 : i < 2; // tableau court : d'un seul tenant
     return new DOCX.TableRow({ cantSplit: true, children: [
-      new DOCX.TableCell({ width: { size: 3600, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_LIGHT }, children: [new DOCX.Paragraph({ keepNext: garder, children: [new DOCX.TextRun({ text: r[0], size: 17, bold: true, color: "555555" })] })] }),
+      new DOCX.TableCell({ width: { size: 3600, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, verticalAlign: DOCX.VerticalAlign.CENTER, shading: i % 2 === 1 ? { type: DOCX.ShadingType.CLEAR, fill: DOCX_ZEBRE } : undefined, children: [new DOCX.Paragraph({ keepNext: garder, children: [new DOCX.TextRun({ text: r[0], size: 17, bold: true, color: "4A5563" })] })] }),
       docxPhaseCell(r[1], false, false, rc[0], garder), docxPhaseCell(r[2], false, false, rc[1], garder), docxPhaseCell(r[3], false, false, rc[2], garder),
     ]});
   });
   return docxTable({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: [3600, 2000, 2000, 2000], rows: [header, ...body] });
 }
 // Table de synthèse : le nom de chaque équipement est un lien cliquable vers sa page dans le document.
-function docxSyntheseRow(label, etat, bookmarkId) {
+function docxSyntheseRow(label, etat, bookmarkId, alterne = false) {
   const linkRun = new DOCX.TextRun({ text: label, size: 18, color: DOCX_BLUE, underline: {} });
-  const margeGenereuse = { top: 200, bottom: 200, left: 160, right: 140 };
-  const etatKey = etat === "Conforme" ? "ok" : (etat === "Dégradé" ? "warning" : (etat === "Défaillant" ? "bad" : null));
-  const c = etatKey && DOCX_ETAT_COULEURS[etatKey];
-  return new DOCX.TableRow({ children: [
-    new DOCX.TableCell({ width: { size: 7600, type: DOCX.WidthType.DXA }, margins: margeGenereuse, children: [new DOCX.Paragraph({ children: [
+  const margeGenereuse = { top: 150, bottom: 150, left: 160, right: 140 };
+  const fond = alterne ? { type: DOCX.ShadingType.CLEAR, fill: DOCX_ZEBRE } : undefined;
+  return new DOCX.TableRow({ cantSplit: true, children: [
+    new DOCX.TableCell({ width: { size: 7600, type: DOCX.WidthType.DXA }, margins: margeGenereuse, verticalAlign: DOCX.VerticalAlign.CENTER, shading: fond, children: [new DOCX.Paragraph({ children: [
       bookmarkId ? new DOCX.InternalHyperlink({ anchor: bookmarkId, children: [linkRun] }) : new DOCX.TextRun({ text: label, size: 18, color: DOCX_DARK }),
     ] })] }),
     etat
-      ? new DOCX.TableCell({
-          width: { size: 2000, type: DOCX.WidthType.DXA }, margins: margeGenereuse, verticalAlign: DOCX.VerticalAlign.CENTER,
-          shading: { type: DOCX.ShadingType.CLEAR, fill: c ? c.fond : DOCX_LIGHT },
-          borders: c ? {
-            top: { style: DOCX.BorderStyle.SINGLE, size: 6, color: c.bord }, bottom: { style: DOCX.BorderStyle.SINGLE, size: 6, color: c.bord },
-            left: { style: DOCX.BorderStyle.SINGLE, size: 6, color: c.bord }, right: { style: DOCX.BorderStyle.SINGLE, size: 6, color: c.bord },
-          } : undefined,
-          children: [new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, children: [new DOCX.TextRun({ text: (etat || "").toUpperCase(), bold: true, color: c ? c.texte : "555555", size: 16 })] })],
-        })
-      : new DOCX.TableCell({ width: { size: 2000, type: DOCX.WidthType.DXA }, margins: margeGenereuse, children: [new DOCX.Paragraph("")] }),
+      ? new DOCX.TableCell({ width: { size: 2000, type: DOCX.WidthType.DXA }, margins: margeGenereuse, verticalAlign: DOCX.VerticalAlign.CENTER, shading: fond, children: [docxPastilleEtat(etat, { taille: 16 })] })
+      : new DOCX.TableCell({ width: { size: 2000, type: DOCX.WidthType.DXA }, margins: margeGenereuse, shading: fond, children: [new DOCX.Paragraph("")] }),
   ]});
 }
 // Ordre d'affichage des équipements dans le rapport — modifiable équipement par équipement,
@@ -14898,8 +14907,8 @@ function equipementsTries(equipements) {
 }
 function docxSyntheseTable(site) {
   if (site.equipements.length === 0) return null;
-  return docxTable({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: [7600, 2000], rows: equipementsTries(site.equipements).map((eq) =>
-    docxSyntheseRow(eq.type + (eq.identification.repere ? " — " + eq.identification.repere : ""), eq.etatFinal, docxBookmarkId(eq))
+  return docxTable({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: [7600, 2000], rows: equipementsTries(site.equipements).map((eq, i) =>
+    docxSyntheseRow(eq.type + (eq.identification.repere ? " — " + eq.identification.repere : ""), eq.etatFinal, docxBookmarkId(eq), i % 2 === 1)
   )});
 }
 // Word n'accepte que lettres/chiffres/underscore dans un nom de repère (bookmark), 40 caractères max.
@@ -15928,7 +15937,7 @@ function docxBlocTauxCharge(eq, allSites) {
     const couleur = (v) => (v === null || v === undefined ? { fond: "FFFFFF", texte: "8B96A3" } : v > 100 ? { fond: "FDECEA", texte: "C0392B" } : v > 80 ? { fond: "FDF3E3", texte: "B5730A" } : { fond: "EAF6EF", texte: "0F8A5F" });
     const largeurs = [2600, 1750, 1750, 1750, 1750];
     const enTete = new DOCX.TableRow({ tableHeader: true, cantSplit: true, children: ["Visite", "L1", "L2", "L3", "Moyenne"].map((h, i) => new DOCX.TableCell({
-      width: { size: largeurs[i], type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_DARK },
+      width: { size: largeurs[i], type: DOCX.WidthType.DXA }, margins: CELL_MARGINS_ENTETE, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_ENTETE },
       children: [new DOCX.Paragraph({ keepNext: true, alignment: i === 0 ? DOCX.AlignmentType.LEFT : DOCX.AlignmentType.CENTER, children: [new DOCX.TextRun({ text: h, bold: true, size: 17, color: DOCX_WHITE })] })],
     })) });
     const corps = histo.map((p) => new DOCX.TableRow({ cantSplit: true, children: [
@@ -17302,10 +17311,10 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
     }
     elements.push(docxSpacer());
   });
-  elements.push(new DOCX.Paragraph({
-    border: { top: { color: DOCX_BLUE, space: 4, style: DOCX.BorderStyle.SINGLE, size: 8 } }, spacing: { before: 240, after: 80 },
-    children: [new DOCX.TextRun({ text: "Synthèse de l'état — à l'issue de la maintenance : ", bold: true, size: 18, color: DOCX_DARK }), new DOCX.TextRun({ text: (eq.etatFinal || "").toUpperCase(), bold: true, size: 18, color: docxEtatColor(eq.etatFinal) })],
-  }));
+  // Encart « Synthèse de l'état » : liseré et fond à la couleur de l'état final de l'équipement.
+  elements.push(docxSpacer(120));
+  elements.push(docxEncartEtat("Synthèse de l'état — à l'issue de la maintenance", eq.etatFinal));
+  elements.push(docxSpacer(60));
   {
     // Pièces d'usure à remplacer cette année (ou en retard) non déjà citées dans les remarques : rappel sous l'état.
     const alertes = alertesUsureEquipement(eq).filter((a) => !String(eq.remarques || "").includes(a.type));
@@ -17540,15 +17549,18 @@ function docxCoverPage(site, infos = {}) {
     width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: [TABLE_WIDTH], borders: sansFiletsInterieurs,
     rows: [new DOCX.TableRow({ children: [new DOCX.TableCell({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_AMBER }, borders: aucune, margins: { top: 50, bottom: 50, left: 100, right: 100 }, children: [docxMiniParagraphe()] })] })],
   });
+  // Cartes à liseré coloré à gauche (même langage que les encarts du rapport) ; la prochaine maintenance recommandée figure dès la couverture.
+  const prochaine = site.rapport?.prochaineMaintenance ? dateFrIso(site.rapport.prochaineMaintenance) : "";
   const cartes = [
-    docxRangeeCartes([{ label: "Site", valeur: site.nom || "—", couleur: DOCX_BLUE, taille: 38, sousTexte: sousSite, fond: DOCX_LIGHT }], TABLE_WIDTH),
+    docxRangeeCartes([{ label: "Site", valeur: site.nom || "—", couleur: DOCX_BLUE, taille: 40, sousTexte: sousSite, fond: DOCX_LIGHT, filet: "gauche" }], TABLE_WIDTH),
     docxRangeeCartes([
-      { label: "Client", valeur: site.client || "—", couleur: DOCX_AMBER, taille: 26, fond: DOCX_LIGHT },
-      { label: "Date(s) d'intervention", valeur: infos.journees || "—", couleur: DOCX_AMBER, taille: 22, fond: DOCX_LIGHT },
+      { label: "Client", valeur: site.client || "—", couleur: DOCX_AMBER, taille: 26, fond: DOCX_LIGHT, filet: "gauche" },
+      { label: "Date(s) d'intervention", valeur: infos.journees || "—", couleur: DOCX_AMBER, taille: 22, fond: DOCX_LIGHT, filet: "gauche" },
     ], TABLE_WIDTH),
-    ...((infos.intervenants || site.rapport?.offre?.numero) ? [docxRangeeCartes([
-      { label: "Intervenant(s)", valeur: infos.intervenants || "—", couleur: DOCX_BLUE, taille: 22, fond: DOCX_LIGHT },
-      ...(site.rapport?.offre?.numero ? [{ label: "Offre / Devis", valeur: "N° " + site.rapport.offre.numero, couleur: DOCX_BLUE, taille: 22, fond: DOCX_LIGHT }] : []),
+    ...((infos.intervenants || site.rapport?.offre?.numero || prochaine) ? [docxRangeeCartes([
+      { label: "Intervenant(s)", valeur: infos.intervenants || "—", couleur: DOCX_SILVER, taille: 20, fond: DOCX_LIGHT, filet: "gauche" },
+      ...(prochaine ? [{ label: "Prochaine maintenance", valeur: "Avant le " + prochaine, couleur: DOCX_SILVER, taille: 20, fond: DOCX_LIGHT, filet: "gauche" }] : []),
+      ...(site.rapport?.offre?.numero ? [{ label: "Offre / Devis", valeur: "N° " + site.rapport.offre.numero, couleur: DOCX_SILVER, taille: 20, fond: DOCX_LIGHT, filet: "gauche" }] : []),
     ], TABLE_WIDTH)] : []),
   ];
   return [
@@ -17672,8 +17684,8 @@ async function generateSiteDocx(site, allSites) {
       width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: [2600, 7000],
       rows: [
         new DOCX.TableRow({ tableHeader: true, children: [
-          new DOCX.TableCell({ width: { size: 2600, type: DOCX.WidthType.DXA }, margins: margeRemarque, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_DARK }, children: [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: "Équipement", bold: true, size: 17, color: DOCX_WHITE })] })] }),
-          new DOCX.TableCell({ width: { size: 7000, type: DOCX.WidthType.DXA }, margins: margeRemarque, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_DARK }, children: [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: "Remarque", bold: true, size: 17, color: DOCX_WHITE })] })] }),
+          new DOCX.TableCell({ width: { size: 2600, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS_ENTETE, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_ENTETE }, children: [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: "Équipement", bold: true, size: 17, color: DOCX_WHITE })] })] }),
+          new DOCX.TableCell({ width: { size: 7000, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS_ENTETE, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_ENTETE }, children: [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: "Remarque", bold: true, size: 17, color: DOCX_WHITE })] })] }),
         ]}),
         ...lignesRemarques.map((ligne) => {
           // Chaque ligne compilée est au format "Équipement (repère) : remarque" — on sépare au
@@ -17747,13 +17759,9 @@ function cleEtatDocx(etat) {
 }
 // Case d'état : bordure foncée et fond clair, comme dans le rapport de maintenance.
 function docxCelluleEtat(etat, largeur) {
-  const c = DOCX_ETAT_COULEURS[cleEtatDocx(etat)];
-  const bord = (couleur) => ({ style: DOCX.BorderStyle.SINGLE, size: 6, color: couleur });
   return new DOCX.TableCell({
     width: { size: largeur, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, verticalAlign: DOCX.VerticalAlign.CENTER,
-    shading: { type: DOCX.ShadingType.CLEAR, fill: c ? c.fond : DOCX_LIGHT },
-    borders: c ? { top: bord(c.bord), bottom: bord(c.bord), left: bord(c.bord), right: bord(c.bord) } : undefined,
-    children: [new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, children: [new DOCX.TextRun({ text: (etat || "—").toUpperCase(), bold: true, size: 16, color: c ? c.texte : "555555" })] })],
+    children: [docxPastilleEtat(etat, { taille: 15 })],
   });
 }
 // Synthèse minimale en deux phrases : ce qui a été fait, puis le bilan des équipements contrôlés.
@@ -17890,7 +17898,7 @@ async function generateInterventionDocx(iv, sites = []) {
     children.push(para("Aucun équipement renseigné.", { color: "666666" }));
   } else {
     const W = [4800, 2600, 2200];
-    const cellule = (i, enfants, entete) => new DOCX.TableCell({ width: { size: W[i], type: DOCX.WidthType.DXA }, margins: { top: 50, bottom: 50, left: 120, right: 110 }, verticalAlign: DOCX.VerticalAlign.CENTER, shading: entete ? { type: DOCX.ShadingType.CLEAR, fill: DOCX_DARK } : undefined, children: enfants });
+    const cellule = (i, enfants, entete) => new DOCX.TableCell({ width: { size: W[i], type: DOCX.WidthType.DXA }, margins: { top: 50, bottom: 50, left: 120, right: 110 }, verticalAlign: DOCX.VerticalAlign.CENTER, shading: entete ? { type: DOCX.ShadingType.CLEAR, fill: DOCX_ENTETE } : undefined, children: enfants });
     const texteCellule = (t, o = {}) => new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: t, size: o.size ?? 18, bold: !!o.bold, color: o.color })] });
     const entete = new DOCX.TableRow({ tableHeader: true, children: ["Équipement", "Localisation", "État"].map((t, i) => cellule(i, [texteCellule(t, { bold: true, size: 17, color: DOCX_WHITE })], true)) });
     const lignes = liste.map((eq) => {
