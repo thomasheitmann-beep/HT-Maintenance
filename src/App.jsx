@@ -1372,12 +1372,56 @@ const LISTE_TYPE_MESURE_ISOLEMENT = ["Standard (lecture instantanée)", "PI (Ind
 const UNITE_ISOLEMENT = ["GΩ", "MΩ", "Ω"];
 
 const L1L2L3 = (unit) => [F("l1", "L1", unit), F("l2", "L2", unit), F("l3", "L3", unit)];
+// ----- Seuils de cohérence ajoutés (repères indicatifs, modifiables par la valeur constructeur quand elle existe) -----
+// Seuil haut seul : tol_min masqué (vide) + tol_max calculé, sur les champs ciblés (phaseKeys) — même mécanique que les seuils THdV / déséquilibre.
+const seuilMaxSeul = (label, unit, unitFrom, phaseKeys, compute) => [
+  { key: "tol_min", label: "Seuil bas", unit: null, hidden: true, unitFrom, phaseKeys, compute: () => "" },
+  { key: "tol_max", label, unit, unitFrom, phaseKeys, compute },
+];
+// Continuité des masses : repère ≤ 100 mΩ (liaisons équipotentielles et circuit de terre d'un poste ; la valeur d'un constructeur ou d'un cahier des charges prime).
+const CHAMPS_CONTINUITE_MASSES = [
+  F("valeur", "Valeur", "mΩ"), F("courantEssai", "Courant d'essai", "mA", ["200", "500", "1000"], "1000"),
+  ...seuilMaxSeul("Seuil indicatif", "mΩ", "valeur", [], (f) => (numOf(f.valeur) === null ? "" : 100)),
+];
+// Résistances de contact par phase (disjoncteur BT, jonctions de jeu de barres) : sans valeur constructeur, la pratique courante compare les
+// phases entre elles — une phase à plus de 1,5 × la plus faible signale un contact dégradé (serrage, oxydation, usure).
+const CHAMPS_CONTACTS_PAR_PHASE = [
+  ...L1L2L3("µΩ"), F("n", "N", "µΩ"), F("courantEssai", "Courant d'essai", "A", LISTE_COURANT_ESSAI_CONTACT),
+  ...seuilMaxSeul("Écart max admis (+50 %)", "µΩ", "l1", ["l1", "l2", "l3"], (f) => {
+    const v = [numOf(f.l1), numOf(f.l2), numOf(f.l3)].filter((x) => x !== null && x > 0);
+    return v.length < 2 ? "" : Math.round(Math.min(...v) * 1.5 * 100) / 100;
+  }),
+];
+// Bobine de déclenchement : Rd mesurée comparée à la valeur nominale constructeur ± tolérance (10 % par défaut).
+// Ancien enregistrement (« Tolérance » saisie comme valeur maximale, sans nominale) : ce maximum reste appliqué.
+const CHAMPS_BOBINE_DECLENCHEMENT = [
+  F("rd", "Rd mesurée", "Ω"), F("rn", "Rd nominale constructeur", "Ω"), F("tolPct", "Écart admis", "%", ["5", "10", "15"], "10"),
+  { key: "tol_min", label: "Tolérance min", unit: "Ω", unitFrom: "rd", phaseKeys: ["rd"], compute: (f) => { const rn = numOf(f.rn), p = numOf(f.tolPct) ?? 10; return rn ? Math.round(rn * (1 - p / 100) * 100) / 100 : ""; } },
+  { key: "tol_max", label: "Tolérance max", unit: "Ω", unitFrom: "rd", phaseKeys: ["rd"], compute: (f) => { const rn = numOf(f.rn), p = numOf(f.tolPct) ?? 10; return rn ? Math.round(rn * (1 + p / 100) * 100) / 100 : (numOf(f.tolerance) ?? ""); } },
+];
+// Contacts des chambres de coupure HTA : valeur constructeur + 20 % ; sans valeur constructeur, repère 100 µΩ
+// (contacts usuels de quelques dizaines de µΩ). Ancien seuil saisi à la main (autre que l'ancien défaut 940 µΩ) : conservé.
+const CHAMPS_CONTACTS_CHAMBRES = [
+  ...L1L2L3("µΩ"), F("reference", "Valeur de référence constructeur", "µΩ"), F("courantEssai", "Courant d'essai", "A", LISTE_COURANT_ESSAI_CONTACT),
+  ...seuilMaxSeul("Seuil max", "µΩ", "l1", ["l1", "l2", "l3"], (f) => {
+    if ([f.l1, f.l2, f.l3].every((x) => numOf(x) === null)) return "";
+    const ref = numOf(f.reference);
+    if (ref) return Math.round(ref * 1.2 * 100) / 100;
+    const ancien = numOf(f.tolerance);
+    return ancien && ancien !== 940 ? ancien : 100;
+  }),
+];
+// Temps d'ouverture / de fermeture : synchronisme entre pôles, repère ≤ 3,3 ms (1/6 de période à 50 Hz, valeur usuelle des constructeurs).
+const champsTempsManoeuvre = () => [
+  ...L1L2L3("ms"), F("synchronisme", "Synchronisme (ensemble des phases)", "ms"), F("reference", "Valeur de référence constructeur", "ms"),
+  ...seuilMaxSeul("Synchronisme max", "ms", "synchronisme", [], (f) => (numOf(f.synchronisme) === null ? "" : 3.3)),
+];
 // Tolérance d'écart entre phases pour la résistance d'enroulement — pas de valeur théorique unique
 // à comparer (contrairement au rapport de transformation), donc auto-référencée : ±2 % autour de
 // la moyenne des 3 phases déjà mesurées. Seuil issu de la pratique courante des essais de
 // résistance d'enroulement (transformateurs ≥ 1,6 MVA) — pas une clause IEC unique et universelle,
 // à la différence du ±0,5 % du rapport de transformation (CEI 60076-1).
-function L1L2L3AvecToleranceEcart(unit, pourcentage = 2) {
+function L1L2L3AvecToleranceEcart(unit, pourcentage = 2, uniteAffichage = null) {
   const moyenneEtEcart = (sens) => (f) => {
     const vals = [numOf(f.l1), numOf(f.l2), numOf(f.l3)].filter((v) => v !== null);
     if (vals.length < 2) return ""; // pas assez de phases saisies pour un écart significatif
@@ -1385,7 +1429,7 @@ function L1L2L3AvecToleranceEcart(unit, pourcentage = 2) {
     return Math.round(moyenne * (1 + (sens * pourcentage) / 100) * 1000) / 1000;
   };
   return [
-    ...L1L2L3(unit),
+    ...L1L2L3(unit).map((f) => (uniteAffichage ? { ...f, uniteAffichage } : f)),
     { key: "tol_min", label: `Tolérance min (écart inter-phases ≤ ${pourcentage}%)`, unit, unitFrom: "l1", compute: moyenneEtEcart(-1) },
     { key: "tol_max", label: `Tolérance max (écart inter-phases ≤ ${pourcentage}%)`, unit, unitFrom: "l1", compute: moyenneEtEcart(1) },
   ];
@@ -1461,7 +1505,7 @@ const MECA_CELLULE = [
 ];
 const TYPES_AVEC_MANOEUVRE_DYNAMIQUE = ["Interrupteur HTA", "Interrupteur Fusible HTA", "Comptage HTA", "Disjoncteur HTA", "Contacteur HTA"];
 const SECURITE_CELLULE = [
-  C("continuite_masses", "Contrôle de la continuité des masses", [F("valeur", "Valeur", "mΩ"), F("courantEssai", "Courant d'essai", "mA", ["200", "500", "1000"], "1000")]),
+  C("continuite_masses", "Contrôle de la continuité des masses", CHAMPS_CONTINUITE_MASSES),
   C("interverrouillage", "Contrôle de l'interverrouillage de sécurité"),
   C("fiche_manoeuvre", "Présence et exactitude de la fiche de manœuvre"),
 ];
@@ -1870,19 +1914,19 @@ const CONTROLES_DISJONCTEUR = [
   C("moteur_rearmement", "Contrôle du moteur de réarmement"),
   C("telecommande", "Contrôle de la télécommande"),
   C("contacts_position_disj", "Contrôle des contacts de position"),
-  C("resistance_bobine_declenchement", "Résistances de la bobine de déclenchement", [F("rd", "Rd", "Ω"), F("tolerance", "Tolérance", "Ω")]),
+  C("resistance_bobine_declenchement", "Résistances de la bobine de déclenchement", CHAMPS_BOBINE_DECLENCHEMENT),
   C("etat_isolants_disj", "État général des isolants"),
   C("etat_chambres_coupure", "État général des chambres de coupures"),
   // Repère par défaut : valeur nominale usuelle ≈ 47 µΩ, tolérance ≈ x20 avant anomalie (soit
   // ≈ 940 µΩ) — pré-rempli comme point de départ modifiable, pas une valeur universelle : la CEI
   // 62271-100 ne fixe rien de fixe (ça dépend de la technologie — SF6, vide, air — et du calibre),
   // à ajuster selon la doc constructeur de CE modèle précis si elle donne une valeur différente.
-  C("resistance_contact_chambres", "Résistances de contact des chambres de coupure", [...L1L2L3("µΩ"), F("tolerance", "Tolérance", "µΩ", null, "940"), F("courantEssai", "Courant d'essai", "A", LISTE_COURANT_ESSAI_CONTACT)]),
+  C("resistance_contact_chambres", "Résistances de contact des chambres de coupure", CHAMPS_CONTACTS_CHAMBRES),
   // CEI 62271-100 ne fixe pas de valeur universelle (dépend fortement de la technologie — SF6, vide,
   // air — et du calibre) : le seul repère pertinent est la valeur donnée par le constructeur pour CE
   // modèle précis, à comparer à la mesure relevée.
-  C("temps_ouverture", "Mesure du temps d'ouverture", [...L1L2L3("ms"), F("synchronisme", "Synchronisme (ensemble des phases)", "ms"), F("reference", "Valeur de référence constructeur", "ms")]),
-  C("temps_fermeture", "Mesure du temps de fermeture", [...L1L2L3("ms"), F("synchronisme", "Synchronisme (ensemble des phases)", "ms"), F("reference", "Valeur de référence constructeur", "ms")]),
+  C("temps_ouverture", "Mesure du temps d'ouverture", champsTempsManoeuvre()),
+  C("temps_fermeture", "Mesure du temps de fermeture", champsTempsManoeuvre()),
   C("courbe_compensation_sf6", "Courbe de compensation pression SF6 / température", [F("reference", "Référence / commentaire")]),
   C("essai_dielectrique_pole", "Essai diélectrique après intervention sur le pôle"),
 ];
@@ -2913,7 +2957,7 @@ function buildTransformateurSchema({ sec = false, classeIsolation = null, deuxSe
         // entre phases, contrairement à l'isolement) — un écart > 2 % entre phases indique une
         // anomalie (connexion desserrée, spire en court-circuit). La température relevée permet de
         // corriger et comparer les valeurs d'une visite à l'autre (résistance du cuivre ≈ +0,4 %/°C).
-        C("resistance_enroulements_primaire", "Résistance des enroulements — Primaire", [...L1L2L3AvecToleranceEcart("mΩ"), F("temperature", "Température enroulement", "°C")]),
+        C("resistance_enroulements_primaire", "Résistance des enroulements — Primaire", [...L1L2L3AvecToleranceEcart("mΩ", 2, "Ω"), F("temperature", "Température enroulement", "°C")]),
         C("resistance_enroulements_secondaire", "Résistance des enroulements — Secondaire" + (deuxSecondaires ? " 1" : ""), [...L1L2L3AvecToleranceEcart("mΩ"), F("temperature", "Température enroulement", "°C")]),
         ...(deuxSecondaires ? [
           C("rapport_par_phase_secondaire2", "Rapport de transformation — Secondaire 2", [F("l1", "L1"), F("l2", "L2"), F("l3", "L3")]),
@@ -3053,7 +3097,7 @@ const SCHEMAS = {
       ]},
       { key: "organes", title: "Organes internes", items: [] },
       { key: "securite", title: "Contrôles de sécurité", items: [
-        C("continuite_masses", "Contrôle de la continuité des masses", [F("valeur", "Valeur", "mΩ"), F("courantEssai", "Courant d'essai", "mA", ["200", "500", "1000"], "1000")]),
+        C("continuite_masses", "Contrôle de la continuité des masses", CHAMPS_CONTINUITE_MASSES),
         C("interverrouillage", "Contrôle de l'interverrouillage de sécurité"),
         C("fiche_manoeuvre", "Présence et exactitude de la fiche de manœuvre"),
       ]},
@@ -3083,7 +3127,7 @@ const SCHEMAS = {
         ...FUSIBLES,
       ]},
       { key: "securite", title: "Contrôles de sécurité", items: [
-        C("continuite_masses", "Contrôle de la continuité des masses", [F("valeur", "Valeur", "mΩ"), F("courantEssai", "Courant d'essai", "mA", ["200", "500", "1000"], "1000")]),
+        C("continuite_masses", "Contrôle de la continuité des masses", CHAMPS_CONTINUITE_MASSES),
         C("interverrouillage", "Contrôle de l'interverrouillage de sécurité"),
         C("fiche_manoeuvre", "Présence et exactitude de la fiche de manœuvre"),
       ]},
@@ -3120,7 +3164,7 @@ const SCHEMAS = {
       ]},
       { key: "electriques", title: "Contrôles électriques", items: [
         C("contacts_auxiliaires", "Contacts auxiliaires"),
-        C("resistances_contacts", "Résistances des contacts", [...L1L2L3("µΩ"), F("n", "N", "µΩ"), F("courantEssai", "Courant d'essai", "A", LISTE_COURANT_ESSAI_CONTACT)]),
+        C("resistances_contacts", "Résistances des contacts", CHAMPS_CONTACTS_PAR_PHASE),
         C("verif_unite_controle", "Vérification unité de contrôle"),
         C("tension_aux_unite", "Tension auxiliaire de l'unité de contrôle", [F("tension", "Tension", null, LISTE_TENSION_ORGANES), F("type", "Type", null, LISTE_TYPE_ORGANES)]),
         C("signalisation", "Signalisation"),
@@ -3164,7 +3208,7 @@ const SCHEMAS = {
       ]},
       { key: "electriques", title: "Contrôles électriques", items: [
         C("contacts_auxiliaires", "Contacts auxiliaires"),
-        C("resistances_contacts", "Résistances des contacts", [...L1L2L3("µΩ"), F("n", "N", "µΩ"), F("courantEssai", "Courant d'essai", "A", LISTE_COURANT_ESSAI_CONTACT)]),
+        C("resistances_contacts", "Résistances des contacts", CHAMPS_CONTACTS_PAR_PHASE),
         C("verif_unite_controle", "Vérification unité de contrôle"),
         C("tension_aux_unite", "Tension auxiliaire de l'unité de contrôle"),
         C("signalisation", "Signalisation"),
@@ -3469,9 +3513,9 @@ const SCHEMAS = {
       ]},
       { key: "electriques", title: "Contrôles électriques", items: [
         C("serrage_connexions", "Contrôle du serrage des connexions", [F("couple", "Couple de serrage", "N.m")]),
-        C("resistance_jonctions", "Résistance de contact aux jonctions", [...L1L2L3("µΩ"), F("n", "N", "µΩ"), F("courantEssai", "Courant d'essai", "A", LISTE_COURANT_ESSAI_CONTACT)]),
+        C("resistance_jonctions", "Résistance de contact aux jonctions", CHAMPS_CONTACTS_PAR_PHASE),
         C("etat_isolants_entretoises", "État des isolants et entretoises"),
-        C("continuite_masses_jdb", "Continuité des masses et mise à la terre", [F("valeur", "Valeur", "mΩ"), F("courantEssai", "Courant d'essai", "mA", ["200", "500", "1000"], "1000")]),
+        C("continuite_masses_jdb", "Continuité des masses et mise à la terre", CHAMPS_CONTINUITE_MASSES),
         C("thermographie", "Contrôle thermographique / points chauds", [F("temperature", "Température relevée", "°C"), F("charge", "Charge au moment du contrôle", "%")]),
       ]},
       { key: "mesure_isolement", title: "Mesure d'isolement", items: [
@@ -3775,8 +3819,8 @@ function repairEquipementControles(eq) {
       if (!controles[sec.key][item.key]) {
         const fieldsDefault = {};
         (item.fields || []).forEach((f) => {
-          fieldsDefault[f.key] = "";
-          if (unitFamilyFor(f.unit)) fieldsDefault[f.key + "Unite"] = f.unit;
+          fieldsDefault[f.key] = f.defaultValue ?? "";
+          if (unitFamilyFor(f.unit)) fieldsDefault[f.key + "Unite"] = f.uniteAffichage || f.unit;
         });
         if (item.fields === FUSIBLE_FIELDS) fieldsDefault[MARQUEUR_FUSIBLE_MOHM] = true;
         controles[sec.key][item.key] = item.kind === "control" ? { action: "", etat: "Conforme", fields: fieldsDefault } : { fields: fieldsDefault };
@@ -3816,7 +3860,7 @@ function createControlesDefaults(schema) {
       const fieldsDefault = {};
       (item.fields || []).forEach((f) => {
         fieldsDefault[f.key] = f.defaultValue ?? "";
-        if (unitFamilyFor(f.unit)) fieldsDefault[f.key + "Unite"] = f.unit;
+        if (unitFamilyFor(f.unit)) fieldsDefault[f.key + "Unite"] = f.uniteAffichage || f.unit;
       });
       if (item.fields === FUSIBLE_FIELDS) fieldsDefault[MARQUEUR_FUSIBLE_MOHM] = true;
       controles[sec.key][item.key] =
@@ -6196,7 +6240,11 @@ function ControlRow({ item, value, onChange, idPrefix, toleranceOverride }) {
   // frappe ne fait plus basculer l'état. Un passage automatique en « Dégradé » est marqué (etatAuto) :
   // si la valeur finale revient dans la tolérance, l'état repasse en « Conforme ». Un état choisi à la
   // main n'est jamais modifié.
+  // Pas d'ajustement à la simple ouverture d'un contrôle déjà enregistré (ex. ancien RMP relu avec un seuil ajouté depuis) :
+  // seule une saisie fait évoluer l'état automatiquement.
+  const premierPassageEtat = useRef(true);
   useEffect(() => {
+    if (premierPassageEtat.current) { premierPassageEtat.current = false; return undefined; }
     const t = setTimeout(() => {
       const v = valueRef.current;
       if (uneMesureHorsTolerance && v.etat === "Conforme") onChange({ ...v, etat: "Dégradé", etatAuto: true });
@@ -10217,15 +10265,17 @@ function champTolStatus(item, fields, key, etat) {
   const tolMaxField = (item.fields || []).find((f) => f.key === "tol_max" && f.compute);
   if (tolMinField) {
     const champsConcernes = [tolMinField.unitFrom, ...(tolMinField.phaseKeys || ["l1", "l2", "l3"])].filter(Boolean);
-    if (!champsConcernes.includes(key)) return null;
+    if (champsConcernes.includes(key)) {
     const min = numOf(tolMinField.compute(fields)), max = tolMaxField ? numOf(tolMaxField.compute(fields)) : null;
     // Mesure et tolérance comparées dans la MÊME unité (ex. mesure en µΩ, tolérance en mΩ → conversion).
     const def = (item.fields || []).find((f) => f.key === key);
-    const uTol = tolMinField.unit;
+    const uTol = (tolMaxField && tolMaxField.unit) || tolMinField.unit;
     const valeur = def && def.unit && uTol && def.unit !== uTol && unitFamilyFor(def.unit) === unitFamilyFor(uTol) ? depuisUniteBase(fields[key], def.unit, uTol) : fields[key];
     return colorer(toleranceState(valeur, min, max));
+    }
+    // champ non visé par le seuil calculé (ex. L1/L2/L3 d'un temps de manœuvre, seuil sur le synchronisme) : règles suivantes
   }
-  if (fields.tolerance !== undefined || fields.tol_max !== undefined) {
+  if (numOf(fields.tolerance) !== null || numOf(fields.tol_max) !== null) {
     if (!["l1", "l2", "l3", "valeur", "rd", "n"].includes(key)) return null;
     const max = numOf(fields.tolerance ?? fields.tol_max);
     const min = fields.tol_min !== undefined ? numOf(fields.tol_min) : null;
