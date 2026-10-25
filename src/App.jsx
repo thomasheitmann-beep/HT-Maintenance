@@ -416,12 +416,17 @@ const entreesCatalogueFusible = (entree) => (!entree ? [] : Array.isArray(entree
 // Résistance à froid de référence constructeur (mΩ, ± 10 % à 20 °C) — sert à calculer une tolérance
 // réelle, indépendante de la valeur mesurée sur site. Si la référence saisie est connue, sa valeur
 // propre est retenue (elle peut différer selon la longueur du fusible).
+// Recherche tolérante : casse, accents et ponctuation ignorés pour le modèle (« SOLEFUSE » = « Soléfuse »),
+// valeur numérique pour Un / In (« 7,2 » = « 7.2 », « 63 A » = « 63 »).
+const normCle = (t) => String(t || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]/g, "");
+const gammeFusible = (modele) => { if (!modele) return null; if (REFERENCE_FUSIBLE_CONSTRUCTEUR[modele]) return REFERENCE_FUSIBLE_CONSTRUCTEUR[modele]; const k = Object.keys(REFERENCE_FUSIBLE_CONSTRUCTEUR).find((x) => normCle(x) === normCle(modele)); return k ? REFERENCE_FUSIBLE_CONSTRUCTEUR[k] : null; };
+const valeurNumCle = (obj, v) => { if (!obj) return undefined; const t = String(v ?? "").trim(); if (obj[t] !== undefined) return obj[t]; const n = numOf(t); if (n === null) return undefined; const k = Object.keys(obj).find((x) => numOf(x) === n); return k !== undefined ? obj[k] : undefined; };
 function resistanceFroidConnue(modele, un, in_, reference) {
-  const gamme = REFERENCE_FUSIBLE_CONSTRUCTEUR[modele];
+  const gamme = gammeFusible(modele);
   if (!gamme) return null;
-  const parTension = gamme[String(un).trim()];
+  const parTension = valeurNumCle(gamme, un);
   if (!parTension) return null;
-  const entrees = entreesCatalogueFusible(parTension[String(in_).trim()]);
+  const entrees = entreesCatalogueFusible(valeurNumCle(parTension, in_));
   if (!entrees.length) return null;
   const norm = (x) => String(x || "").toUpperCase().replace(/\s/g, "");
   const exacte = reference && entrees.find((e) => norm(e[0]) === norm(reference));
@@ -430,9 +435,9 @@ function resistanceFroidConnue(modele, un, in_, reference) {
 // Toutes les références connues pour un modèle + tension donnés, triées par calibre croissant —
 // alimente la liste déroulante du champ Référence, plutôt qu'une simple suggestion au coup par coup.
 function referencesConnuesPourModeleTension(modele, un) {
-  const gamme = REFERENCE_FUSIBLE_CONSTRUCTEUR[modele];
+  const gamme = gammeFusible(modele);
   if (!gamme) return [];
-  const parTension = gamme[String(un).trim()];
+  const parTension = valeurNumCle(gamme, un);
   if (!parTension) return [];
   return Object.entries(parTension)
     .flatMap(([in_, entree]) => entreesCatalogueFusible(entree).map(([ref, r, note]) => ({ in: in_, reference: ref, resistance: r, note: note || "" })))
@@ -6290,7 +6295,7 @@ function ControlRow({ item, value, onChange, idPrefix, toleranceOverride }) {
                       onChange={(e) => setField(f.key, e.target.value)}
                       style={{ ...inputStyle, width: 110, padding: "5px 7px", fontSize: 12 }}
                     />
-                    {fields.modele && REFERENCE_FUSIBLE_CONSTRUCTEUR[fields.modele] && !fields.un && (
+                    {fields.modele && gammeFusible(fields.modele) && !fields.un && (
                       <span style={{ fontSize: 10, color: "#B5730A", whiteSpace: "nowrap" }}>renseignez Un et In pour la liste</span>
                     )}
                   </label>
@@ -8556,6 +8561,19 @@ function compositionCarte(carte) {
     return e ? { q: x.q, e } : null;
   }).filter(Boolean);
 }
+// Pièce du catalogue dont la référence correspond à celle lue sur l'étiquette (casse et séparateurs ignorés).
+function pieceCatalogueParReference(ref, kinds) {
+  const n = normCle(ref);
+  if (n.length < 4) return null;
+  for (const k of kinds) {
+    for (const e of CATALOGUE_PIECES[k] || []) {
+      if (k === "cartes") { if (normCle(e.r) === n) return { marque: e.m || "", modele: e.r, description: `Carte condensateurs ${e.r}` }; continue; }
+      const hit = (e.r || []).find((x) => normCle(x[1]) === n);
+      if (hit) return { marque: hit[0] || "", modele: hit[1], description: libelleCondensateur(e, k) };
+    }
+  }
+  return null;
+}
 function CataloguePiecesPicker({ kind, onChoisir, onFermer }) {
   const [onglet, setOnglet] = useState(kind === "dc" ? "dc" : kind);
   const [f, setF] = useState({ texte: "", cap: "", tension: "", diam: "", marque: "", dim: "" });
@@ -9039,7 +9057,26 @@ async function lirePlaqueIA({ file, typeEquipement, contexte, champs }) {
   if (!res.ok) throw new Error(j.erreur || `Lecture impossible (erreur ${res.status}).`);
   return j;
 }
-function BoutonLirePlaque({ champs, valeursActuelles = {}, onAppliquer, typeEquipement, contexte = "", libelle = "Lire la plaque", compact = false }) {
+// Rapproche une valeur lue d'une option connue : égalité après normalisation (casse, accents, ponctuation),
+// même nombre (« 7,2 » / « 7.2 »), sinon option UNIQUE qui commence par la valeur lue ou inversement
+// (« SCHNEIDER » → « Schneider Electric ») — jamais de rapprochement ambigu.
+function rapprocherOption(lu, options) {
+  if (!Array.isArray(options) || !options.length) return lu;
+  const n = normCle(lu);
+  if (!n) return lu;
+  const exact = options.find((o) => normCle(o) === n);
+  if (exact !== undefined) return String(exact);
+  if (numOf(lu) !== null && /^[\d.,\s]+[a-zA-Zµ°%]*$/.test(String(lu).trim())) {
+    const num = options.find((o) => numOf(o) === numOf(lu) && /^[\d.,\s]+[a-zA-Zµ°%]*$/.test(String(o).trim()));
+    if (num !== undefined) return String(num);
+  }
+  if (n.length >= 4) {
+    const partiels = options.filter((o) => { const k = normCle(o); return k.length >= 4 && (k.startsWith(n) || n.startsWith(k)); });
+    if (partiels.length === 1) return String(partiels[0]);
+  }
+  return lu;
+}
+function BoutonLirePlaque({ champs, valeursActuelles = {}, onAppliquer, typeEquipement, contexte = "", libelle = "Lire la plaque", compact = false, transformer = null }) {
   const inputRef = useRef(null);
   const [lecture, setLecture] = useState(false);
   const [erreur, setErreur] = useState("");
@@ -9050,8 +9087,11 @@ function BoutonLirePlaque({ champs, valeursActuelles = {}, onAppliquer, typeEqui
     setErreur(""); setLecture(true);
     try {
       const r = await lirePlaqueIA({ file, typeEquipement, contexte, champs });
+      if (transformer && r.valeurs) { try { r.valeurs = transformer({ ...r.valeurs }) || r.valeurs; } catch (e) { /* valeurs lues conservées */ } }
       const lignes = champs.filter((c) => r.valeurs && r.valeurs[c.key] !== undefined).map((c) => {
-        const lu = String(r.valeurs[c.key]);
+        // Valeur ramenée sur l'option connue équivalente (casse, accents, ponctuation, ou même nombre) :
+        // « SOLEFUSE » → « Soléfuse », « 7,2 » → « 7.2 » — pour que listes, références et tolérances suivent.
+        const lu = rapprocherOption(String(r.valeurs[c.key]), c.options);
         const brut = valeursActuelles ? valeursActuelles[c.key] : undefined;
         const actuel = brut === undefined || brut === null ? "" : String(brut);
         // Coché d'office si le champ est vide ; une valeur déjà saisie n'est remplacée que sur décision.
@@ -9127,7 +9167,15 @@ const aDesChampsPlaque = (defs) => Array.isArray(defs) && defs.some((f) => estCh
 function champsPlaqueDepuisDefs(defs, fields) {
   return (defs || []).filter((f) => !f.compute && !f.longText && !f.hidden && estChampPlaque(f, CLES_CARACTERISTIQUES_PLAQUE)).map((f) => ({
     key: f.key, label: `${f.label}${f.unit ? ` (${f.unit})` : ""}`,
-    options: typeof f.options === "function" ? f.options(fields || {}) || [] : f.options,
+    options: (() => {
+      const base = typeof f.options === "function" ? f.options(fields || {}) || [] : f.options;
+      // Fusibles : toutes les gammes connues, pour reconnaître le modèle lu même si le fabricant n'est pas encore choisi.
+      if (f.key === "modele" && (defs || []).some((d) => d && d.key === "fabricant")) return Array.from(new Set([...(base || []), ...Object.keys(REFERENCE_FUSIBLE_CONSTRUCTEUR), ...Object.values(MARQUE_MODELE_FUSIBLE).flat()]));
+      if (f.key === "reference" && (defs || []).some((d) => d && d.key === "fabricant")) {
+        return Object.values(REFERENCE_FUSIBLE_CONSTRUCTEUR).flatMap((parU) => Object.values(parU).flatMap((parI) => Object.values(parI).flatMap((e) => entreesCatalogueFusible(e).map((x) => x[0]))));
+      }
+      return base;
+    })(),
   }));
 }
 function contextePlaqueComposant(libelle) {
@@ -9208,7 +9256,13 @@ function PiecesUsureUPSPanel({ eq, update, itemFicheBatterie }) {
                             { key: "modele", label: "Modèle / référence exacte" },
                             { key: "anneeMiseEnService", label: "Année de fabrication (seulement si un code date est lisible)" },
                           ]}
-                          valeursActuelles={m} onAppliquer={(patch) => setModele(m.id, patch)} />
+                          valeursActuelles={m} onAppliquer={(patch) => setModele(m.id, patch)}
+                          transformer={(v) => {
+                            // Référence lue présente dans le catalogue : marque, référence et description normalisées du catalogue.
+                            const kinds = CATALOGUE_PAR_CATEGORIE_USURE[cat.key] ? [CATALOGUE_PAR_CATEGORIE_USURE[cat.key], ...(cat.key === "condensateursContinus" ? ["cartes"] : [])] : ["ac", "dc", "ventil"];
+                            const p = pieceCatalogueParReference(v.modele, kinds);
+                            return p ? { ...v, marque: p.marque || v.marque, modele: p.modele, description: p.description || v.description } : v;
+                          }} />
                       )}
                       {modeles.length > 1 && !(cat.key === "batteries" && idx === 0) && (
                         <button onClick={() => removeModele(m.id)} style={{ background: "none", border: "none", color: "#EF4444", cursor: "pointer", padding: 4 }} title="Retirer">
