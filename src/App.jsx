@@ -8396,17 +8396,10 @@ function TauxChargeCalcule({ eq }) {
   return (
     <Card style={{ marginBottom: 14 }}>
       <div style={{ fontSize: 12.5, color: "#5B6B7D", marginBottom: 10 }}>Taux de charge calculé ({base})</div>
-      <div style={{ display: "flex", gap: 22, alignItems: "flex-end", height: 90 }}>
-        {phases.map(([label, pct]) => (
-          <div key={label} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6, width: 48 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: couleurTauxCharge(pct) }}>{pct ?? "—"}%</div>
-            <div style={{ width: 26, height: 60, background: "#EEF1F5", borderRadius: 4, display: "flex", alignItems: "flex-end", overflow: "hidden" }}>
-              <div style={{ width: "100%", height: pct ? `${Math.min(100, Math.round((pct / echelleMax) * 100))}%` : 0, background: couleurTauxCharge(pct), borderRadius: "4px 4px 0 0", transition: "height 0.2s" }} />
-            </div>
-            <div style={{ fontSize: 11, color: "#8B96A3" }}>{label}</div>
-          </div>
-        ))}
-      </div>
+      {(() => {
+        const img = genererGraphiqueTauxCharge([t.t1, t.t2, t.t3], ["L1", "L2", "L3"]);
+        return img ? <img src={img} alt="Taux de charge par phase" style={{ maxWidth: "100%", height: "auto" }} onLoad={(e) => { e.currentTarget.style.width = `${e.currentTarget.naturalWidth / SCHEMA_ECHELLE}px`; }} /> : null;
+      })()}
     </Card>
   );
 }
@@ -8450,14 +8443,10 @@ function HistoriqueTauxCharge({ eq, allSites }) {
       <div style={{ fontSize: 11.5, fontWeight: 700, color: "#5B6B7D", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.4 }}>
         Évolution du taux de charge (3 dernières années)
       </div>
-      <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "flex-end" }}>
-        {historique.map((p, i) => (
-          <div key={i} style={{ textAlign: "center" }}>
-            <div style={{ fontSize: 13, fontWeight: 700, color: "#0A5DA8" }}>{p.valeur}%</div>
-            <div style={{ fontSize: 10.5, color: "#8B96A3" }}>{p.date ? p.date.slice(0, 4) : "—"}</div>
-          </div>
-        ))}
-      </div>
+      {(() => {
+        const img = genererGraphiqueHistoriqueTauxCharge(historique);
+        return img ? <img src={img} alt="Évolution du taux de charge" style={{ maxWidth: "100%", height: "auto" }} onLoad={(e) => { e.currentTarget.style.width = `${e.currentTarget.naturalWidth / SCHEMA_ECHELLE}px`; }} /> : null;
+      })()}
     </Card>
   );
 }
@@ -8487,15 +8476,10 @@ function HistoriqueTransformateur({ eq, allSites }) {
       </div>
       {series.map((s, si) => (
         <div key={si} style={{ marginBottom: si < series.length - 1 ? 14 : 0 }}>
-          <div style={{ fontSize: 11.5, color: "#3E4A5C", marginBottom: 4 }}>{s.label}</div>
-          <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "flex-end" }}>
-            {s.points.map((p, i) => (
-              <div key={i} style={{ textAlign: "center" }}>
-                <div style={{ fontSize: 13, fontWeight: 700, color: "#0A5DA8" }}>{p.valeur} {s.unite}</div>
-                <div style={{ fontSize: 10.5, color: "#8B96A3" }}>{p.date ? p.date.slice(0, 4) : "—"}</div>
-              </div>
-            ))}
-          </div>
+          {(() => {
+            const img = genererGraphiqueHistorique(s.points, `${s.label}${s.unite ? ` (${s.unite})` : ""}`);
+            return img ? <img src={img} alt={s.label} style={{ maxWidth: "100%", height: "auto" }} onLoad={(e) => { e.currentTarget.style.width = `${e.currentTarget.naturalWidth / SCHEMA_ECHELLE}px`; }} /> : null;
+          })()}
         </div>
       ))}
     </Card>
@@ -14996,7 +14980,7 @@ function genererGraphiqueElementsBatterie(entries, moyenne, toleranceBasse, tole
     canvas.width = W * ECHELLE; canvas.height = H * ECHELLE;
     const ctx = canvas.getContext("2d");
     ctx.scale(ECHELLE, ECHELLE);
-    const SANS = "Arial, Helvetica, sans-serif", SERIF = "Georgia, 'Times New Roman', serif";
+    const SANS = SCHEMA_POLICE, SERIF = SCHEMA_POLICE; // police moderne unique (alignée sur les synoptiques)
     const fr = (v) => String(Math.round(v * 100) / 100).replace(".", ",");
     // Fond blanc et cadre arrondi léger (effet « carte »).
     ctx.fillStyle = "#FFFFFF"; ctx.fillRect(0, 0, W, H);
@@ -15025,7 +15009,7 @@ function genererGraphiqueElementsBatterie(entries, moyenne, toleranceBasse, tole
     const left = 54, right = W - 104, top = 62, bottom = H - 36; // marge droite : étiquettes des seuils
     const yFor = (v) => bottom - ((v - axeMin) / (axeMax - axeMin || 1)) * (bottom - top);
     // Titre (bleu, gras, majuscules), réduit si trop long pour la largeur disponible.
-    ctx.fillStyle = "#0A5DA8"; ctx.textBaseline = "top"; ctx.textAlign = "left";
+    ctx.fillStyle = SCHEMA_ACCENT; ctx.fillRect(10, 15, 3.5, 16); ctx.fillStyle = SCHEMA_MARINE; ctx.textBaseline = "top"; ctx.textAlign = "left";
     let taille = 13;
     ctx.font = `bold ${taille}px ${SANS}`;
     while (taille > 9 && ctx.measureText(titre || "").width > W - 36) { taille -= 0.5; ctx.font = `bold ${taille}px ${SANS}`; }
@@ -15038,17 +15022,22 @@ function genererGraphiqueElementsBatterie(entries, moyenne, toleranceBasse, tole
       ctx.beginPath(); ctx.moveTo(left, y); ctx.lineTo(right, y); ctx.stroke();
       ctx.fillText(v.toFixed(decimales).replace(".", ","), left - 8, y);
     }
-    // Barres : bleues, ou ambre pour un bloc hors tolérance.
+    // Bande de tolérance (vert pâle) entre les deux seuils.
+    if (seuilBas !== null && seuilHaut !== null) { ctx.fillStyle = "rgba(15, 138, 95, 0.08)"; ctx.fillRect(left, yFor(seuilHaut), right - left, yFor(seuilBas) - yFor(seuilHaut)); }
+    // Barres arrondies en dégradé : bleues, ou rouges pour un bloc hors tolérance.
     const fente = (right - left) / n, largeurBarre = fente * 0.62;
     const statuts = valeurs.map((v) => (v === null ? null : elementBatterieStatus(v, moyenne, toleranceBasse, toleranceHaute)));
     valeurs.forEach((v, i) => {
       if (v === null) return;
-      const x = left + i * fente + (fente - largeurBarre) / 2, y = yFor(v);
-      ctx.fillStyle = statuts[i] === "bad" ? "#FFC02E" : "#1560A8";
-      ctx.fillRect(x, y, largeurBarre, Math.max(1, bottom - y));
+      const x = left + i * fente + (fente - largeurBarre) / 2, y = yFor(v), hb = Math.max(1, bottom - y);
+      const c = statuts[i] === "bad" ? "#C0392B" : SCHEMA_SYMBOLE;
+      const g = ctx.createLinearGradient(0, y, 0, bottom); g.addColorStop(0, c); g.addColorStop(1, statuts[i] === "bad" ? "#E8958B" : "#6FA3D8");
+      ctx.fillStyle = g;
+      const rr = Math.min(4, largeurBarre / 3, hb);
+      ctx.beginPath(); ctx.roundRect ? ctx.roundRect(x, y, largeurBarre, hb, [rr, rr, 0, 0]) : ctx.rect(x, y, largeurBarre, hb); ctx.fill();
     });
     // Seuils en pointillés rouges, avec leur étiquette (halo blanc pour rester lisible sur les barres).
-    ctx.setLineDash([7, 5]); ctx.lineWidth = 1.6; ctx.strokeStyle = "#B02A2A";
+    ctx.setLineDash([5, 4]); ctx.lineWidth = 1.2; ctx.strokeStyle = "#C0392B";
     [seuilBas, seuilHaut].forEach((s) => { if (s === null) return; const y = yFor(s); ctx.beginPath(); ctx.moveTo(left, y); ctx.lineTo(right, y); ctx.stroke(); });
     ctx.setLineDash([]); ctx.lineWidth = 1;
     // Étiquettes des seuils dans la marge de droite (jamais par-dessus les barres), sur deux lignes,
@@ -15203,7 +15192,7 @@ function genererGraphiqueCourbeDecharge({ valeurs: valeursBrutes, temps, dureeMi
     canvas.width = W * ECHELLE; canvas.height = H * ECHELLE;
     const ctx = canvas.getContext("2d");
     ctx.scale(ECHELLE, ECHELLE);
-    const SANS = "Arial, Helvetica, sans-serif", SERIF = "Georgia, 'Times New Roman', serif";
+    const SANS = SCHEMA_POLICE, SERIF = SCHEMA_POLICE; // police moderne unique (alignée sur les synoptiques)
     const fr = (v, d = 2) => (Math.round(v * Math.pow(10, d)) / Math.pow(10, d)).toString().replace(".", ",");
     // Fond blanc et cadre arrondi.
     ctx.fillStyle = "#FFFFFF"; ctx.fillRect(0, 0, W, H);
@@ -15253,7 +15242,7 @@ function genererGraphiqueCourbeDecharge({ valeurs: valeursBrutes, temps, dureeMi
     const xFor = (t) => left + (t / tMax) * (right - left);
     const yFor = (v) => bottom - ((v - axeMin) / (axeMax - axeMin || 1)) * (bottom - top);
     // Titre et sous-titre.
-    ctx.fillStyle = "#0A5DA8"; ctx.textBaseline = "top"; ctx.textAlign = "left";
+    ctx.fillStyle = SCHEMA_ACCENT; ctx.fillRect(10, 15, 3.5, 16); ctx.fillStyle = SCHEMA_MARINE; ctx.textBaseline = "top"; ctx.textAlign = "left";
     let taille = 13;
     ctx.font = `bold ${taille}px ${SANS}`;
     while (taille > 9 && ctx.measureText(titre || "").width > W - 36) { taille -= 0.5; ctx.font = `bold ${taille}px ${SANS}`; }
@@ -15300,8 +15289,12 @@ function genererGraphiqueCourbeDecharge({ valeurs: valeursBrutes, temps, dureeMi
       ctx.setLineDash([2, 4]); ctx.strokeStyle = "#D9822B"; ctx.lineWidth = 1.4;
       ctx.beginPath(); ctx.moveTo(x, top); ctx.lineTo(x, bottom); ctx.stroke(); ctx.setLineDash([]); ctx.lineWidth = 1;
     }
+    // Zone sous le seuil bas (rouge pâle) et aire dégradée sous la courbe.
+    if (typeof seuilBas === "number" && yFor(seuilBas) < bottom) { ctx.fillStyle = "rgba(192, 57, 43, 0.06)"; ctx.fillRect(left, yFor(seuilBas), right - left, bottom - yFor(seuilBas)); }
+    { const g = ctx.createLinearGradient(0, top, 0, bottom); g.addColorStop(0, "rgba(10, 93, 168, 0.22)"); g.addColorStop(1, "rgba(10, 93, 168, 0.02)");
+      ctx.fillStyle = g; ctx.beginPath(); ctx.moveTo(xFor(ts[0]), bottom); valeurs.forEach((v, i) => ctx.lineTo(xFor(ts[i]), yFor(v))); ctx.lineTo(xFor(ts[n - 1]), bottom); ctx.closePath(); ctx.fill(); }
     // Courbe.
-    ctx.strokeStyle = "#1560A8"; ctx.lineWidth = 2.4; ctx.lineJoin = "round"; ctx.lineCap = "round";
+    ctx.strokeStyle = SCHEMA_SYMBOLE; ctx.lineWidth = 2.6; ctx.lineJoin = "round"; ctx.lineCap = "round";
     ctx.beginPath();
     valeurs.forEach((v, i) => { const x = xFor(ts[i]), y = yFor(v); if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y); });
     ctx.stroke(); ctx.lineWidth = 1;
@@ -15551,7 +15544,7 @@ function genererGraphiqueCourbeDeclenchement(p) {
     canvas.width = W * ECHELLE; canvas.height = H * ECHELLE;
     const ctx = canvas.getContext("2d");
     ctx.scale(ECHELLE, ECHELLE);
-    const SANS = "Arial, Helvetica, sans-serif", SERIF = "Georgia, 'Times New Roman', serif";
+    const SANS = SCHEMA_POLICE, SERIF = SCHEMA_POLICE; // police moderne unique (alignée sur les synoptiques)
     const fr = (v, d = 1) => (Math.round(v * Math.pow(10, d)) / Math.pow(10, d)).toString().replace(".", ",");
     const fmtI = (I) => (I >= 1000 ? `${fr(I / 1000, 2)} kA` : `${fr(I, 0)} A`);
     const fmtT = (t) => (t < 1 ? `${fr(t * 1000, 0)} ms` : `${fr(t, 1)} s`);
@@ -15575,7 +15568,7 @@ function genererGraphiqueCourbeDeclenchement(p) {
     const xFor = (I) => left + ((Math.log10(I) - Math.log10(xMin)) / (Math.log10(xMax) - Math.log10(xMin))) * (right - left);
     const yFor = (t) => bottom - ((Math.log10(Math.min(Math.max(t, yMin), yMax)) - Math.log10(yMin)) / (Math.log10(yMax) - Math.log10(yMin))) * (bottom - top);
     // Titre et sous-titre (réglages).
-    ctx.fillStyle = "#0A5DA8"; ctx.textBaseline = "top"; ctx.textAlign = "left";
+    ctx.fillStyle = SCHEMA_ACCENT; ctx.fillRect(10, 15, 3.5, 16); ctx.fillStyle = SCHEMA_MARINE; ctx.textBaseline = "top"; ctx.textAlign = "left";
     let taille = 13;
     ctx.font = `bold ${taille}px ${SANS}`;
     while (taille > 9 && ctx.measureText(p.titre).width > W - 36) { taille -= 0.5; ctx.font = `bold ${taille}px ${SANS}`; }
@@ -15925,7 +15918,9 @@ function docxBlocTauxCharge(eq, allSites) {
       new DOCX.TextRun({ text: `   (${base})`, size: 15, color: "8B96A3", italics: true }),
     ] }));
     const graphTC = genererGraphiqueTauxCharge([tc.t1, tc.t2, tc.t3], ["L1", "L2", "L3"]);
-    const imgTC = graphTC ? docxImage(graphTC, 340, 85) : null;
+    const dimTC = graphTC ? dimensionsPng(graphTC) : null;
+    const largTC = dimTC && dimTC.w ? Math.min(360, Math.round(dimTC.w / SCHEMA_ECHELLE * 0.7)) : 340;
+    const imgTC = graphTC ? docxImage(graphTC, largTC, dimTC && dimTC.w ? Math.round((largTC * dimTC.h) / dimTC.w) : 120) : null;
     if (imgTC) elements.push(new DOCX.Paragraph({ spacing: { after: 60 }, children: [imgTC] }));
   }
   if (histo.length >= 2) {
@@ -15945,8 +15940,9 @@ function docxBlocTauxCharge(eq, allSites) {
     ] }));
     elements.push(new DOCX.Paragraph({ keepNext: true, spacing: { before: 120, after: 80 }, children: [new DOCX.TextRun({ text: "Évolution du taux de charge — 3 dernières années", bold: true, size: 17, color: DOCX_DARK })] }));
     elements.push(docxTable({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: largeurs, rows: [enTete, ...corps] }));
-    const graphHisto = genererGraphiqueHistorique(histo, "Taux de charge moyen (%)");
-    const imgHisto = graphHisto ? docxImage(graphHisto, 320, 105) : null;
+    const graphHisto = genererGraphiqueHistoriqueTauxCharge(histo);
+    const dimH = graphHisto ? dimensionsPng(graphHisto) : null;
+    const imgHisto = graphHisto ? docxImage(graphHisto, 400, dimH && dimH.w ? Math.round((400 * dimH.h) / dimH.w) : 177) : null;
     if (imgHisto) elements.push(new DOCX.Paragraph({ spacing: { before: 100, after: 40 }, children: [imgHisto] }));
   }
   elements.push(docxSpacer());
@@ -15957,30 +15953,29 @@ function docxBlocTauxCharge(eq, allSites) {
 function genererGraphiqueHistorique(points, labelY) {
   if (typeof document === "undefined" || !document.createElement || points.length < 2) return null;
   try {
-    const w = 460, h = 150;
-    const canvas = document.createElement("canvas");
-    canvas.width = w; canvas.height = h;
-    const ctx = canvas.getContext("2d");
-    ctx.fillStyle = "#FFFFFF"; ctx.fillRect(0, 0, w, h);
+    // Même style que l'historique du taux de charge : aire dégradée, points cerclés, valeurs en pastilles, dates des visites.
+    const w = 460, h = 170;
+    const { canvas, ctx } = canevasSchema(w, h);
     const valeurs = points.map((p) => p.valeur);
-    const vMin = Math.min(0, Math.min(...valeurs) * 0.9), vMax = Math.max(...valeurs) * 1.15;
-    const chartTop = 26, chartBottom = h - 30, chartLeft = 36, chartRight = w - 14;
-    const chartH = chartBottom - chartTop, chartW = chartRight - chartLeft;
-    const yFor = (v) => chartBottom - ((v - vMin) / (vMax - vMin || 1)) * chartH;
-    const xFor = (i) => chartLeft + (points.length === 1 ? chartW / 2 : (i / (points.length - 1)) * chartW);
-    ctx.fillStyle = "#0A5DA8"; ctx.font = "bold 11px Arial, sans-serif"; ctx.textAlign = "left"; ctx.textBaseline = "top";
-    ctx.fillText(labelY || "", 2, 2);
-    ctx.strokeStyle = "#D8DEE5"; ctx.beginPath(); ctx.moveTo(chartLeft, chartTop); ctx.lineTo(chartLeft, chartBottom); ctx.lineTo(chartRight, chartBottom); ctx.stroke();
-    ctx.strokeStyle = "#0A5DA8"; ctx.lineWidth = 2; ctx.beginPath();
-    points.forEach((p, i) => { const x = xFor(i), y = yFor(p.valeur); if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y); });
-    ctx.stroke(); ctx.lineWidth = 1;
+    const vMin = Math.min(0, Math.min(...valeurs) * 0.9), vMax = Math.max(...valeurs) * 1.18 || 1;
+    const x0 = 24, x1 = w - 24, y0 = 52, yb = h - 34, marge = 36;
+    const X = (i) => x0 + marge + (i / (points.length - 1)) * (x1 - x0 - 2 * marge);
+    const Y = (v) => yb - ((v - vMin) / (vMax - vMin || 1)) * (yb - y0);
+    ctx.fillStyle = SCHEMA_ACCENT; ctx.fillRect(10, 13, 3.5, 15);
+    ctx.fillStyle = SCHEMA_MARINE; ctx.font = `bold 12.5px ${SCHEMA_POLICE}`; ctx.textAlign = "left"; ctx.textBaseline = "middle"; ctx.fillText(labelY || "", 18, 21);
+    ctx.strokeStyle = "#E9EDF1"; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(x0, yb); ctx.lineTo(x1, yb); ctx.stroke();
+    const g = ctx.createLinearGradient(0, y0, 0, yb); g.addColorStop(0, "rgba(10,93,168,0.25)"); g.addColorStop(1, "rgba(10,93,168,0.02)");
+    ctx.fillStyle = g; ctx.beginPath(); ctx.moveTo(X(0), yb); points.forEach((p, i) => ctx.lineTo(X(i), Y(p.valeur))); ctx.lineTo(X(points.length - 1), yb); ctx.fill();
+    ctx.strokeStyle = SCHEMA_SYMBOLE; ctx.lineWidth = 2.6; ctx.beginPath(); points.forEach((p, i) => (i ? ctx.lineTo(X(i), Y(p.valeur)) : ctx.moveTo(X(i), Y(p.valeur)))); ctx.stroke();
     points.forEach((p, i) => {
-      const x = xFor(i), y = yFor(p.valeur);
-      ctx.fillStyle = "#0A5DA8"; ctx.beginPath(); ctx.arc(x, y, 3.5, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = "#1A1F26"; ctx.font = "10px Arial, sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "bottom";
-      ctx.fillText(`${p.valeur}%`, x, y - 6);
-      ctx.fillStyle = "#8B96A3"; ctx.textBaseline = "top";
-      ctx.fillText(p.date ? p.date.slice(0, 4) : "—", x, chartBottom + 4);
+      const x = X(i), y = Y(p.valeur);
+      ctx.fillStyle = "#FFFFFF"; ctx.strokeStyle = SCHEMA_SYMBOLE; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, y, 4.5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      const txt = String(p.valeur).replace(".", ",");
+      ctx.font = `bold 11px ${SCHEMA_POLICE}`; const tw = ctx.measureText(txt).width + 12;
+      ctx.fillStyle = SCHEMA_MARINE; ctx.beginPath(); ctx.roundRect ? ctx.roundRect(x - tw / 2, y - 26, tw, 17, 8.5) : ctx.rect(x - tw / 2, y - 26, tw, 17); ctx.fill();
+      ctx.fillStyle = "#FFFFFF"; ctx.textAlign = "center"; ctx.fillText(txt, x, y - 17.5);
+      const m = /^(\d{4})-(\d{2})/.exec(p.date || "");
+      ctx.fillStyle = "#8B96A3"; ctx.font = `10.5px ${SCHEMA_POLICE}`; ctx.fillText(m ? `${m[2]}/${m[1]}` : "—", x, yb + 15);
     });
     return canvas.toDataURL("image/png");
   } catch (e) {
@@ -16487,80 +16482,136 @@ function genererGraphiqueSynthese(counts) {
   const total = counts.conforme + counts.degrade + counts.defaillant;
   if (!total) return null;
   try {
-    const w = 320, h = 170;
-    const canvas = document.createElement("canvas");
-    canvas.width = w; canvas.height = h;
-    const ctx = canvas.getContext("2d");
-    ctx.fillStyle = "#FFFFFF"; ctx.fillRect(0, 0, w, h);
-    const cx = 75, cy = h / 2, rOut = 62, rIn = 36;
+    // Anneau moderne : segments séparés par un fin espace, total au centre, légende en pastilles avec part en %.
+    const w = 360, h = 180;
+    const { canvas, ctx } = canevasSchema(w, h);
+    const cx = 92, cy = h / 2, r = 62, ep = 20;
     const segments = [
-      { n: counts.conforme, color: "#0F8A5F" },
-      { n: counts.degrade, color: "#B5730A" },
-      { n: counts.defaillant, color: "#C0392B" },
+      { n: counts.conforme, color: "#0F8A5F", label: "Conforme" },
+      { n: counts.degrade, color: "#E39B1A", label: "Dégradé" },
+      { n: counts.defaillant, color: "#C0392B", label: "Défaillant" },
     ];
+    ctx.lineWidth = ep; ctx.lineCap = "butt";
+    ctx.strokeStyle = "#EEF1F5"; ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
+    const nonNuls = segments.filter((sg) => sg.n).length, espace = nonNuls > 1 ? 0.035 : 0;
     let angle = -Math.PI / 2;
-    segments.forEach((s) => {
-      if (!s.n) return;
-      const sweep = (s.n / total) * Math.PI * 2;
-      ctx.beginPath();
-      ctx.moveTo(cx, cy);
-      ctx.arc(cx, cy, rOut, angle, angle + sweep);
-      ctx.closePath();
-      ctx.fillStyle = s.color;
-      ctx.fill();
+    segments.forEach((sg) => {
+      if (!sg.n) return;
+      const sweep = (sg.n / total) * Math.PI * 2;
+      ctx.strokeStyle = sg.color; ctx.beginPath(); ctx.arc(cx, cy, r, angle + espace, angle + sweep - espace); ctx.stroke();
       angle += sweep;
     });
-    ctx.fillStyle = "#FFFFFF"; ctx.beginPath(); ctx.arc(cx, cy, rIn, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = "#1A1F26"; ctx.font = "bold 20px Arial, sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
-    ctx.fillText(String(total), cx, cy - 8);
-    ctx.font = "10px Arial, sans-serif"; ctx.fillStyle = "#8B96A3";
-    ctx.fillText("équipements", cx, cy + 10);
-    const legendes = [
-      { label: `Conforme (${counts.conforme})`, color: "#0F8A5F" },
-      { label: `Dégradé (${counts.degrade})`, color: "#B5730A" },
-      { label: `Défaillant (${counts.defaillant})`, color: "#C0392B" },
-    ];
-    ctx.textAlign = "left"; ctx.font = "12px Arial, sans-serif";
-    legendes.forEach((l, i) => {
-      const y = 40 + i * 26;
-      ctx.fillStyle = l.color; ctx.fillRect(170, y - 6, 12, 12);
-      ctx.fillStyle = "#1A1F26"; ctx.fillText(l.label, 190, y);
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillStyle = SCHEMA_MARINE; ctx.font = `bold 28px ${SCHEMA_POLICE}`; ctx.fillText(String(total), cx, cy - 6);
+    ctx.fillStyle = "#8B96A3"; ctx.font = `10.5px ${SCHEMA_POLICE}`; ctx.fillText(total > 1 ? "équipements" : "équipement", cx, cy + 16);
+    segments.forEach((sg, i) => {
+      const y = 50 + i * 38, x = 190;
+      ctx.fillStyle = sg.color; ctx.beginPath(); ctx.roundRect ? ctx.roundRect(x, y - 13, 46, 26, 13) : ctx.rect(x, y - 13, 46, 26); ctx.fill();
+      ctx.fillStyle = "#FFFFFF"; ctx.font = `bold 13px ${SCHEMA_POLICE}`; ctx.textAlign = "center"; ctx.fillText(String(sg.n), x + 23, y + 0.5);
+      ctx.textAlign = "left"; ctx.fillStyle = SCHEMA_MARINE; ctx.font = `12.5px ${SCHEMA_POLICE}`; ctx.fillText(sg.label, x + 56, y - 6);
+      ctx.fillStyle = "#8B96A3"; ctx.font = `10.5px ${SCHEMA_POLICE}`; ctx.fillText(`${Math.round((sg.n / total) * 100)} %`, x + 56, y + 9);
     });
     return canvas.toDataURL("image/png");
   } catch (e) {
     return null;
   }
 }
+// Taux de charge en cadrans demi-cercle (un par phase) : arc coloré par zone (vert ≤ 80 %, orange ≤ 100 %,
+// rouge au-delà, échelle jusqu'à 130 %), aiguille, valeur SOUS le cadran (jamais masquée par l'aiguille).
 function genererGraphiqueTauxCharge(valeurs, labels) {
   if (typeof document === "undefined" || !document.createElement) return null;
   try {
-    const canvas = document.createElement("canvas");
-    canvas.width = 520; canvas.height = 130;
-    const ctx = canvas.getContext("2d");
-    ctx.fillStyle = "#FFFFFF"; ctx.fillRect(0, 0, 520, 130);
-    const barHeight = 26, gap = 12, startY = 10, maxWidth = 360, startX = 46;
-    const echelle = 130; // échelle visuelle : 100% s'affiche aux 100/echelle de la barre
-    valeurs.forEach((v, i) => {
-      const y = startY + i * (barHeight + gap);
-      const val = numOf(v);
-      ctx.fillStyle = "#EEF1F5";
-      ctx.fillRect(startX, y, maxWidth, barHeight);
-      if (val !== null) {
-        const w = Math.min((Math.max(val, 0) / echelle) * maxWidth, maxWidth);
-        const color = val >= 100 ? "#C0392B" : val >= 80 ? "#B5730A" : "#0F8A5F";
-        ctx.fillStyle = color;
-        ctx.fillRect(startX, y, w, barHeight);
+    let phases = valeurs.map((v, i) => ({ v: numOf(v), l: labels[i] }));
+    if (phases.filter((p) => p.v !== null).length === 1) phases = phases.filter((p) => p.v !== null); // monophasé : un seul cadran
+    const ECH = 130, n = phases.length, largeurCadran = 170;
+    const w = Math.max(220, n * largeurCadran + 20), h = 168;
+    const { canvas, ctx } = canevasSchema(w, h);
+    const couleur = (v) => (v > 100 ? "#C0392B" : v > 80 ? "#E39B1A" : "#0F8A5F");
+    phases.forEach((p, i) => {
+      const cx = 10 + largeurCadran * i + largeurCadran / 2, cy = 92, r = 58;
+      ctx.lineCap = "butt";
+      [[0, 80, "#CFE9DA"], [80, 100, "#F7DFB4"], [100, ECH, "#F4C3BD"]].forEach(([d, f, c]) => {
+        ctx.strokeStyle = c; ctx.lineWidth = 12;
+        ctx.beginPath(); ctx.arc(cx, cy, r, Math.PI + (d / ECH) * Math.PI, Math.PI + (f / ECH) * Math.PI); ctx.stroke();
+      });
+      // Graduations 0 / 80 / 100 %
+      ctx.fillStyle = "#8B96A3"; ctx.font = `9px ${SCHEMA_POLICE}`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      [0, 80, 100].forEach((t) => { const a = Math.PI + (t / ECH) * Math.PI; ctx.fillText(`${t}`, cx + Math.cos(a) * (r + 15), cy + Math.sin(a) * (r + 13)); });
+      if (p.v !== null) {
+        const va = Math.min(Math.max(p.v, 0), ECH);
+        ctx.strokeStyle = couleur(p.v); ctx.lineWidth = 12;
+        ctx.beginPath(); ctx.arc(cx, cy, r, Math.PI, Math.PI + (va / ECH) * Math.PI); ctx.stroke();
+        const a = Math.PI + (va / ECH) * Math.PI;
+        ctx.lineCap = "round"; ctx.strokeStyle = SCHEMA_MARINE; ctx.lineWidth = 2.5;
+        ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + Math.cos(a) * (r - 16), cy + Math.sin(a) * (r - 16)); ctx.stroke();
       }
-      ctx.fillStyle = "#1A1F26";
-      ctx.font = "bold 14px Arial, sans-serif";
-      ctx.textBaseline = "middle";
-      ctx.fillText(labels[i], 8, y + barHeight / 2);
-      ctx.fillText(val !== null ? `${val}%` : "—", startX + maxWidth + 12, y + barHeight / 2);
-      const marker100 = startX + (100 / echelle) * maxWidth;
-      ctx.strokeStyle = "#8B96A3";
-      ctx.setLineDash([3, 3]);
-      ctx.beginPath(); ctx.moveTo(marker100, y - 2); ctx.lineTo(marker100, y + barHeight + 2); ctx.stroke();
-      ctx.setLineDash([]);
+      ctx.fillStyle = SCHEMA_MARINE; ctx.beginPath(); ctx.arc(cx, cy, 4.5, 0, Math.PI * 2); ctx.fill();
+      // Valeur et phase sous le cadran.
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.font = `bold 20px ${SCHEMA_POLICE}`; ctx.fillStyle = p.v === null ? "#8B96A3" : couleur(p.v);
+      ctx.fillText(p.v === null ? "—" : `${String(p.v).replace(".", ",")} %`, cx, cy + 26);
+      pastilleSchema(ctx, p.l, cx, cy + 52);
+    });
+    return canvas.toDataURL("image/png");
+  } catch (e) {
+    return null;
+  }
+}
+// Historique du taux de charge (style moderne) : bandes de seuil, moyenne épaisse sur aire dégradée, phases en traits fins distincts.
+function genererGraphiqueHistoriqueTauxCharge(points) {
+  if (typeof document === "undefined" || !document.createElement || points.length < 2) return null;
+  try {
+    const w = 520, h = 230;
+    const { canvas, ctx } = canevasSchema(w, h);
+    const x0 = 46, x1 = w - 30, y0 = 50, yb = h - 40;
+    const toutes = points.flatMap((p) => [p.t1, p.t2, p.t3, p.valeur]).filter((v) => v !== null && v !== undefined);
+    const ech = Math.max(120, Math.ceil((Math.max(...toutes) + 10) / 10) * 10);
+    const marge = 40; // points écartés des bords : les valeurs ne recouvrent jamais l'échelle
+    const X = (i) => x0 + marge + (points.length === 1 ? (x1 - x0 - 2 * marge) / 2 : (i / (points.length - 1)) * (x1 - x0 - 2 * marge));
+    const Y = (v) => yb - (Math.min(v, ech) / ech) * (yb - y0);
+    // Titre et légende
+    ctx.textBaseline = "middle"; ctx.textAlign = "left";
+    ctx.fillStyle = SCHEMA_MARINE; ctx.font = `bold 12.5px ${SCHEMA_POLICE}`; ctx.fillText("Évolution du taux de charge", 16, 22);
+    const PHASES = [["L1", "#7E57C2"], ["L2", "#00897B"], ["L3", "#EF6C00"]];
+    let lx = w - 16;
+    ctx.font = `10.5px ${SCHEMA_POLICE}`; ctx.textAlign = "right";
+    [["Moyenne", SCHEMA_SYMBOLE, true], ...PHASES.slice().reverse().map(([l, c]) => [l, c, false])].forEach(([t, c, epais]) => {
+      ctx.fillStyle = "#5B6B7D"; ctx.fillText(t, lx, 22); lx -= ctx.measureText(t).width + 6;
+      ctx.strokeStyle = c; ctx.lineWidth = epais ? 3 : 1.6; ctx.setLineDash(epais ? [] : [4, 3]);
+      ctx.beginPath(); ctx.moveTo(lx - 16, 22); ctx.lineTo(lx, 22); ctx.stroke(); ctx.setLineDash([]); lx -= 30;
+    });
+    // Bandes de seuil
+    [[0, 80, "#F2FAF5"], [80, 100, "#FEF6E9"], [100, ech, "#FDEFED"]].forEach(([a, b, c]) => { ctx.fillStyle = c; ctx.fillRect(x0, Y(b), x1 - x0, Y(a) - Y(b)); });
+    [[80, "#E39B1A"], [100, "#C0392B"]].forEach(([t, c]) => {
+      ctx.strokeStyle = c; ctx.lineWidth = 1; ctx.setLineDash([4, 3]); ctx.beginPath(); ctx.moveTo(x0, Y(t)); ctx.lineTo(x1, Y(t)); ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle = c; ctx.font = `10px ${SCHEMA_POLICE}`; ctx.textAlign = "right"; ctx.fillText(`${t} %`, x0 - 6, Y(t));
+    });
+    ctx.fillStyle = "#8B96A3"; ctx.textAlign = "right"; ctx.fillText("0 %", x0 - 6, yb);
+    // Aire + courbe de la moyenne
+    const g = ctx.createLinearGradient(0, y0, 0, yb); g.addColorStop(0, "rgba(10,93,168,0.28)"); g.addColorStop(1, "rgba(10,93,168,0.03)");
+    ctx.fillStyle = g; ctx.beginPath(); ctx.moveTo(X(0), yb); points.forEach((p, i) => ctx.lineTo(X(i), Y(p.valeur))); ctx.lineTo(X(points.length - 1), yb); ctx.fill();
+    ctx.strokeStyle = SCHEMA_SYMBOLE; ctx.lineWidth = 3; ctx.beginPath(); points.forEach((p, i) => (i ? ctx.lineTo(X(i), Y(p.valeur)) : ctx.moveTo(X(i), Y(p.valeur)))); ctx.stroke();
+    // Phases (par-dessus la moyenne, pour rester visibles même quand elles s'en approchent)
+    PHASES.forEach(([l, c], k) => {
+      const cle = ["t1", "t2", "t3"][k];
+      const pts = points.map((p, i) => [i, p[cle]]).filter(([, v]) => v !== null && v !== undefined);
+      if (pts.length < 2) return;
+      ctx.strokeStyle = c; ctx.lineWidth = 1.6; ctx.setLineDash([4, 3]);
+      ctx.beginPath(); pts.forEach(([i, v], j) => (j ? ctx.lineTo(X(i), Y(v)) : ctx.moveTo(X(i), Y(v)))); ctx.stroke(); ctx.setLineDash([]);
+      pts.forEach(([i, v]) => { ctx.fillStyle = c; ctx.beginPath(); ctx.arc(X(i), Y(v), 2.6, 0, Math.PI * 2); ctx.fill(); });
+    });
+    // Points et valeurs de la moyenne, dates
+    points.forEach((p, i) => {
+      const x = X(i), y = Y(p.valeur);
+      ctx.fillStyle = "#FFFFFF"; ctx.strokeStyle = SCHEMA_SYMBOLE; ctx.lineWidth = 2.2; ctx.beginPath(); ctx.arc(x, y, 5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      const c = p.valeur > 100 ? "#C0392B" : p.valeur > 80 ? "#B5730A" : "#0F8A5F";
+      const txt = `${String(p.valeur).replace(".", ",")} %`;
+      ctx.font = `bold 11px ${SCHEMA_POLICE}`; const tw = ctx.measureText(txt).width + 12;
+      ctx.fillStyle = c; ctx.beginPath(); ctx.roundRect(x - tw / 2, y - 27, tw, 17, 8.5); ctx.fill();
+      ctx.fillStyle = "#FFFFFF"; ctx.textAlign = "center"; ctx.fillText(txt, x, y - 18.5);
+      const m = /^(\d{4})-(\d{2})/.exec(p.date || "");
+      ctx.fillStyle = p.courante ? SCHEMA_MARINE : "#8B96A3"; ctx.font = `${p.courante ? "bold " : ""}10.5px ${SCHEMA_POLICE}`;
+      ctx.fillText(m ? `${m[2]}/${m[1]}` : "—", x, yb + 16);
     });
     return canvas.toDataURL("image/png");
   } catch (e) {
