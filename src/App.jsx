@@ -7739,7 +7739,7 @@ function SchemaOnduleur({ eq, update }) {
       </div>
       <div style={{ display: "flex", gap: 18, flexWrap: "wrap", alignItems: "flex-start" }}>
         <div style={{ flex: "1 1 260px", textAlign: "center" }}>
-          <img src={dataUrl} alt="Schéma synoptique" style={{ maxWidth: "100%", height: "auto" }} />
+          <img src={dataUrl} alt="Schéma synoptique" style={{ maxWidth: "100%", height: "auto" }} onLoad={(e) => { e.currentTarget.style.width = `${e.currentTarget.naturalWidth / SCHEMA_ECHELLE}px`; }} />
         </div>
         {update && (
           <div style={{ flex: "0 1 200px", minWidth: 180, borderLeft: "1px solid #2A3038", paddingLeft: 16 }}>
@@ -15993,21 +15993,75 @@ function genererGraphiqueHistorique(points, labelY) {
 // Bibliothèque de symboles électriques, reproduisant fidèlement les icônes du modèle de référence
 // utilisé par les techniciens (boîtes vert sauge en pseudo-3D) — réutilisée par tous les schémas
 // synoptiques (Onduleur, Redresseur chargeur, Inverseur de source), dessinés en <canvas>.
-const SCHEMA_VERT = "#9DBF95", SCHEMA_VERT_HAUT = "#B8D4B0", SCHEMA_VERT_COTE = "#7FA377", SCHEMA_TRAIT = "#2A2E24";
+// Charte moderne, alignée sur le rapport : cartes arrondies bleu clair à liseré bleu HT Maintenance,
+// symboles en bleu, liaisons ardoise, repères de réseau en pastilles marine, légendes discrètes.
+const SCHEMA_VERT = "#F2F7FC", SCHEMA_VERT_HAUT = "#E3EEF9", SCHEMA_VERT_COTE = "#0A5DA8", SCHEMA_TRAIT = "#3E4A5C";
+const SCHEMA_SYMBOLE = "#0A5DA8", SCHEMA_ACCENT = "#FFC107", SCHEMA_MARINE = "#1A1F26";
+const SCHEMA_POLICE = "'Helvetica Neue', Helvetica, Arial, sans-serif";
+const SCHEMA_ECHELLE = 2; // rendu haute définition (net dans le rapport Word et à l'écran)
+// Canevas haute définition : dimensions logiques w × h, rendu à SCHEMA_ECHELLE, fond blanc et cadre arrondi discret.
+function canevasSchema(w, h) {
+  const canvas = document.createElement("canvas");
+  canvas.width = w * SCHEMA_ECHELLE; canvas.height = h * SCHEMA_ECHELLE;
+  const ctx = canvas.getContext("2d");
+  ctx.scale(SCHEMA_ECHELLE, SCHEMA_ECHELLE);
+  ctx.fillStyle = "#FFFFFF"; ctx.fillRect(0, 0, w, h);
+  ctx.strokeStyle = "#E2E6EB"; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.roundRect ? ctx.roundRect(1.5, 1.5, w - 3, h - 3, 12) : ctx.rect(1.5, 1.5, w - 3, h - 3); ctx.stroke();
+  ctx.lineCap = "round"; ctx.lineJoin = "round";
+  return { canvas, ctx };
+}
+// Libellé posé sur un trait : fond blanc derrière le texte (le trait s'interrompt proprement).
+function etiquetteSchema(ctx, txt, x, y) {
+  const m = ctx.measureText(txt), w = m.width + 8, h = 14;
+  const align = ctx.textAlign;
+  const x0 = align === "left" ? x - 4 : align === "right" ? x - w + 4 : x - w / 2;
+  const f = ctx.fillStyle; ctx.fillStyle = "#FFFFFF"; ctx.fillRect(x0, y - h / 2, w, h); ctx.fillStyle = f;
+  ctx.fillText(txt, x, y);
+}
+// Recadre le schéma à sa hauteur utile (évite le blanc sous le dessin) — renvoie l'image PNG.
+function rognerSchema(canvas, hUtile) {
+  const hPx = Math.min(canvas.height, Math.ceil(hUtile * SCHEMA_ECHELLE));
+  const c2 = document.createElement("canvas"); c2.width = canvas.width; c2.height = hPx;
+  c2.getContext("2d").drawImage(canvas, 0, 0, canvas.width, hPx, 0, 0, canvas.width, hPx);
+  return c2.toDataURL("image/png");
+}
+// Dimensions d'une image PNG (data URL) lues dans son en-tête — pour garder les proportions dans le rapport Word.
+function dimensionsPng(dataUrl) {
+  try {
+    const b = atob(String(dataUrl).split(",")[1].slice(0, 44));
+    const u = (i) => ((b.charCodeAt(i) << 24) | (b.charCodeAt(i + 1) << 16) | (b.charCodeAt(i + 2) << 8) | b.charCodeAt(i + 3)) >>> 0;
+    return { w: u(16), h: u(20) };
+  } catch (e) { return null; }
+}
+// Repère de réseau (R0, R1, R2, RS) : pastille marine, texte blanc gras.
+function pastilleSchema(ctx, txt, x, y) {
+  ctx.save();
+  ctx.font = `bold 12px ${SCHEMA_POLICE}`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  const w = Math.max(30, ctx.measureText(txt).width + 18), h = 20;
+  ctx.fillStyle = SCHEMA_MARINE;
+  ctx.beginPath(); ctx.roundRect ? ctx.roundRect(x - w / 2, y - h / 2, w, h, 10) : ctx.rect(x - w / 2, y - h / 2, w, h); ctx.fill();
+  ctx.fillStyle = "#FFFFFF"; ctx.fillText(txt, x, y + 0.5);
+  ctx.restore();
+}
 // Boîte pseudo-3D (face avant + dessus + côté légèrement décalés, comme un petit cube) : le
 // contenu (icône) se dessine ensuite par-dessus, centré sur la face avant.
-function draw3DBox(ctx, x, y, w, h, depth) {
-  const d = depth ?? Math.min(w, h) * 0.22;
-  ctx.strokeStyle = SCHEMA_TRAIT; ctx.lineWidth = 1.3;
-  ctx.fillStyle = SCHEMA_VERT_HAUT;
-  ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + d, y - d); ctx.lineTo(x + w + d, y - d); ctx.lineTo(x + w, y); ctx.closePath();
-  ctx.fill(); ctx.stroke();
-  ctx.fillStyle = SCHEMA_VERT_COTE;
-  ctx.beginPath(); ctx.moveTo(x + w, y); ctx.lineTo(x + w + d, y - d); ctx.lineTo(x + w + d, y + h - d); ctx.lineTo(x + w, y + h); ctx.closePath();
-  ctx.fill(); ctx.stroke();
-  ctx.fillStyle = SCHEMA_VERT;
-  ctx.fillRect(x, y, w, h); ctx.strokeRect(x, y, w, h);
-  return { cx: x + w / 2, cy: y + h / 2, right: x + w + d, top: y - d };
+function draw3DBox(ctx, x, y, w, h) {
+  // Carte moderne : ombre douce, coins arrondis, dégradé clair, liseré bleu et filet ambre en tête.
+  const r = Math.min(10, w * 0.15, h * 0.15);
+  ctx.save();
+  ctx.shadowColor = "rgba(10, 93, 168, 0.18)"; ctx.shadowBlur = 10; ctx.shadowOffsetY = 3;
+  const grad = ctx.createLinearGradient(0, y, 0, y + h); grad.addColorStop(0, "#FFFFFF"); grad.addColorStop(1, SCHEMA_VERT_HAUT);
+  ctx.fillStyle = grad;
+  ctx.beginPath(); ctx.roundRect ? ctx.roundRect(x, y, w, h, r) : ctx.rect(x, y, w, h); ctx.fill();
+  ctx.restore();
+  ctx.strokeStyle = SCHEMA_VERT_COTE; ctx.lineWidth = 1.6;
+  ctx.beginPath(); ctx.roundRect ? ctx.roundRect(x, y, w, h, r) : ctx.rect(x, y, w, h); ctx.stroke();
+  ctx.save();
+  ctx.strokeStyle = SCHEMA_ACCENT; ctx.lineWidth = 3; ctx.lineCap = "round";
+  ctx.beginPath(); ctx.moveTo(x + r + 2, y + 0.5); ctx.lineTo(x + Math.min(w * 0.35, 40) + r, y + 0.5); ctx.stroke();
+  ctx.restore();
+  return { cx: x + w / 2, cy: y + h / 2, right: x + w, top: y };
 }
 function drawSymboleAC(ctx, cx, cy, s) {
   ctx.beginPath();
@@ -16039,7 +16093,7 @@ function drawSymboleDC(ctx, cx, cy, s) {
 // ce qui permet une seule définition pour les deux orientations (horizontale / verticale).
 function drawIconInterrupteur(ctx, x, y, w, h, orientation) {
   const b = draw3DBox(ctx, x, y, w, h);
-  ctx.strokeStyle = SCHEMA_TRAIT; ctx.fillStyle = SCHEMA_TRAIT; ctx.lineWidth = 1.6;
+  ctx.strokeStyle = SCHEMA_SYMBOLE; ctx.fillStyle = SCHEMA_TRAIT; ctx.lineWidth = 1.6;
   const horiz = orientation === "horizontal";
   const flowScale = horiz ? w : h;
   const perpScale = horiz ? h : w;
@@ -16065,8 +16119,8 @@ function drawIconInterrupteur(ctx, x, y, w, h, orientation) {
 // Icône « redresseur » (CA -> CC) : diagonale, sinusoïde en haut, CC en bas
 function drawIconRedresseur(ctx, x, y, w, h) {
   const b = draw3DBox(ctx, x, y, w, h);
-  ctx.strokeStyle = SCHEMA_TRAIT; ctx.lineWidth = 1.3;
-  ctx.beginPath(); ctx.moveTo(x, y + h); ctx.lineTo(x + w, y); ctx.stroke();
+  ctx.strokeStyle = SCHEMA_SYMBOLE; ctx.lineWidth = 1.3;
+  ctx.beginPath(); ctx.moveTo(x + 7, y + h - 7); ctx.lineTo(x + w - 7, y + 7); ctx.stroke();
   drawSymboleAC(ctx, x + w * 0.28, y + h * 0.28, w * 0.16);
   drawSymboleDC(ctx, x + w * 0.72, y + h * 0.74, w * 0.16);
   return b;
@@ -16074,8 +16128,8 @@ function drawIconRedresseur(ctx, x, y, w, h) {
 // Icône « onduleur » (CC -> CA) : diagonale, CC en haut, sinusoïde en bas (miroir du redresseur)
 function drawIconOnduleur(ctx, x, y, w, h) {
   const b = draw3DBox(ctx, x, y, w, h);
-  ctx.strokeStyle = SCHEMA_TRAIT; ctx.lineWidth = 1.3;
-  ctx.beginPath(); ctx.moveTo(x, y + h); ctx.lineTo(x + w, y); ctx.stroke();
+  ctx.strokeStyle = SCHEMA_SYMBOLE; ctx.lineWidth = 1.3;
+  ctx.beginPath(); ctx.moveTo(x + 7, y + h - 7); ctx.lineTo(x + w - 7, y + 7); ctx.stroke();
   drawSymboleDC(ctx, x + w * 0.28, y + h * 0.28, w * 0.16);
   drawSymboleAC(ctx, x + w * 0.72, y + h * 0.74, w * 0.16);
   return b;
@@ -16091,7 +16145,7 @@ function drawIconOnduleur(ctx, x, y, w, h) {
 // trois zones ainsi formées (gauche, droite, bas-centre).
 function drawIconCommutateurStatique(ctx, x, y, w, h, orientation) {
   const b = draw3DBox(ctx, x, y, w, h);
-  ctx.strokeStyle = SCHEMA_TRAIT; ctx.lineWidth = 1.3;
+  ctx.strokeStyle = SCHEMA_SYMBOLE; ctx.lineWidth = 1.3;
   if (orientation === "vertical") {
     // Point de convergence (pointe) côté des DEUX entrées (sources 1 et 2, à gauche), branches
     // partant vers la sortie unique (à droite).
@@ -16108,13 +16162,14 @@ function drawIconCommutateurStatique(ctx, x, y, w, h, orientation) {
   const cx = x + w / 2, yPic = y + h * 0.15;
   ctx.beginPath(); ctx.moveTo(cx, yPic); ctx.lineTo(x + w * 0.08, y + h * 0.85); ctx.stroke();
   ctx.beginPath(); ctx.moveTo(cx, yPic); ctx.lineTo(x + w * 0.92, y + h * 0.85); ctx.stroke();
-  drawSymboleAC(ctx, x + w * 0.15, y + h * 0.35, w * 0.1);
-  drawSymboleAC(ctx, x + w * 0.90, y + h * 0.35, w * 0.1);
-  drawSymboleAC(ctx, cx, y + h * 0.68, w * 0.1);
+  const sAC = Math.min(w * 0.1, h * 0.16);
+  drawSymboleAC(ctx, x + w * 0.15, y + h * 0.38, sAC);
+  drawSymboleAC(ctx, x + w * 0.85, y + h * 0.38, sAC);
+  drawSymboleAC(ctx, cx, y + h * 0.68, sAC);
   return b;
 }
 function drawBatterie(ctx, cx, cy, s) {
-  ctx.strokeStyle = SCHEMA_TRAIT; ctx.lineWidth = 2;
+  ctx.strokeStyle = SCHEMA_SYMBOLE; ctx.lineWidth = 2.4; ctx.lineCap = "round";
   const xs = [cx - s, cx - s * 0.33, cx + s * 0.33, cx + s];
   const hs = [s * 0.9, s * 0.45, s * 0.9, s * 0.45];
   xs.forEach((x, i) => { ctx.beginPath(); ctx.moveTo(x, cy - hs[i]); ctx.lineTo(x, cy + hs[i]); ctx.stroke(); });
@@ -16125,7 +16180,7 @@ function drawBatterie(ctx, cx, cy, s) {
 // cercles chevauchés, sans les bornes qui n'ont plus lieu d'être une fois dans la boîte).
 function drawIconTransformateur(ctx, x, y, w, h) {
   const b = draw3DBox(ctx, x, y, w, h);
-  ctx.strokeStyle = SCHEMA_TRAIT; ctx.lineWidth = 1.6;
+  ctx.strokeStyle = SCHEMA_SYMBOLE; ctx.lineWidth = 1.6;
   const r = Math.min(w, h) * 0.22;
   ctx.beginPath(); ctx.arc(b.cx, b.cy - r * 0.65, r, 0, Math.PI * 2); ctx.stroke();
   ctx.beginPath(); ctx.arc(b.cx, b.cy + r * 0.65, r, 0, Math.PI * 2); ctx.stroke();
@@ -16135,7 +16190,7 @@ function drawIconTransformateur(ctx, x, y, w, h) {
 // entre le bus continu du redresseur et la batterie.
 function drawIconChargeur(ctx, x, y, w, h) {
   const b = draw3DBox(ctx, x, y, w, h);
-  ctx.strokeStyle = SCHEMA_TRAIT; ctx.lineWidth = 1.3;
+  ctx.strokeStyle = SCHEMA_SYMBOLE; ctx.lineWidth = 1.3;
   drawSymboleDC(ctx, b.cx - w * 0.2, b.cy, w * 0.11);
   ctx.beginPath(); ctx.moveTo(b.cx - w * 0.02, b.cy); ctx.lineTo(b.cx + w * 0.1, b.cy); ctx.stroke();
   ctx.beginPath(); ctx.moveTo(b.cx + w * 0.1, b.cy); ctx.lineTo(b.cx + w * 0.04, b.cy - 4); ctx.moveTo(b.cx + w * 0.1, b.cy); ctx.lineTo(b.cx + w * 0.04, b.cy + 4); ctx.stroke();
@@ -16159,18 +16214,18 @@ function genererSchemaOnduleur(eq) {
     const avecChargeur = eq.identification?.presenceChargeur !== "Non présent"; // présent par défaut
     const TRANSFO_H = 60; // espace vertical réservé à un symbole transformateur amont
     const w = 480, h = (avecBypass ? 780 : 560) + (avecTransfoR1 || avecTransfoR2 ? TRANSFO_H : 0) + (avecTransfoSortie ? 75 : 0);
-    const canvas = document.createElement("canvas");
-    canvas.width = w; canvas.height = h;
-    const ctx = canvas.getContext("2d");
-    ctx.fillStyle = "#FFFFFF"; ctx.fillRect(0, 0, w, h);
+    const { canvas, ctx } = canevasSchema(w, h);
     ctx.textAlign = "center"; ctx.textBaseline = "middle";
-    const line = (x1, y1, x2, y2) => { ctx.strokeStyle = SCHEMA_TRAIT; ctx.lineWidth = 1.4; ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); };
+    const line = (x1, y1, x2, y2) => { ctx.strokeStyle = SCHEMA_TRAIT; ctx.lineWidth = 1.8; ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); };
     const arrowDown = (x, y) => { ctx.fillStyle = SCHEMA_TRAIT; ctx.beginPath(); ctx.moveTo(x - 4, y - 5); ctx.lineTo(x + 4, y - 5); ctx.lineTo(x, y + 3); ctx.fill(); };
-    const label = (txt, x, y, color, font) => { ctx.fillStyle = color || "#5B6B7D"; ctx.font = font || "11px Arial, sans-serif"; ctx.fillText(txt, x, y); };
+    const label = (txt, x, y, color, font) => {
+      if (/^R[0-9S]$/.test(txt)) { pastilleSchema(ctx, txt, x, y); return; } // repères de réseau en pastille
+      ctx.fillStyle = color || "#5B6B7D"; ctx.font = font || "11px " + SCHEMA_POLICE; etiquetteSchema(ctx, txt, x, y);
+    };
     // Les boîtes ont un effet pseudo-3D dont le sommet remonte de "depth" au-dessus de y — un
     // libellé positionné sans en tenir compte chevauche systématiquement la boîte. boxDepth()
     // calcule ce décalage pour toujours placer le texte clairement au-dessus.
-    const boxDepth = (bw2, bh2) => Math.min(bw2, bh2) * 0.22;
+    const boxDepth = () => 0; // cartes à plat (plus d'effet 3D)
 
     // Un seul couloir principal (cxM) pour le trajet de puissance normal ; le réseau secours (cxR2)
     // ne rejoint que le commutateur, sans longer tout le schéma en parallèle.
@@ -16180,12 +16235,13 @@ function genererSchemaOnduleur(eq) {
     const GAP_LIGNE = 26, LABEL_MARGIN = 14;
 
     let y = 16;
+    let yBasDessin = 0; // bas du dessin, pour placer la légende et recadrer l'image
     let yR2Depart = null; // position depuis laquelle R2 continue sans coupure vers le commutateur
     const avecAnnotationPontage = (eq.identification?.alimentationReseaux || "").includes("pontés");
-    label("R1", cxM, y, SCHEMA_TRAIT, "14px Arial, sans-serif");
+    label("R1", cxM, y, SCHEMA_TRAIT, "14px " + SCHEMA_POLICE);
     // Pontés = une seule source réelle : pas de repère "R2" ni de trait indépendant en haut, pour
     // ne jamais donner l'impression que R2 remonte vers une entrée séparée. Tout part de R1.
-    if (avecBypass && !reseauxPontes) label("R2", cxR2, y, SCHEMA_TRAIT, "14px Arial, sans-serif");
+    if (avecBypass && !reseauxPontes) label("R2", cxR2, y, SCHEMA_TRAIT, "14px " + SCHEMA_POLICE);
     y += 26;
     line(cxM, y, cxM, y + GAP_LIGNE);
     if (avecBypass && !reseauxPontes) { line(cxR2, y, cxR2, y + GAP_LIGNE); yR2Depart = y + GAP_LIGNE; }
@@ -16195,11 +16251,11 @@ function genererSchemaOnduleur(eq) {
     const tfW = 60, tfH = 46;
     if (avecTransfoR1) {
       drawIconTransformateur(ctx, cxM - tfW / 2, y, tfW, tfH);
-      label("Transfo. amont", cxM + tfW / 2 + 40, y + tfH / 2, "#5B6B7D", "10px Arial, sans-serif");
+      label("Transfo. amont", cxM + tfW / 2 + 40, y + tfH / 2, "#5B6B7D", "10px " + SCHEMA_POLICE);
     }
     if (avecTransfoR2 && avecBypass && !reseauxPontes) {
       drawIconTransformateur(ctx, cxR2 - tfW / 2, y, tfW, tfH);
-      label("Transfo. amont", cxR2 + tfW / 2 + 40, y + tfH / 2, "#5B6B7D", "10px Arial, sans-serif");
+      label("Transfo. amont", cxR2 + tfW / 2 + 40, y + tfH / 2, "#5B6B7D", "10px " + SCHEMA_POLICE);
       yR2Depart = y + tfH; // continue sans coupure sous son transformateur
     }
     if (reseauxPontes && avecBypass) {
@@ -16210,11 +16266,11 @@ function genererSchemaOnduleur(eq) {
       const yPontage = yDepart + 14;
       line(cxM, yDepart, cxM, yPontage);
       line(cxM, yPontage, cxR2, yPontage);
-      if (avecAnnotationPontage) label("(pontés — source unique)", (cxM + cxR2) / 2, yPontage + 12, "#8B96A3", "9.5px Arial, sans-serif");
+      if (avecAnnotationPontage) label("(pontés — source unique)", (cxM + cxR2) / 2, yPontage + 12, "#8B96A3", "9.5px " + SCHEMA_POLICE);
       if (avecTransfoR2) {
         line(cxR2, yPontage, cxR2, yPontage + 10);
         drawIconTransformateur(ctx, cxR2 - tfW / 2, yPontage + 10, tfW, tfH);
-        label("Transfo. R2", cxR2 + tfW / 2 + 40, yPontage + 10 + tfH / 2, "#5B6B7D", "10px Arial, sans-serif");
+        label("Transfo. R2", cxR2 + tfW / 2 + 40, yPontage + 10 + tfH / 2, "#5B6B7D", "10px " + SCHEMA_POLICE);
         yR2Depart = yPontage + 10 + tfH;
       } else {
         yR2Depart = yPontage;
@@ -16249,13 +16305,13 @@ function genererSchemaOnduleur(eq) {
       const xChargeur = cxM + 55;
       line(cxM, yBatt, xChargeur, yBatt);
       drawIconChargeur(ctx, xChargeur - chW / 2, yBatt - chH / 2, chW, chH);
-      ctx.fillStyle = "#5B6B7D"; ctx.font = "9px Arial, sans-serif"; ctx.textAlign = "center"; ctx.fillText("Chargeur", xChargeur, yBatt + chH / 2 + 12);
+      ctx.fillStyle = "#5B6B7D"; ctx.font = "9px " + SCHEMA_POLICE; ctx.textAlign = "center"; ctx.fillText("Chargeur", xChargeur, yBatt + chH / 2 + 12);
       line(xChargeur + chW / 2, yBatt, xBatt - 26, yBatt);
     } else {
       line(cxM, yBatt, xBatt - 26, yBatt);
     }
     drawBatterie(ctx, xBatt, yBatt, 24);
-    label("Batterie", xBatt, yBatt + 42, "#3E4A5C", "12px Arial, sans-serif");
+    label("Batterie", xBatt, yBatt + 42, "#3E4A5C", "12px " + SCHEMA_POLICE);
 
     // Onduleur
     y += depthRed + LABEL_MARGIN + 6;
@@ -16264,7 +16320,7 @@ function genererSchemaOnduleur(eq) {
     let yOnduleurBas = y + bh;
     let yApresOnduleur = yOnduleurBas + GAP_LIGNE;
     line(cxM, yOnduleurBas, cxM, yApresOnduleur);
-    label("R0", cxM - redW / 2 - 20, yOnduleurBas + bh / 2 + 10, SCHEMA_TRAIT, "11px Arial, sans-serif");
+    label("R0", cxM - redW / 2 - 20, yOnduleurBas + bh / 2 + 10, SCHEMA_TRAIT, "11px " + SCHEMA_POLICE);
 
     if (avecBypass) {
       // La hauteur finale (yApresOnduleur) doit être connue AVANT de tracer les deux lignes qui
@@ -16296,29 +16352,36 @@ function genererSchemaOnduleur(eq) {
       if (avecTransfoSortie) {
         line(csMidX, yFinal, csMidX, yFinal + 16);
         drawIconTransformateur(ctx, csMidX - tfW / 2, yFinal + 16, tfW, tfH);
-        label("Transfo. sortie", csMidX + tfW / 2 + 40, yFinal + 16 + tfH / 2, "#5B6B7D", "10px Arial, sans-serif");
+        label("Transfo. sortie", csMidX + tfW / 2 + 40, yFinal + 16 + tfH / 2, "#5B6B7D", "10px " + SCHEMA_POLICE);
         yFinal += 16 + tfH;
       }
       line(csMidX, yFinal, csMidX, yFinal + GAP_LIGNE);
       arrowDown(csMidX, yFinal + GAP_LIGNE);
-      label("RS", csMidX, yFinal + GAP_LIGNE + 18, SCHEMA_TRAIT, "14px Arial, sans-serif");
+      label("RS", csMidX, yFinal + GAP_LIGNE + 18, SCHEMA_TRAIT, "14px " + SCHEMA_POLICE);
+      yBasDessin = Math.max(yBasDessin, yFinal + GAP_LIGNE + 30);
     } else {
       let yFinal = yApresOnduleur;
       if (avecTransfoSortie) {
         line(cxM, yFinal, cxM, yFinal + 16);
         drawIconTransformateur(ctx, cxM - tfW / 2, yFinal + 16, tfW, tfH);
-        label("Transfo. sortie", cxM + tfW / 2 + 40, yFinal + 16 + tfH / 2, "#5B6B7D", "10px Arial, sans-serif");
+        label("Transfo. sortie", cxM + tfW / 2 + 40, yFinal + 16 + tfH / 2, "#5B6B7D", "10px " + SCHEMA_POLICE);
         yFinal += 16 + tfH;
       }
       line(cxM, yFinal, cxM, yFinal + GAP_LIGNE);
       arrowDown(cxM, yFinal + GAP_LIGNE);
-      label("RS", cxM, yFinal + GAP_LIGNE + 18, SCHEMA_TRAIT, "14px Arial, sans-serif");
+      label("RS", cxM, yFinal + GAP_LIGNE + 18, SCHEMA_TRAIT, "14px " + SCHEMA_POLICE);
       label(`Utilisation ${regime("utilisation")}`, cxM + 100, yFinal + 10);
+      yBasDessin = Math.max(yBasDessin, yFinal + GAP_LIGNE + 30);
     }
 
     ctx.textAlign = "left";
-    label(avecBypass ? "Configuration : avec commutateur statique et réseau secours" : "Configuration : Onduleur sécurité (sans commutateur statique)", 8, h - 12, "#5B6B7D", "11px Arial, sans-serif");
-    return canvas.toDataURL("image/png");
+    const yLegende = Math.min(h - 12, Math.max(yBasDessin, yBatt + 60) + 22);
+    label(avecBypass ? "Configuration : avec commutateur statique et réseau secours" : "Configuration : Onduleur sécurité (sans commutateur statique)", 14, yLegende, "#8B96A3", "italic 10.5px " + SCHEMA_POLICE);
+    // Cadre redessiné à la hauteur utile puis recadrage.
+    const hUtile = yLegende + 16;
+    ctx.fillStyle = "#FFFFFF"; ctx.fillRect(0, hUtile - 3, w, h - hUtile + 3);
+    ctx.strokeStyle = "#E2E6EB"; ctx.lineWidth = 1; ctx.beginPath(); ctx.roundRect ? ctx.roundRect(1.5, 1.5, w - 3, hUtile - 3, 12) : ctx.rect(1.5, 1.5, w - 3, hUtile - 3); ctx.stroke();
+    return rognerSchema(canvas, hUtile);
   } catch (e) {
     return null;
   }
@@ -16330,53 +16393,52 @@ function genererSchemaRedresseurChargeur(eq) {
   try {
     const r = (eq.controles && eq.controles.regimes_reseaux) || {};
     const regime = (k) => (r[k] === "Monophasé" ? "1~" : "3~");
-    const w = 380, h = 430;
-    const canvas = document.createElement("canvas");
-    canvas.width = w; canvas.height = h;
-    const ctx = canvas.getContext("2d");
-    ctx.fillStyle = "#FFFFFF"; ctx.fillRect(0, 0, w, h);
-    ctx.font = "13px Arial, sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
-    const line = (x1, y1, x2, y2) => { ctx.strokeStyle = SCHEMA_TRAIT; ctx.lineWidth = 1.4; ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); };
+    const w = 440, h = 430;
+    const { canvas, ctx } = canevasSchema(w, h);
+    ctx.font = "13px " + SCHEMA_POLICE; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    const line = (x1, y1, x2, y2) => { ctx.strokeStyle = SCHEMA_TRAIT; ctx.lineWidth = 1.8; ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); };
     const arrowDown = (x, y) => { ctx.fillStyle = SCHEMA_TRAIT; ctx.beginPath(); ctx.moveTo(x - 4, y - 5); ctx.lineTo(x + 4, y - 5); ctx.lineTo(x, y + 3); ctx.fill(); };
-    const boxDepth = (bw2, bh2) => Math.min(bw2, bh2) * 0.22;
-    const cx = 190, bw = 100, bh = 70, redW = 130;
+    const boxDepth = () => 0; // cartes à plat (plus d'effet 3D)
+    const cx = 220, bw = 100, bh = 70, redW = 130;
     const LABEL_MARGIN = 14;
 
     let y = 20;
     if (redresseurDoubleAlim(eq)) {
       // Double alimentation amont : R1 et R2 se rejoignent avant le redresseur.
-      ctx.fillStyle = SCHEMA_TRAIT; ctx.fillText("R1", cx - 75, y); ctx.fillText("R2", cx + 75, y);
+      pastilleSchema(ctx, "R1", cx - 75, y); pastilleSchema(ctx, "R2", cx + 75, y);
       y += 25; line(cx - 75, y, cx - 75, y + 20); line(cx + 75, y, cx + 75, y + 20); y += 20;
-      ctx.fillStyle = "#5B6B7D"; ctx.font = "10.5px Arial, sans-serif";
-      ctx.fillText(`Alim. 1 ${regime("normal")}`, cx - 75, y + 10); ctx.fillText(`Alim. 2 ${regime("secours")}`, cx + 75, y + 10);
+      ctx.fillStyle = "#5B6B7D"; ctx.font = "10.5px " + SCHEMA_POLICE;
+      etiquetteSchema(ctx, `Alim. 1 ${regime("normal")}`, cx - 75, y + 10); etiquetteSchema(ctx, `Alim. 2 ${regime("secours")}`, cx + 75, y + 10);
       y += 22; line(cx - 75, y - 22, cx - 75, y); line(cx + 75, y - 22, cx + 75, y);
       line(cx - 75, y, cx + 75, y);
       line(cx, y, cx, y + 20); y += 20;
     } else {
-      ctx.fillStyle = SCHEMA_TRAIT; ctx.fillText("R1", cx, y);
+      pastilleSchema(ctx, "R1", cx, y);
       y += 25; line(cx, y, cx, y + 20); y += 20;
-      ctx.fillStyle = "#5B6B7D"; ctx.font = "10.5px Arial, sans-serif"; ctx.fillText(`Réseau ${regime("normal")}`, cx, y + 10);
+      ctx.fillStyle = "#5B6B7D"; ctx.font = "10.5px " + SCHEMA_POLICE; etiquetteSchema(ctx, `Réseau ${regime("normal")}`, cx, y + 10);
       y += 22; line(cx, y - 22, cx, y);
       line(cx, y, cx, y + 20); y += 20;
     }
     y += boxDepth(redW, bh) + LABEL_MARGIN + 6;
     ctx.fillStyle = "#5B6B7D"; ctx.fillText("Redresseur / Chargeur", cx, y - boxDepth(redW, bh) - LABEL_MARGIN);
     drawIconRedresseur(ctx, cx - redW / 2, y, redW, bh);
-    let yAfter = y + bh + 24;
-    line(cx, y + bh, cx, yAfter);
-    const yBatt = yAfter + 26;
-    drawBatterie(ctx, cx + 70, yBatt, 22);
-    ctx.font = "11px Arial, sans-serif"; ctx.fillStyle = "#3E4A5C"; ctx.fillText("Batterie (floating)", cx + 70, yBatt + 36);
-    line(cx, yAfter, cx, yBatt);
+    // Sortie continue : la batterie est raccordée au milieu de la barre qui descend vers l'utilisation.
+    const yBatt = y + bh + 40, yFin = yBatt + 40;
+    line(cx, y + bh, cx, yFin);
+    arrowDown(cx, yFin);
     line(cx, yBatt, cx + 48, yBatt);
-    line(cx, yAfter, cx, yAfter + 24);
-    arrowDown(cx, yAfter + 24);
-    ctx.font = "13px Arial, sans-serif"; ctx.fillStyle = SCHEMA_TRAIT; ctx.fillText("RS", cx, yAfter + 42);
-    ctx.font = "10.5px Arial, sans-serif"; ctx.fillStyle = "#5B6B7D"; ctx.fillText("Utilisation continue", cx - 90, yAfter + 15);
+    drawBatterie(ctx, cx + 70, yBatt, 22);
+    ctx.font = "11px " + SCHEMA_POLICE; ctx.fillStyle = "#3E4A5C"; ctx.fillText("Batterie (floating)", cx + 70, yBatt + 36);
+    ctx.font = "13px " + SCHEMA_POLICE; pastilleSchema(ctx, "RS", cx, yFin + 18);
+    ctx.font = "10.5px " + SCHEMA_POLICE; ctx.fillStyle = "#5B6B7D"; ctx.fillText("Utilisation continue", cx - 70, yFin - 8);
 
-    ctx.font = "11px Arial, sans-serif"; ctx.fillStyle = "#5B6B7D"; ctx.textAlign = "left";
-    ctx.fillText("Redresseur chargeur — sortie continue régulée, batterie en tampon (floating)", 8, h - 10);
-    return canvas.toDataURL("image/png");
+    ctx.font = "italic 10.5px " + SCHEMA_POLICE; ctx.fillStyle = "#8B96A3"; ctx.textAlign = "left";
+    const yLeg = yFin + 54;
+    ctx.fillText("Redresseur chargeur — sortie continue régulée, batterie en tampon (floating)", 14, yLeg);
+    const hUtile = yLeg + 16;
+    ctx.fillStyle = "#FFFFFF"; ctx.fillRect(0, hUtile - 3, w, h - hUtile + 3);
+    ctx.strokeStyle = "#E2E6EB"; ctx.lineWidth = 1; ctx.beginPath(); ctx.roundRect ? ctx.roundRect(1.5, 1.5, w - 3, hUtile - 3, 12) : ctx.rect(1.5, 1.5, w - 3, hUtile - 3); ctx.stroke();
+    return rognerSchema(canvas, hUtile);
   } catch (e) {
     return null;
   }
@@ -16389,33 +16451,30 @@ function genererSchemaInverseurSource(eq) {
     const r = (eq.controles && eq.controles.regimes_reseaux) || {};
     const regime = (k) => (r[k] === "Monophasé" ? "1~" : "3~");
     const w = 500, h = 260;
-    const canvas = document.createElement("canvas");
-    canvas.width = w; canvas.height = h;
-    const ctx = canvas.getContext("2d");
-    ctx.fillStyle = "#FFFFFF"; ctx.fillRect(0, 0, w, h);
-    ctx.font = "11px Arial, sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
-    const line = (x1, y1, x2, y2) => { ctx.strokeStyle = SCHEMA_TRAIT; ctx.lineWidth = 1.4; ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); };
+    const { canvas, ctx } = canevasSchema(w, h);
+    ctx.font = "11px " + SCHEMA_POLICE; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    const line = (x1, y1, x2, y2) => { ctx.strokeStyle = SCHEMA_TRAIT; ctx.lineWidth = 1.8; ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); };
     const arrowRight = (x, y) => { ctx.fillStyle = SCHEMA_TRAIT; ctx.beginPath(); ctx.moveTo(x - 5, y - 4); ctx.lineTo(x + 5, y); ctx.lineTo(x - 5, y + 4); ctx.fill(); };
-    const boxDepth = (bw2, bh2) => Math.min(bw2, bh2) * 0.22;
+    const boxDepth = () => 0; // cartes à plat (plus d'effet 3D)
     const LABEL_MARGIN = 14;
     const yMid = 130, yTop = 65, yBot = 195;
 
-    ctx.fillStyle = "#5B6B7D"; ctx.fillText(`Source 1 (R1) ${regime("source1")}`, 70, yTop - 14);
-    ctx.fillText(`Source 2 (R2) ${regime("source2")}`, 70, yBot - 14);
     const csW = 70, csH = 130;
     const csX = 230, csY = yMid - csH / 2;
-    const yEntreeHaut = csY + csH * 0.22, yEntreeBas = csY + csH * 0.78;
-    line(20, yTop, 230, yTop); line(20, yBot, 230, yBot);
-    line(230, yTop, 230, yEntreeHaut); line(230, yBot, 230, yEntreeBas);
-    const depthCS = boxDepth(csW, csH);
-    ctx.fillText("Commutateur", csX + csW + 46, yMid - 8);
-    ctx.fillText("statique", csX + csW + 46, yMid + 8);
+    // Arrivées des deux sources directement au 1/4 et aux 3/4 de la hauteur du commutateur.
+    const yEntreeHaut = csY + csH * 0.25, yEntreeBas = csY + csH * 0.75;
+    ctx.fillStyle = "#5B6B7D"; ctx.fillText(`Source 1 ${regime("source1")}`, 100, yEntreeHaut - 14);
+    ctx.fillText(`Source 2 ${regime("source2")}`, 100, yEntreeBas - 14);
+    line(38, yEntreeHaut, csX, yEntreeHaut); line(38, yEntreeBas, csX, yEntreeBas);
+    pastilleSchema(ctx, "R1", 24, yEntreeHaut); pastilleSchema(ctx, "R2", 24, yEntreeBas);
+    ctx.fillText("Commutateur", csX + csW + 72, yMid + 16);
+    ctx.fillText("statique", csX + csW + 72, yMid + 30);
     drawIconCommutateurStatique(ctx, csX, csY, csW, csH, "vertical");
     line(csX + csW, yMid, 460, yMid); arrowRight(455, yMid);
-    ctx.font = "10.5px Arial, sans-serif"; ctx.fillText(`Utilisation ${regime("utilisation")}`, 460, yMid - 16);
+    ctx.font = "10.5px " + SCHEMA_POLICE; ctx.fillText(`Utilisation ${regime("utilisation")}`, 435, yMid - 16);
 
-    ctx.font = "11px Arial, sans-serif"; ctx.fillStyle = "#5B6B7D"; ctx.textAlign = "left";
-    ctx.fillText("Inverseur de source — commutation entre deux sources, sans conversion de puissance", 8, h - 10);
+    ctx.font = "italic 10.5px " + SCHEMA_POLICE; ctx.fillStyle = "#8B96A3"; ctx.textAlign = "left";
+    ctx.fillText("Inverseur de source — commutation entre deux sources, sans conversion de puissance", 14, h - 14);
     return canvas.toDataURL("image/png");
   } catch (e) {
     return null;
@@ -16725,10 +16784,10 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
     const gen = eq.type === "Onduleur" ? genererSchemaOnduleur : eq.type === "Redresseur chargeur" ? genererSchemaRedresseurChargeur : genererSchemaInverseurSource;
     const schemaImg = gen(eq);
     if (schemaImg) {
-      let imgW = 400, imgH = 190;
-      if (eq.type === "Onduleur") { imgW = 300; imgH = eq.identification?.typeUPS !== "Onduleur sécurité" ? 488 : 350; }
-      else if (eq.type === "Redresseur chargeur") { imgW = 300; imgH = 340; }
-      else { imgW = 400; imgH = 208; }
+      // Largeur fixe par type, hauteur déduite des proportions réelles de l'image (schéma recadré à sa hauteur utile).
+      const imgW = eq.type === "Inverseur de source" ? 420 : eq.type === "Redresseur chargeur" ? 340 : 320;
+      const dims = dimensionsPng(schemaImg);
+      const imgH = dims && dims.w ? Math.round((imgW * dims.h) / dims.w) : Math.round(imgW * 0.8);
       const img = docxImage(schemaImg, imgW, imgH);
       if (img) {
         elements.push(docxBlocInsecable([docxHeading("Schéma synoptique", 480, 160), new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, spacing: { after: 100 }, children: [img] })]));
