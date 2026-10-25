@@ -14288,19 +14288,51 @@ function docxSousTitreRemarques(texte) {
 function docxPuces(items, size = 18, espace = 50) {
   return items.map((t) => new DOCX.Paragraph({ spacing: { after: espace }, indent: { left: 260, hanging: 220 }, children: [new DOCX.TextRun({ text: "•  " + t, size })] }));
 }
-function docxRemarquesEquipement(texte) {
-  const titre = new DOCX.Paragraph({ spacing: { before: 140, after: 60 }, keepNext: true, children: [new DOCX.TextRun({ text: "Remarques et préconisations", bold: true, size: 18, color: DOCX_DARK })] });
-  const paragraphes = (lignes) => lignes.map((l) => new DOCX.Paragraph({ spacing: { after: 60 }, children: [new DOCX.TextRun({ text: l, size: 18 })] }));
+// Carte « Constats | Préconisations » : deux colonnes côte à côte, liseré et teinte de l'état de l'équipement.
+// Une seule rangée de tableau (insécable si le texte est raisonnable) : la carte ne se coupe pas entre deux pages, Pages compris.
+//  - titre (optionnel) : nom de l'équipement, cliquable vers sa fiche si `lien` est fourni ; pastille d'état à droite.
+//  - autres : lignes libres (texte non structuré) affichées au-dessus des constats.
+function docxCarteRemarques({ titre = "", lien = "", etat = "", constats = [], preconisations = [], autres = [] }) {
+  const rang = RANK_OF[etat] ?? 0;
+  const teinte = teinteSyntheseRang(rang);
+  const a = docxAucuneBordure();
+  const W = [4800, 4800];
+  const fond = { type: DOCX.ShadingType.CLEAR, fill: "FAFBFC" };
+  const etiquette = (t, couleur) => new DOCX.Paragraph({ keepNext: true, spacing: { before: 60, after: 90 }, border: { bottom: { style: DOCX.BorderStyle.SINGLE, size: 6, color: couleur, space: 3 } },
+    children: [new DOCX.TextRun({ text: t, bold: true, size: 15, color: couleur, characterSpacing: 30 })] });
+  const puce = (t, symbole, couleurSymbole) => new DOCX.Paragraph({ spacing: { before: 0, after: 80, line: 280 }, indent: { left: 300, hanging: 300 },
+    children: [new DOCX.TextRun({ text: symbole, bold: true, size: 19, color: couleurSymbole }), new DOCX.TextRun({ text: "\u00A0\u00A0" + finPhrase(t), size: 19, color: DOCX_DARK })] });
+  const vide = (t) => new DOCX.Paragraph({ spacing: { after: 40 }, children: [new DOCX.TextRun({ text: t, size: 19, italics: true, color: "8B96A3" })] });
+  const ligneTitre = titre ? [new DOCX.Paragraph({ keepNext: true, spacing: { before: 0, after: 60 }, children: [
+    lien ? new DOCX.InternalHyperlink({ anchor: lien, children: [new DOCX.TextRun({ text: titre, bold: true, size: 21, color: DOCX_DARK })] }) : new DOCX.TextRun({ text: titre, bold: true, size: 21, color: DOCX_DARK }),
+  ] })] : [];
+  const lignePastille = titre ? [new DOCX.Paragraph({ keepNext: true, alignment: DOCX.AlignmentType.RIGHT, spacing: { before: 0, after: 60 }, children: [
+    new DOCX.TextRun({ text: "\u200B", size: 21 }), // même hauteur de ligne que le nom de l'équipement : « Constats » et « Préconisations » alignés
+    new DOCX.TextRun({ text: "\u00A0\u00A0●\u00A0", bold: true, size: 15, color: teinte.barre, shading: { type: DOCX.ShadingType.CLEAR, fill: teinte.fond, color: "auto" } }),
+    new DOCX.TextRun({ text: (rang < 0 ? String(etat || "").toUpperCase() : teinte.etiquette) + "\u00A0\u00A0", bold: true, size: 15, color: teinte.texte, characterSpacing: 10, shading: { type: DOCX.ShadingType.CLEAR, fill: teinte.fond, color: "auto" } }),
+  ] })] : [];
+  const libres = autres.map((t) => new DOCX.Paragraph({ spacing: { after: 80, line: 280 }, children: [new DOCX.TextRun({ text: t, size: 19, color: DOCX_DARK })] }));
+  const gauche = [...ligneTitre, ...libres, etiquette("CONSTATS", "5A6573"), ...(constats.length ? constats.map((t) => puce(t, "•", "8B96A3")) : [vide("Aucune remarque particulière.")])];
+  const droite = [...lignePastille, etiquette("PRÉCONISATIONS", teinte.texte), ...(preconisations.length ? preconisations.map((t) => puce(t, "→", teinte.barre)) : [vide("Aucune action nécessaire.")])];
+  const longueur = [...autres, ...constats, ...preconisations].join(" ").length;
+  return docxTable({
+    width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: W, borders: { ...docxToutesAucune(), insideHorizontal: a, insideVertical: a },
+    rows: [new DOCX.TableRow({ cantSplit: longueur < 900, children: [
+      new DOCX.TableCell({ width: { size: W[0], type: DOCX.WidthType.DXA }, shading: fond, margins: { top: 170, bottom: 120, left: 260, right: 200 },
+        borders: { top: a, bottom: a, right: { style: DOCX.BorderStyle.SINGLE, size: 4, color: "E2E6EB" }, left: { style: DOCX.BorderStyle.SINGLE, size: 48, color: teinte.barre } }, children: gauche }),
+      new DOCX.TableCell({ width: { size: W[1], type: DOCX.WidthType.DXA }, shading: fond, margins: { top: 170, bottom: 120, left: 240, right: 220 }, borders: { top: a, bottom: a, left: a, right: a }, children: droite }),
+    ] })],
+  });
+}
+function docxRemarquesEquipement(texte, etat) {
+  const titre = docxHeading("Remarques et préconisations", 360, 140);
+  const lignes = String(texte).split("\n").map((l) => l.trim()).filter(Boolean);
   if (!remarquesStructurees(texte)) {
-    return [titre, ...paragraphes(String(texte).split("\n").map((l) => l.trim()).filter(Boolean))];
+    // Texte libre : chaque ligne devient un constat (lisible en liste, même sans titres « Constats » / « Préconisations »).
+    return [titre, docxCarteRemarques({ etat, constats: lignes.map((l) => l.replace(/^[•\-–*]\s*/, "")) }), docxSpacer(120)];
   }
-  const p = parserSectionsRemarques(String(texte).split("\n"));
-  const out = [titre];
-  if (p.autres.length) out.push(...paragraphes(p.autres));
-  if (p.constats.length) out.push(docxSousTitreRemarques("Constats"), ...docxPuces(p.constats));
-  if (p.preconisations.length) out.push(docxSousTitreRemarques("Préconisations"), ...docxPuces(p.preconisations));
-  out.push(docxSpacer(100)); // espace avant ce qui suit (photos, courbes…)
-  return out;
+  const p = parserSectionsRemarques(lignes);
+  return [titre, docxCarteRemarques({ etat, constats: p.constats, preconisations: p.preconisations, autres: p.autres }), docxSpacer(120)];
 }
 // Synthèse du site, lisible par le client : encart « synthèse générale » en grands caractères (barre et fond de la couleur de l'état global), puis tableau détaillé
 // Équipement | Constats | Préconisations dont chaque ligne est colorée selon l'état de l'équipement — rouge : prioritaire, orange : à planifier, vert : conforme —
@@ -14347,13 +14379,7 @@ function docxSyntheseSiteStructuree(texte, site) {
     out.push(docxSpacer(200));
   }
   if (p.equipements.length || equipements.length) {
-    out.push(new DOCX.Paragraph({ keepNext: true, spacing: { before: 160, after: 100 }, children: [new DOCX.TextRun({ text: "Détail par équipement", bold: true, size: 24, color: DOCX_BLUE })] }));
-    const marge = { top: 130, bottom: 130, left: 140, right: 120 };
-    const W = [2600, 3600, 3400];
-    const a = docxAucuneBordure();
-    const cellule = (i, enfants, extra = {}) => new DOCX.TableCell({ width: { size: W[i], type: DOCX.WidthType.DXA }, margins: marge, ...extra, children: enfants });
-    const texte1 = (t, couleur) => new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: t, size: 20, color: couleur })] });
-    const entete = new DOCX.TableRow({ tableHeader: true, cantSplit: true, children: ["Équipement", "Constats", "Préconisations"].map((t, i) => cellule(i, [new DOCX.Paragraph({ keepNext: true, children: [new DOCX.TextRun({ text: t, bold: true, size: 19, color: DOCX_WHITE })] })], { shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_ENTETE }, margins: CELL_MARGINS_ENTETE })) });
+    out.push(new DOCX.Paragraph({ keepNext: true, spacing: { before: 160, after: 120 }, children: [new DOCX.TextRun({ text: "Détail par équipement", bold: true, size: 24, color: DOCX_BLUE })] }));
     // Une ligne par équipement du site, du plus critique au conforme, chacune à la couleur de son
     // état réel. Remarques : celles du texte de synthèse (éventuellement retouchées à la main), sinon
     // celles de la fiche équipement, sinon une mention « aucune remarque ».
@@ -14384,35 +14410,17 @@ function docxSyntheseSiteStructuree(texte, site) {
       });
     // Blocs du texte qui ne correspondent plus à aucun équipement (titre modifié à la main) : conservés à la fin.
     p.equipements.filter((b) => !utilises.has(b) && !equipementDuTitre(b.titre)).forEach((b) => blocs.push({ ...b, eq: null }));
-    const lignes = blocs.map((e) => {
+    // Une carte par équipement (du plus critique au conforme), nom cliquable vers sa fiche dans le rapport.
+    blocs.forEach((e) => {
       const eq = e.eq;
-      const teinte = teinteSyntheseRang(eq ? (RANK_OF[eq.etatFinal] ?? 0) : 0);
-      const constats = [...e.autres, ...e.constats];
-      // Une rangée insécable plus haute qu'une page est tronquée en bas de page (Pages comme Word) :
-      // on ne la rend insécable que si son texte est court ; sinon elle peut se poursuivre page suivante.
-      const longueurTexte = [...constats, ...e.preconisations].join(" ").length;
-      return new DOCX.TableRow({ cantSplit: longueurTexte < 700, children: [
-        cellule(0, [
-          new DOCX.Paragraph({ spacing: { after: 60 }, children: [new DOCX.TextRun({ text: e.titre || "—", bold: true, size: 21, color: DOCX_DARK })] }),
-          new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: "●  " + (eq && (RANK_OF[eq.etatFinal] ?? 0) < 0 ? String(eq.etatFinal).toUpperCase() : teinte.etiquette), bold: true, size: 15, color: teinte.texte, characterSpacing: 20 })] }),
-        ], { shading: { type: DOCX.ShadingType.CLEAR, fill: teinte.fond }, borders: { top: a, bottom: a, right: a, left: { style: DOCX.BorderStyle.SINGLE, size: 48, color: teinte.barre } } }),
-        cellule(1, constats.length ? docxPuces(constats, 19, 60) : [texte1("—")]),
-        cellule(2, e.preconisations.length ? docxPuces(e.preconisations, 19, 60) : [texte1("—")]),
-      ] });
+      out.push(docxCarteRemarques({
+        titre: e.titre || "—", lien: eq ? docxBookmarkId(eq) : "", etat: eq ? eq.etatFinal : "Conforme",
+        constats: e.constats.filter((t) => !/^Aucune remarque particulière\.?$/i.test(t)),
+        preconisations: e.preconisations.filter((t) => !/^Aucune action nécessaire\.?$/i.test(t)),
+        autres: e.autres,
+      }));
+      out.push(new DOCX.Paragraph({ spacing: { before: 0, after: 0, line: 160, lineRule: DOCX.LineRuleType ? DOCX.LineRuleType.EXACT : "exact" }, children: [new DOCX.TextRun({ text: "", size: 4 })] }));
     });
-    const sansRemarque = []; // désormais chaque équipement a sa propre ligne (voir ci-dessus)
-    if (sansRemarque.length) {
-      const teinte = teinteSyntheseRang(0);
-      lignes.push(new DOCX.TableRow({ cantSplit: true, children: [new DOCX.TableCell({
-        width: { size: W[0] + W[1] + W[2], type: DOCX.WidthType.DXA }, columnSpan: 3, margins: marge, shading: { type: DOCX.ShadingType.CLEAR, fill: teinte.fond },
-        borders: { top: a, bottom: a, right: a, left: { style: DOCX.BorderStyle.SINGLE, size: 48, color: teinte.barre } },
-        children: [new DOCX.Paragraph({ children: [
-          new DOCX.TextRun({ text: "✓  Aucune remarque, aucune action : ", bold: true, size: 20, color: teinte.texte }),
-          new DOCX.TextRun({ text: sansRemarque.map(titreDe).join(" · "), size: 20, color: DOCX_DARK }),
-        ] })],
-      })] }));
-    }
-    out.push(docxTable({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: W, rows: [entete, ...lignes] }));
     out.push(new DOCX.Paragraph({ spacing: { before: 100, after: 40 }, children: [new DOCX.TextRun({ text: "Code couleur :  rouge = prioritaire (remise en conformité rapide)  ·  orange = à planifier / à surveiller  ·  vert = conforme, aucune action.", size: 16, italics: true, color: "8B96A3" })] }));
   }
   return out;
@@ -14728,13 +14736,11 @@ const COLONNES_CONTROLE = [1600, 2200, 1600, 2200, 2000];
 function estDetailDense(detail) {
   if (!Array.isArray(detail)) return false;
   const parts = detail.filter((p) => p && String(p.text ?? "").trim());
-  return parts.length >= 2; // dès deux résultats : grille Libellé | Valeur (un seul résultat reste sur la ligne du contrôle)
+  return parts.length >= 1 && parts.some((p) => String(p.text).includes(" : ")); // dès qu'il y a un résultat : grille Libellé | Valeur
 }
 function docxControlRowsDense(label, detail, action, etat, isAlternate, garderAvecSuite = false) {
   const parts = detail.filter((p) => p && String(p.text ?? "").trim());
   const fond = isAlternate ? { type: DOCX.ShadingType.CLEAR, fill: DOCX_ZEBRE } : undefined;
-  const aucune = docxAucuneBordure();
-  const sansHaut = { top: aucune }; // pas de filet entre les lignes d'un même contrôle
   const couleurEtat = (e) => (e === "bad" ? DOCX_RED : e === "warning" ? DOCX_ORANGE : e === "ok" ? DOCX_GREEN : DOCX_DARK);
   const courts = [], longs = [];
   const decoupe = parts.map((p) => { const t = String(p.text), k = t.indexOf(" : "); return { cle: k > 0 ? t.slice(0, k) : "", val: k > 0 ? t.slice(k + 3) : t, etat: p.etat }; });
@@ -14765,35 +14771,45 @@ function docxControlRowsDense(label, detail, action, etat, isAlternate, garderAv
     }
     if (!p.cle || p.val.length > 34) longs.push(p); else courts.push(p);
   });
-  const marges = { top: 30, bottom: 30, left: 130, right: 80 };
-  const cell = (i, enfants, extra = {}) => new DOCX.TableCell({ width: { size: extra.largeur || COLONNES_CONTROLE[i], type: DOCX.WidthType.DXA }, margins: marges, verticalAlign: DOCX.VerticalAlign.CENTER, shading: fond, borders: sansHaut, ...extra.opts, children: enfants });
-  const para = (runs) => new DOCX.Paragraph({ keepNext: garderAvecSuite, spacing: { before: 0, after: 0 }, children: runs });
+  // UNE SEULE rangée de tableau pour tout le contrôle (une rangée ne se coupe jamais entre deux pages, y compris dans Pages) :
+  // la grille Libellé | Valeur est faite de paragraphes à taquets de tabulation, deux couples par ligne quand ils tiennent.
+  const TAB = (pos) => ({ type: DOCX.TabStopType.LEFT, position: pos });
+  const tab = () => (DOCX.Tab ? new DOCX.TextRun({ children: [new DOCX.Tab()] }) : new DOCX.TextRun({ text: "\t" }));
+  const largeurCle = (t) => String(t || "").length * 72; // estimation (Calibri 7,5 pt)
   const runCle = (t) => new DOCX.TextRun({ text: t, size: 15, color: "6B7785" });
-  const runVal = (p) => new DOCX.TextRun({ text: p.val, size: 16, bold: true, color: couleurEtat(p.etat) });
-  const nbSousLignes = Math.ceil(courts.length / 2) + longs.length + (action ? 1 : 0);
-  const lignes = [];
-  // Ligne de titre : nom du contrôle (+ pastille d'état fusionnée sur toutes les lignes du contrôle)
-  lignes.push(new DOCX.TableRow({ cantSplit: true, children: [
-    new DOCX.TableCell({ width: { size: 7600, type: DOCX.WidthType.DXA }, columnSpan: 4, margins: { top: 110, bottom: 40, left: 130, right: 120 }, shading: fond, children: [para([new DOCX.TextRun({ text: label, size: 18, bold: true, color: DOCX_DARK })])] }),
-    new DOCX.TableCell({ width: { size: 2000, type: DOCX.WidthType.DXA }, rowSpan: nbSousLignes + 1, margins: CELL_MARGINS, verticalAlign: DOCX.VerticalAlign.CENTER, shading: fond, children: [etat ? docxPastilleEtat(etat, { garder: garderAvecSuite }) : docxMiniParagraphe()] }),
-  ] }));
-  for (let i = 0; i < courts.length; i += 2) {
+  const runsVal = (p) => p.runs || [new DOCX.TextRun({ text: p.val, size: 16, bold: true, color: couleurEtat(p.etat) })];
+  // Colonnes adaptées au plus long libellé du contrôle (grille identique pour toutes ses lignes) — largeur utile de la cellule ≈ 7350.
+  const largeurLibelles = Math.min(2300, Math.max(1400, ...[...courts, ...longs].map((p) => largeurCle(p.cle)), action ? largeurCle("Action") : 0) + 160);
+  const V1 = largeurLibelles, K2 = 3950, V2 = K2 + largeurLibelles;
+  let filet = 0;
+  const ligne = (enfants, tabStops, extra = {}) => new DOCX.Paragraph({
+    keepNext: true, keepLines: true, tabStops, spacing: { before: 45, after: 45 },
+    // filets alternés (teinte très légèrement différente) : sinon Word regroupe les bordures identiques et n'en trace qu'une
+    border: { top: { style: DOCX.BorderStyle.SINGLE, size: 2, color: (filet++ % 2) ? "E6E9ED" : "E7EAEE", space: 3 } },
+    ...extra, children: enfants,
+  });
+  const tientGauche = (p) => p && !p.runs && largeurCle(p.cle) <= V1 - 120 && String(p.val).length * 85 <= K2 - V1 - 120;
+  const tientDroite = (p) => p && !p.runs && largeurCle(p.cle) <= V2 - K2 - 120 && String(p.val).length * 85 <= 7350 - V2;
+  // Lignes à un seul couple : même colonne de valeurs pour tout le contrôle (alignée sur le libellé le plus long, au plus 3400).
+  let posSeule = V1;
+  const ligneSeule = (p) => {
+    const pos = posSeule;
+    return ligne([runCle(p.cle || ""), tab(), ...runsVal(p)], [TAB(pos)], { indent: { left: pos, hanging: pos } });
+  };
+  const paragraphes = [new DOCX.Paragraph({ keepNext: true, keepLines: true, spacing: { before: 0, after: 30 }, children: [new DOCX.TextRun({ text: label, size: 18, bold: true, color: DOCX_DARK })] })];
+  for (let i = 0; i < courts.length;) {
     const a = courts[i], b = courts[i + 1];
-    lignes.push(new DOCX.TableRow({ cantSplit: true, children: [
-      cell(0, [para([runCle(a.cle)])]), cell(1, [para([runVal(a)])]),
-      cell(2, [para(b ? [runCle(b.cle)] : [])]), cell(3, [para(b ? [runVal(b)] : [])]),
-    ] }));
+    if (tientGauche(a) && tientDroite(b)) {
+      paragraphes.push(ligne([runCle(a.cle), tab(), ...runsVal(a), tab(), runCle(b.cle), tab(), ...runsVal(b)], [TAB(V1), TAB(K2), TAB(V2)]));
+      i += 2;
+    } else { paragraphes.push(ligneSeule(a)); i += 1; }
   }
-  longs.forEach((p) => lignes.push(new DOCX.TableRow({ cantSplit: true, children: [
-    cell(0, [para(p.cle ? [runCle(p.cle)] : [])]),
-    cell(1, [para(p.runs || [new DOCX.TextRun({ text: p.val, size: 16, bold: p.etat === "bad" || p.etat === "warning", color: couleurEtat(p.etat) })])], { largeur: 6000, opts: { columnSpan: 3 } }),
-  ] })));
-  if (action) lignes.push(new DOCX.TableRow({ cantSplit: true, children: [
-    cell(0, [para([runCle("Action")])]),
-    cell(1, [para([new DOCX.TextRun({ text: action, size: 16, color: DOCX_DARK })])], { largeur: 6000, opts: { columnSpan: 3 } }),
-  ] }));
-  // Marge basse sur la dernière ligne du bloc
-  return lignes;
+  longs.forEach((p) => paragraphes.push(ligneSeule(p)));
+  if (action) paragraphes.push(ligneSeule({ cle: "Action", val: action }));
+  return [new DOCX.TableRow({ cantSplit: true, children: [
+    new DOCX.TableCell({ width: { size: 7600, type: DOCX.WidthType.DXA }, columnSpan: 4, margins: { top: 110, bottom: 90, left: 130, right: 120 }, shading: fond, children: paragraphes }),
+    new DOCX.TableCell({ width: { size: 2000, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, verticalAlign: DOCX.VerticalAlign.CENTER, shading: fond, children: [etat ? docxPastilleEtat(etat, { garder: garderAvecSuite }) : docxMiniParagraphe()] }),
+  ] })];
 }
 // `garderAvecSuite` : le tableau reste sur la même page que l'élément qui le suit (ex. une courbe).
 // Sections « État … » (état de l'installation, de l'onduleur, du by-pass, redresseur / chargeur…) : ce sont de simples listes de contrôles avec un état. Au lieu d'une rangée haute
@@ -14811,7 +14827,7 @@ function docxControlTableCompact(rows) {
   const cellEtat = (etat, largeur, fond) => new DOCX.TableCell({
     width: { size: largeur, type: DOCX.WidthType.DXA }, margins: { top: 40, bottom: 40, left: 60, right: 60 }, verticalAlign: DOCX.VerticalAlign.CENTER,
     shading: fond ? { type: DOCX.ShadingType.CLEAR, fill: fond } : undefined,
-    children: [etat ? docxPastilleEtat(etat, { taille: 14 }) : docxMiniParagraphe()],
+    children: [etat ? docxPastilleEtat(etat) : docxMiniParagraphe()],
   });
   const cellLabel = (r, largeur, span, separateur, fond) => {
     const detail = r ? r[1] : null, action = r ? r[2] : "";
@@ -15014,7 +15030,7 @@ function docxSyntheseRow(label, etat, bookmarkId, alterne = false) {
       bookmarkId ? new DOCX.InternalHyperlink({ anchor: bookmarkId, children: [linkRun] }) : new DOCX.TextRun({ text: label, size: 18, color: DOCX_DARK }),
     ] })] }),
     etat
-      ? new DOCX.TableCell({ width: { size: 2000, type: DOCX.WidthType.DXA }, margins: margeGenereuse, verticalAlign: DOCX.VerticalAlign.CENTER, shading: fond, children: [docxPastilleEtat(etat, { taille: 16 })] })
+      ? new DOCX.TableCell({ width: { size: 2000, type: DOCX.WidthType.DXA }, margins: margeGenereuse, verticalAlign: DOCX.VerticalAlign.CENTER, shading: fond, children: [docxPastilleEtat(etat)] })
       : new DOCX.TableCell({ width: { size: 2000, type: DOCX.WidthType.DXA }, margins: margeGenereuse, shading: fond, children: [new DOCX.Paragraph("")] }),
   ]});
 }
@@ -17446,7 +17462,7 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
       remplacees.forEach((r) => elements.push(new DOCX.Paragraph({ spacing: { after: 30 }, children: [new DOCX.TextRun({ text: "✓  ", bold: true, size: 18, color: "0F8A5F" }), new DOCX.TextRun({ text: texteRemplacement(r), size: 18, color: DOCX_DARK })] })));
     }
   }
-  if (eq.remarques) elements.push(...docxRemarquesEquipement(eq.remarques));
+  if (eq.remarques) elements.push(...docxRemarquesEquipement(eq.remarques, eq.etatFinal));
   { const galerie = docxPhotosCoteACote(eq.photos, 200, 220); if (galerie) { elements.push(docxSpacer(160)); elements.push(galerie); } }
 
   // Courbe de déclenchement (Disjoncteur BT) : normalement insérée dans sa propre section (voir la boucle
@@ -17876,7 +17892,7 @@ function cleEtatDocx(etat) {
 function docxCelluleEtat(etat, largeur) {
   return new DOCX.TableCell({
     width: { size: largeur, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, verticalAlign: DOCX.VerticalAlign.CENTER,
-    children: [docxPastilleEtat(etat, { taille: 15 })],
+    children: [docxPastilleEtat(etat)],
   });
 }
 // Synthèse minimale en deux phrases : ce qui a été fait, puis le bilan des équipements contrôlés.
