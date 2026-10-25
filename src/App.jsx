@@ -16034,6 +16034,11 @@ function dimensionsPng(dataUrl) {
     return { w: u(16), h: u(20) };
   } catch (e) { return null; }
 }
+// Libellé de réseau placé SOUS sa pastille de repère (jamais sur un trait).
+function libelleSousRepere(ctx, txt, x, y, align = "center") {
+  ctx.save(); ctx.font = `10.5px ${SCHEMA_POLICE}`; ctx.fillStyle = "#5B6B7D"; ctx.textAlign = align; ctx.textBaseline = "middle";
+  ctx.fillText(txt, x, y + 22); ctx.restore();
+}
 // Repère de réseau (R0, R1, R2, RS) : pastille marine, texte blanc gras.
 function pastilleSchema(ctx, txt, x, y) {
   ctx.save();
@@ -16242,7 +16247,9 @@ function genererSchemaOnduleur(eq) {
     // Pontés = une seule source réelle : pas de repère "R2" ni de trait indépendant en haut, pour
     // ne jamais donner l'impression que R2 remonte vers une entrée séparée. Tout part de R1.
     if (avecBypass && !reseauxPontes) label("R2", cxR2, y, SCHEMA_TRAIT, "14px " + SCHEMA_POLICE);
-    y += 26;
+    libelleSousRepere(ctx, `Réseau normal ${regime("normal")}`, cxM, y);
+    if (avecBypass && !reseauxPontes) libelleSousRepere(ctx, `Réseau secours ${regime("secours")}`, cxR2, y);
+    y += 44;
     line(cxM, y, cxM, y + GAP_LIGNE);
     if (avecBypass && !reseauxPontes) { line(cxR2, y, cxR2, y + GAP_LIGNE); yR2Depart = y + GAP_LIGNE; }
     y += GAP_LIGNE;
@@ -16283,7 +16290,6 @@ function genererSchemaOnduleur(eq) {
     }
 
     // Réseau normal — relié directement au redresseur (plus d'interrupteur intermédiaire)
-    label(`Réseau normal ${regime("normal")}`, cxM, y + 10);
     let yReseauNormalBas = y + 22;
     line(cxM, y, cxM, yReseauNormalBas);
     y = yReseauNormalBas + GAP_LIGNE;
@@ -16334,7 +16340,6 @@ function genererSchemaOnduleur(eq) {
       // depuis son point de départ (pontage ou simple trait initial), sans coupure. Le libellé est
       // placé sous le transformateur (s'il existe), avec un petit espace, jamais collé dessus.
       if (yR2Depart !== null) {
-        if (!reseauxPontes) label(`Réseau secours ${regime("secours")}`, cxR2, yR2Depart + 12);
         line(cxR2, yR2Depart, cxR2, yApresOnduleur);
       } else {
         label(`Réseau secours ${regime("secours")}`, cxR2, yRedresseurBas - 4);
@@ -16347,7 +16352,6 @@ function genererSchemaOnduleur(eq) {
       // Sortie — reliée directement (plus d'interrupteur intermédiaire)
       let yApresCS = yApresOnduleur + csH + GAP_LIGNE + 22;
       line(csMidX, yApresOnduleur + csH, csMidX, yApresOnduleur + csH + GAP_LIGNE);
-      label("Sortie", csMidX, yApresOnduleur + csH + GAP_LIGNE + 10);
       let yFinal = yApresCS;
       if (avecTransfoSortie) {
         line(csMidX, yFinal, csMidX, yFinal + 16);
@@ -16358,7 +16362,8 @@ function genererSchemaOnduleur(eq) {
       line(csMidX, yFinal, csMidX, yFinal + GAP_LIGNE);
       arrowDown(csMidX, yFinal + GAP_LIGNE);
       label("RS", csMidX, yFinal + GAP_LIGNE + 18, SCHEMA_TRAIT, "14px " + SCHEMA_POLICE);
-      yBasDessin = Math.max(yBasDessin, yFinal + GAP_LIGNE + 30);
+      libelleSousRepere(ctx, `Utilisation ${regime("utilisation")}`, csMidX, yFinal + GAP_LIGNE + 18);
+      yBasDessin = Math.max(yBasDessin, yFinal + GAP_LIGNE + 48);
     } else {
       let yFinal = yApresOnduleur;
       if (avecTransfoSortie) {
@@ -16370,8 +16375,8 @@ function genererSchemaOnduleur(eq) {
       line(cxM, yFinal, cxM, yFinal + GAP_LIGNE);
       arrowDown(cxM, yFinal + GAP_LIGNE);
       label("RS", cxM, yFinal + GAP_LIGNE + 18, SCHEMA_TRAIT, "14px " + SCHEMA_POLICE);
-      label(`Utilisation ${regime("utilisation")}`, cxM + 100, yFinal + 10);
-      yBasDessin = Math.max(yBasDessin, yFinal + GAP_LIGNE + 30);
+      libelleSousRepere(ctx, `Utilisation ${regime("utilisation")}`, cxM, yFinal + GAP_LIGNE + 18);
+      yBasDessin = Math.max(yBasDessin, yFinal + GAP_LIGNE + 48);
     }
 
     ctx.textAlign = "left";
@@ -16406,21 +16411,17 @@ function genererSchemaRedresseurChargeur(eq) {
     if (redresseurDoubleAlim(eq)) {
       // Double alimentation amont : R1 et R2 se rejoignent avant le redresseur.
       pastilleSchema(ctx, "R1", cx - 75, y); pastilleSchema(ctx, "R2", cx + 75, y);
-      y += 25; line(cx - 75, y, cx - 75, y + 20); line(cx + 75, y, cx + 75, y + 20); y += 20;
-      ctx.fillStyle = "#5B6B7D"; ctx.font = "10.5px " + SCHEMA_POLICE;
-      etiquetteSchema(ctx, `Alim. 1 ${regime("normal")}`, cx - 75, y + 10); etiquetteSchema(ctx, `Alim. 2 ${regime("secours")}`, cx + 75, y + 10);
-      y += 22; line(cx - 75, y - 22, cx - 75, y); line(cx + 75, y - 22, cx + 75, y);
+      libelleSousRepere(ctx, `Alim. 1 ${regime("normal")}`, cx - 75, y); libelleSousRepere(ctx, `Alim. 2 ${regime("secours")}`, cx + 75, y);
+      y += 40; line(cx - 75, y, cx - 75, y + 42); line(cx + 75, y, cx + 75, y + 42); y += 42;
       line(cx - 75, y, cx + 75, y);
       line(cx, y, cx, y + 20); y += 20;
     } else {
       pastilleSchema(ctx, "R1", cx, y);
-      y += 25; line(cx, y, cx, y + 20); y += 20;
-      ctx.fillStyle = "#5B6B7D"; ctx.font = "10.5px " + SCHEMA_POLICE; etiquetteSchema(ctx, `Réseau ${regime("normal")}`, cx, y + 10);
-      y += 22; line(cx, y - 22, cx, y);
-      line(cx, y, cx, y + 20); y += 20;
+      libelleSousRepere(ctx, `Réseau ${regime("normal")}`, cx, y);
+      y += 40; line(cx, y, cx, y + 62); y += 62;
     }
     y += boxDepth(redW, bh) + LABEL_MARGIN + 6;
-    ctx.fillStyle = "#5B6B7D"; ctx.fillText("Redresseur / Chargeur", cx, y - boxDepth(redW, bh) - LABEL_MARGIN);
+    ctx.fillStyle = "#5B6B7D"; ctx.font = "12px " + SCHEMA_POLICE; etiquetteSchema(ctx, "Redresseur / Chargeur", cx, y - boxDepth(redW, bh) - LABEL_MARGIN);
     drawIconRedresseur(ctx, cx - redW / 2, y, redW, bh);
     // Sortie continue : la batterie est raccordée au milieu de la barre qui descend vers l'utilisation.
     const yBatt = y + bh + 40, yFin = yBatt + 40;
@@ -16430,10 +16431,10 @@ function genererSchemaRedresseurChargeur(eq) {
     drawBatterie(ctx, cx + 70, yBatt, 22);
     ctx.font = "11px " + SCHEMA_POLICE; ctx.fillStyle = "#3E4A5C"; ctx.fillText("Batterie (floating)", cx + 70, yBatt + 36);
     ctx.font = "13px " + SCHEMA_POLICE; pastilleSchema(ctx, "RS", cx, yFin + 18);
-    ctx.font = "10.5px " + SCHEMA_POLICE; ctx.fillStyle = "#5B6B7D"; ctx.fillText("Utilisation continue", cx - 70, yFin - 8);
+    libelleSousRepere(ctx, "Utilisation continue", cx, yFin + 18);
 
     ctx.font = "italic 10.5px " + SCHEMA_POLICE; ctx.fillStyle = "#8B96A3"; ctx.textAlign = "left";
-    const yLeg = yFin + 54;
+    const yLeg = yFin + 72;
     ctx.fillText("Redresseur chargeur — sortie continue régulée, batterie en tampon (floating)", 14, yLeg);
     const hUtile = yLeg + 16;
     ctx.fillStyle = "#FFFFFF"; ctx.fillRect(0, hUtile - 3, w, h - hUtile + 3);
@@ -16463,15 +16464,16 @@ function genererSchemaInverseurSource(eq) {
     const csX = 230, csY = yMid - csH / 2;
     // Arrivées des deux sources directement au 1/4 et aux 3/4 de la hauteur du commutateur.
     const yEntreeHaut = csY + csH * 0.25, yEntreeBas = csY + csH * 0.75;
-    ctx.fillStyle = "#5B6B7D"; ctx.fillText(`Source 1 ${regime("source1")}`, 100, yEntreeHaut - 14);
-    ctx.fillText(`Source 2 ${regime("source2")}`, 100, yEntreeBas - 14);
-    line(38, yEntreeHaut, csX, yEntreeHaut); line(38, yEntreeBas, csX, yEntreeBas);
-    pastilleSchema(ctx, "R1", 24, yEntreeHaut); pastilleSchema(ctx, "R2", 24, yEntreeBas);
+    line(40, yEntreeHaut, csX, yEntreeHaut); line(40, yEntreeBas, csX, yEntreeBas);
+    pastilleSchema(ctx, "R1", 26, yEntreeHaut); pastilleSchema(ctx, "R2", 26, yEntreeBas);
+    libelleSousRepere(ctx, `Source 1 ${regime("source1")}`, 12, yEntreeHaut, "left"); libelleSousRepere(ctx, `Source 2 ${regime("source2")}`, 12, yEntreeBas, "left");
+    ctx.fillStyle = "#5B6B7D";
     ctx.fillText("Commutateur", csX + csW + 72, yMid + 16);
     ctx.fillText("statique", csX + csW + 72, yMid + 30);
     drawIconCommutateurStatique(ctx, csX, csY, csW, csH, "vertical");
-    line(csX + csW, yMid, 460, yMid); arrowRight(455, yMid);
-    ctx.font = "10.5px " + SCHEMA_POLICE; ctx.fillText(`Utilisation ${regime("utilisation")}`, 435, yMid - 16);
+    line(csX + csW, yMid, 452, yMid); arrowRight(450, yMid);
+    pastilleSchema(ctx, "RS", 474, yMid);
+    libelleSousRepere(ctx, `Utilisation ${regime("utilisation")}`, 492, yMid, "right");
 
     ctx.font = "italic 10.5px " + SCHEMA_POLICE; ctx.fillStyle = "#8B96A3"; ctx.textAlign = "left";
     ctx.fillText("Inverseur de source — commutation entre deux sources, sans conversion de puissance", 14, h - 14);
