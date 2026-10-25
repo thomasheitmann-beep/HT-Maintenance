@@ -1427,7 +1427,9 @@ const FUSIBLE_FIELDS = [
       return age > duree ? `⚠ ${age} ans — durée de vie constructeur (${duree} ans) dépassée, à surveiller / envisager le remplacement` : `${age} an(s) — dans la durée de vie constructeur (${duree} ans)`;
     },
   },
-  ...L1L2L3("µΩ"),
+  // Résistance à froid d'un fusible HTA : quelques centaines de mΩ (petits calibres) à quelques mΩ (gros calibres) —
+  // L1 / L2 / L3 en mΩ, comme la R mesurée, la référence catalogue et la tolérance (auparavant en µΩ par erreur).
+  ...L1L2L3("mΩ"),
   F("valeur", "R mesurée à 20°C", "mΩ"),
   {
     key: "tol_min", label: "Tolérance min", unit: "mΩ", unitFrom: "valeur",
@@ -3760,6 +3762,13 @@ function repairEquipementControles(eq) {
     });
     eq = { ...eq, unitesEnBase: true };
   }
+  // Fusibles HTA : L1 / L2 / L3 passent de µΩ à mΩ (unité de base). Reprise unique des mesures déjà saisies (voir migrerMesuresFusible).
+  schema.sections.forEach((sec) => (sec.items || []).forEach((item) => {
+    if (item.fields !== FUSIBLE_FIELDS) return;
+    const v = controles[sec.key]?.[item.key];
+    if (!v || !v.fields || v.fields[MARQUEUR_FUSIBLE_MOHM]) return;
+    controles[sec.key] = { ...controles[sec.key], [item.key]: { ...v, fields: migrerMesuresFusible(v.fields) } };
+  }));
   schema.sections.forEach((sec) => {
     controles[sec.key] = { ...(controles[sec.key] || {}) };
     sec.items.forEach((item) => {
@@ -3769,6 +3778,7 @@ function repairEquipementControles(eq) {
           fieldsDefault[f.key] = "";
           if (unitFamilyFor(f.unit)) fieldsDefault[f.key + "Unite"] = f.unit;
         });
+        if (item.fields === FUSIBLE_FIELDS) fieldsDefault[MARQUEUR_FUSIBLE_MOHM] = true;
         controles[sec.key][item.key] = item.kind === "control" ? { action: "", etat: "Conforme", fields: fieldsDefault } : { fields: fieldsDefault };
       }
     });
@@ -3776,6 +3786,27 @@ function repairEquipementControles(eq) {
     if (sec.key === "parametrage_relais" && !controles.parametrage_relais_seuils) controles.parametrage_relais_seuils = [emptySeuilEntry(PARAM_SEUIL_TYPES[0])];
   });
   return appliquerEtatsAutoDisjoncteur({ ...eq, controles });
+}
+// Reprise des mesures L1 / L2 / L3 des fusibles HTA, autrefois enregistrées en µΩ (unité de base) alors que la tolérance est en mΩ.
+//  - Unité choisie à l'écran autre que µΩ (mΩ, Ω) : la valeur enregistrée était bien convertie en µΩ → simple conversion µΩ → mΩ.
+//  - Unité laissée à µΩ (cas courant) : le technicien a en pratique saisi des mΩ (valeurs comparées à la tolérance en mΩ).
+//    Si une résistance de référence est connue (catalogue ou R mesurée), on retient l'interprétation la plus proche de celle-ci ;
+//    sinon la valeur est conservée telle quelle, lue en mΩ.
+const MARQUEUR_FUSIBLE_MOHM = "mesuresEnMilliohm";
+function migrerMesuresFusible(fieldsSrc) {
+  const fields = { ...fieldsSrc, [MARQUEUR_FUSIBLE_MOHM]: true };
+  const ref = resistanceFroidConnue(fields.modele, fields.un, fields.in, fields.reference) ?? numOf(fields.valeur);
+  const ecartLog = (a, b) => Math.abs(Math.log(a / b));
+  ["l1", "l2", "l3"].forEach((k) => {
+    const v = numOf(fields[k]);
+    const u = fields[k + "Unite"];
+    if (v === null) { if (!u || u === "µΩ") fields[k + "Unite"] = "mΩ"; return; }
+    const enMilli = (x) => String(Number(x.toPrecision(8)));
+    if (u && u !== "µΩ") { fields[k] = enMilli(v / 1000); return; } // valeur stockée en µΩ → mΩ (affichage inchangé)
+    if (ref && ref > 0 && v > 0 && ecartLog(v / 1000, ref) < ecartLog(v, ref)) { fields[k] = enMilli(v / 1000); return; } // vrais µΩ : affichage inchangé (µΩ)
+    fields[k + "Unite"] = "mΩ"; // valeur conservée, désormais lue (et affichée) en mΩ
+  });
+  return fields;
 }
 function createControlesDefaults(schema) {
   const controles = {};
@@ -3787,6 +3818,7 @@ function createControlesDefaults(schema) {
         fieldsDefault[f.key] = f.defaultValue ?? "";
         if (unitFamilyFor(f.unit)) fieldsDefault[f.key + "Unite"] = f.unit;
       });
+      if (item.fields === FUSIBLE_FIELDS) fieldsDefault[MARQUEUR_FUSIBLE_MOHM] = true;
       controles[sec.key][item.key] =
         item.kind === "control" ? { action: "", etat: "Conforme", fields: fieldsDefault } : { fields: fieldsDefault };
     });
@@ -10187,7 +10219,11 @@ function champTolStatus(item, fields, key, etat) {
     const champsConcernes = [tolMinField.unitFrom, ...(tolMinField.phaseKeys || ["l1", "l2", "l3"])].filter(Boolean);
     if (!champsConcernes.includes(key)) return null;
     const min = numOf(tolMinField.compute(fields)), max = tolMaxField ? numOf(tolMaxField.compute(fields)) : null;
-    return colorer(toleranceState(fields[key], min, max));
+    // Mesure et tolérance comparées dans la MÊME unité (ex. mesure en µΩ, tolérance en mΩ → conversion).
+    const def = (item.fields || []).find((f) => f.key === key);
+    const uTol = tolMinField.unit;
+    const valeur = def && def.unit && uTol && def.unit !== uTol && unitFamilyFor(def.unit) === unitFamilyFor(uTol) ? depuisUniteBase(fields[key], def.unit, uTol) : fields[key];
+    return colorer(toleranceState(valeur, min, max));
   }
   if (fields.tolerance !== undefined || fields.tol_max !== undefined) {
     if (!["l1", "l2", "l3", "valeur", "rd", "n"].includes(key)) return null;
