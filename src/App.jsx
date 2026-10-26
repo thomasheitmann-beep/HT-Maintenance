@@ -1755,7 +1755,35 @@ const GRADIN_FIELD_DEFS = [
   { key: "fusiblesRef" }, { key: "fusiblesAnnee" },
   { key: "condensateursRef" }, { key: "condensateursAnnee" },
   { key: "contacteurDuree" }, { key: "fusiblesDuree" }, { key: "condensateursDuree" }, // durée de vie (ans) — vide = 10 ans
+  // Pièces d'usure détaillées : marque, modèle et description séparés (+ tension de bobine du contacteur).
+  { key: "contacteurMarque" }, { key: "contacteurModele" }, { key: "contacteurDescription" }, { key: "contacteurBobine" },
+  { key: "fusiblesMarque" }, { key: "fusiblesModele" }, { key: "fusiblesDescription" },
+  { key: "condensateursMarque" }, { key: "condensateursModele" }, { key: "condensateursDescription" },
 ];
+const PIECES_GRADIN = [["contacteur", "Contacteur"], ["fusibles", "Fusibles"], ["condensateurs", "Condensateurs"]];
+// Mesures réseau avec / sans compensation : puissances par phase (P, S relevés ; Q calculé) et totales.
+// Total = somme des 3 phases quand elles sont toutes relevées ; sinon P / S totaux saisis directement (ancien mode, toujours possible).
+const sommePhases = (f, prefixe) => { const v = [1, 2, 3].map((i) => numOf(f[prefixe + i])); return v.every((x) => x !== null) ? Math.round(v.reduce((a, b) => a + b, 0) * 1000) / 1000 : null; };
+const totalPuissance = (f, k) => sommePhases(f, k) ?? numOf(f[k]);
+const qDepuis = (p, s) => (p === null || s === null || s < p ? "" : Math.round(Math.sqrt(s * s - p * p) * 100) / 100);
+const CHAMPS_PUISSANCES_RESEAU_BATTERIE = [
+  F("p1", "P L1", "kW"), F("p2", "P L2", "kW"), F("p3", "P L3", "kW"),
+  F("s1", "S L1", "kVA"), F("s2", "S L2", "kVA"), F("s3", "S L3", "kVA"),
+  { key: "q1", label: "Q L1 (calculé)", unit: "kVAR", compute: (f) => qDepuis(numOf(f.p1), numOf(f.s1)) },
+  { key: "q2", label: "Q L2 (calculé)", unit: "kVAR", compute: (f) => qDepuis(numOf(f.p2), numOf(f.s2)) },
+  { key: "q3", label: "Q L3 (calculé)", unit: "kVAR", compute: (f) => qDepuis(numOf(f.p3), numOf(f.s3)) },
+  F("p", "P total (si non relevé par phase)", "kW"), F("s", "S total (si non relevé par phase)", "kVA"),
+  { key: "pTotal", label: "P total (calculé)", unit: "kW", compute: (f) => (sommePhases(f, "p") ?? "") },
+  { key: "sTotal", label: "S total (calculé)", unit: "kVA", compute: (f) => (sommePhases(f, "s") ?? "") },
+  { key: "q", label: "Q total (calculé)", unit: "kVAR", compute: (f) => qDepuis(totalPuissance(f, "p"), totalPuissance(f, "s")) },
+  { key: "cosphi", label: "Cos Phi (calculé)", unit: "(cos φ)", compute: (f) => { const p = totalPuissance(f, "p"), s = totalPuissance(f, "s"); return p === null || s === null || s <= 0 ? "" : Math.round((p / s) * 1000) / 1000; } },
+  { key: "tangphi", label: "Tang Phi (calculé)", unit: "(tan φ)", compute: (f) => { const p = totalPuissance(f, "p"), s = totalPuissance(f, "s"); return p === null || s === null || p <= 0 || s < p ? "" : Math.round((Math.sqrt(s * s - p * p) / p) * 1000) / 1000; } },
+];
+const CLES_PUISSANCE_PAR_PHASE = ["p1", "p2", "p3", "s1", "s2", "s3", "q1", "q2", "q3", "pTotal", "sTotal"];
+const LISTE_TENSION_BOBINE_CONTACTEUR = ["24 V AC", "48 V AC", "110 V AC", "230 V AC", "400 V AC", "24 V DC", "48 V DC", "110 V DC", "125 V DC", "220 V DC"];
+// Ancienne saisie : une seule case « Référence » (…Ref) — reprise comme modèle tant que les champs détaillés sont vides.
+const modelePieceGradin = (f, k) => f[k + "Modele"] || (!f[k + "Marque"] ? f[k + "Ref"] || "" : "");
+const textePieceGradin = (f, k) => [f[k + "Marque"], modelePieceGradin(f, k)].filter(Boolean).join(" ");
 // Courant théorique par phase d'un gradin, à partir de sa puissance réactive et de sa tension
 // (I = Q×1000 / (√3×U)) — sert à valider la cohérence des courants mesurés (±10%).
 // Génère des champs L1/L2/L3 + une valeur calculée (moyenne ou max selon la grandeur), fidèle
@@ -1895,11 +1923,46 @@ function pireRangControles(eq) {
   return pire;
 }
 // Capacité (µF) calculée à partir du courant mesuré sur une phase : C = I / (U × 2π × f)
-function gradinCapacite(i, u, f) {
+// Capacité par élément déduite du courant de ligne mesuré. Triphasé : condensateurs couplés en triangle (cas usuel en BT,
+// valeur « 3 × C µF » des plaques) → C = I / (√3 · U · ω). Monophasé : C = I / (U · ω).
+// (Avant : I / (U · ω) aussi en triphasé, soit √3 fois trop — non comparable à la plaque.)
+function gradinCapacite(i, u, f, mono = false) {
   const ii = numOf(i), uu = numOf(u), ff = numOf(f);
   if (ii === null || uu === null || !uu || !ff) return null;
-  return Math.round((ii / (uu * 2 * Math.PI * ff)) * 1e6 * 100) / 100;
+  return Math.round((ii / ((mono ? 1 : Math.sqrt(3)) * uu * 2 * Math.PI * ff)) * 1e6 * 100) / 100;
 }
+// Puissance réactive d'un gradin : par phase (Q phase = U/√3 · I en triphasé, U · I en monophasé) et totale.
+// Total : somme des 3 phases si toutes sont mesurées ; estimé (moyenne × 3) s'il en manque ; à défaut, Q déclaré.
+function gradinPuissances(g, mono) {
+  const f = (g && g.fields) || {};
+  const u = numOf(f.u);
+  const arr = (v) => (v === null || v === undefined ? null : Math.round(v * 100) / 100);
+  const phase = (i) => { const ii = numOf(i); return ii === null || u === null ? null : arr(((mono ? 1 : 1 / Math.sqrt(3)) * u * ii) / 1000); };
+  const phases = mono ? [phase(f.i1)] : [phase(f.i1), phase(f.i2), phase(f.i3)];
+  const mesurees = phases.filter((v) => v !== null);
+  let total = null, source = null;
+  if (mono && mesurees.length) { total = mesurees[0]; source = "mesure"; }
+  else if (!mono && mesurees.length === 3) { total = arr(mesurees.reduce((a, b) => a + b, 0)); source = "mesure"; }
+  else if (!mono && mesurees.length) { total = arr((mesurees.reduce((a, b) => a + b, 0) / mesurees.length) * 3); source = "estime"; }
+  else if (numOf(f.q) !== null) { total = numOf(f.q); source = "declare"; }
+  return { phases, total, source, declare: numOf(f.q) };
+}
+// Puissance de la batterie : somme des gradins, par phase (si toutes les phases de tous les gradins sont mesurées) et au total.
+function puissancesBatterie(eq) {
+  const mono = estBatterieMono(eq);
+  const gradins = (eq.controles?.gradins_dynamique || []).filter((g) => g.label || numOf(g.fields?.q) !== null);
+  const parGradin = gradins.map((g) => ({ nom: g.label || "Gradin", ...gradinPuissances(g, mono) }));
+  const nbPh = mono ? 1 : 3;
+  const phasesCompletes = parGradin.length > 0 && parGradin.every((p) => p.phases.every((v) => v !== null));
+  const phases = phasesCompletes ? Array.from({ length: nbPh }, (_, k) => Math.round(parGradin.reduce((s2, p) => s2 + p.phases[k], 0) * 100) / 100) : null;
+  const avecTotal = parGradin.filter((p) => p.total !== null);
+  const total = avecTotal.length ? Math.round(avecTotal.reduce((s2, p) => s2 + p.total, 0) * 100) / 100 : null;
+  const sources = new Set(avecTotal.map((p) => p.source));
+  const source = !avecTotal.length ? null : sources.size === 1 ? [...sources][0] : "mixte";
+  const declareTotal = parGradin.some((p) => p.declare !== null) ? Math.round(parGradin.reduce((s2, p) => s2 + (p.declare || 0), 0) * 100) / 100 : null;
+  return { mono, parGradin, phases, total, source, complet: avecTotal.length === parGradin.length, declareTotal, qn: numOf(eq.identification?.qn) };
+}
+const LIBELLE_SOURCE_PUISSANCE = { mesure: "calculée d'après les courants mesurés", estime: "estimée (phases non toutes mesurées)", declare: "puissance déclarée (courants non mesurés)", mixte: "en partie mesurée, en partie déclarée" };
 // Puissance réactive (kVAR) déduite du courant mesuré sur une phase — inverse de gradinIntensiteTheorique,
 // utile pour comparer phase par phase et au total avec la valeur théorique déclarée du gradin (Q).
 function gradinQMesuree(i, u, mono) {
@@ -3301,8 +3364,10 @@ const SCHEMAS = {
       { key: "qn", label: "Qn (kVAR)", numeric: true }, { key: "triphase", label: "Régime", options: ["Triphasé", "Monophasé"] },
       { key: "nombreGradins", label: "Nombre total de gradins", numeric: true }, { key: "anneeMiseEnService", label: "Année de mise en service", numeric: true },
       { key: "transformateurAssocie", label: "Transformateur associé (repère, pour le calcul de résonance)" },
+      { key: "transformateursParallele", label: "Autres transformateurs en parallèle (même jeu de barres BT)", multi: true },
       { key: "transfoSnManuel", label: "Sn du transformateur (kVA) — si non suivi dans l'app", numeric: true },
       { key: "transfoUccManuel", label: "Ucc du transformateur (%) — si non suivi dans l'app", numeric: true },
+      { key: "transfoNbParallele", label: "Nombre de transformateurs identiques en parallèle — si non suivis dans l'app", numeric: true },
     ],
     sections: [
       { key: "environnement", title: "Environnement et exploitation", items: [
@@ -3342,7 +3407,7 @@ const SCHEMAS = {
         C("tempo_reenclenchement", "Temporisation avant réenclenchement d'un gradin", [F("valeur", "Valeur", "s")]),
         C("alarmes_signalisations_batt", "Alarmes et signalisations"),
       ]},
-      { key: "mesures_amont", title: "Mesures réseau amont (batterie en service)", items: [
+      { key: "mesures_amont", title: "Mesures avec compensation (réseau amont, batterie en service)", items: [
         C("gradins_en_service", "Gradins en service lors de la mesure", [F("valeur", "Gradins actifs (ex. 1, 2, 3)")]),
         C("frequence_amont", "Fréquence", [F("hz", "Fréquence", "Hz")]),
         C("tensions_amont", "Tensions", [
@@ -3355,14 +3420,9 @@ const SCHEMAS = {
           { key: "tol_min", label: "Seuil bas", unit: null, hidden: true, phaseKeys: ["thdi1", "thdi2", "thdi3"], compute: () => "" },
           { key: "tol_max", label: "Seuil indicatif ThdI", unit: "% (repère général — dépend du rapport Isc/IL, IEEE 519-2014)", phaseKeys: ["thdi1", "thdi2", "thdi3"], compute: () => 10 },
         ]),
-        C("puissances_amont", "Puissances", [
-          F("p", "P", "kW"), F("s", "S", "kVA"),
-          { key: "q", label: "Q (calculé)", unit: "kVAR", compute: (f) => { const p = numOf(f.p), s = numOf(f.s); if (p === null || s === null || s < p) return ""; return Math.round(Math.sqrt(s * s - p * p) * 1000) / 1000; } },
-          { key: "cosphi", label: "Cos Phi (calculé)", unit: "(cos φ)", compute: (f) => { const p = numOf(f.p), s = numOf(f.s); if (p === null || s === null || s <= 0) return ""; return Math.round((p / s) * 1000) / 1000; } },
-          { key: "tangphi", label: "Tang Phi (calculé)", unit: "(tan φ)", compute: (f) => { const p = numOf(f.p), s = numOf(f.s); if (p === null || s === null || p <= 0 || s < p) return ""; return Math.round((Math.sqrt(s * s - p * p) / p) * 1000) / 1000; } },
-        ]),
+        C("puissances_amont", "Puissances", CHAMPS_PUISSANCES_RESEAU_BATTERIE),
       ]},
-      { key: "mesures_aval", title: "Mesures réseau aval (ou batterie hors service)", items: [
+      { key: "mesures_aval", title: "Mesures sans compensation (réseau aval ou batterie hors service)", items: [
         C("frequence_aval", "Fréquence", [F("hz", "Fréquence", "Hz")]),
         C("tensions_aval", "Tensions", [
           F("u12", "U12", "V"), F("u23", "U23", "V"), F("u31", "U31", "V"), F("thdv1", "THdV L1", "%"), F("thdv2", "THdV L2", "%"), F("thdv3", "THdV L3", "%"),
@@ -3374,12 +3434,7 @@ const SCHEMAS = {
           { key: "tol_min", label: "Seuil bas", unit: null, hidden: true, phaseKeys: ["thdi1", "thdi2", "thdi3"], compute: () => "" },
           { key: "tol_max", label: "Seuil indicatif ThdI", unit: "% (repère général — dépend du rapport Isc/IL, IEEE 519-2014)", phaseKeys: ["thdi1", "thdi2", "thdi3"], compute: () => 10 },
         ]),
-        C("puissances_aval", "Puissances", [
-          F("p", "P", "kW"), F("s", "S", "kVA"),
-          { key: "q", label: "Q (calculé)", unit: "kVAR", compute: (f) => { const p = numOf(f.p), s = numOf(f.s); if (p === null || s === null || s < p) return ""; return Math.round(Math.sqrt(s * s - p * p) * 1000) / 1000; } },
-          { key: "cosphi", label: "Cos Phi (calculé)", unit: "(cos φ)", compute: (f) => { const p = numOf(f.p), s = numOf(f.s); if (p === null || s === null || s <= 0) return ""; return Math.round((p / s) * 1000) / 1000; } },
-          { key: "tangphi", label: "Tang Phi (calculé)", unit: "(tan φ)", compute: (f) => { const p = numOf(f.p), s = numOf(f.s); if (p === null || s === null || p <= 0 || s < p) return ""; return Math.round((Math.sqrt(s * s - p * p) / p) * 1000) / 1000; } },
-        ]),
+        C("puissances_aval", "Puissances", CHAMPS_PUISSANCES_RESEAU_BATTERIE),
       ]},
       // Mesures à l'analyseur de réseau (TGBT, batterie en service) : taux d'harmoniques individuels,
       // exploités par l'analyse du risque de résonance (rapport Word + constats automatiques).
@@ -3670,6 +3725,7 @@ function getSchema(eq) {
     const sections = base.sections.map((sec) => (sec.key !== "mesures_amont" && sec.key !== "mesures_aval") ? sec : {
       ...sec,
       items: sec.items.map((it) => {
+        if (/^puissances_/.test(it.key)) return { ...it, fields: it.fields.filter((f) => !CLES_PUISSANCE_PAR_PHASE.includes(f.key)).map((f) => (f.key === "p" ? { ...f, label: "P" } : f.key === "s" ? { ...f, label: "S" } : f.key === "q" ? { ...f, label: "Q (calculé)" } : f)) };
         const g = /^tensions_/.test(it.key) ? garder.tensions : /^courants_/.test(it.key) ? garder.courants : null;
         if (!g) return it;
         return { ...it, fields: it.fields.filter((f) => g.includes(f.key) || f.key === "tol_max").map((f) => libelles[f.key] ? { ...f, label: libelles[f.key] } : (f.phaseKeys ? { ...f, phaseKeys: f.phaseKeys.filter((k) => g.includes(k)) } : f)) };
@@ -3957,7 +4013,7 @@ function dupliquerEquipementPourNouvelleVisite(source) {
   if (src.batterie_id) fresh.controles.batterie_id = clone(src.batterie_id);
   if (src.usure?.ventilation_usure && fresh.controles.usure) fresh.controles.usure = { ...fresh.controles.usure, ventilation_usure: clone(src.usure.ventilation_usure) };
   if (Array.isArray(src.gradins_dynamique) && src.gradins_dynamique.length) {
-    const garder = ["q", "u", "selfMA", "selfFrequence", "contacteurRef", "contacteurAnnee", "contacteurDuree", "fusiblesRef", "fusiblesAnnee", "fusiblesDuree", "condensateursRef", "condensateursAnnee", "condensateursDuree"];
+    const garder = ["contacteurMarque", "contacteurModele", "contacteurDescription", "contacteurBobine", "fusiblesMarque", "fusiblesModele", "fusiblesDescription", "condensateursMarque", "condensateursModele", "condensateursDescription", "q", "u", "selfMA", "selfFrequence", "contacteurRef", "contacteurAnnee", "contacteurDuree", "fusiblesRef", "fusiblesAnnee", "fusiblesDuree", "condensateursRef", "condensateursAnnee", "condensateursDuree"];
     fresh.controles.gradins_dynamique = src.gradins_dynamique.map((g) => {
       const base = emptyDynamicEntry(g.label, GRADIN_FIELD_DEFS, true);
       garder.forEach((k) => { if (g.fields && g.fields[k] !== undefined) base.fields[k] = g.fields[k]; });
@@ -4920,14 +4976,15 @@ function nomLocalEquipement(eq, locaux) {
   return String(eq?.localLibre || "").trim();
 }
 function ChoixLocalEquipement({ eq, locaux, update, listId }) {
-  const valeur = nomLocalEquipement(eq, locaux);
+  // Valeur brute (non rognée) pendant la saisie : sinon l'espace tapé en fin de mot disparaît aussitôt.
+  const valeur = localDeEquipement(eq, locaux) ? nomLocalEquipement(eq, locaux) : String(eq?.localLibre || "");
   const choisir = (texte) => {
     const t = String(texte || "");
     const trouve = (locaux || []).find((l) => (l.nom || "Local sans nom").trim().toLowerCase() === t.trim().toLowerCase());
     if (trouve) update({ ...eq, localId: trouve.id, localLibre: "" });
     else update({ ...eq, localId: "", localLibre: t });
   };
-  const libre = !localDeEquipement(eq, locaux) && valeur;
+  const libre = !localDeEquipement(eq, locaux) && valeur.trim();
   return (
     <>
       <Combo value={valeur} onChange={choisir} options={(locaux || []).map((l) => l.nom || "Local sans nom")} listId={listId} placeholder={(locaux || []).length ? "Choisir ou saisir" : "Saisir le local"} />
@@ -6528,10 +6585,11 @@ function CustomActionsList({ custom, onAdd, onChange, onRemove, idPrefix }) {
   );
 }
 
-function SectionBlock({ title, items, values, onChangeItem, idPrefix, custom, onAddCustom, onChangeCustom, onRemoveCustom, extra, toleranceOverrides }) {
+function SectionBlock({ title, items, values, onChangeItem, idPrefix, custom, onAddCustom, onChangeCustom, onRemoveCustom, extra, toleranceOverrides, entete = null }) {
   return (
     <Card style={{ marginBottom: 14 }}>
       <SectionTitle>{title}</SectionTitle>
+      {entete}
       <div>
         {items.map((item) => (
           <ControlRow key={item.key} item={item} value={values[item.key]} onChange={(v) => onChangeItem(item.key, v)} idPrefix={idPrefix} toleranceOverride={toleranceOverrides && toleranceOverrides[item.key]} />
@@ -7279,14 +7337,13 @@ function GradinsPanel({ eq, update, idPrefix }) {
             const tolMax = iTheo !== null ? Math.round(iTheo * 1.1 * 100) / 100 : null;
             const iStatus = (v) => (iTheo === null ? null : toleranceState(v, tolMin, tolMax));
             const freqReseau = numOf(eq.controles.mesures_amont?.frequence_amont?.fields?.hz) || 50;
-            const c1 = gradinCapacite(e.fields.i1, e.fields.u, freqReseau);
-            const c2 = gradinCapacite(e.fields.i2, e.fields.u, freqReseau);
-            const c3 = gradinCapacite(e.fields.i3, e.fields.u, freqReseau);
-            const q1 = gradinQMesuree(e.fields.i1, e.fields.u, estBatterieMono(eq));
-            const q2 = gradinQMesuree(e.fields.i2, e.fields.u, estBatterieMono(eq));
-            const q3 = gradinQMesuree(e.fields.i3, e.fields.u, estBatterieMono(eq));
-            const qMesures = [q1, q2, q3].filter((v) => v !== null);
-            const qTotalMesure = qMesures.length ? Math.round((qMesures.reduce((a, b) => a + b, 0) / qMesures.length) * 100) / 100 : null;
+            const mono = estBatterieMono(eq);
+            const c1 = gradinCapacite(e.fields.i1, e.fields.u, freqReseau, mono);
+            const c2 = gradinCapacite(e.fields.i2, e.fields.u, freqReseau, mono);
+            const c3 = gradinCapacite(e.fields.i3, e.fields.u, freqReseau, mono);
+            const pg = gradinPuissances(e, mono);
+            const [q1, q2, q3] = [pg.phases[0], pg.phases[1] ?? null, pg.phases[2] ?? null];
+            const qTotalMesure = pg.source === "mesure" || pg.source === "estime" ? pg.total : null;
             const qStatus = qTotalMesure === null ? null : toleranceState(e.fields.q, Math.round(qTotalMesure * 0.9 * 100) / 100, Math.round(qTotalMesure * 1.1 * 100) / 100);
             const freqAccordTheo = gradinFrequenceAccordTheorique(e.fields.q, e.fields.u, e.fields.selfMA);
             return (
@@ -7315,8 +7372,8 @@ function GradinsPanel({ eq, update, idPrefix }) {
                       <div style={{ fontSize: 10.5, fontWeight: 700, color: "#8B96A3", marginBottom: 6 }}>{ph.phase}</div>
                       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                         <MiniInput label="I" unit="A" value={ph.iVal} onChange={(v) => setField(e.id, ph.i, v)} validState={iStatus(ph.iVal)} />
-                        <MiniComputed label="C" unit="µF" value={ph.c} />
-                        <MiniComputed label="Q" unit="kVAR" value={ph.q} />
+                        <MiniComputed label={estBatterieMono(eq) ? "C" : "C (×3, triangle)"} unit="µF" value={ph.c} />
+                        <MiniComputed label="Q phase" unit="kVAR" value={ph.q} />
                       </div>
                     </div>
                   ))}
@@ -7326,7 +7383,7 @@ function GradinsPanel({ eq, update, idPrefix }) {
                   <MiniInput label="Q" unit="kVAR" value={e.fields.q} onChange={(v) => setField(e.id, "q", v)} validState={qStatus} />
                   <MiniInput label="U" unit="V" value={e.fields.u} onChange={(v) => setField(e.id, "u", v)} />
                   <MiniComputed label="I théorique" unit="A" value={iTheo} />
-                  <MiniComputed label="Q total mesuré" unit="kVAR" value={qTotalMesure} />
+                  <MiniComputed label={pg.source === "estime" ? "Q total (estimé)" : pg.source === "declare" ? "Q total (déclaré)" : "Q total calculé"} unit="kVAR" value={pg.total} />
                 </div>
 
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 8 }}>
@@ -7347,42 +7404,56 @@ function GradinsPanel({ eq, update, idPrefix }) {
                   <BoutonLirePlaque compact libelle="Lire une plaque" typeEquipement="Batterie de compensation"
                     contexte={`Composant d'un gradin de batterie de compensation (condensateur, contacteur ou fusible) — une seule pièce par photo en général. Tension du réseau : ${e.fields.u || 400} V. Pour un condensateur, la référence doit inclure marque et référence suivies entre parenthèses de la puissance à la tension du réseau et de la capacité (ex. « Multicond UHPC-37,0-525-3P (21,5 kvar sous 400 V, 3 × 142,4 µF) »).`}
                     champs={[
-                      { key: "condensateursRef", label: "Condensateurs — marque, référence et caractéristiques" },
+                      { key: "condensateursMarque", label: "Condensateurs — marque" },
+                      { key: "condensateursModele", label: "Condensateurs — modèle / référence" },
+                      { key: "condensateursDescription", label: "Condensateurs — description (puissance kvar, tension, capacité µF, couplage)" },
                       { key: "condensateursAnnee", label: "Condensateurs — année de fabrication (si lisible)" },
-                      { key: "contacteurRef", label: "Contacteur — marque et référence" },
+                      { key: "contacteurMarque", label: "Contacteur — marque" },
+                      { key: "contacteurModele", label: "Contacteur — modèle / référence" },
+                      { key: "contacteurDescription", label: "Contacteur — description (calibre, catégorie AC-6b, puissance condensateur)" },
+                      { key: "contacteurBobine", label: "Contacteur — tension de la bobine de commande", options: LISTE_TENSION_BOBINE_CONTACTEUR },
                       { key: "contacteurAnnee", label: "Contacteur — année de fabrication (si lisible)" },
-                      { key: "fusiblesRef", label: "Fusibles — marque, référence et calibre" },
+                      { key: "fusiblesMarque", label: "Fusibles — marque" },
+                      { key: "fusiblesModele", label: "Fusibles — modèle / référence" },
+                      { key: "fusiblesDescription", label: "Fusibles — description (calibre A, type gG / aM, taille)" },
                       { key: "fusiblesAnnee", label: "Fusibles — année de fabrication (si lisible)" },
                     ]}
                     valeursActuelles={e.fields} onAppliquer={(patch) => setEntry(e.id, { fields: { ...e.fields, ...patch } })} />
                 </div>
                 {(() => {
-                  // Pièces d'usure du gradin : une ligne par pièce, référence en grand, durée de vie 10 ans par défaut (modifiable), échéance calculée.
+                  // Pièces d'usure du gradin : une carte par pièce — marque, modèle, description séparés (+ tension de bobine pour le contacteur),
+                  // année de mise en service, durée de vie (10 ans par défaut) et échéance calculée.
                   const anneeCourante = new Date().getFullYear();
-                  const pieces = [["contacteur", "Contacteur"], ["fusibles", "Fusibles"], ["condensateurs", "Condensateurs"]];
                   const cellStyle = { ...inputStyle, width: "100%", boxSizing: "border-box", padding: "7px 9px", fontSize: 13 };
+                  const etiquette = (t) => <div style={{ fontSize: 10, fontWeight: 700, color: "#8B96A3", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 3 }}>{t}</div>;
                   return (
-                    <div style={{ border: "1px solid #E2E6EB", borderRadius: 10, overflowX: "auto", marginBottom: 10 }}><div style={{ minWidth: 560 }}>
-                      <div style={{ display: "grid", gridTemplateColumns: "minmax(110px, 0.9fr) minmax(160px, 2.4fr) minmax(90px, 0.8fr) minmax(90px, 0.8fr) minmax(90px, 0.8fr)", background: "#F4F6F8", fontSize: 10.5, fontWeight: 700, color: "#5B6B7D", textTransform: "uppercase", letterSpacing: 0.4 }}>
-                        {["Pièce", "Référence", "Année MES", "Durée de vie", "Échéance"].map((t) => <div key={t} style={{ padding: "7px 9px" }}>{t}</div>)}
-                      </div>
-                      {pieces.map(([k, nom]) => {
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 10 }}>
+                      {PIECES_GRADIN.map(([k, nom]) => {
                         const annee = numOf(e.fields[k + "Annee"]);
                         const duree = numOf(e.fields[k + "Duree"]) ?? 10;
                         const echeance = annee !== null ? Math.round(annee) + Math.round(duree) : null;
                         const couleur = echeance === null ? "#8B96A3" : echeance < anneeCourante ? "#C0392B" : echeance === anneeCourante ? "#B5730A" : "#0F8A5F";
-                        const fond = echeance === null ? "transparent" : echeance < anneeCourante ? "#FDF1F0" : echeance === anneeCourante ? "#FDF6EC" : "#EAF7F1";
+                        const fond = echeance === null ? "#F4F6F8" : echeance < anneeCourante ? "#FDF1F0" : echeance === anneeCourante ? "#FDF6EC" : "#EAF7F1";
                         return (
-                          <div key={k} style={{ display: "grid", gridTemplateColumns: "minmax(110px, 0.9fr) minmax(160px, 2.4fr) minmax(90px, 0.8fr) minmax(90px, 0.8fr) minmax(90px, 0.8fr)", alignItems: "center", borderTop: "1px solid #E2E6EB" }}>
-                            <div style={{ padding: "7px 9px", fontWeight: 700, fontSize: 12.5, color: "#1A1F26" }}>{nom}</div>
-                            <div style={{ padding: "5px 6px" }}><input type="text" value={e.fields[k + "Ref"] ?? ""} onChange={(ev) => setField(e.id, k + "Ref", ev.target.value)} placeholder="Référence / modèle" style={cellStyle} /></div>
-                            <div style={{ padding: "5px 6px" }}><input type="number" step="1" value={e.fields[k + "Annee"] ?? ""} onChange={(ev) => setField(e.id, k + "Annee", ev.target.value)} placeholder="ex. 2018" style={cellStyle} /></div>
-                            <div style={{ padding: "5px 6px", display: "flex", alignItems: "center", gap: 4 }}><input type="number" step="1" value={e.fields[k + "Duree"] ?? ""} onChange={(ev) => setField(e.id, k + "Duree", ev.target.value)} placeholder="10" style={cellStyle} /><span style={{ fontSize: 11, color: "#8B96A3" }}>ans</span></div>
-                            <div style={{ padding: "5px 6px" }}><div style={{ padding: "7px 9px", borderRadius: 8, background: fond, color: couleur, fontWeight: 700, fontSize: 13, textAlign: "center" }}>{echeance ?? "—"}</div></div>
+                          <div key={k} style={{ border: "1px solid #E2E6EB", borderRadius: 10, padding: 10, background: "#fff" }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                              <div style={{ fontWeight: 700, fontSize: 13, color: "#1A1F26" }}>{nom}</div>
+                              <div style={{ padding: "4px 10px", borderRadius: 999, background: fond, color: couleur, fontWeight: 700, fontSize: 12 }}>Échéance {echeance ?? "—"}</div>
+                            </div>
+                            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 8 }}>
+                              <div>{etiquette("Marque")}<input type="text" value={e.fields[k + "Marque"] ?? ""} onChange={(ev) => setField(e.id, k + "Marque", ev.target.value)} placeholder="ex. Schneider" style={cellStyle} /></div>
+                              <div>{etiquette("Modèle / référence")}<input type="text" value={e.fields[k + "Modele"] || modelePieceGradin(e.fields, k)} onChange={(ev) => setEntry(e.id, { fields: { ...e.fields, [k + "Modele"]: ev.target.value, [k + "Ref"]: "" } })} placeholder={k === "contacteur" ? "ex. LC1DFK" : k === "fusibles" ? "ex. NH00 gG" : "ex. VarplusCan"} style={cellStyle} /></div>
+                              <div style={{ gridColumn: "span 2" }}>{etiquette("Description")}<input type="text" value={e.fields[k + "Description"] ?? ""} onChange={(ev) => setField(e.id, k + "Description", ev.target.value)} placeholder={k === "contacteur" ? "ex. contacteur condensateur 25 kvar AC-6b" : k === "fusibles" ? "ex. 80 A gG taille 00" : "ex. 25 kvar 440 V triphasé"} style={cellStyle} /></div>
+                              {k === "contacteur" && (
+                                <div>{etiquette("Tension bobine")}<Combo value={e.fields.contacteurBobine ?? ""} onChange={(v) => setField(e.id, "contacteurBobine", v)} options={LISTE_TENSION_BOBINE_CONTACTEUR} listId={`${e.id}-bobine`} placeholder="ex. 230 V AC" /></div>
+                              )}
+                              <div>{etiquette("Année MES")}<input type="number" step="1" value={e.fields[k + "Annee"] ?? ""} onChange={(ev) => setField(e.id, k + "Annee", ev.target.value)} placeholder="ex. 2018" style={cellStyle} /></div>
+                              <div>{etiquette("Durée de vie (ans)")}<input type="number" step="1" value={e.fields[k + "Duree"] ?? ""} onChange={(ev) => setField(e.id, k + "Duree", ev.target.value)} placeholder="10" style={cellStyle} /></div>
+                            </div>
                           </div>
                         );
                       })}
-                    </div></div>
+                    </div>
                   );
                 })()}
 
@@ -7401,7 +7472,47 @@ function GradinsPanel({ eq, update, idPrefix }) {
           })}
         </div>
       )}
+      <PuissanceBatterieCarte eq={eq} />
     </Card>
+  );
+}
+// Synthèse de puissance de la batterie (somme des gradins) : par phase quand tous les courants sont mesurés, et au total.
+function PuissanceBatterieCarte({ eq }) {
+  const pb = puissancesBatterie(eq);
+  if (!pb.parGradin.length || (pb.total === null && !pb.phases)) return null;
+  const th = { background: "#26364A", color: "#fff", padding: "5px 8px", fontSize: 11, fontWeight: 700, textAlign: "center" };
+  const td = { padding: "6px 8px", borderBottom: "1px solid #E2E6EB", fontSize: 12, textAlign: "center" };
+  const noms = pb.mono ? ["Phase"] : ["L1", "L2", "L3"];
+  const ecartQn = pb.qn && pb.total !== null ? Math.round(((pb.total - pb.qn) / pb.qn) * 1000) / 10 : null;
+  return (
+    <div style={{ marginTop: 12, border: "1px solid #D8DEE5", borderRadius: 10, padding: 12, background: "#F7F8FA" }}>
+      <div style={{ fontSize: 11, fontWeight: 700, color: "#5B6B7D", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 8 }}>Puissance de la batterie (somme des gradins)</div>
+      <div style={{ overflowX: "auto" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", background: "#fff" }}>
+          <thead><tr><th style={{ ...th, textAlign: "left" }}>Gradin</th>{!pb.mono && noms.map((n) => <th key={n} style={th}>Q {n}</th>)}<th style={th}>Q total</th></tr></thead>
+          <tbody>
+            {pb.parGradin.map((p, i) => (
+              <tr key={i}>
+                <td style={{ ...td, textAlign: "left", fontWeight: 600 }}>{p.nom}</td>
+                {!pb.mono && p.phases.map((v, k) => <td key={k} style={td}>{v !== null ? `${v} kVAR` : "—"}</td>)}
+                <td style={{ ...td, fontWeight: 700 }}>{p.total !== null ? `${p.total} kVAR` : "—"}{p.source === "estime" ? " *" : p.source === "declare" ? " (décl.)" : ""}</td>
+              </tr>
+            ))}
+            <tr style={{ background: "#EEF4FB" }}>
+              <td style={{ ...td, textAlign: "left", fontWeight: 800, color: "#0A5DA8" }}>Batterie</td>
+              {!pb.mono && noms.map((n, k) => <td key={n} style={{ ...td, fontWeight: 700, color: "#0A5DA8" }}>{pb.phases ? `${pb.phases[k]} kVAR` : "—"}</td>)}
+              <td style={{ ...td, fontWeight: 800, color: "#0A5DA8" }}>{pb.total !== null ? `${pb.total} kVAR` : "—"}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div style={{ fontSize: 11, color: "#5B6B7D", marginTop: 6, lineHeight: 1.45 }}>
+        Puissance totale {LIBELLE_SOURCE_PUISSANCE[pb.source] || ""}{!pb.complet ? " — certains gradins sans puissance connue" : ""}.
+        {pb.qn ? ` Qn déclaré : ${pb.qn} kVAR${ecartQn !== null && pb.source !== "declare" ? ` (écart ${ecartQn > 0 ? "+" : ""}${String(ecartQn).replace(".", ",")} %)` : ""}.` : ""}
+        {!pb.mono && !pb.phases ? " Puissance par phase : disponible quand les courants des 3 phases de chaque gradin sont relevés." : ""}
+        {pb.parGradin.some((p) => p.source === "estime") ? " * estimé d'après les phases mesurées (moyenne × 3)." : ""}
+      </div>
+    </div>
   );
 }
 
@@ -7777,6 +7888,43 @@ function calcTensionParCellule(eq) {
   const vFloating = numOf(eq.controles.mesures_batterie_ups?.tension_floating?.fields?.v);
   if (!t || vFloating === null || !t.nbElementsTotal) return null;
   return Math.round((vFloating / t.nbElementsTotal) * 1000) / 1000;
+}
+// Batterie de compensation : recopie des mesures « avec compensation » dans « sans compensation » (et des harmoniques EN service
+// dans HORS service) — cas où aucun gradin n'était enclenché pendant la mesure : les deux relevés sont alors identiques.
+function recopierMesuresCompensation(eq, paires) {
+  const controles = { ...eq.controles };
+  paires.forEach(([secSource, secCible, cleCible]) => {
+    const source = controles[secSource] || {};
+    const cible = { ...(controles[secCible] || {}) };
+    Object.keys(cible).forEach((k) => {
+      if (k.endsWith("__custom")) return;
+      const ks = cleCible(k);
+      const src = source[ks];
+      if (!src || !src.fields || ks === k && secSource === secCible) return;
+      cible[k] = { ...(cible[k] || {}), fields: { ...(cible[k]?.fields || {}), ...src.fields }, ...(src.etat ? { etat: src.etat } : {}) };
+    });
+    controles[secCible] = cible;
+  });
+  return { ...eq, controles };
+}
+const aucunGradinEnclenche = (eq) => {
+  const v = String(eq.controles?.mesures_amont?.gradins_en_service?.fields?.valeur ?? "").trim();
+  return v !== "" && /^(0|aucun|aucune|néant|neant|-|—)$/i.test(v);
+};
+const sectionRemplie = (sec) => Object.entries(sec || {}).some(([k, it]) => !k.endsWith("__custom") && it && it.fields && Object.entries(it.fields).some(([fk, v]) => !/Unite$/.test(fk) && v !== "" && v !== null && v !== undefined));
+function BoutonRecopieCompensation({ eq, update, paires, libelle, sectionCible }) {
+  const aucun = aucunGradinEnclenche(eq);
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", margin: "-4px 0 10px", padding: "8px 10px", borderRadius: 8, background: aucun ? "#EEF4FB" : "#F7F8FA", border: `1px solid ${aucun ? "#BFD3EA" : "#E2E6EB"}` }}>
+      <button onClick={() => {
+        if (sectionRemplie(eq.controles[sectionCible]) && !window.confirm("Des valeurs sont déjà saisies : les remplacer par celles de la mesure avec compensation ?")) return;
+        update(recopierMesuresCompensation(eq, paires));
+      }} style={btnGhost(BRAND.blue)}><Copy size={13} /> {libelle}</button>
+      <span style={{ fontSize: 11, color: aucun ? "#0A5DA8" : "#8B96A3" }}>
+        {aucun ? "Aucun gradin enclenché pendant la mesure : les deux relevés sont identiques, la recopie évite une double saisie." : "À utiliser si aucun gradin n'était enclenché pendant la mesure (relevés identiques)."}
+      </span>
+    </div>
+  );
 }
 function calcPiecesUsure(eq) {
   const lignes = [];
@@ -8299,28 +8447,67 @@ function calcResonanceHarmonique(eq, allEquipements) {
     .filter((g) => numOf(g.fields?.selfFrequence))
     .map((g) => ({ nom: g.label || "gradin", frequence: numOf(g.fields.selfFrequence), rangAccord: Math.round((numOf(g.fields.selfFrequence) / freqReseau) * 100) / 100 }));
   const selfInfo = gradinsAvecSelf.length ? { present: true, gradins: gradinsAvecSelf } : { present: false };
-  // Repli sur saisie manuelle (Sn/Ucc directement sur la batterie) si aucun transformateur suivi
-  // dans l'app ne correspond — utile quand le transfo n'est pas un équipement séparé du site.
-  if (!repereTransfo) {
-    if (snManuel && uccManuel) {
-      if (!qn) return { manque: "Qn (kVAR) de la batterie (champ dans l'identification)" };
-      const scc = (snManuel / uccManuel) * 100;
-      return { h0: Math.round(Math.sqrt(scc / qn) * 100) / 100, transfoLabel: "valeurs saisies manuellement", scc: Math.round(scc), snAffiche: snManuel, uccAffiche: uccManuel, selfInfo };
-    }
-    return { manque: "associez un transformateur suivi (champ « Transformateur associé ») ou renseignez Sn/Ucc manuellement" };
+  // Transformateurs en amont de la batterie. En parallèle sur le même jeu de barres BT, leurs puissances de court-circuit
+  // s'additionnent (Scc ≈ Σ Sn/Ucc) : h₀ = √(Scc/Q) augmente. La configuration la plus défavorable peut être celle où un
+  // seul transformateur est en service (maintenance, couplage ouvert) : le rang de résonance est donc calculé pour CHAQUE
+  // configuration d'exploitation possible. Repli sur Sn/Ucc saisis à la main (n transformateurs identiques) si aucun n'est suivi.
+  const reperes = [repereTransfo, ...(Array.isArray(eq.identification?.transformateursParallele) ? eq.identification.transformateursParallele : [])]
+    .map((r) => String(r || "").trim()).filter(Boolean)
+    .filter((r, i, t) => t.findIndex((x) => x.toLowerCase() === r.toLowerCase()) === i);
+  let transfos = [], manuel = false;
+  if (!reperes.length) {
+    if (!(snManuel && uccManuel)) return { manque: "associez un transformateur suivi (champ « Transformateur associé ») ou renseignez Sn/Ucc manuellement" };
+    if (!qn) return { manque: "Qn (kVAR) de la batterie (champ dans l'identification)" };
+    const nb = Math.max(1, Math.min(6, Math.round(numOf(eq.identification?.transfoNbParallele) || 1)));
+    manuel = true;
+    transfos = Array.from({ length: nb }, (_, i) => ({ label: nb > 1 ? `Transformateur ${i + 1}` : "valeurs saisies manuellement", sn: snManuel, ucc: uccManuel }));
+  } else {
+    const manquants = [];
+    reperes.forEach((r) => {
+      const t = (allEquipements || []).find((e) => e.type === "Transformateur" && (e.identification?.repere || "").trim().toLowerCase() === r.toLowerCase());
+      if (!t) { manquants.push(`aucun transformateur avec le repère « ${r} » trouvé sur ce site — vérifiez l'orthographe ou qu'il a bien été ajouté`); return; }
+      const sn = numOf(t.identification?.puissance), ucc = numOf(t.identification?.ucc);
+      if (!sn) manquants.push(`renseignez la puissance (kVA) du transformateur ${t.identification?.repere}`);
+      if (!ucc) manquants.push(`renseignez Ucc (%) du transformateur ${t.identification?.repere}`);
+      transfos.push({ label: t.identification?.repere || r, sn, ucc });
+    });
+    if (!qn) manquants.push("renseignez Qn (kVAR) de la batterie (champ dans l'identification)");
+    if (manquants.length) return { manque: manquants.join(" ; ") };
   }
-  const transfo = (allEquipements || []).find((e) => e.type === "Transformateur" && (e.identification?.repere || "").trim().toLowerCase() === repereTransfo.toLowerCase());
-  if (!transfo) return { manque: `aucun transformateur avec le repère « ${repereTransfo} » trouvé sur ce site — vérifiez l'orthographe ou qu'il a bien été ajouté` };
-  const sn = numOf(transfo.identification?.puissance); // kVA
-  const ucc = numOf(transfo.identification?.ucc); // %
-  const manquants = [];
-  if (!sn) manquants.push(`la puissance (kVA) du transformateur ${transfo.identification?.repere}`);
-  if (!ucc) manquants.push(`Ucc (%) du transformateur ${transfo.identification?.repere}`);
-  if (!qn) manquants.push("Qn (kVAR) de la batterie (champ dans l'identification)");
-  if (manquants.length) return { manque: `renseignez ${manquants.join(" et ")}` };
-  const scc = (sn / ucc) * 100; // kVA — puissance de court-circuit approximée
-  const h0 = Math.sqrt(scc / qn);
-  return { h0: Math.round(h0 * 100) / 100, transfoLabel: transfo.identification?.repere || "transfo associé", scc: Math.round(scc), snAffiche: sn, uccAffiche: ucc, selfInfo };
+  transfos = transfos.map((t) => ({ ...t, scc: (t.sn / t.ucc) * 100 }));
+  const n = transfos.length;
+  // Configurations : tous en service, puis chaque combinaison partielle (doublons de Scc fusionnés, ex. transformateurs identiques).
+  // Les combinaisons de même Scc (ex. transformateurs identiques) sont regroupées : « TR1 ou TR2 seul en service ».
+  const parScc = new Map();
+  const ajouterConfig = (indices) => {
+    const scc = indices.reduce((s2, i) => s2 + transfos[i].scc, 0);
+    const cle = Math.round(scc);
+    if (!parScc.has(cle)) parScc.set(cle, { scc: cle, groupes: [], taille: indices.length });
+    parScc.get(cle).groupes.push(indices);
+  };
+  const tousIdx = transfos.map((_, i) => i);
+  ajouterConfig(tousIdx);
+  if (n > 1 && n <= 4) {
+    for (let taille = n - 1; taille >= 1; taille--) {
+      for (let m = 1; m < (1 << n); m++) { const idx = tousIdx.filter((i) => m & (1 << i)); if (idx.length === taille) ajouterConfig(idx); }
+    }
+  } else if (n > 4) tousIdx.forEach((i) => ajouterConfig([i]));
+  const configurations = [...parScc.values()].map(({ scc, groupes, taille }) => {
+    const tous = taille === n;
+    const nomGroupe = (g) => g.map((i) => transfos[i].label).join(" + ");
+    const label = n === 1 ? transfos[0].label
+      : manuel ? (tous ? `${n} transformateurs en parallèle` : `${taille} transformateur${taille > 1 ? "s" : ""} en service sur ${n}`)
+      : tous ? `${nomGroupe(groupes[0])} en parallèle` : `${groupes.map(nomGroupe).join(" ou ")} seul${taille > 1 ? "s" : ""} en service`;
+    return { label, scc, nbEnService: taille, normale: tous };
+  });
+  const sccTotal = transfos.reduce((s2, t) => s2 + t.scc, 0);
+  const fr = (v) => String(v).replace(".", ",");
+  const detail = transfos.map((t) => `${n > 1 ? t.label + " : " : ""}Sn = ${t.sn} kVA, Ucc = ${fr(t.ucc)} %`).join(" ; ");
+  return {
+    h0: Math.round(Math.sqrt(sccTotal / qn) * 100) / 100, scc: Math.round(sccTotal), selfInfo,
+    transfoLabel: n > 1 ? (manuel ? `${n} transformateurs identiques en parallèle` : transfos.map((t) => t.label).join(" + ") + " en parallèle") : transfos[0].label,
+    snAffiche: transfos[0].sn, uccAffiche: transfos[0].ucc, detail, multi: n > 1, transfos, configurations,
+  };
 }
 // ---------------------------------------------------------------------------------------------
 // Analyse complète du risque de résonance d'une batterie de compensation :
@@ -8387,10 +8574,10 @@ function analyseResonanceBatterie(eq, allEquipements) {
   if (!base.manque && filtrage !== "total") {
     const qs = gradins.map((g) => numOf(g.fields?.q)).filter((q) => q !== null && q > 0);
     const liste = qs.length ? qs : (qn ? [qn] : []);
-    let cumul = 0;
-    etapes = liste.map((q, i) => {
+    const configs = base.configurations && base.configurations.length ? base.configurations : [{ label: base.transfoLabel, scc: base.scc, normale: true }];
+    etapes = configs.flatMap((cfg) => { let cumul = 0; return liste.map((q, i) => {
       cumul += q;
-      const h0 = Math.sqrt(base.scc / cumul);
+      const h0 = Math.sqrt(cfg.scc / cumul);
       const proche = RANGS_RESONANCE.map((h) => ({ h, ecart: Math.abs(h0 - h) / h })).sort((a, b) => a.ecart - b.ecart)[0];
       const pres = presence(proche.h);
       const amp = harmo(proche.h).niveauAmpli; // amplification mesurée à l'enclenchement (null si non mesurée)
@@ -8407,9 +8594,11 @@ function analyseResonanceBatterie(eq, allEquipements) {
         niveau = amp !== null ? amp : pres === "present" ? 1 : 0;
         verdict = amp === 2 ? `Amplification du rang ${proche.h} mesurée` : pres === "present" || amp === 1 ? `Vigilance : rang ${proche.h} présent et assez proche` : `Vigilance : assez proche du rang ${proche.h}`;
       }
-      return { n: i + 1, q: arrondi(cumul, 1), h0: arrondi(h0), rangProche: proche.h, ecartPct: Math.round(proche.ecart * 100), presence: pres, niveau, verdict };
-    });
+      return { n: i + 1, q: arrondi(cumul, 1), h0: arrondi(h0), rangProche: proche.h, ecartPct: Math.round(proche.ecart * 100), presence: pres, niveau, verdict, config: cfg.label, configNormale: !!cfg.normale, sccConfig: cfg.scc };
+    }); });
   }
+  const multiConfigs = !!(base.configurations && base.configurations.length > 1);
+  const avecConfig = (e) => (multiConfigs ? ` — ${e.configNormale ? "configuration normale, " : ""}${e.config}` : "");
   // Surcharge des condensateurs (courant max mesuré / courant théorique)
   const surcharges = gradins.map((g) => {
     const it = gradinIntensiteTheorique(g.fields?.q, g.fields?.u, estBatterieMono(eq));
@@ -8431,10 +8620,10 @@ function analyseResonanceBatterie(eq, allEquipements) {
   const pire = etapes.filter((e) => e.niveau >= 1).sort((a, b) => b.niveau - a.niveau || a.ecartPct - b.ecartPct)[0];
   if (pire) {
     const v = (x) => String(x).replace(".", ",");
-    const conc = etapes.filter((e) => e.niveau >= 1 && e.rangProche === pire.rangProche).map((e) => `${e.n} gradin${e.n > 1 ? "s enclenchés" : " enclenché"} (Q = ${v(e.q)} kVAR, h₀ = ${v(e.h0)})`);
+    const conc = etapes.filter((e) => e.niveau >= 1 && e.rangProche === pire.rangProche).map((e) => `${e.n} gradin${e.n > 1 ? "s enclenchés" : " enclenché"} (Q = ${v(e.q)} kVAR, h₀ = ${v(e.h0)}${avecConfig(e)})`);
     const pres = presence(pire.rangProche);
     constats.push({ rang: pire.niveau, categorie: "resonance", sujet: `rang ${pire.rangProche}`,
-      phrase: `Le rang de résonance de la batterie avec le transformateur est proche du rang harmonique ${pire.rangProche} avec ${listeFr(conc)}` +
+      phrase: `Le rang de résonance de la batterie avec ${multiConfigs ? "les transformateurs" : "le transformateur"} est proche du rang harmonique ${pire.rangProche} avec ${listeFr(conc)}` +
         (harmo(pire.rangProche).niveauAmpli !== null
           ? `. Mesures de ce rang — ${mesureTexte(pire.rangProche)}, soit une amplification de × ${v2(harmo(pire.rangProche).ampli)} ${harmo(pire.rangProche).ampliSur === "Uh" ? "en tension" : "en courant"} à l'enclenchement de la batterie : ${harmo(pire.rangProche).niveauAmpli === 2 ? "résonance confirmée (surchauffe des condensateurs, distorsion de tension amplifiée)" : "amplification modérée, à surveiller"}.`
           : pres === "present" ? `, et ce rang est présent sur le réseau (${mesureTexte(pire.rangProche)}) : risque de résonance avéré (surchauffe des condensateurs, distorsion de tension amplifiée).` : ` : risque de résonance à confirmer par une mesure des harmoniques à l'analyseur de réseau, batterie hors service puis en service.`) });
@@ -8445,7 +8634,7 @@ function analyseResonanceBatterie(eq, allEquipements) {
     const n = Math.max(...liste.map((e) => e.niveau));
     const pres = presence(h);
     constats.push({ rang: n, categorie: "resonance", sujet: `rang ${h}`,
-      phrase: `Le rang de résonance est aussi proche du rang harmonique ${h} avec ${listeFr(liste.map((e) => `${e.n} gradin${e.n > 1 ? "s enclenchés" : " enclenché"} (h₀ = ${String(e.h0).replace(".", ",")})`))}` +
+      phrase: `Le rang de résonance est aussi proche du rang harmonique ${h} avec ${listeFr(liste.map((e) => `${e.n} gradin${e.n > 1 ? "s enclenchés" : " enclenché"} (h₀ = ${String(e.h0).replace(".", ",")}${avecConfig(e)})`))}` +
         (pres === "present" ? `, rang présent sur le réseau (${mesureTexte(h)}).` : pres === null ? ` : à confirmer par une mesure des harmoniques.` : `.`) });
   });
   // Amplification mesurée sur un rang non déjà couvert par le calcul (ex. batterie à selfs mal accordées ou dégradées).
@@ -8459,9 +8648,12 @@ function analyseResonanceBatterie(eq, allEquipements) {
   let conclusion;
   if (constats.length) conclusion = niveau >= 2 ? "Risque de résonance ou surcharge harmonique avéré : action corrective à prévoir rapidement." : "Risque de résonance à surveiller ou à confirmer par une mesure des harmoniques.";
   else if (filtrage === "total") conclusion = `Batterie équipée de selfs anti-harmoniques accordées sous le rang 5${accords[0]?.rang ? ` (rang d'accord h = ${String(accords[0].rang).replace(".", ",")}, p ≈ ${String(accords[0].p).replace(".", ",")} %)` : ""} : aucun risque de résonance sur les rangs harmoniques 5, 7, 11 et 13.`;
-  else if (etapes.length) conclusion = "Quel que soit le nombre de gradins enclenchés, le rang de résonance reste à l'écart des rangs harmoniques 5, 7, 11 et 13, ou aucune amplification n'a été mesurée : pas de risque de résonance identifié.";
+  else if (etapes.length) conclusion = (multiConfigs ? "Quels que soient le nombre de gradins enclenchés et les transformateurs en service, le rang" : "Quel que soit le nombre de gradins enclenchés, le rang") + " de résonance reste à l'écart des rangs harmoniques 5, 7, 11 et 13, ou aucune amplification n'a été mesurée : pas de risque de résonance identifié.";
   else conclusion = base.manque ? `Calcul du rang de résonance indisponible — ${base.manque}.` : "Données insuffisantes pour conclure.";
-  return { base, filtrage, accords, etapes, harmoniques, aMesures, thdu, thdi, surcharges, constats, niveau, conclusion, freqReseau };
+  const noteParallele = multiConfigs
+    ? `Transformateurs en parallèle : Scc ≈ Σ Sn/Ucc (${base.detail}). Le rang de résonance est calculé pour chaque configuration d'exploitation — tous les transformateurs en service, puis un seul en service (maintenance, couplage ouvert) — car la configuration la plus défavorable n'est pas forcément la configuration normale. L'impédance du réseau HTA amont, négligée ici, abaisse légèrement le rang réel, d'autant plus que les transformateurs en parallèle sont nombreux.`
+    : null;
+  return { base, filtrage, accords, etapes, harmoniques, aMesures, thdu, thdi, surcharges, constats, niveau, conclusion, freqReseau, multiConfigs, noteParallele };
 }
 function ResonanceHarmoniqueCalculee({ eq, allEquipements }) {
   const a = analyseResonanceBatterie(eq, allEquipements);
@@ -8474,7 +8666,7 @@ function ResonanceHarmoniqueCalculee({ eq, allEquipements }) {
   return (
     <div style={{ border: `1.5px solid ${c.bord}`, background: "#fff", borderRadius: 10, padding: "12px 14px", margin: "10px 0", fontSize: 12, color: "#3E4A5C", lineHeight: 1.5 }}>
       <div style={{ fontWeight: 700, color: "#0A5DA8", marginBottom: 6 }}>Analyse du risque de résonance (reprise dans le rapport Word)</div>
-      {!a.base.manque && <div>Scc ≈ {a.base.scc} kVA ({a.base.transfoLabel} : Sn = {a.base.snAffiche} kVA, Ucc = {a.base.uccAffiche} %) · Qn = {eq.identification?.qn || "—"} kVAR · Selfs anti-harmoniques : {a.filtrage === "total" ? "oui (tous les gradins)" : a.filtrage === "partiel" ? "sur une partie des gradins" : "non"}</div>}
+      {!a.base.manque && <div>Scc ≈ {a.base.scc} kVA ({a.base.multi ? `${a.base.transfoLabel} — ${a.base.detail}` : `${a.base.transfoLabel} : Sn = ${a.base.snAffiche} kVA, Ucc = ${a.base.uccAffiche} %`}) · Qn = {eq.identification?.qn || "—"} kVAR · Selfs anti-harmoniques : {a.filtrage === "total" ? "oui (tous les gradins)" : a.filtrage === "partiel" ? "sur une partie des gradins" : "non"}</div>}
       {a.filtrage !== "non" && (
         <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 8 }}>
           <thead><tr><th style={th}>Gradin</th><th style={th}>Fréquence d'accord</th><th style={th}>Rang d'accord h</th><th style={th}>p ≈</th><th style={th}>Verdict</th></tr></thead>
@@ -8486,12 +8678,13 @@ function ResonanceHarmoniqueCalculee({ eq, allEquipements }) {
       )}
       {a.etapes.length > 0 && (
         <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 8 }}>
-          <thead><tr><th style={th}>Gradins enclenchés</th><th style={th}>Q cumulé</th><th style={th}>h₀ = √(Scc/Q)</th><th style={th}>Rang proche (écart)</th><th style={th}>Verdict</th></tr></thead>
-          <tbody>{a.etapes.map((e) => (
-            <tr key={e.n}><td style={td}>{e.n}</td><td style={td}>{e.q} kVAR</td><td style={td}>{e.h0}</td><td style={td}>{e.rangProche} ({e.ecartPct} %)</td><td style={td}>{pastille(e.niveau, e.verdict)}</td></tr>
+          <thead><tr>{a.multiConfigs && <th style={th}>Transformateurs en service</th>}<th style={th}>Gradins enclenchés</th><th style={th}>Q cumulé</th><th style={th}>h₀ = √(Scc/Q)</th><th style={th}>Rang proche (écart)</th><th style={th}>Verdict</th></tr></thead>
+          <tbody>{a.etapes.map((e, i) => (
+            <tr key={i}>{a.multiConfigs && <td style={{ ...td, fontWeight: e.n === 1 ? 700 : 400, color: e.n === 1 ? "#1A1F26" : "#B0B8C1" }}>{e.n === 1 ? `${e.config} (Scc ≈ ${e.sccConfig} kVA)` : "〃"}</td>}<td style={td}>{e.n}</td><td style={td}>{e.q} kVAR</td><td style={td}>{e.h0}</td><td style={td}>{e.rangProche} ({e.ecartPct} %)</td><td style={td}>{pastille(e.niveau, e.verdict)}</td></tr>
           ))}</tbody>
         </table>
       )}
+      {a.noteParallele && <div style={{ marginTop: 8, fontSize: 11.5, color: "#0A5DA8", background: "#EEF2F6", borderRadius: 6, padding: "6px 8px" }}>{a.noteParallele}</div>}
       {a.surcharges.some((x) => x.niveau > 0) && (
         <div style={{ marginTop: 8 }}>{a.surcharges.filter((x) => x.niveau > 0).map((x, i) => <div key={i}>{pastille(x.niveau, x.niveau === 2 ? "Surcharge" : "Courant élevé")} {x.nom} : I max {x.imax} A / I théorique {x.it} A (× {x.ratio})</div>)}</div>
       )}
@@ -8884,9 +9077,9 @@ function piecesUsureEquipement(eq) {
   if (TYPES_AVEC_GRADINS.includes(eq.type)) {
     (eq.controles.gradins_dynamique || []).filter((g) => g.label).forEach((g) => {
       [["contacteur", "Contacteur", 1], ["fusibles", "Fusibles", 3], ["condensateurs", "Condensateurs", 1]].forEach(([k, nom, qte]) => {
-        if (!g.fields[k + "Ref"] && !g.fields[k + "Annee"]) return;
-        ajouter({ cle: `gradin:${g.id}:${k}`, categorie: `${nom} — ${g.label}`, marque: "", reference: g.fields[k + "Ref"] || "",
-          description: [nom, k === "condensateurs" && g.fields.q && `${g.fields.q} kVAR`, k === "condensateurs" && g.fields.u && `${g.fields.u} V`].filter(Boolean).join(" · "),
+        if (!g.fields[k + "Ref"] && !g.fields[k + "Annee"] && !g.fields[k + "Marque"] && !g.fields[k + "Modele"] && !g.fields[k + "Description"]) return;
+        ajouter({ cle: `gradin:${g.id}:${k}`, categorie: `${nom} — ${g.label}`, marque: g.fields[k + "Marque"] || "", reference: modelePieceGradin(g.fields, k),
+          description: [g.fields[k + "Description"] || nom, k === "condensateurs" && !g.fields[k + "Description"] && g.fields.q && `${g.fields.q} kVAR`, k === "condensateurs" && !g.fields[k + "Description"] && g.fields.u && `${g.fields.u} V`, k === "contacteur" && g.fields.contacteurBobine && `bobine ${g.fields.contacteurBobine}`].filter(Boolean).join(" · "),
           quantite: qte, anneeMiseEnService: g.fields[k + "Annee"], dureeVie: g.fields[k + "Duree"] || 10 });
       });
     });
@@ -9010,7 +9203,7 @@ function appliquerRemplacementPiece(eq, r) {
       controles.pieces_usure_ups = data;
     }
   } else if (genre === "gradin") {
-    controles.gradins_dynamique = (controles.gradins_dynamique || []).map((g) => g.id !== a ? g : { ...g, fields: { ...g.fields, [b + "Annee"]: annee, ...(r.identique ? {} : { [b + "Ref"]: [r.marque, r.reference].filter(Boolean).join(" ") || g.fields[b + "Ref"] }) } });
+    controles.gradins_dynamique = (controles.gradins_dynamique || []).map((g) => g.id !== a ? g : { ...g, fields: { ...g.fields, [b + "Annee"]: annee, ...(r.identique ? {} : { [b + "Marque"]: r.marque || g.fields[b + "Marque"] || "", [b + "Modele"]: r.reference || modelePieceGradin(g.fields, b), ...(r.description ? { [b + "Description"]: r.description } : {}), [b + "Ref"]: "" }) } });
   } else if (genre === "ventilation") {
     const u = controles.usure || {};
     const v = u.ventilation_usure || { fields: {} };
@@ -9230,6 +9423,20 @@ function rapprocherOption(lu, options) {
   }
   return lu;
 }
+// Champs qui modifient les contrôles affichés (schéma de la fiche) : une lecture de plaque ne les coche jamais d'office —
+// une erreur de lecture (ex. régime « Monophasé » lu sur un élément condensateur d'une batterie triphasée) masquerait
+// des mesures ou des sections entières. Ils restent proposés, à cocher volontairement.
+const CHAMPS_PLAQUE_STRUCTURANTS = {
+  triphase: "masque les phases L2 / L3 si « Monophasé »",
+  typeUPS: "masque le réseau secours et le by-pass si « Onduleur sécurité »",
+  configuration: "ajoute ou retire les champs des modules",
+  typeIsolation: "masque les contrôles d'huile si transformateur sec",
+  classeIsolation: "modifie les seuils d'isolement et de température",
+  deuxEnroulementsSecondaires: "ajoute ou retire le second secondaire",
+  presenceRelais: "ajoute ou retire les contrôles du relais",
+  presenceTC: "ajoute ou retire les contrôles des TC",
+  fonction: "modifie les caractéristiques demandées (ex. tore homopolaire)",
+};
 function BoutonLirePlaque({ champs, valeursActuelles = {}, onAppliquer, typeEquipement, contexte = "", libelle = "Lire la plaque", compact = false, transformer = null }) {
   const inputRef = useRef(null);
   const [lecture, setLecture] = useState(false);
@@ -9249,7 +9456,8 @@ function BoutonLirePlaque({ champs, valeursActuelles = {}, onAppliquer, typeEqui
         const brut = valeursActuelles ? valeursActuelles[c.key] : undefined;
         const actuel = brut === undefined || brut === null ? "" : String(brut);
         // Coché d'office si le champ est vide ; une valeur déjà saisie n'est remplacée que sur décision.
-        return { key: c.key, label: c.label, lu, actuel, incertain: (r.incertains || []).includes(c.key), coche: !actuel.trim() };
+        const structurant = CHAMPS_PLAQUE_STRUCTURANTS[c.key] || null;
+        return { key: c.key, label: c.label, lu, actuel, incertain: (r.incertains || []).includes(c.key), coche: !actuel.trim() && !structurant && lu !== actuel, structurant };
       });
       setResultat({ lignes, texte: r.texte || "", commentaire: r.commentaire || "" });
     } catch (e) {
@@ -9289,6 +9497,7 @@ function BoutonLirePlaque({ champs, valeursActuelles = {}, onAppliquer, typeEqui
                   <input type="text" value={l.lu} onChange={(e) => majLigne(l.key, { lu: e.target.value, coche: true })}
                     style={{ ...inputStyle, width: "100%", boxSizing: "border-box", padding: "6px 8px", fontSize: 13, marginTop: 3, ...(l.incertain ? { borderColor: "#E0A040", background: "#FDF6EC" } : {}) }} />
                   <div style={{ fontSize: 11, color: "#8B96A3", marginTop: 2 }}>Actuel : {l.actuel || "—"}{l.incertain ? " · lecture incertaine" : ""}</div>
+                  {l.structurant && <div style={{ fontSize: 11, color: "#B5730A", marginTop: 2 }}>⚠ Non coché d'office : ce choix {l.structurant}. À cocher seulement si la plaque le confirme.</div>}
                 </div>
               </div>
             ))}
@@ -9340,7 +9549,7 @@ function contextePlaqueComposant(libelle) {
   return `Plaque signalétique du composant « ${libelle} » : ne remplir que ce qui est lisible.`;
 }
 // Champs d'identification jamais lus sur une plaque (repère interne, liens vers d'autres équipements, choix d'app).
-const CHAMPS_IDENTIFICATION_HORS_PLAQUE = ["repere", "transformateurAssocie", "transfoManuel", "presenceRelais", "presenceTC", "transfoSnManuel", "transfoUccManuel"];
+const CHAMPS_IDENTIFICATION_HORS_PLAQUE = ["repere", "transformateurAssocie", "transformateursParallele", "transfoNbParallele", "transfoManuel", "presenceRelais", "presenceTC", "transfoSnManuel", "transfoUccManuel"];
 function PiecesUsureUPSPanel({ eq, update, itemFicheBatterie }) {
   const [catalogueOuvert, setCatalogueOuvert] = useState(null); // id du modèle dont le catalogue est ouvert
   const valeurFiche = eq.controles.batterie_id?.batterie_caracteristiques || { fields: {} };
@@ -10905,7 +11114,7 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
                 <SectionTitle>Identification</SectionTitle>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                   <BoutonLirePlaque typeEquipement={eq.type}
-                    contexte={`Plaque signalétique d'un équipement « ${eq.type} ». Un équipement peut porter plusieurs plaques (cellule, appareil de coupure, relais de protection, TC…) : ne remplir que ce qui est lisible sur cette photo.`}
+                    contexte={`Plaque signalétique d'un équipement « ${eq.type} ». Un équipement peut porter plusieurs plaques (cellule, appareil de coupure, relais de protection, TC…) : ne remplir que ce qui est lisible sur cette photo.${eq.type === "Batterie de compensation" ? " Le régime (triphasé / monophasé) est celui de la batterie complète : ne pas le déduire de l'étiquette d'un élément condensateur, souvent monophasé dans une batterie triphasée. Qn = puissance totale de la batterie, pas celle d'un élément." : ""}`}
                     champs={schema.identification.filter((f) => !f.multi && !CHAMPS_IDENTIFICATION_HORS_PLAQUE.includes(f.key) && !champIdentificationMasque(eq, f.key)).map((f) => ({ key: f.key, label: f.label, options: optionsFusionnees[f.key] }))}
                     valeursActuelles={eq.identification}
                     onAppliquer={(patch) => update(repairEquipementControles({ ...eq, identification: { ...eq.identification, ...patch } }))} />
@@ -10924,7 +11133,7 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
                   if (TYPES_TRANSFO_MANUEL.includes(eq.type) && CHAMPS_TRANSFO_MANUEL.includes(f.key) && champIdentificationMasque(eq, f.key)) {
                     return null; // saisie manuelle du transformateur : visible seulement si demandée (boutons Oui / Non)
                   }
-                  if (f.multi) {
+                  if (f.multi && f.key !== "transformateursParallele") {
                     const valeurs = eq.identification[f.key] || [];
                     const toggle = (opt) => {
                       const next = valeurs.includes(opt) ? valeurs.filter((v) => v !== opt) : [...valeurs, opt];
@@ -10961,8 +11170,31 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
                   // Champs de repli manuels (Sn/Ucc) — masqués dès qu'un transformateur suivi est
                   // choisi ci-dessus, puisqu'ils deviennent alors inutiles (ses propres valeurs sont
                   // utilisées à la place).
-                  if ((f.key === "transfoSnManuel" || f.key === "transfoUccManuel") && eq.type === "Batterie de compensation" && (eq.identification.transformateurAssocie || "").trim()) {
+                  if ((f.key === "transfoSnManuel" || f.key === "transfoUccManuel" || f.key === "transfoNbParallele") && eq.type === "Batterie de compensation" && (eq.identification.transformateurAssocie || "").trim()) {
                     return null;
+                  }
+                  // Autres transformateurs en parallèle (même jeu de barres BT) : cases à cocher parmi les transformateurs suivis du site.
+                  if (f.key === "transformateursParallele" && eq.type === "Batterie de compensation") {
+                    const principal = (eq.identification.transformateurAssocie || "").trim().toLowerCase();
+                    const autres = allEquipements.filter((e) => e.type === "Transformateur" && e.identification?.repere && e.identification.repere.trim().toLowerCase() !== principal).map((e) => e.identification.repere);
+                    if (!principal || !autres.length) return null;
+                    const choisis = Array.isArray(eq.identification[f.key]) ? eq.identification[f.key] : [];
+                    return (
+                      <Field key={f.key} label={f.label} span="1 / -1">
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                          {autres.map((r) => {
+                            const actif = choisis.includes(r);
+                            return (
+                              <span key={r} onClick={() => setIdentification(f.key, actif ? choisis.filter((x) => x !== r) : [...choisis, r])}
+                                style={{ cursor: "pointer", userSelect: "none", fontSize: 12, padding: "5px 10px", borderRadius: 999, border: `1.5px solid ${actif ? BRAND.blue : "#D8DEE5"}`, background: actif ? "#EEF4FB" : "#fff", color: actif ? "#0A5DA8" : "#5B6B7D", fontWeight: actif ? 700 : 500 }}>
+                                {actif ? "✓ " : ""}{r}
+                              </span>
+                            );
+                          })}
+                        </div>
+                        <div style={{ fontSize: 10.5, color: "#8B96A3", marginTop: 4 }}>Transformateurs couplés sur le même jeu de barres que la batterie : leurs puissances de court-circuit s'additionnent et le risque de résonance est vérifié pour chaque configuration (tous en service, un seul en service…).</div>
+                      </Field>
+                    );
                   }
                   if (f.key === "rapportTPProtection" && eq.type !== "Comptage HTA") {
                     // Le rapport TP se lit en priorité depuis le contrôle détaillé de Comptage HTA
@@ -11246,10 +11478,31 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
                 </React.Fragment>
               );
             }
+            if (eq.type === "Batterie de compensation" && sec.key === "mesures_aval") {
+              return (
+                <React.Fragment key={sec.key}>
+                  <SectionBlock
+                    title={sec.title}
+                    items={sec.items}
+                    values={eq.controles[sec.key]}
+                    onChangeItem={(itemKey, v) => setControleItem(sec.key, itemKey, v)}
+                    idPrefix={`${eq.id}-${sec.key}`}
+                    custom={eq.controles[sec.key + "__custom"] || []}
+                    onAddCustom={() => addCustomAction(sec.key)}
+                    onChangeCustom={(id, patch) => changeCustomAction(sec.key, id, patch)}
+                    onRemoveCustom={(id) => removeCustomAction(sec.key, id)}
+                    entete={<BoutonRecopieCompensation eq={eq} update={update} sectionCible="mesures_aval" libelle="Recopier les mesures avec compensation"
+                      paires={[["mesures_amont", "mesures_aval", (k) => k.replace(/_aval$/, "_amont")]]} />}
+                  />
+                </React.Fragment>
+              );
+            }
             if (eq.type === "Batterie de compensation" && sec.key === "analyse_harmonique") {
               return (
                 <React.Fragment key={sec.key}>
                   <SectionBlock
+                    entete={<BoutonRecopieCompensation eq={eq} update={update} sectionCible="analyse_harmonique" libelle="Recopier les harmoniques EN service dans HORS service"
+                      paires={[["analyse_harmonique", "analyse_harmonique", (k) => (/_hs$/.test(k) ? k.replace(/_hs$/, "") : "__aucun")]]} />}
                     title={sec.title}
                     items={sec.items}
                     values={eq.controles[sec.key]}
@@ -14609,7 +14862,7 @@ function docxAnalyseResonance(a, eq) {
     children: [new DOCX.Paragraph({ alignment: o.centre ? DOCX.AlignmentType.CENTER : undefined, children: [new DOCX.TextRun({ text: String(texte ?? "—"), size: o.size || 17, bold: !!o.bold, color: o.color || DOCX_DARK })] })],
   });
   const tableau = (entetes, largeurs, lignes) => docxTable({ width: { size: W, type: DOCX.WidthType.DXA }, columnWidths: largeurs, rows: [
-    new DOCX.TableRow({ tableHeader: true, cantSplit: true, children: entetes.map((t, i) => cell(t, largeurs[i], { bold: true, color: DOCX_WHITE, fond: DOCX_DARK, size: 16 })) }),
+    new DOCX.TableRow({ tableHeader: true, cantSplit: true, children: entetes.map((t, i) => cell(t, largeurs[i], { bold: true, color: DOCX_WHITE, fond: DOCX_ENTETE, size: 16 })) }),
     ...lignes.map((l) => new DOCX.TableRow({ cantSplit: true, children: l.cellules.map((t, i) => (i === l.cellules.length - 1 && l.niveau !== undefined)
       ? cell(t, largeurs[i], { bold: true, fond: coul(l.niveau).fond, color: coul(l.niveau).texte, size: 16 })
       : cell(t, largeurs[i])) })),
@@ -14618,7 +14871,7 @@ function docxAnalyseResonance(a, eq) {
   out.push(new DOCX.Paragraph({ keepNext: true, spacing: { before: 200, after: 80 }, children: [new DOCX.TextRun({ text: "Analyse du risque de résonance", bold: true, size: 21, color: DOCX_BLUE })] }));
   const b = a.base;
   const donnees = [
-    !b.manque && `Scc ≈ ${b.scc} kVA (${b.transfoLabel} : Sn = ${b.snAffiche} kVA, Ucc = ${fr(b.uccAffiche)} %)`,
+    !b.manque && (b.multi ? `Scc ≈ ${b.scc} kVA (${b.transfoLabel})` : `Scc ≈ ${b.scc} kVA (${b.transfoLabel} : Sn = ${b.snAffiche} kVA, Ucc = ${fr(b.uccAffiche)} %)`),
     eq.identification?.qn && `Qn batterie : ${eq.identification.qn} kVAR`,
     `Selfs anti-harmoniques : ${a.filtrage === "total" ? "oui" : a.filtrage === "partiel" ? "sur une partie des gradins" : "non"}`,
     a.thdu !== null && `THDu max : ${fr(a.thdu)} %`, a.thdi !== null && `THDi max : ${fr(a.thdi)} %`,
@@ -14630,9 +14883,15 @@ function docxAnalyseResonance(a, eq) {
     out.push(docxSpacer(80));
   }
   if (a.etapes.length) {
-    out.push(tableau(["Gradins enclenchés", "Q cumulé", "h₀ = √(Scc/Q)", "Rang proche (écart)", "Verdict"], [1500, 1400, 1500, 1700, 3500],
-      a.etapes.map((e) => ({ niveau: e.niveau, cellules: [String(e.n), `${fr(e.q)} kVAR`, fr(e.h0), `${e.rangProche} (${e.ecartPct} %)`, e.verdict] }))));
+    if (a.multiConfigs) {
+      out.push(tableau(["Transformateurs en service", "Gradins", "Q cumulé", "h₀", "Rang proche (écart)", "Verdict"], [2300, 800, 1200, 900, 1500, 2900],
+        a.etapes.map((e) => ({ niveau: e.niveau, cellules: [e.n === 1 ? `${e.config} (Scc ≈ ${e.sccConfig} kVA)` : "〃", String(e.n), `${fr(e.q)} kVAR`, fr(e.h0), `${e.rangProche} (${e.ecartPct} %)`, e.verdict] }))));
+    } else {
+      out.push(tableau(["Gradins enclenchés", "Q cumulé", "h₀ = √(Scc/Q)", "Rang proche (écart)", "Verdict"], [1500, 1400, 1500, 1700, 3500],
+        a.etapes.map((e) => ({ niveau: e.niveau, cellules: [String(e.n), `${fr(e.q)} kVAR`, fr(e.h0), `${e.rangProche} (${e.ecartPct} %)`, e.verdict] }))));
+    }
     out.push(docxSpacer(80));
+    if (a.noteParallele) { out.push(docxNormeNote(a.noteParallele)); out.push(docxSpacer(80)); }
   }
   if (a.aMesures) {
     const pc = (v) => (v !== null ? `${fr(v)} %` : "—");
@@ -15085,7 +15344,7 @@ function docxValCell(text, state, garder = false) {
 }
 // Constructeur générique : lignes [Grandeur, val1, val2, val3, Moyenne] → un seul tableau,
 // réutilisé par toutes les sections de mesures par phase (Onduleur, Batterie de compensation…).
-function docxBuildMesuresTable(rows, headers) {
+function docxBuildMesuresTable(rows, headers, enteteDerniere = "Moyenne des valeurs") {
   if (!rows.length) return null;
   const h = headers || ["L1", "L2", "L3"];
   const garderLigne = (idx) => (rows.length <= 14 ? idx < rows.length - 1 : idx < 2); // tableau court : d'un seul tenant
@@ -15093,7 +15352,7 @@ function docxBuildMesuresTable(rows, headers) {
     width: { size: width, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS_ENTETE, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_ENTETE },
     children: [new DOCX.Paragraph({ keepNext: true, alignment: DOCX.AlignmentType.CENTER, children: [new DOCX.TextRun({ text, size: 17, bold: true, color: DOCX_WHITE })] })],
   });
-  const header = new DOCX.TableRow({ cantSplit: true, tableHeader: true, children: [headCell("Grandeur", 2800), headCell(h[0], 1600), headCell(h[1], 1600), headCell(h[2], 1600), headCell("Moyenne des valeurs", 2000)] });
+  const header = new DOCX.TableRow({ cantSplit: true, tableHeader: true, children: [headCell("Grandeur", 2800), headCell(h[0], 1600), headCell(h[1], 1600), headCell(h[2], 1600), headCell(enteteDerniere, 2000)] });
   const body = rows.map((r, idx) => { const garder = garderLigne(idx); const etats = r[5] || [null, null, null]; return new DOCX.TableRow({ cantSplit: true, children: [
     new DOCX.TableCell({ width: { size: 2800, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, verticalAlign: DOCX.VerticalAlign.CENTER, shading: idx % 2 === 1 ? { type: DOCX.ShadingType.CLEAR, fill: DOCX_ZEBRE } : undefined, children: [new DOCX.Paragraph({ keepNext: garder, children: [new DOCX.TextRun({ text: r[0], size: 17, bold: true, color: "4A5563" })] })] }),
     docxValCell(r[1], etats[0], garder), docxValCell(r[2], etats[1], garder), docxValCell(r[3], etats[2], garder),
@@ -17309,14 +17568,12 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
       const freqReseau = numOf(eq.controles.mesures_amont?.frequence_amont?.fields?.hz) || 50;
       (eq.controles.gradins_dynamique || []).filter((g) => g.label).forEach((g) => {
         const iTheo = gradinIntensiteTheorique(g.fields.q, g.fields.u, estBatterieMono(eq));
-        const c1 = gradinCapacite(g.fields.i1, g.fields.u, freqReseau);
-        const c2 = gradinCapacite(g.fields.i2, g.fields.u, freqReseau);
-        const c3 = gradinCapacite(g.fields.i3, g.fields.u, freqReseau);
-        const q1 = gradinQMesuree(g.fields.i1, g.fields.u, estBatterieMono(eq));
-        const q2 = gradinQMesuree(g.fields.i2, g.fields.u, estBatterieMono(eq));
-        const q3 = gradinQMesuree(g.fields.i3, g.fields.u, estBatterieMono(eq));
-        const qMesures = [q1, q2, q3].filter((v) => v !== null);
-        const qTotalMesure = qMesures.length ? Math.round((qMesures.reduce((a, b) => a + b, 0) / qMesures.length) * 100) / 100 : null;
+        const mono = estBatterieMono(eq);
+        const c1 = gradinCapacite(g.fields.i1, g.fields.u, freqReseau, mono);
+        const c2 = gradinCapacite(g.fields.i2, g.fields.u, freqReseau, mono);
+        const c3 = gradinCapacite(g.fields.i3, g.fields.u, freqReseau, mono);
+        const pg = gradinPuissances(g, mono);
+        const [q1, q2, q3] = [pg.phases[0], pg.phases[1] ?? null, pg.phases[2] ?? null];
 
         elements.push(new DOCX.Paragraph({
           spacing: { before: 100, after: 6 },
@@ -17326,19 +17583,19 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
           ],
         }));
         const summary = [
-          g.fields.q && `Q déclaré : ${g.fields.q} kVAR`, qTotalMesure !== null && `Q mesuré : ${qTotalMesure} kVAR`,
+          g.fields.q && `Q déclaré : ${g.fields.q} kVAR`, pg.total !== null && pg.source !== "declare" && `Q total calculé : ${pg.total} kVAR${pg.source === "estime" ? " (estimé)" : ""}`,
           g.fields.u && `U : ${g.fields.u} V`, iTheo !== null && `I théorique : ${iTheo} A`,
         ].filter(Boolean).join("   ·   ");
         if (summary) elements.push(new DOCX.Paragraph({ spacing: { after: 6 }, children: [new DOCX.TextRun({ text: summary, size: 16, color: "666666" })] }));
 
         if (estBatterieMono(eq)) {
-          const mesMono = [g.fields.i1 && `I mesuré : ${g.fields.i1} A`, c1 !== null && `C : ${c1} µF`, q1 !== null && `Q : ${q1} kVAR`].filter(Boolean).join("   ·   ");
+          const mesMono = [g.fields.i1 && `I mesuré : ${g.fields.i1} A`, c1 !== null && `C : ${c1} µF`, q1 !== null && `Q calculé : ${q1} kVAR`].filter(Boolean).join("   ·   ");
           const horsTol = iTheo !== null && toleranceState(g.fields.i1, Math.round(iTheo * 0.9 * 100) / 100, Math.round(iTheo * 1.1 * 100) / 100) === "bad";
           if (mesMono) elements.push(new DOCX.Paragraph({ spacing: { after: 6 }, children: [new DOCX.TextRun({ text: mesMono, size: 16, color: horsTol ? DOCX_ORANGE : "333333", bold: horsTol })] }));
         } else elements.push(docxPhaseTable([
           ["I (A)", g.fields.i1, g.fields.i2, g.fields.i3],
-          ["C (µF)", c1, c2, c3],
-          ["Q (kVAR)", q1, q2, q3],
+          ["C (µF, ×3 triangle)", c1, c2, c3],
+          ["Q par phase (kVAR)", q1, q2, q3],
         ], undefined, [
           iTheo !== null ? [g.fields.i1, g.fields.i2, g.fields.i3].map((v) => (toleranceState(v, Math.round(iTheo * 0.9 * 100) / 100, Math.round(iTheo * 1.1 * 100) / 100) === "bad" ? DOCX_ORANGE : null)) : [null, null, null],
         ]));
@@ -17349,12 +17606,37 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
 
         { const galerie = docxPhotosCoteACote(g.photos, 160, 180); if (galerie) elements.push(galerie); }
       });
+      // Puissance de la batterie : par phase (si mesurée sur tous les gradins) et totale.
+      {
+        const pb = puissancesBatterie(eq);
+        if (pb.parGradin.length && (pb.total !== null || pb.phases)) {
+          const noms = pb.mono ? [] : ["L1", "L2", "L3"];
+          const L = pb.mono ? [5600, 4000] : [2600, 1750, 1750, 1750, 1750];
+          const cell = (t, i, o = {}) => new DOCX.TableCell({ width: { size: L[i], type: DOCX.WidthType.DXA }, margins: o.entete ? CELL_MARGINS_ENTETE : { top: 60, bottom: 60, left: 110, right: 90 }, verticalAlign: DOCX.VerticalAlign.CENTER,
+            shading: o.entete ? { type: DOCX.ShadingType.CLEAR, fill: DOCX_ENTETE } : o.fond ? { type: DOCX.ShadingType.CLEAR, fill: o.fond } : undefined,
+            children: [new DOCX.Paragraph({ keepNext: true, alignment: i === 0 ? DOCX.AlignmentType.LEFT : DOCX.AlignmentType.CENTER, children: [new DOCX.TextRun({ text: String(t), size: o.entete ? 15 : 17, bold: !!(o.entete || o.gras), color: o.entete ? DOCX_WHITE : o.couleur || DOCX_DARK })] })] });
+          const kv = (v) => (v === null || v === undefined ? "—" : `${String(v).replace(".", ",")} kVAR`);
+          const lignes = [
+            new DOCX.TableRow({ tableHeader: true, cantSplit: true, children: ["Puissance réactive", ...noms.map((n) => `Q ${n}`), "Q total"].map((t, i) => cell(t, i, { entete: true })) }),
+            ...pb.parGradin.map((p, j) => new DOCX.TableRow({ cantSplit: true, children: [p.nom, ...(pb.mono ? [] : p.phases.map(kv)), kv(p.total) + (p.source === "estime" ? " *" : p.source === "declare" ? " (déclaré)" : "")].map((t, i) => cell(t, i, { fond: j % 2 ? DOCX_ZEBRE : null, gras: i === L.length - 1 })) })),
+            new DOCX.TableRow({ cantSplit: true, children: ["Batterie (somme)", ...noms.map((_, k) => (pb.phases ? kv(pb.phases[k]) : "—")), kv(pb.total)].map((t, i) => cell(t, i, { fond: "EEF4FB", gras: true, couleur: DOCX_BLUE })) }),
+          ];
+          elements.push(new DOCX.Paragraph({ keepNext: true, spacing: { before: 120, after: 80 }, children: [new DOCX.TextRun({ text: "Puissance de la batterie", bold: true, size: 20, color: DOCX_BLUE })] }));
+          elements.push(docxTable({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: L, rows: lignes }));
+          const ecartQn = pb.qn && pb.total !== null && pb.source !== "declare" ? Math.round(((pb.total - pb.qn) / pb.qn) * 1000) / 10 : null;
+          const note = [`Puissance totale ${LIBELLE_SOURCE_PUISSANCE[pb.source] || ""}${!pb.complet ? ", certains gradins sans puissance connue" : ""}.`,
+            pb.qn ? `Qn déclaré : ${String(pb.qn).replace(".", ",")} kVAR${ecartQn !== null ? ` (écart ${ecartQn > 0 ? "+" : ""}${String(ecartQn).replace(".", ",")} %)` : ""}.` : "",
+            pb.parGradin.some((p) => p.source === "estime") ? "* estimé d'après les phases mesurées (moyenne × 3)." : "",
+            !pb.mono ? "Q par phase = U/√3 × I ; capacité par élément C = I / (√3 · U · ω), couplage triangle (valeur « 3 × C » des plaques)." : ""].filter(Boolean).join(" ");
+          elements.push(new DOCX.Paragraph({ spacing: { before: 60, after: 0 }, children: [new DOCX.TextRun({ text: note, size: 15, italics: true, color: "6B7785" })] }));
+        }
+      }
       elements.push(docxSpacer());
       return;
     }
     if ((sec.key === "mesures_amont" || sec.key === "mesures_aval") && TYPES_AVEC_GRADINS.includes(eq.type)) {
       elements.push(docxHeading(sec.title));
-      const rows = [];
+      const rows = [], lignesPuissance = [];
       sec.items.forEach((item) => {
         const value = eq.controles[sec.key][item.key] || { action: "", etat: "", fields: {} };
         const fields = value.fields || {};
@@ -17367,6 +17649,18 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
         } else if (item.key.startsWith("courants_")) {
           rows.push(["Courant (L1/L2/L3)", fields.i1, fields.i2, fields.i3, moyenneOf(fields.i1, fields.i2, fields.i3)]);
           rows.push(["ThdI (%)", fields.thdi1, fields.thdi2, fields.thdi3, moyenneOf(fields.thdi1, fields.thdi2, fields.thdi3)]);
+        } else if (item.key.startsWith("puissances_")) {
+          // Puissances : par phase quand elles sont relevées, total dans la dernière colonne (somme des phases ou total saisi).
+          const mono = estBatterieMono(eq);
+          const cf = (k) => { const d = (item.fields || []).find((x) => x.key === k); return d && d.compute ? d.compute(fields) : fields[k]; };
+          const ph = (k) => (mono ? ["", "", ""] : [fields[k + "1"], fields[k + "2"], fields[k + "3"]]);
+          const pT = totalPuissance(fields, "p"), sT = totalPuissance(fields, "s");
+          if (pT !== null || sT !== null || ["p1", "s1"].some((k) => numOf(fields[k]) !== null)) {
+            lignesPuissance.push(["P (kW)", ...ph("p"), pT ?? ""]);
+            lignesPuissance.push(["S (kVA)", ...ph("s"), sT ?? ""]);
+            lignesPuissance.push(["Q calculé (kVAR)", ...(mono ? ["", "", ""] : [cf("q1"), cf("q2"), cf("q3")]), cf("q")]);
+            lignesPuissance.push(["Cos φ / tan φ", "", "", "", [cf("cosphi"), cf("tangphi")].filter((v) => v !== "" && v !== null && v !== undefined).join(" / ")]);
+          }
         } else {
           const parts = printFieldParts(item, value).map((p) => p.text);
           if (parts.length) rows.push([item.label, "", "", "", parts.map((p) => p.includes(" : ") ? p.split(" : ").slice(1).join(" : ") : p).join("  ·  ")]);
@@ -17374,6 +17668,10 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
       });
       const t = docxBuildMesuresTable(rows);
       if (t) elements.push(t);
+      if (lignesPuissance.length) {
+        if (t) elements.push(docxSpacer(80));
+        elements.push(docxBuildMesuresTable(lignesPuissance, null, "Total"));
+      }
       elements.push(docxSpacer());
       return;
     }
