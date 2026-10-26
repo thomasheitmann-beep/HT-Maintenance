@@ -757,9 +757,11 @@ const RELAIS_MICOM = ["MiCOM P111", "MiCOM P12x", "MiCOM P13x", "MiCOM P14x", "M
 const RELAIS_MICOM_ANCIENS = ["K-Series (KCGG / KCEG)", "MCGG", "CDG"];
 const RELAIS_SEPAM_ANCIENS = ["SEPAM 100", "SEPAM 1000+", "SEPAM 2000"];
 const RELAIS_VIP = ["VIP 35", "VIP 200", "VIP 201", "VIP 300 LL/LH", "VIP 400"];
+// Easergy Flair (Schneider, origine Merlin Gerin) : détecteurs de passage de défaut HTA au format DIN, montés en cellule.
+const DETECTEURS_FLAIR = ["Flair 21D", "Flair 22D", "Flair 23D", "Flair 23DM"];
 const MARQUE_GAMME_RELAIS_HTA = {
-  "Schneider Electric": ["SEPAM série 10", "SEPAM série 20", "SEPAM série 40", "SEPAM série 60", "SEPAM série 80", "SEPAM S20", "SEPAM S40", "SEPAM S80", "SEPAM T20", "SEPAM M20", ...RELAIS_SEPAM_ANCIENS, "Statimax", "Statimax RAH 411 E", ...RELAIS_VIP, "Easergy P3", "Easergy P5", "VAMP 50 (série)", "VAMP 200 (série)", ...RELAIS_MICOM],
-  "Merlin Gerin": ["SEPAM S20", "SEPAM S40", "SEPAM S80", ...RELAIS_SEPAM_ANCIENS, "Statimax", "Statimax RAH 411 E", ...RELAIS_VIP],
+  "Schneider Electric": ["SEPAM série 10", "SEPAM série 20", "SEPAM série 40", "SEPAM série 60", "SEPAM série 80", "SEPAM S20", "SEPAM S40", "SEPAM S80", "SEPAM T20", "SEPAM M20", ...RELAIS_SEPAM_ANCIENS, "Statimax", "Statimax RAH 411 E", ...RELAIS_VIP, ...DETECTEURS_FLAIR, "Easergy P3", "Easergy P5", "VAMP 50 (série)", "VAMP 200 (série)", ...RELAIS_MICOM],
+  "Merlin Gerin": ["SEPAM S20", "SEPAM S40", "SEPAM S80", ...RELAIS_SEPAM_ANCIENS, "Statimax", "Statimax RAH 411 E", ...RELAIS_VIP, ...DETECTEURS_FLAIR],
   "SEG": ["WIC1-1", "WIC1-2", "WIC1-3"], // relais autonomes WI-LINE (manuel WIC1)
   "Areva": [...RELAIS_MICOM, ...RELAIS_MICOM_ANCIENS],
   "Alstom": [...RELAIS_MICOM, ...RELAIS_MICOM_ANCIENS],
@@ -1761,6 +1763,17 @@ const GRADIN_FIELD_DEFS = [
   { key: "condensateursMarque" }, { key: "condensateursModele" }, { key: "condensateursDescription" },
 ];
 const PIECES_GRADIN = [["contacteur", "Contacteur"], ["fusibles", "Fusibles"], ["condensateurs", "Condensateurs"]];
+// Ventilateurs d'une batterie de compensation : plusieurs modèles possibles dans une même armoire (controles.ventilateurs).
+// Ancienne saisie (un seul ventilateur : usure.ventilation_usure, référence + année) reprise comme premier ventilateur.
+const DUREE_VIE_VENTILATEUR = 4;
+const nouveauVentilateur = () => ({ id: uid(), marque: "", modele: "", description: "", quantite: "1", annee: "", duree: "" });
+function ventilateursBatterie(eq) {
+  const liste = eq?.controles?.ventilateurs;
+  if (Array.isArray(liste)) return liste;
+  const v = eq?.controles?.usure?.ventilation_usure?.fields || {};
+  return v.reference || v.annee ? [{ id: "ventilation", marque: "", modele: v.reference || "", description: "", quantite: "1", annee: v.annee || "", duree: "", ancien: true }] : [];
+}
+const libelleVentilateur = (v, i, n) => ["Ventilateur" + (n > 1 ? ` ${i + 1}` : ""), [v.marque, v.modele].filter(Boolean).join(" ")].filter(Boolean).join(" — ");
 // Mesures réseau avec / sans compensation : puissances par phase (P, S relevés ; Q calculé) et totales.
 // Total = somme des 3 phases quand elles sont toutes relevées ; sinon P / S totaux saisis directement (ancien mode, toujours possible).
 const sommePhases = (f, prefixe) => { const v = [1, 2, 3].map((i) => numOf(f[prefixe + i])); return v.every((x) => x !== null) ? Math.round(v.reduce((a, b) => a + b, 0) * 1000) / 1000 : null; };
@@ -4012,6 +4025,7 @@ function dupliquerEquipementPourNouvelleVisite(source) {
   if (src.pieces_usure_ups) fresh.controles.pieces_usure_ups = clone(src.pieces_usure_ups);
   if (src.batterie_id) fresh.controles.batterie_id = clone(src.batterie_id);
   if (src.usure?.ventilation_usure && fresh.controles.usure) fresh.controles.usure = { ...fresh.controles.usure, ventilation_usure: clone(src.usure.ventilation_usure) };
+  if (Array.isArray(src.ventilateurs)) fresh.controles.ventilateurs = clone(src.ventilateurs);
   if (Array.isArray(src.gradins_dynamique) && src.gradins_dynamique.length) {
     const garder = ["contacteurMarque", "contacteurModele", "contacteurDescription", "contacteurBobine", "fusiblesMarque", "fusiblesModele", "fusiblesDescription", "condensateursMarque", "condensateursModele", "condensateursDescription", "q", "u", "selfMA", "selfFrequence", "contacteurRef", "contacteurAnnee", "contacteurDuree", "fusiblesRef", "fusiblesAnnee", "fusiblesDuree", "condensateursRef", "condensateursAnnee", "condensateursDuree"];
     fresh.controles.gradins_dynamique = src.gradins_dynamique.map((g) => {
@@ -7936,8 +7950,8 @@ function calcPiecesUsure(eq) {
     if (g.fields.fusiblesAnnee) lignes.push({ type: `Fusibles — ${g.label}`, annee: anneeRemplacement(g.fields.fusiblesAnnee, duree("fusibles")) });
     if (g.fields.condensateursAnnee) lignes.push({ type: `Condensateurs — ${g.label}`, annee: anneeRemplacement(g.fields.condensateursAnnee, duree("condensateurs")) });
   });
-  const ventilationAnnee = eq.controles.usure?.ventilation_usure?.fields?.annee;
-  if (ventilationAnnee) lignes.push({ type: "Ventilation", annee: anneeRemplacement(ventilationAnnee, 4) });
+  const ventilos = ventilateursBatterie(eq);
+  ventilos.forEach((v, i) => { if (v.annee) lignes.push({ type: libelleVentilateur(v, i, ventilos.length), annee: anneeRemplacement(v.annee, Math.round(numOf(v.duree) ?? DUREE_VIE_VENTILATEUR)) }); });
   return lignes;
 }
 function AutonomieCalculee({ eq }) {
@@ -9083,8 +9097,8 @@ function piecesUsureEquipement(eq) {
           quantite: qte, anneeMiseEnService: g.fields[k + "Annee"], dureeVie: g.fields[k + "Duree"] || 10 });
       });
     });
-    const v = eq.controles.usure?.ventilation_usure?.fields || {};
-    if (v.reference || v.annee) ajouter({ cle: "ventilation", categorie: "Ventilation", marque: "", reference: v.reference || "", description: "Ventilateur", quantite: 1, anneeMiseEnService: v.annee, dureeVie: 4 });
+    const ventilos = ventilateursBatterie(eq);
+    ventilos.forEach((v, i) => { if (v.marque || v.modele || v.annee || v.description) ajouter({ cle: v.ancien ? "ventilation" : `ventilation:${v.id}`, categorie: ventilos.length > 1 ? `Ventilation — ventilateur ${i + 1}` : "Ventilation", marque: v.marque || "", reference: v.modele || "", description: v.description || "Ventilateur", quantite: numOf(v.quantite) ?? 1, anneeMiseEnService: v.annee, dureeVie: numOf(v.duree) ?? DUREE_VIE_VENTILATEUR }); });
   }
   return out;
 }
@@ -9205,9 +9219,11 @@ function appliquerRemplacementPiece(eq, r) {
   } else if (genre === "gradin") {
     controles.gradins_dynamique = (controles.gradins_dynamique || []).map((g) => g.id !== a ? g : { ...g, fields: { ...g.fields, [b + "Annee"]: annee, ...(r.identique ? {} : { [b + "Marque"]: r.marque || g.fields[b + "Marque"] || "", [b + "Modele"]: r.reference || modelePieceGradin(g.fields, b), ...(r.description ? { [b + "Description"]: r.description } : {}), [b + "Ref"]: "" }) } });
   } else if (genre === "ventilation") {
+    const id = a || "ventilation";
+    const liste = ventilateursBatterie(eq).map((v) => { const { ancien, ...reste } = v; return v.id !== id ? reste : { ...reste, annee, ...(r.identique ? {} : { marque: r.marque || v.marque, modele: r.reference || v.modele, description: r.description || v.description }) }; });
+    controles.ventilateurs = liste;
     const u = controles.usure || {};
-    const v = u.ventilation_usure || { fields: {} };
-    controles.usure = { ...u, ventilation_usure: { ...v, fields: { ...(v.fields || {}), annee, ...(r.identique ? {} : { reference: [r.marque, r.reference].filter(Boolean).join(" ") || v.fields?.reference }) } } };
+    if (u.ventilation_usure) controles.usure = { ...u, ventilation_usure: { ...u.ventilation_usure, fields: { ...(u.ventilation_usure.fields || {}), reference: "", annee: "" } } };
   }
   const entree = { ...r, annee: Number(annee), categorie: piece ? piece.categorie : r.categorie || "Pièce", ancien, partiel, total: partiel ? total : null };
   return { ...eq, controles, remplacementsPieces: [...(eq.remplacementsPieces || []), entree] };
@@ -9366,19 +9382,70 @@ function PiecesRemplaceesRI({ eqIv, siteEq, onChange, ivDate }) {
 // en service/durée de vie), avec bouton pour ajouter un modèle différent par catégorie. Usage
 // interne uniquement — seule la synthèse des échéances (calcEcheancesUsureUPS) va dans le rapport.
 // Batterie de compensation : aide au choix du ventilateur (remplit la référence de « Ventilation »).
-function VentilationCatalogueCompensation({ eq, update }) {
-  const [ouvert, setOuvert] = useState(false);
-  const v = eq.controles.usure?.ventilation_usure || { fields: {} };
-  const choisir = (choix) => {
-    const fields = { ...(v.fields || {}), reference: [choix.marque, choix.modele].filter(Boolean).join(" ") + (choix.description ? ` — ${choix.description.replace(/\s*\([^)]*\)\s*$/, "")}` : "") };
-    update({ ...eq, controles: { ...eq.controles, usure: { ...(eq.controles.usure || {}), ventilation_usure: { ...v, fields } } } });
-    setOuvert(false);
+function VentilateursCompensation({ eq, update }) {
+  const [catalogue, setCatalogue] = useState(null); // id du ventilateur à remplir depuis le catalogue
+  const liste = ventilateursBatterie(eq);
+  const enregistrer = (next) => {
+    const nettoye = next.map(({ ancien, ...v }) => (v.id === "ventilation" ? { ...v, id: uid() } : v));
+    const u = eq.controles.usure || {};
+    const usure = u.ventilation_usure ? { ...u, ventilation_usure: { ...u.ventilation_usure, fields: { ...(u.ventilation_usure.fields || {}), reference: "", annee: "" } } } : u;
+    update({ ...eq, controles: { ...eq.controles, usure, ventilateurs: nettoye } });
   };
+  const maj = (id, k, val) => enregistrer(liste.map((v) => (v.id === id ? { ...v, [k]: val } : v)));
+  const anneeCourante = new Date().getFullYear();
+  const cellStyle = { ...inputStyle, width: "100%", boxSizing: "border-box", padding: "7px 9px", fontSize: 13 };
+  const etiquette = (t) => <div style={{ fontSize: 10, fontWeight: 700, color: "#8B96A3", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 3 }}>{t}</div>;
   return (
-    <div style={{ margin: "-6px 0 14px" }}>
-      <button onClick={() => setOuvert(!ouvert)} style={btnGhost(BRAND.blue)}><Search size={13} /> Catalogue ventilateurs</button>
-      {ouvert && <CataloguePiecesPicker kind="ventil" onFermer={() => setOuvert(false)} onChoisir={choisir} />}
-    </div>
+    <Card style={{ marginBottom: 14 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+        <SectionTitle>Ventilateurs</SectionTitle>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button onClick={() => setCatalogue("__nouveau")} style={btnGhost(BRAND.blue)}><Search size={13} /> Catalogue ventilateurs</button>
+          <button onClick={() => enregistrer([...liste, nouveauVentilateur()])} style={btnGhost(BRAND.blue)}><Plus size={13} /> Ajouter un ventilateur</button>
+        </div>
+      </div>
+      {liste.length === 0 ? (
+        <div style={{ textAlign: "center", padding: 14, color: "#8B96A3", fontSize: 12.5, border: "1px dashed #D8DEE5", borderRadius: 10 }}>Aucun ventilateur renseigné — « Ajouter un ventilateur » pour chaque modèle présent dans l'armoire.</div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {liste.map((v, i) => {
+            const annee = numOf(v.annee), duree = numOf(v.duree) ?? DUREE_VIE_VENTILATEUR;
+            const echeance = annee !== null ? Math.round(annee) + Math.round(duree) : null;
+            const couleur = echeance === null ? "#8B96A3" : echeance < anneeCourante ? "#C0392B" : echeance === anneeCourante ? "#B5730A" : "#0F8A5F";
+            const fond = echeance === null ? "#F4F6F8" : echeance < anneeCourante ? "#FDF1F0" : echeance === anneeCourante ? "#FDF6EC" : "#EAF7F1";
+            return (
+              <div key={v.id} style={{ border: "1px solid #E2E6EB", borderRadius: 10, padding: 10, background: "#fff" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                  <div style={{ fontWeight: 700, fontSize: 13, color: "#1A1F26" }}>Ventilateur {liste.length > 1 ? i + 1 : ""}</div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <div style={{ padding: "4px 10px", borderRadius: 999, background: fond, color: couleur, fontWeight: 700, fontSize: 12 }}>Échéance {echeance ?? "—"}</div>
+                    <button onClick={() => setCatalogue(v.id)} style={{ background: "none", border: "none", color: "#0A5DA8", cursor: "pointer", padding: 4 }} title="Remplir depuis le catalogue"><Search size={15} /></button>
+                    <button onClick={() => enregistrer([...liste.slice(0, i + 1), { ...nouveauVentilateur(), marque: v.marque, modele: v.modele, description: v.description, annee: v.annee, duree: v.duree }, ...liste.slice(i + 1)])} style={{ background: "none", border: "none", color: "#0A5DA8", cursor: "pointer", padding: 4 }} title="Dupliquer"><Copy size={15} /></button>
+                    <button onClick={() => enregistrer(liste.filter((x) => x.id !== v.id))} style={{ background: "none", border: "none", color: "#EF4444", cursor: "pointer", padding: 4 }} title="Retirer"><Trash2 size={15} /></button>
+                  </div>
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 8 }}>
+                  <div>{etiquette("Marque")}<input type="text" value={v.marque || ""} onChange={(e) => maj(v.id, "marque", e.target.value)} placeholder="ex. ebm-papst" style={cellStyle} /></div>
+                  <div>{etiquette("Modèle / référence")}<input type="text" value={v.modele || ""} onChange={(e) => maj(v.id, "modele", e.target.value)} placeholder="ex. W2E200" style={cellStyle} /></div>
+                  <div style={{ gridColumn: "span 2" }}>{etiquette("Description")}<input type="text" value={v.description || ""} onChange={(e) => maj(v.id, "description", e.target.value)} placeholder="ex. axial 230 V Ø 200 mm, toit d'armoire" style={cellStyle} /></div>
+                  <div>{etiquette("Quantité")}<input type="number" step="1" min="1" value={v.quantite ?? ""} onChange={(e) => maj(v.id, "quantite", e.target.value)} style={cellStyle} /></div>
+                  <div>{etiquette("Année MES")}<input type="number" step="1" value={v.annee || ""} onChange={(e) => maj(v.id, "annee", e.target.value)} placeholder="ex. 2020" style={cellStyle} /></div>
+                  <div>{etiquette("Durée de vie (ans)")}<input type="number" step="1" value={v.duree || ""} onChange={(e) => maj(v.id, "duree", e.target.value)} placeholder={String(DUREE_VIE_VENTILATEUR)} style={cellStyle} /></div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {catalogue && (
+        <CataloguePiecesPicker kind="ventil" onFermer={() => setCatalogue(null)} onChoisir={(choix) => {
+          const valeurs = { marque: choix.marque || "", modele: choix.modele || "", description: (choix.description || "").replace(/\s*\([^)]*\)\s*$/, "") };
+          if (catalogue === "__nouveau") enregistrer([...liste, { ...nouveauVentilateur(), ...valeurs }]);
+          else enregistrer(liste.map((v) => (v.id === catalogue ? { ...v, ...valeurs } : v)));
+          setCatalogue(null);
+        }} />
+      )}
+    </Card>
   );
 }
 const CATALOGUE_PAR_CATEGORIE_USURE = { condensateursAlternatifs: "ac", condensateursContinus: "dc", ventilateurs: "ventil" };
@@ -11777,18 +11844,20 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
             if (sec.key === "usure" && TYPES_AVEC_GRADINS.includes(eq.type)) {
               return (
                 <React.Fragment key={sec.key}>
-                  <SectionBlock
-                    title={sec.title}
-                    items={sec.items}
-                    values={eq.controles[sec.key]}
-                    onChangeItem={(itemKey, v) => setControleItem(sec.key, itemKey, v)}
-                    idPrefix={`${eq.id}-${sec.key}`}
-                    custom={eq.controles[sec.key + "__custom"] || []}
-                    onAddCustom={() => addCustomAction(sec.key)}
-                    onChangeCustom={(id, patch) => changeCustomAction(sec.key, id, patch)}
-                    onRemoveCustom={(id) => removeCustomAction(sec.key, id)}
-                  />
-                  <VentilationCatalogueCompensation eq={eq} update={update} />
+                  <VentilateursCompensation eq={eq} update={update} />
+                  {(
+                    <SectionBlock
+                      title="Autres pièces d'usure"
+                      items={sec.items.filter((it) => it.key !== "ventilation_usure")}
+                      values={eq.controles[sec.key]}
+                      onChangeItem={(itemKey, v) => setControleItem(sec.key, itemKey, v)}
+                      idPrefix={`${eq.id}-${sec.key}`}
+                      custom={eq.controles[sec.key + "__custom"] || []}
+                      onAddCustom={() => addCustomAction(sec.key)}
+                      onChangeCustom={(id, patch) => changeCustomAction(sec.key, id, patch)}
+                      onRemoveCustom={(id) => removeCustomAction(sec.key, id)}
+                    />
+                  )}
                   <PiecesUsureSynthese eq={eq} />
                 </React.Fragment>
               );
