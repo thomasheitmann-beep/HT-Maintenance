@@ -6310,16 +6310,20 @@ function ChampTelephone({ value, onChange, placeholder, style }) {
   );
 }
 
-function KpiCard({ icon: Icon, label, value, accent }) {
+function KpiCard({ icon: Icon, label, value, accent, onClick = null, actif = false }) {
   return (
-    <div className="kpi-carte" style={{ background: "#FFFFFF", border: "1px solid #D8DEE5", borderTop: `3px solid ${accent || "#FFC107"}`, borderRadius: 14, padding: "14px 16px", flex: 1, minWidth: 150 }}>
+    <div className="kpi-carte" onClick={onClick || undefined} role={onClick ? "button" : undefined} title={onClick ? "Voir le détail" : undefined}
+      style={{ background: actif ? "#F7FBF9" : "#FFFFFF", border: "1px solid #D8DEE5", borderTop: `3px solid ${accent || "#FFC107"}`, borderRadius: 14, padding: "14px 16px", flex: 1, minWidth: 150, cursor: onClick ? "pointer" : "default", boxShadow: actif ? `0 0 0 2px ${accent}33` : "none" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
         <div style={{ width: 26, height: 26, borderRadius: 7, background: (accent || "#FFC107") + "1F", display: "flex", alignItems: "center", justifyContent: "center" }}>
           <Icon size={13} color={accent || "#FFC107"} />
         </div>
         <span style={{ fontSize: 10.5, fontWeight: 700, color: "#5B6B7D", letterSpacing: 0.5, textTransform: "uppercase" }}>{label}</span>
       </div>
-      <div style={{ fontSize: 27, fontWeight: 700, color: "#1A1F26", fontVariantNumeric: "tabular-nums", fontFamily: "'Rajdhani', 'Inter', sans-serif" }}>{value}</div>
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 6 }}>
+        <div style={{ fontSize: 27, fontWeight: 700, color: "#1A1F26", fontVariantNumeric: "tabular-nums", fontFamily: "'Rajdhani', 'Inter', sans-serif" }}>{value}</div>
+        {onClick && <span style={{ fontSize: 11, fontWeight: 700, color: accent }}>{actif ? "Masquer" : "Voir ›"}</span>}
+      </div>
     </div>
   );
 }
@@ -6737,12 +6741,84 @@ function HistoriqueSites({ sites, onOpen }) {
   );
 }
 
+// Pièces d'usure à remplacer d'ici l'année de référence, par équipement d'un site (dernière visite).
+function piecesAPrevoirSite(site, anneeRef = new Date().getFullYear()) {
+  return (site.equipements || []).map((eq) => {
+    let pieces = [];
+    try { pieces = alertesUsureEquipement(eq, anneeRef); } catch (e) { pieces = []; }
+    return { eq, label: `${eq.type}${eq.identification?.repere ? " — " + eq.identification.repere : ""}`, pieces };
+  }).filter((x) => x.pieces.length);
+}
+// Dernière visite de chaque site (même nom + même client).
+function dernieresVisites(sites) {
+  const derniers = new Map();
+  (sites || []).forEach((s) => { const cle = `${(s.nom || "").trim().toLowerCase()}|${(s.client || "").trim().toLowerCase()}`; const d = derniers.get(cle); if (!d || String(s.rapport?.date || "") > String(d.rapport?.date || "")) derniers.set(cle, s); });
+  return derniers;
+}
+// Pièces à prévoir pour la PROCHAINE intervention d'un site : échéances jusqu'à l'année de cette intervention.
+function piecesProchaineIntervention(site) {
+  const an = parseInt(String(site.rapport?.prochaineMaintenance || "").slice(0, 4), 10);
+  return piecesAPrevoirSite(site, Math.max(new Date().getFullYear(), isNaN(an) ? 0 : an));
+}
+function PiecesAPrevoirPanneau({ sites, onOpen, onFermer }) {
+  const anneeCourante = new Date().getFullYear();
+  const lignes = [...dernieresVisites(sites).values()]
+    .map((s) => ({ s, items: piecesAPrevoirSite(s, anneeCourante), jours: daysUntil(s.rapport?.prochaineMaintenance) }))
+    .filter((x) => x.items.length)
+    .sort((a, b) => (a.jours ?? 99999) - (b.jours ?? 99999));
+  return (
+    <Card style={{ marginBottom: 20, borderTop: "3px solid #0F8A5F" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 10 }}>
+        <SectionTitle>Pièces à remplacer cette année</SectionTitle>
+        <button onClick={onFermer} style={{ background: "none", border: "none", cursor: "pointer", color: "#5B6B7D" }} title="Fermer"><X size={16} /></button>
+      </div>
+      {lignes.length === 0 ? (
+        <div style={{ fontSize: 12.5, color: "#8B96A3", padding: "8px 0" }}>Aucune pièce d'usure à échéance cette année sur les derniers rapports des sites.</div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {lignes.map(({ s, items, jours }) => {
+            const bientot = jours !== null && jours <= 30; // intervention dans moins d'un mois, ou déjà en retard
+            return (
+              <div key={s.id} style={{ border: "1px solid #E2E6EB", borderLeft: `4px solid ${bientot ? "#B5730A" : "#0F8A5F"}`, borderRadius: 10, padding: "10px 12px", background: "#fff" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8, flexWrap: "wrap", marginBottom: 6 }}>
+                  <div style={{ cursor: "pointer" }} onClick={() => onOpen(s.id)}>
+                    <div style={{ fontWeight: 700, fontSize: 13.5, color: "#1A1F26" }}>{s.nom || "Site sans nom"}</div>
+                    <div style={{ fontSize: 12, color: "#5B6B7D" }}>{s.client || ""}</div>
+                  </div>
+                  <span style={{ fontSize: 11.5, fontWeight: 700, padding: "3px 10px", borderRadius: 999, background: bientot ? "#FDF3E3" : "#F4F6F8", color: bientot ? "#B5730A" : "#5B6B7D" }}>
+                    {s.rapport?.prochaineMaintenance ? `Prochaine intervention : ${dateFrIso(s.rapport.prochaineMaintenance)}${jours !== null ? (jours < 0 ? ` (${-jours} j de retard)` : ` (dans ${jours} j)`) : ""}` : "Prochaine intervention non planifiée"}
+                    {bientot ? " — commander les pièces" : ""}
+                  </span>
+                </div>
+                {items.map(({ eq, label, pieces }) => (
+                  <div key={eq.id} onClick={() => onOpen(s.id, eq.id)} title="Ouvrir l'équipement"
+                    style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", padding: "6px 8px", borderRadius: 8, cursor: "pointer", background: "#F7F8FA", marginTop: 4 }}>
+                    <span style={{ fontSize: 12.5, fontWeight: 700, color: "#1A1F26", minWidth: 150 }}>{label}</span>
+                    {pieces.map((p, i) => (
+                      <span key={i} style={{ fontSize: 11.5, fontWeight: 700, padding: "2px 9px", borderRadius: 999, background: p.enRetard ? "#FDF1F0" : "#FDF3E3", color: p.enRetard ? "#C0392B" : "#B5730A" }}>
+                        {p.enRetard ? "✕" : "●"} {p.type} — {p.enRetard ? `échue ${p.annee}` : `échéance ${p.annee}`}
+                      </span>
+                    ))}
+                    <ChevronRight size={14} color="#9AA5B1" style={{ marginLeft: "auto" }} />
+                  </div>
+                ))}
+              </div>
+            );
+          })}
+        </div>
+      )}
+      <div style={{ fontSize: 11, color: "#8B96A3", marginTop: 8 }}>D'après le dernier rapport de chaque site. Orange : prochaine intervention dans moins d'un mois (ou en retard) — c'est le moment de commander les pièces.</div>
+    </Card>
+  );
+}
 function Overview({ sites, interventions = [], onOpen, onNew, onOpenIntervention }) {
+  const [voirPieces, setVoirPieces] = useState(false);
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("Tous");
   const [sortKey, setSortKey] = useState("prochaine");
 
   const enriched = useMemo(() => sites.map((s) => ({ ...s, _rank: overallRank(s), _prochaine: s.rapport.prochaineMaintenance })), [sites]);
+  const derniers = useMemo(() => dernieresVisites(sites), [sites]);
 
   const filtered = useMemo(() => {
     let list = enriched;
@@ -6788,8 +6864,9 @@ function Overview({ sites, interventions = [], onOpen, onNew, onOpenIntervention
         <KpiCard icon={Building2} label="Sites suivis" value={kpis.total} accent="#0A5DA8" />
         <KpiCard icon={Clock} label="Maintenance sous 30 j" value={kpis.urgent} accent="#B5730A" />
         <KpiCard icon={AlertOctagon} label="Équipements défaillants" value={kpis.equipDefaillants} accent="#C0392B" />
-        <KpiCard icon={RefreshCw} label="Pièces à remplacer cette année" value={kpis.pieces} accent="#0F8A5F" />
+        <KpiCard icon={RefreshCw} label="Pièces à remplacer cette année" value={kpis.pieces} accent="#0F8A5F" onClick={() => setVoirPieces((v) => !v)} actif={voirPieces} />
       </div>
+      {voirPieces && <PiecesAPrevoirPanneau sites={sites} onOpen={onOpen} onFermer={() => setVoirPieces(false)} />}
 
       <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap" }}>
         <div style={{ flex: "1 1 220px", position: "relative" }}>
@@ -6828,6 +6905,9 @@ function Overview({ sites, interventions = [], onOpen, onNew, onOpenIntervention
               : days < 0 ? { fond: "#FDF1F0", texte: "#C0392B", libelle: `${-days} j de retard` }
               : days <= 30 ? { fond: "#FDF3E3", texte: "#B5730A", libelle: `dans ${days} j` }
               : { fond: "#EAF7F1", texte: "#0F6B3F", libelle: days > 365 ? `dans ${Math.round(days / 30)} mois` : `dans ${days} j` };
+            // Pastille « pièces à prévoir » : un mois avant la prochaine intervention (ou en retard), sur la dernière visite du site.
+            const estDerniere = derniers.get(`${(s.nom || "").trim().toLowerCase()}|${(s.client || "").trim().toLowerCase()}`)?.id === s.id;
+            const piecesPrevoir = estDerniere && days !== null && days <= 30 ? piecesProchaineIntervention(s).reduce((n, x) => n + x.pieces.length, 0) : 0;
             const cpt = { ok: 0, deg: 0, def: 0 };
             (s.equipements || []).forEach((eq) => { const r = RANK_OF[eq.etatFinal] ?? 0; if (r >= 2) cpt.def++; else if (r === 1) cpt.deg++; else if (r === 0) cpt.ok++; });
             return (
@@ -6838,6 +6918,11 @@ function Overview({ sites, interventions = [], onOpen, onNew, onOpenIntervention
                 <div className="site-row-main" style={{ flex: "1 1 220px", minWidth: 0 }}>
                   <div style={{ fontSize: 14, fontWeight: 700, color: "#1A1F26", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.nom || "Site sans nom"}</div>
                   <div style={{ fontSize: 12, color: "#5B6B7D" }}>{[s.client, s.local].filter(Boolean).join(" · ") || "Client non renseigné"}{s.rapport.intervenant ? <span className="hide-mobile"> · {s.rapport.intervenant}</span> : null}</div>
+                  {piecesPrevoir > 0 && (
+                    <span title="Pièces d'usure arrivant à échéance d'ici la prochaine intervention : à commander" style={{ display: "inline-flex", alignItems: "center", gap: 5, marginTop: 4, fontSize: 11, fontWeight: 700, padding: "2px 9px", borderRadius: 999, background: "#FDF3E3", color: "#B5730A", border: "1px solid #F3DDB3" }}>
+                      <RefreshCw size={11} /> {piecesPrevoir} pièce{piecesPrevoir > 1 ? "s" : ""} à prévoir
+                    </span>
+                  )}
                 </div>
                 <div className="site-row-meta" style={{ flex: "0 0 120px", display: "flex", gap: 8, fontSize: 12, fontWeight: 700 }} title="Équipements conformes · dégradés · défaillants">
                   {(s.equipements || []).length === 0 ? <span style={{ color: "#8B96A3", fontWeight: 500 }}>Aucun équipement</span> : (<>
@@ -12637,7 +12722,7 @@ function ResumeSiteContacts({ site, onModifier }) {
     </div>
   );
 }
-function SiteDetail({ site, allSites, update, onBack, onDelete, onPrint, onPrintAnnexe, onCreateIntervention, clientsRegistry, contactsRegistry, caracteristiquesLibrary, apprendreCaracteristique, interventions = [] }) {
+function SiteDetail({ site, allSites, update, onBack, onDelete, onPrint, onPrintAnnexe, onCreateIntervention, clientsRegistry, contactsRegistry, caracteristiquesLibrary, apprendreCaracteristique, interventions = [], ongletInitial = null }) {
   // Informations client / site / contacts : dépliées pour un site neuf, repliées en résumé une fois renseignées.
   const [infosOuvertes, setInfosOuvertes] = useState(() => !(site.client || site.nom));
   const [menuPlus, setMenuPlus] = useState(false);
@@ -12657,7 +12742,7 @@ function SiteDetail({ site, allSites, update, onBack, onDelete, onPrint, onPrint
       return { eq, label: total[n] > 1 ? `${n} ${vus[n]}` : n };
     });
   }, [site.equipements]);
-  const [activeTab, setActiveTab] = useState("rapport");
+  const [activeTab, setActiveTab] = useState(ongletInitial && site.equipements.some((e) => e.id === ongletInitial) ? ongletInitial : "rapport");
   const [addMenuOpenHTA, setAddMenuOpenHTA] = useState(false);
   const [addMenuOpenConv, setAddMenuOpenConv] = useState(false);
 
@@ -19732,6 +19817,7 @@ function AppPrincipale({ currentUser, onLogout }) {
   const [reprendreSiteOpen, setReprendreSiteOpen] = useState(false);
   const [siteAReprendrePicker, setSiteAReprendrePicker] = useState(null);
   const [scannerOuvert, setScannerOuvert] = useState(false);
+  const [ongletSiteInitial, setOngletSiteInitial] = useState(null); // équipement à ouvrir directement dans la fiche site
   const [ficheInitiale, setFicheInitiale] = useState(null); // fiche équipement à ouvrir dans l'onglet Rapports (après un scan) // site choisi, en attente de sélection des équipements
   const [saveError, setSaveError] = useState(false);
   // État de la connexion et nombre de photos conservées sur l'appareil en attendant le réseau.
@@ -20834,11 +20920,11 @@ function AppPrincipale({ currentUser, onLogout }) {
 
           <FiletSecurite cle={`${selectedId || ""}|${selectedIvId || ""}|${view}`} onAccueil={() => { setSelectedId(null); setSelectedIvId(null); setView("sites"); }}>
           {selected ? (
-            <SiteDetail site={selected} allSites={sites} update={(updater) => updateSite(selected.id, updater)} onBack={() => setSelectedId(null)} onDelete={deleteSite} onPrint={requestPrintSite} onPrintAnnexe={setPrintAnnexeSite} onCreateIntervention={createIntervention} clientsRegistry={clientsRegistry} contactsRegistry={contactsRegistry} caracteristiquesLibrary={caracteristiquesLibrary} apprendreCaracteristique={apprendreCaracteristique} interventions={interventions} />
+            <SiteDetail key={selected.id} ongletInitial={ongletSiteInitial} site={selected} allSites={sites} update={(updater) => updateSite(selected.id, updater)} onBack={() => { setSelectedId(null); setOngletSiteInitial(null); }} onDelete={deleteSite} onPrint={requestPrintSite} onPrintAnnexe={setPrintAnnexeSite} onCreateIntervention={createIntervention} clientsRegistry={clientsRegistry} contactsRegistry={contactsRegistry} caracteristiquesLibrary={caracteristiquesLibrary} apprendreCaracteristique={apprendreCaracteristique} interventions={interventions} />
           ) : selectedIv ? (
             <InterventionEditor iv={selectedIv} update={(updater) => updateIntervention(selectedIv.id, updater)} onBack={() => setSelectedIvId(null)} onDelete={deleteIntervention} onPrint={requestPrintIv} sites={sites} />
           ) : view === "sites" ? (
-            !loaded ? <div style={{ textAlign: "center", padding: 60, color: "#8B96A3", fontSize: 13 }}>{enLigne ? "Chargement…" : "Hors connexion — les données se chargeront dès le retour du réseau."}</div> : <Overview sites={sites} interventions={interventions} onOpen={setSelectedId} onNew={addSite} onOpenIntervention={setSelectedIvId} />
+            !loaded ? <div style={{ textAlign: "center", padding: 60, color: "#8B96A3", fontSize: 13 }}>{enLigne ? "Chargement…" : "Hors connexion — les données se chargeront dès le retour du réseau."}</div> : <Overview sites={sites} interventions={interventions} onOpen={(id, eqId) => { setOngletSiteInitial(eqId || null); setSelectedId(id); }} onNew={addSite} onOpenIntervention={setSelectedIvId} />
           ) : view === "interventions" ? (
             !ivLoaded ? <div style={{ textAlign: "center", padding: 60, color: "#8B96A3", fontSize: 13 }}>{enLigne ? "Chargement…" : "Hors connexion — les données se chargeront dès le retour du réseau."}</div> : <InterventionsOverview interventions={interventions} sites={sites} onOpen={setSelectedIvId} onCreate={createIntervention} onPlanifier={planifierIntervention} />
           ) : view === "rapports" ? (
