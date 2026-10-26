@@ -132,6 +132,22 @@ function normesTableauDuLocal(l) {
   return l?.normeTableauBT ? [l.normeTableauBT] : [];
 }
 const NORMES_ENSEMBLE = ["NF EN 61439", "NF EN 60439 (ancienne)"];
+// --- Normes du poste HTA (plusieurs possibles, comme côté BT) et type de comptage ---------------
+const LISTE_NORME_POSTE_HTA = ["NF C13-100", "NF C13-200", "NF EN 62271-200", "NF EN 62271-202", "DIN"];
+const DESCRIPTION_NORME_POSTE_HTA = {
+  "NF C13-100": "Poste de livraison HTA raccordé au réseau de distribution publique",
+  "NF C13-200": "Installations électriques à haute tension (installations privées en aval du poste de livraison)",
+  "NF EN 62271-200": "Appareillage HTA sous enveloppe métallique (cellules)",
+  "NF EN 62271-202": "Postes préfabriqués haute tension / basse tension",
+  "DIN": "Normes allemandes (DIN / VDE)",
+};
+// « normeFusible » (ancien champ unique) garde la norme utilisée par le contrôle du calibre des fusibles HTA.
+const NORMES_CONTROLE_FUSIBLE = ["NF C13-100", "NF C13-200", "DIN"];
+function normesPosteDuLocal(l) {
+  if (Array.isArray(l?.normesPosteHTA) && l.normesPosteHTA.length) return l.normesPosteHTA;
+  return l?.normeFusible ? [l.normeFusible] : [];
+}
+const LISTE_COMPTAGE = [{ v: "HTA", label: "Comptage HTA" }, { v: "BT", label: "Comptage BT" }];
 const localEnsembleNormalise = (l) => normesTableauDuLocal(l).some((n) => NORMES_ENSEMBLE.includes(n));
 const LISTE_FORME_SEPARATION = ["Forme 1", "Forme 2a", "Forme 2b", "Forme 3a", "Forme 3b", "Forme 4a", "Forme 4b"];
 // Rôle de chaque norme quand le tableau est déclaré selon les deux référentiels.
@@ -140,7 +156,7 @@ const TEXTE_DOUBLE_NORME = "Double référence : la NF C 15-100 encadre l'instal
 function pointsControleEnsemble61439(l) {
   if (!localEnsembleNormalise(l)) return null;
   const e = l.ensemble61439 || {};
-  const car = [e.tableautier && `tableautier : ${e.tableautier}`, e.ina && `InA = ${e.ina} A`, e.icw && `Icw = ${e.icw} kA (1 s)`, e.ipk && `Ipk = ${e.ipk} kA`, e.forme && e.forme, e.ip && e.ip].filter(Boolean).join(", ");
+  const car = [e.tableautier && `tableautier : ${e.tableautier}`, e.ina && `InA = ${e.ina} A`, e.icw && `Icw = ${e.icw} kA (1 s)`, e.ipk && `Ipk = ${e.ipk} kA`, e.ue && `Ue = ${e.ue} V`, e.forme && e.forme, e.ip && e.ip, e.annee && `fabriqué en ${e.annee}`].filter(Boolean).join(", ");
   const manques = [e.plaque === "Non" && "plaque signalétique absente ou illisible", e.dossier === "Non" && "dossier technique / rapport d'essais individuels non disponible"].filter(Boolean);
   return `Tableau selon NF EN 61439${car ? ` (${car})` : ""} : vérifier la présence et la lisibilité de la plaque signalétique (constructeur, norme, InA, Icw/Ipk, IP), la disponibilité du dossier technique et du rapport d'essais individuels, le maintien de la forme de séparation et de l'indice IP (capots, obturateurs, presse-étoupes), le serrage et l'échauffement des connexions (thermographie) au regard de InA.${manques.length ? ` ⚠ Constaté : ${manques.join(" ; ")}.` : ""}`;
 }
@@ -3931,6 +3947,7 @@ function dupliquerEquipementPourNouvelleVisite(source) {
   fresh.identification = { ...source.identification };
   fresh.niveauMaintenance = source.niveauMaintenance || "1-4";
   fresh.lignageId = source.lignageId || source.id;
+  if (source.localLibre) fresh.localLibre = source.localLibre; // local saisi librement : conservé d'une visite à l'autre
   if (source.qrCode) fresh.qrCode = source.qrCode; // l'étiquette posée reste valable d'une visite à l'autre
   // Pièces d'usure et fiche batterie reprises telles quelles (années de mise en service, références,
   // historique des remplacements) : elles évoluent d'une visite à l'autre sans ressaisie.
@@ -3984,7 +4001,7 @@ function emptySite() {
 // Normes applicables au tableau basse tension d'un local (pendant, côté BT, de « Norme du poste » côté HTA).
 const LISTE_NORME_TABLEAU_BT = ["NF C 15-100", "NF EN 61439", "NF EN 60439 (ancienne)", "NF C 14-100", "DIN"];
 function emptyLocal(nom) {
-  return { id: uid(), nom: nom || "", typeDePoste: "", regimeNeutre: "", marque: "", anneeMiseEnService: "", normeFusible: "", normeTableauBT: "", typeDecouplage: "" };
+  return { id: uid(), nom: nom || "", typeDePoste: "", regimeNeutre: "", marque: "", anneeMiseEnService: "", normeFusible: "", normesPosteHTA: [], comptage: "", normeTableauBT: "", typeDecouplage: "" };
 }
 
 function worstRank(labels) { return labels.reduce((worst, l) => Math.max(worst, RANK_OF[l] ?? 0), 0); }
@@ -4073,7 +4090,7 @@ function prefillInterventionFromSite(site, eqOrList, numeroRI) {
       constructeur: idf.marque || (site.locaux || []).find((l) => l.id === eq.localId)?.marque || "",
       modele: idf.modele || idf.typeCellule || idf.typeTransformateur || idf.typeDisjoncteur || "",
       numeroSerie: idf.numeroSerie || idf.numeroSerieDisjoncteur || idf.numeroSerieContacteur || idf.numeroSerieRelais || "",
-      localisation: (site.locaux || []).find((l) => l.id === eq.localId)?.nom || site.local || "",
+      localisation: nomLocalEquipement(eq, site.locaux) || site.local || "",
       reference: idf.repere || "",
       etat: eq.etatFinal || "Conforme",
       remarque: aplatirRemarques(eq.remarques),
@@ -4893,6 +4910,30 @@ function AutoTextArea({ value, onChange, style, placeholder, onFocus, onBlur }) 
 function actionInputWidth(texte) {
   const longueur = (texte || "").length;
   return Math.max(150, Math.min(340, longueur * 7 + 40));
+}
+// Local d'un équipement : un des locaux renseignés du site (localId) OU un libellé saisi librement (localLibre),
+// pour situer l'équipement même quand son local n'est pas décrit dans la partie « Locaux » du rapport.
+function localDeEquipement(eq, locaux) { return (locaux || []).find((l) => l.id === eq?.localId) || null; }
+function nomLocalEquipement(eq, locaux) {
+  const l = localDeEquipement(eq, locaux);
+  if (l) return l.nom || "Local sans nom";
+  return String(eq?.localLibre || "").trim();
+}
+function ChoixLocalEquipement({ eq, locaux, update, listId }) {
+  const valeur = nomLocalEquipement(eq, locaux);
+  const choisir = (texte) => {
+    const t = String(texte || "");
+    const trouve = (locaux || []).find((l) => (l.nom || "Local sans nom").trim().toLowerCase() === t.trim().toLowerCase());
+    if (trouve) update({ ...eq, localId: trouve.id, localLibre: "" });
+    else update({ ...eq, localId: "", localLibre: t });
+  };
+  const libre = !localDeEquipement(eq, locaux) && valeur;
+  return (
+    <>
+      <Combo value={valeur} onChange={choisir} options={(locaux || []).map((l) => l.nom || "Local sans nom")} listId={listId} placeholder={(locaux || []).length ? "Choisir ou saisir" : "Saisir le local"} />
+      {libre && <div style={{ fontSize: 10.5, color: "#8B96A3", marginTop: 4 }}>Local non décrit dans « Locaux » — repris tel quel dans le rapport.</div>}
+    </>
+  );
 }
 function Combo({ value, onChange, options, listId, style, placeholder, numeric, onBlur, multiline = false }) {
   const [open, setOpen] = useState(false);
@@ -6761,6 +6802,14 @@ function RapportTab({ site, update }) {
       return { normesTableauBT: next, normeTableauBT: next[0] || "" };
     });
   }
+  // Normes du poste HTA : plusieurs cochables ; « normeFusible » garde celle qui sert au contrôle des fusibles (compatibilité).
+  function basculerNormePoste(id, n) {
+    patchLocal(id, (l) => {
+      const cur = normesPosteDuLocal(l);
+      const next = cur.includes(n) ? cur.filter((x) => x !== n) : LISTE_NORME_POSTE_HTA.filter((x) => x === n || cur.includes(x));
+      return { normesPosteHTA: next, normeFusible: next.find((x) => NORMES_CONTROLE_FUSIBLE.includes(x)) || "" };
+    });
+  }
   // Régimes de neutre HTA et BT séparés ; « regimeNeutre » garde le texte combiné (compatibilité).
   function setRegimeLocal(id, cote, v) {
     patchLocal(id, (l) => {
@@ -6911,12 +6960,35 @@ function RapportTab({ site, update }) {
                 <Combo value={l.marque} onChange={(v) => setLocalField(l.id, "marque", v)} options={LISTE_MARQUES} listId={`${l.id}-marque`} />
               </Field>
               <Field label="Année de mise en service"><TextInput value={l.anneeMiseEnService} onChange={(e) => setLocalField(l.id, "anneeMiseEnService", e.target.value)} /></Field>
-              <Field label="Norme du poste">
-                <Select value={l.normeFusible || ""} onChange={(e) => setLocalField(l.id, "normeFusible", e.target.value)}>
-                  <option value="">—</option>
-                  {["NF C13-100", "NF C13-200", "DIN"].map((n) => <option key={n} value={n}>{n}</option>)}
-                </Select>
-                <div style={{ fontSize: 10.5, color: "#8B96A3", marginTop: 4 }}>Caractéristique générale du poste — utilisée actuellement pour le contrôle du calibre fusible HTA.</div>
+              <Field label="Norme(s) du poste HTA" span="1 / -1">
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {LISTE_NORME_POSTE_HTA.map((n) => {
+                    const actif = normesPosteDuLocal(l).includes(n);
+                    return (
+                      <span key={n} title={DESCRIPTION_NORME_POSTE_HTA[n]} onClick={() => basculerNormePoste(l.id, n)} style={{ cursor: "pointer", userSelect: "none", fontSize: 12, padding: "5px 10px", borderRadius: 999, border: `1.5px solid ${actif ? BRAND.blue : "#D8DEE5"}`, background: actif ? "#EEF4FB" : "#fff", color: actif ? "#0A5DA8" : "#5B6B7D", fontWeight: actif ? 700 : 500 }}>
+                        {actif ? "✓ " : ""}{n}
+                      </span>
+                    );
+                  })}
+                </div>
+                <div style={{ fontSize: 10.5, color: "#8B96A3", marginTop: 4 }}>
+                  Plusieurs normes possibles (ex. NF C13-100 + NF EN 62271-202 pour un poste préfabriqué de livraison).
+                  {normesPosteDuLocal(l).length ? " " + normesPosteDuLocal(l).map((n) => `${n} : ${DESCRIPTION_NORME_POSTE_HTA[n] || ""}`).join(" · ") + "." : ""}
+                  {" "}La NF C13-100 / C13-200 sert aussi au contrôle du calibre des fusibles HTA.
+                </div>
+              </Field>
+              <Field label="Comptage" span="1 / -1">
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {LISTE_COMPTAGE.map(({ v, label }) => {
+                    const actif = l.comptage === v;
+                    return (
+                      <span key={v} onClick={() => setLocalField(l.id, "comptage", actif ? "" : v)} style={{ cursor: "pointer", userSelect: "none", fontSize: 12, padding: "5px 10px", borderRadius: 999, border: `1.5px solid ${actif ? BRAND.blue : "#D8DEE5"}`, background: actif ? "#EEF4FB" : "#fff", color: actif ? "#0A5DA8" : "#5B6B7D", fontWeight: actif ? 700 : 500 }}>
+                        {actif ? "✓ " : ""}{label}
+                      </span>
+                    );
+                  })}
+                </div>
+                <div style={{ fontSize: 10.5, color: "#8B96A3", marginTop: 4 }}>{l.comptage === "BT" ? "Comptage côté BT : poste à un seul transformateur (NF C13-100 : Ib ≤ 45 A, soit ≤ 1250 kVA en 20 kV)." : l.comptage === "HTA" ? "Comptage côté HTA : cellule de comptage (TC / TP) en amont du transformateur." : "Côté où se fait le comptage du distributeur."}</div>
               </Field>
               <Field label="Norme(s) du tableau BT" span="1 / -1">
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
@@ -6937,12 +7009,30 @@ function RapportTab({ site, update }) {
                   const e = l.ensemble61439 || {};
                   return (
                     <div style={{ marginTop: 8, padding: 10, border: "1px solid #D8DEE5", borderRadius: 8, background: "#fff" }}>
-                      <div style={{ fontSize: 11, fontWeight: 700, color: "#5B6B7D", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 8 }}>Ensemble NF EN 61439 — caractéristiques assignées (plaque signalétique)</div>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: "#5B6B7D", textTransform: "uppercase", letterSpacing: 0.4 }}>Ensemble NF EN 61439 — caractéristiques assignées (plaque signalétique)</div>
+                        <BoutonLirePlaque compact libelle="Lire la plaque" typeEquipement="Tableau basse tension — ensemble NF EN 61439"
+                          contexte="Plaque signalétique d'un ensemble d'appareillage BT (tableau) selon NF EN 61439-1/-2 : constructeur (tableautier), courant assigné InA, courant de courte durée Icw (1 s), courant de crête Ipk, tension assignée d'emploi Ue, forme de séparation, degré de protection IP, année de fabrication."
+                          champs={[
+                            { key: "tableautier", label: "Tableautier / constructeur de l'ensemble" },
+                            { key: "ina", label: "Courant assigné de l'ensemble InA (A)" },
+                            { key: "icw", label: "Courant assigné de courte durée admissible Icw (kA, 1 s)" },
+                            { key: "ipk", label: "Courant assigné de crête admissible Ipk (kA)" },
+                            { key: "ue", label: "Tension assignée d'emploi Ue (V)" },
+                            { key: "forme", label: "Forme de séparation interne", options: LISTE_FORME_SEPARATION },
+                            { key: "ip", label: "Degré de protection IP", options: LISTE_INDICE_PROTECTION },
+                            { key: "annee", label: "Année de fabrication" },
+                          ]}
+                          valeursActuelles={e}
+                          onAppliquer={(patch) => patchLocal(l.id, (loc) => ({ ensemble61439: { ...(loc.ensemble61439 || {}), ...patch, plaque: "Oui" } }))} />
+                      </div>
                       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10 }}>
                         <Field label="Tableautier"><TextInput value={e.tableautier || ""} onChange={(ev) => setEnsemble(l.id, "tableautier", ev.target.value)} /></Field>
                         <Field label="InA (A)"><TextInput inputMode="decimal" value={e.ina || ""} onChange={(ev) => setEnsemble(l.id, "ina", ev.target.value)} /></Field>
                         <Field label="Icw (kA, 1 s)"><TextInput inputMode="decimal" value={e.icw || ""} onChange={(ev) => setEnsemble(l.id, "icw", ev.target.value)} /></Field>
                         <Field label="Ipk (kA crête)"><TextInput inputMode="decimal" value={e.ipk || ""} onChange={(ev) => setEnsemble(l.id, "ipk", ev.target.value)} /></Field>
+                        <Field label="Ue (V)"><TextInput inputMode="decimal" value={e.ue || ""} onChange={(ev) => setEnsemble(l.id, "ue", ev.target.value)} /></Field>
+                        <Field label="Année de fabrication"><TextInput inputMode="numeric" value={e.annee || ""} onChange={(ev) => setEnsemble(l.id, "annee", ev.target.value)} /></Field>
                         <Field label="Forme de séparation">
                           <Select value={e.forme || ""} onChange={(ev) => setEnsemble(l.id, "forme", ev.target.value)}><option value="">—</option>{LISTE_FORME_SEPARATION.map((f) => <option key={f} value={f}>{f}</option>)}</Select>
                         </Field>
@@ -10794,12 +10884,10 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
       {open && (
         <div style={{ marginTop: 16 }}>
           <div style={{ marginBottom: 16, display: "flex", gap: 16, flexWrap: "wrap" }}>
-            {schema.identification.length === 0 && locaux.length > 1 && (
+            {schema.identification.length === 0 && (
               <div style={{ maxWidth: 260 }}>
                 <Field label="Local">
-                  <Select value={eq.localId} onChange={(e) => update({ ...eq, localId: e.target.value })}>
-                    {locaux.map((l) => <option key={l.id} value={l.id}>{l.nom || "Local sans nom"}</option>)}
-                  </Select>
+                  <ChoixLocalEquipement eq={eq} locaux={locaux} update={update} listId={`${eq.id}-local`} />
                 </Field>
               </div>
             )}
@@ -10960,14 +11048,12 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
                   </Field>
                   );
                   // Le local se choisit juste à côté du nom / repère de l'équipement (même ligne de la grille).
-                  if (f.key === "repere" && locaux.length > 0) {
+                  if (f.key === "repere") {
                     return (
                       <React.Fragment key={f.key}>
                         {champ}
                         <Field label="Local">
-                          <Select value={eq.localId} onChange={(e) => update({ ...eq, localId: e.target.value })}>
-                            {locaux.map((l) => <option key={l.id} value={l.id}>{l.nom || "Local sans nom"}</option>)}
-                          </Select>
+                          <ChoixLocalEquipement eq={eq} locaux={locaux} update={update} listId={`${eq.id}-local`} />
                         </Field>
                       </React.Fragment>
                     );
@@ -11886,7 +11972,7 @@ function PrintEquipement({ eq, allEquipements = [], locaux = [] }) {
           {schema.identification.filter((f) => !champIdentificationMasque(eq, f.key)).map((f) => (
             <React.Fragment key={f.key}>
               <PrintFieldRow label={f.label} value={formatIdentificationValue(identificationAffichee[f.key])} />
-              {f.key === "repere" && localEq && <PrintFieldRow label="Local" value={localEq.nom || "Local sans nom"} />}
+              {f.key === "repere" && nomLocalEquipement(eq, locaux) && <PrintFieldRow label="Local" value={nomLocalEquipement(eq, locaux)} />}
             </React.Fragment>
           ))}
         </div>
@@ -12194,8 +12280,8 @@ function SiteDetail({ site, allSites, update, onBack, onDelete, onPrint, onPrint
     // Local : même nom que dans la visite d'origine si présent, sinon le premier local du site.
     const srcSite = (allSites || []).find((s) => (s.equipements || []).some((e) => e.id === source.id));
     const nomLocal = srcSite && (srcSite.locaux || []).find((l) => l.id === source.localId)?.nom;
-    const local = (site.locaux || []).find((l) => nomLocal && l.nom === nomLocal) || (site.locaux || [])[0];
-    if (local) eq.localId = local.id;
+    const local = (site.locaux || []).find((l) => nomLocal && l.nom === nomLocal) || (!nomLocal && eq.localLibre ? null : (site.locaux || [])[0]);
+    if (local) { eq.localId = local.id; eq.localLibre = ""; }
     eq.ordre = (site.equipements.length + 1) * 10;
     update((d) => ({ ...d, equipements: [...d.equipements, eq] }));
     setActiveTab(eq.id);
@@ -12206,7 +12292,7 @@ function SiteDetail({ site, allSites, update, onBack, onDelete, onPrint, onPrint
     if (!sources.length) return;
     const nouveaux = sources.map((source, i) => {
       const eq = dupliquerEquipementPourNouvelleVisite(source);
-      if (site.locaux && site.locaux.length) eq.localId = site.locaux[0].id;
+      if (site.locaux && site.locaux.length && !eq.localLibre) eq.localId = site.locaux[0].id;
       eq.ordre = (site.equipements.length + 1 + i) * 10;
       return eq;
     });
@@ -13116,7 +13202,7 @@ function FicheEquipementHistorique({ p, interventions, onRetour, onOpenSite, onO
   const couleurStatut = { retard: "#C0392B", annee: "#B5730A", avenir: "#0F8A5F", inconnue: "#8B96A3" };
   const th = { background: "#1A1F26", color: "#fff", padding: "6px 8px", fontSize: 11, textAlign: "left", fontWeight: 700 };
   const td = { padding: "6px 8px", borderBottom: "1px solid #E2E6EB", fontSize: 12, verticalAlign: "top" };
-  const ident = [["Marque", idf.marque], ["Modèle", idf.modele || idf.typeCellule || idf.typeTransformateur], ["N° de série", idf.numeroSerie || idf.numeroSerieDisjoncteur], ["Année de mise en service", idf.anneeMiseEnService || idf.annee], ["Local", local?.nom], ["Code étiquette", eq.qrCode]].filter(([, v]) => v);
+  const ident = [["Marque", idf.marque], ["Modèle", idf.modele || idf.typeCellule || idf.typeTransformateur], ["N° de série", idf.numeroSerie || idf.numeroSerieDisjoncteur], ["Année de mise en service", idf.anneeMiseEnService || idf.annee], ["Local", nomLocalEquipement(eq, p.dernier.site.locaux)], ["Code étiquette", eq.qrCode]].filter(([, v]) => v);
   return (
     <div>
       <button onClick={onRetour} style={{ ...btnGhost("#5B6B7D"), marginBottom: 12 }}><ArrowLeft size={13} /> Retour à la liste</button>
@@ -17044,15 +17130,16 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
   const elements = [docxEquipHeader(eq.type + (eq.identification.repere ? " — " + eq.identification.repere : ""), docxBookmarkId(eq), eq.etatFinal), docxSpacer(40)];
   // Le local est une ligne du tableau d'identification, juste sous le nom / repère. Un équipement sans
   // tableau d'identification (ex. « Sécurité ») garde l'ancienne mention discrète au-dessus.
-  if (localNom && !schema.identification.length) elements.push(new DOCX.Paragraph({ spacing: { after: 60 }, children: [new DOCX.TextRun({ text: "Local : " + (localNom.nom || "Local sans nom"), size: 16, color: "666666", italics: true })] }));
+  const libelleLocal = nomLocalEquipement(eq, locaux);
+  if (libelleLocal && !schema.identification.length) elements.push(new DOCX.Paragraph({ spacing: { after: 60 }, children: [new DOCX.TextRun({ text: "Local : " + libelleLocal, size: 16, color: "666666", italics: true })] }));
   else elements.push(docxSpacer(40));
   if (schema.identification.length) {
     const identificationAffichee = identificationBilanPuissanceAffichee(eq, allSites);
     const champsId = schema.identification.filter((f) => !champIdentificationMasque(eq, f.key));
     const lignesId = champsId.map((f) => [f.label, formatIdentificationValue(identificationAffichee[f.key])]);
-    if (localNom) {
+    if (libelleLocal) {
       const idxRepere = champsId.findIndex((f) => f.key === "repere");
-      lignesId.splice(idxRepere >= 0 ? idxRepere + 1 : 0, 0, ["Local", localNom.nom || "Local sans nom"]);
+      lignesId.splice(idxRepere >= 0 ? idxRepere + 1 : 0, 0, ["Local", libelleLocal]);
     }
     const t = docxFieldTable(lignesId, eq.photoEquipement);
     if (t) { elements.push(t); elements.push(docxSpacer()); }
@@ -17864,7 +17951,7 @@ async function generateSiteDocx(site, allSites) {
   ];
   const locauxRows = (site.locaux || []).map((l) => ({
     nom: l.nom || "Local sans nom",
-    resume: [l.typeDePoste && `Type de poste : ${l.typeDePoste}`, texteRegimesNeutre(l) && `Régime de neutre — ${texteRegimesNeutre(l)}`, l.normeFusible && `Norme du poste : ${l.normeFusible}`, normesTableauDuLocal(l).length && `Norme${normesTableauDuLocal(l).length > 1 ? "s" : ""} du tableau BT : ${normesTableauDuLocal(l).join(" + ")}`, l.marque && `Marque : ${l.marque}`, l.anneeMiseEnService && `Mise en service : ${l.anneeMiseEnService}`].filter(Boolean).join(" · "),
+    resume: [l.typeDePoste && `Type de poste : ${l.typeDePoste}`, texteRegimesNeutre(l) && `Régime de neutre — ${texteRegimesNeutre(l)}`, normesPosteDuLocal(l).length && `Norme${normesPosteDuLocal(l).length > 1 ? "s" : ""} du poste HTA : ${normesPosteDuLocal(l).join(" + ")}`, l.comptage && `Comptage ${l.comptage}`, normesTableauDuLocal(l).length && `Norme${normesTableauDuLocal(l).length > 1 ? "s" : ""} du tableau BT : ${normesTableauDuLocal(l).join(" + ")}`, l.marque && `Marque : ${l.marque}`, l.anneeMiseEnService && `Mise en service : ${l.anneeMiseEnService}`].filter(Boolean).join(" · "),
     definitions: [regimesNeutreDuLocal(l).hta ? REGIME_NEUTRE_DESCRIPTIONS[regimesNeutreDuLocal(l).hta] : null, regimesNeutreDuLocal(l).bt ? REGIME_NEUTRE_DESCRIPTIONS[regimesNeutreDuLocal(l).bt] : null, pointsControleRegimeBT(regimesNeutreDuLocal(l).bt, normesTableauDuLocal(l)), normesTableauDuLocal(l).includes("NF C 15-100") && localEnsembleNormalise(l) ? TEXTE_DOUBLE_NORME : null, pointsControleEnsemble61439(l)].filter(Boolean),
   }));
   const locauxTable = locauxRows.length && locauxRows.some((l) => l.resume) ? docxTable({
@@ -19878,7 +19965,7 @@ function AppPrincipale({ currentUser, onLogout }) {
     const equipementsSource = equipementIds ? (source.equipements || []).filter((eq) => equipementIds.includes(eq.id)) : (source.equipements || []);
     fresh.equipements = equipementsSource.map((eq) => {
       const copy = dupliquerEquipementPourNouvelleVisite(eq);
-      copy.localId = localIdMap[eq.localId] || (fresh.locaux[0] ? fresh.locaux[0].id : "");
+      copy.localId = localIdMap[eq.localId] || (copy.localLibre ? "" : (fresh.locaux[0] ? fresh.locaux[0].id : ""));
       return copy;
     });
     setSites((prev) => [fresh, ...prev]);
