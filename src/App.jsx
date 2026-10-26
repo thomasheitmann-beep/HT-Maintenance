@@ -14,7 +14,8 @@ import {
   Plus, Search, AlertTriangle, CheckCircle2, AlertOctagon,
   Trash2, ArrowLeft, Building2, Clock, ChevronRight, ChevronDown,
   MapPin, ShieldCheck, FileText, Settings2, Printer, ImagePlus,
-  Mail, PenLine, RotateCcw, ClipboardList, X, MinusCircle, Download, Upload, Copy, RefreshCw, Users, Phone, Crop, QrCode, Camera,
+  Mail, PenLine, RotateCcw, ClipboardList, X, MinusCircle, Download, Upload, Copy, RefreshCw, Users, Phone,
+  Zap, BatteryCharging, Gauge, Activity, Droplets, Power, Layers, Sun, WifiOff, Navigation, Crop, QrCode, Camera,
 } from "lucide-react";
 
 /* =========================================================================
@@ -3843,6 +3844,32 @@ const RANK_COLOR = {
   2: { color: "#EF4444", bg: "rgba(239,68,68,0.14)", icon: AlertOctagon },
 };
 const EQUIP_STATUSES = ["Conforme", "Dégradé", "Défaillant", "Non réalisé", "Non présent"];
+// Choix de l'état en un geste : trois boutons de couleur (Conforme / Dégradé / Défaillant) + un petit menu pour les autres états.
+const ETATS_RAPIDES = [["Conforme", "✓", "#0F8A5F"], ["Dégradé", "!", "#B5730A"], ["Défaillant", "✕", "#C0392B"]];
+function EtatRapide({ value, onChange, accord = (x) => x, grand = false }) {
+  const autre = !ETATS_RAPIDES.some(([e]) => e === value);
+  return (
+    <div style={{ display: "inline-flex", alignItems: "stretch", gap: 4, flexWrap: "nowrap" }}>
+      <div role="group" style={{ display: "inline-flex", border: "1px solid #D8DEE5", borderRadius: 8, overflow: "hidden", background: "#fff" }}>
+        {ETATS_RAPIDES.map(([e, sym, c], i) => {
+          const actif = value === e;
+          return (
+            <button key={e} type="button" onClick={() => onChange(e)} aria-pressed={actif} title={accord(e)}
+              style={{ border: "none", borderLeft: i ? "1px solid #D8DEE5" : "none", background: actif ? c : "#fff", color: actif ? "#fff" : c, fontWeight: 700,
+                fontSize: grand ? 13 : 11.5, padding: grand ? "9px 14px" : "6px 9px", minHeight: grand ? 40 : 32, cursor: "pointer", whiteSpace: "nowrap", fontFamily: "inherit" }}>
+              {sym} {accord(e)}
+            </button>
+          );
+        })}
+      </div>
+      <select value={autre ? value || "" : ""} onChange={(ev) => ev.target.value && onChange(ev.target.value)} title="Autre état (non réalisé, non présent)"
+        style={{ ...inputStyle, width: autre && value ? "auto" : 34, padding: "0 6px", fontSize: 12, minHeight: grand ? 40 : 32, color: autre && value ? "#5B6B7D" : "#8B96A3", fontWeight: autre && value ? 700 : 400, WebkitAppearance: "none", appearance: "none", textAlign: "center", cursor: "pointer" }}>
+        <option value="">⋯</option>
+        {EQUIP_STATUSES.filter((e) => !ETATS_RAPIDES.some(([r]) => r === e)).map((e) => <option key={e} value={e}>{accord(e)}</option>)}
+      </select>
+    </div>
+  );
+}
 const CONFORMITE_STATUSES = ["Conforme", "À corriger", "Non conforme"];
 const OUI_NON = ["OUI", "NON"];
 
@@ -6285,7 +6312,7 @@ function ChampTelephone({ value, onChange, placeholder, style }) {
 
 function KpiCard({ icon: Icon, label, value, accent }) {
   return (
-    <div style={{ background: "#FFFFFF", border: "1px solid #D8DEE5", borderRadius: 14, padding: "16px 18px", flex: 1, minWidth: 150 }}>
+    <div className="kpi-carte" style={{ background: "#FFFFFF", border: "1px solid #D8DEE5", borderTop: `3px solid ${accent || "#FFC107"}`, borderRadius: 14, padding: "14px 16px", flex: 1, minWidth: 150 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
         <div style={{ width: 26, height: 26, borderRadius: 7, background: (accent || "#FFC107") + "1F", display: "flex", alignItems: "center", justifyContent: "center" }}>
           <Icon size={13} color={accent || "#FFC107"} />
@@ -6550,9 +6577,7 @@ function ControlRow({ item, value, onChange, idPrefix, toleranceOverride }) {
             />
           )}
           {value.etat !== undefined && (
-            <Select value={value.etat} onChange={(e) => { const { etatAuto, ...reste } = value; onChange({ ...reste, etat: e.target.value }); }} style={{ width: 120, padding: "5px 7px", fontSize: 12 }}>
-              {EQUIP_STATUSES.map((s) => <option key={s} value={s}>{agree(s, itemAgreement(item.label).gender, itemAgreement(item.label).plural)}</option>)}
-            </Select>
+            <EtatRapide value={value.etat} onChange={(v) => { const { etatAuto, ...reste } = value; onChange({ ...reste, etat: v }); }} accord={(s) => agree(s, itemAgreement(item.label).gender, itemAgreement(item.label).plural)} />
           )}
         </div>
       </div>
@@ -6582,9 +6607,7 @@ function CustomActionsList({ custom, onAdd, onChange, onRemove, idPrefix }) {
                 multiline
                 style={{ width: actionInputWidth(c.action), padding: "5px 7px", fontSize: 12 }}
               />
-              <Select value={c.etat} onChange={(e) => onChange(c.id, { etat: e.target.value })} style={{ width: 120, padding: "5px 7px", fontSize: 12 }}>
-                {EQUIP_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
-              </Select>
+              <EtatRapide value={c.etat} onChange={(v) => onChange(c.id, { etat: v })} />
               <button onClick={() => onRemove(c.id)} style={{ background: "none", border: "none", color: "#EF4444", cursor: "pointer", padding: 4 }} title="Retirer">
                 <Trash2 size={15} />
               </button>
@@ -6639,7 +6662,7 @@ function SemaineTechnicien({ sites, interventions, onOpenSite, onOpenInterventio
   return (
     <Card style={{ marginBottom: 16 }}>
       <SectionTitle>Ma semaine</SectionTitle>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 8, marginTop: 10 }}>
+      <div className="semaine-grille" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 8, marginTop: 10 }}>
         {jours.map((j, i) => (
           <div key={j.dateISO} style={{
             border: j.estAujourdhui ? `1.5px solid ${BRAND.amber}` : "1px solid #D8DEE5", borderRadius: 10, padding: "8px 10px",
@@ -6744,7 +6767,15 @@ function Overview({ sites, interventions = [], onOpen, onNew, onOpenIntervention
       const d = daysUntil(s._prochaine);
       if (d !== null && d <= 30) urgent++;
     });
-    return { total: sites.length, degrade, defaillant, urgent };
+    // Dernière visite de chaque site (nom + client) : équipements défaillants et pièces d'usure à remplacer cette année.
+    const derniers = new Map();
+    sites.forEach((s) => { const cle = `${(s.nom || "").trim().toLowerCase()}|${(s.client || "").trim().toLowerCase()}`; const d = derniers.get(cle); if (!d || String(s.rapport?.date || "") > String(d.rapport?.date || "")) derniers.set(cle, s); });
+    let equipDefaillants = 0, pieces = 0;
+    derniers.forEach((s) => (s.equipements || []).forEach((eq) => {
+      if ((RANK_OF[eq.etatFinal] ?? 0) >= 2) equipDefaillants++;
+      try { pieces += alertesUsureEquipement(eq).length; } catch (e) { /* équipement incomplet */ }
+    }));
+    return { total: sites.length, degrade, defaillant, urgent, equipDefaillants, pieces };
   }, [sites, enriched]);
 
   return (
@@ -6754,8 +6785,10 @@ function Overview({ sites, interventions = [], onOpen, onNew, onOpenIntervention
       <HistoriqueSites sites={sites} onOpen={onOpen} />
 
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 20 }}>
-        <KpiCard icon={Building2} label="Sites suivis" value={kpis.total} />
-        <KpiCard icon={Clock} label="Maintenance sous 30 j" value={kpis.urgent} accent="#FFC107" />
+        <KpiCard icon={Building2} label="Sites suivis" value={kpis.total} accent="#0A5DA8" />
+        <KpiCard icon={Clock} label="Maintenance sous 30 j" value={kpis.urgent} accent="#B5730A" />
+        <KpiCard icon={AlertOctagon} label="Équipements défaillants" value={kpis.equipDefaillants} accent="#C0392B" />
+        <KpiCard icon={RefreshCw} label="Pièces à remplacer cette année" value={kpis.pieces} accent="#0F8A5F" />
       </div>
 
       <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap" }}>
@@ -6790,25 +6823,36 @@ function Overview({ sites, interventions = [], onOpen, onNew, onOpenIntervention
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {filtered.map((s) => {
             const days = daysUntil(s._prochaine);
-            const urgentColor = days !== null && days <= 30 ? "#EF4444" : days !== null && days <= 60 ? "#FB923C" : "#5B6B7D";
+            const couleurEtat = s._rank >= 2 ? "#C0392B" : s._rank === 1 ? "#B5730A" : s._rank < 0 ? "#7A8794" : "#0F8A5F";
+            const badge = days === null ? { fond: "#F4F6F8", texte: "#5B6B7D", libelle: "—" }
+              : days < 0 ? { fond: "#FDF1F0", texte: "#C0392B", libelle: `${-days} j de retard` }
+              : days <= 30 ? { fond: "#FDF3E3", texte: "#B5730A", libelle: `dans ${days} j` }
+              : { fond: "#EAF7F1", texte: "#0F6B3F", libelle: days > 365 ? `dans ${Math.round(days / 30)} mois` : `dans ${days} j` };
+            const cpt = { ok: 0, deg: 0, def: 0 };
+            (s.equipements || []).forEach((eq) => { const r = RANK_OF[eq.etatFinal] ?? 0; if (r >= 2) cpt.def++; else if (r === 1) cpt.deg++; else if (r === 0) cpt.ok++; });
             return (
               <div key={s.id} onClick={() => onOpen(s.id)} className="site-row"
-                style={{ background: "#FFFFFF", border: "1px solid #D8DEE5", borderRadius: 12, padding: "13px 16px", cursor: "pointer" }}
-                onMouseEnter={(e) => (e.currentTarget.style.borderColor = "#9AA5B1")} onMouseLeave={(e) => (e.currentTarget.style.borderColor = "#D8DEE5")}
+                style={{ background: "#FFFFFF", border: "1px solid #D8DEE5", borderLeft: `5px solid ${couleurEtat}`, borderRadius: 12, padding: "13px 16px", cursor: "pointer" }}
+                onMouseEnter={(e) => (e.currentTarget.style.boxShadow = "0 4px 14px rgba(26,31,38,0.08)")} onMouseLeave={(e) => (e.currentTarget.style.boxShadow = "none")}
               >
                 <div className="site-row-main" style={{ flex: "1 1 220px", minWidth: 0 }}>
-                  <div style={{ fontSize: 13.5, fontWeight: 700, color: "#1A1F26", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.nom || "Site sans nom"}</div>
-                  <div style={{ fontSize: 12, color: "#5B6B7D" }}>{[s.client, s.local].filter(Boolean).join(" · ") || "Client non renseigné"}</div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: "#1A1F26", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.nom || "Site sans nom"}</div>
+                  <div style={{ fontSize: 12, color: "#5B6B7D" }}>{[s.client, s.local].filter(Boolean).join(" · ") || "Client non renseigné"}{s.rapport.intervenant ? <span className="hide-mobile"> · {s.rapport.intervenant}</span> : null}</div>
                 </div>
-                <div className="site-row-meta hide-mobile" style={{ flex: "0 0 130px", fontSize: 12 }}>
-                  <div style={{ color: "#8B96A3", fontSize: 10.5, textTransform: "uppercase", fontWeight: 600 }}>Intervenant</div>
-                  <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.rapport.intervenant || "—"}</div>
+                <div className="site-row-meta" style={{ flex: "0 0 120px", display: "flex", gap: 8, fontSize: 12, fontWeight: 700 }} title="Équipements conformes · dégradés · défaillants">
+                  {(s.equipements || []).length === 0 ? <span style={{ color: "#8B96A3", fontWeight: 500 }}>Aucun équipement</span> : (<>
+                    <span style={{ color: "#0F8A5F" }}>✓ {cpt.ok}</span>
+                    {cpt.deg > 0 && <span style={{ color: "#B5730A" }}>! {cpt.deg}</span>}
+                    {cpt.def > 0 && <span style={{ color: "#C0392B" }}>✕ {cpt.def}</span>}
+                  </>)}
                 </div>
-                <div className="site-row-meta" style={{ flex: "0 0 150px", fontSize: 12, color: urgentColor, fontWeight: 600 }}>
-                  <div style={{ color: "#8B96A3", fontSize: 10.5, textTransform: "uppercase", fontWeight: 600 }}>Prochaine maint.</div>
-                  {s._prochaine} {days !== null && <span style={{ fontWeight: 500 }}>({days < 0 ? `${-days}j retard` : `${days}j`})</span>}
+                <div className="site-row-meta" style={{ flex: "0 0 auto", minWidth: 170, fontSize: 12, whiteSpace: "nowrap" }}>
+                  <div style={{ color: "#8B96A3", fontSize: 10.5, textTransform: "uppercase", fontWeight: 600 }}>Prochaine maintenance</div>
+                  <span style={{ display: "inline-block", marginTop: 2, padding: "2px 9px", borderRadius: 999, background: badge.fond, color: badge.texte, fontWeight: 700 }}>
+                    {s._prochaine ? dateFrIso(s._prochaine) : "—"}{days !== null ? ` · ${badge.libelle}` : ""}
+                  </span>
                 </div>
-                <div className="site-row-meta" style={{ flex: "0 0 90px" }}><StatusBadge label={rankToLabel(s._rank)} /></div>
+                <div className="site-row-meta" style={{ flex: "0 0 100px" }}><StatusBadge label={rankToLabel(s._rank)} /></div>
                 <ChevronRight size={16} color="#9AA5B1" className="hide-mobile" />
               </div>
             );
@@ -7292,9 +7336,7 @@ function AnalyseHuilePanel({ eq, update, idPrefix }) {
                       )}
                     </label>
                   ))}
-                  <Select value={v.etat} onChange={(e) => setEtat(item.key, e.target.value)} style={{ width: 130, padding: "5px 7px", fontSize: 12 }}>
-                    {EQUIP_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
-                  </Select>
+                  <EtatRapide value={v.etat} onChange={(__v) => setEtat(item.key, __v)} />
                 </div>
               )}
             </div>
@@ -7477,9 +7519,7 @@ function GradinsPanel({ eq, update, idPrefix }) {
 
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                   <AutoTextArea placeholder="Action" value={e.action} onChange={(v) => setEntry(e.id, { action: v })} style={{ width: actionInputWidth(e.action), padding: "5px 7px", fontSize: 12 }} />
-                  <Select value={e.etat} onChange={(ev) => setEntry(e.id, { etat: ev.target.value })} style={{ width: 120, padding: "5px 7px", fontSize: 12 }}>
-                    {EQUIP_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
-                  </Select>
+                  <EtatRapide value={e.etat} onChange={(__v) => setEntry(e.id, { etat: __v })} />
                 </div>
               </div>
             );
@@ -7685,9 +7725,7 @@ function DynamicListPanel({ title, entries, onChange, typeOptions, fieldDefs, wi
                   {withActionEtat && (
                     <>
                       <AutoTextArea placeholder="Action" value={e.action} onChange={(v) => setEntry(e.id, { action: v })} style={{ width: actionInputWidth(e.action), padding: "5px 7px", fontSize: 12 }} />
-                      <Select value={e.etat} onChange={(ev) => setEntry(e.id, { etat: ev.target.value })} style={{ width: 120, padding: "5px 7px", fontSize: 12 }}>
-                        {EQUIP_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
-                      </Select>
+                      <EtatRapide value={e.etat} onChange={(__v) => setEntry(e.id, { etat: __v })} />
                     </>
                   )}
                 </div>
@@ -10370,9 +10408,7 @@ function DisjoncteurRelaisPanel({ eq, update, custom, onAddCustom, onChangeCusto
                   })()}
                   {tol && <MiniComputed label="Tolérance attendue" unit={tol.unite} value={`${tol.min} – ${tol.max}`} />}
                   <AutoTextArea placeholder="Action" value={s.essai.action} onChange={(v) => setEssai(s.id, { action: v })} style={{ width: actionInputWidth(s.essai.action), padding: "5px 7px", fontSize: 12 }} />
-                  <Select value={s.essai.etat} onChange={(e) => setEssai(s.id, { etat: e.target.value })} style={{ width: 120, padding: "5px 7px", fontSize: 12 }}>
-                    {EQUIP_STATUSES.map((st) => <option key={st} value={st}>{st}</option>)}
-                  </Select>
+                  <EtatRapide value={s.essai.etat} onChange={(__v) => setEssai(s.id, { etat: __v })} />
                 </div>
               </div>
             </div>
@@ -10383,9 +10419,7 @@ function DisjoncteurRelaisPanel({ eq, update, custom, onAddCustom, onChangeCusto
             <span style={{ fontSize: 12.5, color: "#3E4A5C", flex: "1 1 240px" }}>Contrôle du circuit de mesures et commande</span>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
               <AutoTextArea placeholder="Action" value={circuit.action} onChange={(v) => setCircuit({ action: v })} style={{ width: actionInputWidth(circuit.action), padding: "5px 7px", fontSize: 12 }} />
-              <Select value={circuit.etat} onChange={(e) => setCircuit({ etat: e.target.value })} style={{ width: 120, padding: "5px 7px", fontSize: 12 }}>
-                {EQUIP_STATUSES.map((st) => <option key={st} value={st}>{st}</option>)}
-              </Select>
+              <EtatRapide value={circuit.etat} onChange={(__v) => setCircuit({ etat: __v })} />
             </div>
           </div>
         </div>
@@ -10488,9 +10522,7 @@ function BRKReglagePanel({ eq, update, custom, onAddCustom, onChangeCustom, onRe
             <MiniComputed label="Valise STR" unit="mA" value={valiseSTR_SL} />
             <MiniComputed label="Valise IS" unit="A" value={valiseIS_SL} />
             <MiniInput label="Déclenchement" unit="s" value={tSL.declenchement} onChange={(v) => setT("test_surcharge_longue", "declenchement", v)} />
-            <Select value={tests.test_surcharge_longue.etat} onChange={(e) => setTEtat("test_surcharge_longue", e.target.value)} style={{ width: 130, padding: "5px 7px", fontSize: 12 }}>
-              {EQUIP_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
-            </Select>
+            <EtatRapide value={tests.test_surcharge_longue.etat} onChange={(__v) => setTEtat("test_surcharge_longue", __v)} />
             <BadgeAuto k="test_surcharge_longue" />
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "8px 0", borderBottom: "1px solid #E2E6EB" }}>
@@ -10503,9 +10535,7 @@ function BRKReglagePanel({ eq, update, custom, onAddCustom, onChangeCustom, onRe
             {evCC && evCC.source === "constructeur" && <MiniComputed label="Plage constructeur" unit="ms" value={`${arrondi(evCC.bas * 1000, 1)}–${arrondi(evCC.haut * 1000, 1)}`} />}
             {evCC && evCC.source !== "constructeur" && evCC.attendu !== null && <MiniComputed label="Attendu (±20 %)" unit="ms" value={Math.round(evCC.attendu * 1000 * 10) / 10} />}
             <MiniInput label="Décl. à T réglé" unit="ms" value={tCC.declenchement_treg} onChange={(v) => setT("test_cc_temporise", "declenchement_treg", v)} />
-            <Select value={tests.test_cc_temporise.etat} onChange={(e) => setTEtat("test_cc_temporise", e.target.value)} style={{ width: 130, padding: "5px 7px", fontSize: 12 }}>
-              {EQUIP_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
-            </Select>
+            <EtatRapide value={tests.test_cc_temporise.etat} onChange={(__v) => setTEtat("test_cc_temporise", __v)} />
             <BadgeAuto k="test_cc_temporise" />
           </div>
           {estMTZ && (
@@ -10533,9 +10563,7 @@ function BRKReglagePanel({ eq, update, custom, onAddCustom, onChangeCustom, onRe
             <MiniComputed label="Valise IS" unit="A" value={valiseIS_Inst} />
             {evIn && evIn.source === "constructeur" && <MiniComputed label="Max constructeur" unit="ms" value={Math.round(evIn.max * 1000)} />}
             <MiniInput label="Déclenchement" unit="ms" value={tests.test_instantane.fields.declenchement} onChange={(v) => setT("test_instantane", "declenchement", v)} />
-            <Select value={tests.test_instantane.etat} onChange={(e) => setTEtat("test_instantane", e.target.value)} style={{ width: 130, padding: "5px 7px", fontSize: 12 }}>
-              {EQUIP_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
-            </Select>
+            <EtatRapide value={tests.test_instantane.etat} onChange={(__v) => setTEtat("test_instantane", __v)} />
             <BadgeAuto k="test_instantane" />
           </div>
         </div>
@@ -12074,9 +12102,7 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
           <Card>
             <div style={{ display: "flex", flexDirection: "column", gap: 18, width: "100%" }}>
               <Field label="Synthèse de l'état — à l'issue de la maintenance">
-                <Select value={eq.etatFinal} onChange={(e) => { const { etatFinalAuto, ...reste } = eq; update({ ...reste, etatFinal: e.target.value }); }} style={{ maxWidth: 320 }}>
-                  {EQUIP_STATUSES.map((s) => <option key={s} value={s}>{agree(s, equipGender(eq.type), false)}</option>)}
-                </Select>
+                <EtatRapide grand value={eq.etatFinal} onChange={(v) => { const { etatFinalAuto, ...reste } = eq; update({ ...reste, etatFinal: v }); }} accord={(s) => agree(s, equipGender(eq.type), false)} />
               </Field>
               {remplacementsDuRapport(eq, rapportDate).length > 0 && (
                 <div style={{ border: "1.5px solid #0F8A5F", background: "#EAF7F1", borderRadius: 10, padding: "10px 12px", fontSize: 12.5, color: "#1A1F26" }}>
@@ -12546,7 +12572,75 @@ function PrintReport({ site }) {
   );
 }
 
+// Icône par type d'équipement (onglets de la fiche site).
+function iconeTypeEquipement(type) {
+  if (type === "Sécurité") return ShieldCheck;
+  if (type === "Transformateur") return Zap;
+  if (/Onduleur|Redresseur/.test(type || "")) return BatteryCharging;
+  if (type === "Batterie de compensation") return Gauge;
+  if (type === "Analyse d'huile") return Droplets;
+  if (type === "Bilan de puissance") return Activity;
+  if (/Jeu de barre/.test(type || "")) return Layers;
+  if (type === "Inverseur de source") return RefreshCw;
+  if (/Disjoncteur|Interrupteur|Contacteur|Comptage/.test(type || "")) return Power;
+  return Settings2;
+}
+// Progression de la saisie d'un équipement : contrôles comportant des mesures / valeurs à relever, et combien sont renseignés.
+function progressionEquipement(eq) {
+  try {
+    const schema = schemaFiltreeParNiveau(getSchema(eq), eq.niveauMaintenance);
+    let total = 0, fait = 0;
+    (schema.sections || []).forEach((sec) => (sec.items || []).forEach((item) => {
+      const saisis = (item.fields || []).filter((f) => !f.compute && !f.hidden && !f.longText && f.defaultValue === undefined && f.unit);
+      if (!saisis.length) return;
+      total++;
+      const v = eq.controles?.[sec.key]?.[item.key]?.fields || {};
+      if (saisis.some((f) => v[f.key] !== undefined && v[f.key] !== null && String(v[f.key]).trim() !== "")) fait++;
+    }));
+    return { total, fait };
+  } catch (e) { return null; }
+}
+// Résumé de la fiche site (informations repliées) : site, client, adresse avec itinéraire, contacts avec appel / e-mail directs.
+function ResumeSiteContacts({ site, onModifier }) {
+  const tel = (n) => String(n || "").replace(/[^\d+]/g, "");
+  const contactCarte = (titre, c) => {
+    if (!c || !(c.prenom || c.nom || c.email || c.portable || c.fixe)) return null;
+    const numero = c.portable || c.fixe;
+    return (
+      <div style={{ border: "1px solid #E2E6EB", borderRadius: 10, padding: "8px 10px", background: "#F7F8FA", minWidth: 0, flex: "1 1 230px" }}>
+        <div style={{ fontSize: 10, fontWeight: 700, color: "#8B96A3", textTransform: "uppercase", letterSpacing: 0.4 }}>{titre}</div>
+        <div style={{ fontSize: 13, fontWeight: 700, color: "#1A1F26", margin: "2px 0 6px" }}>{[c.prenom, c.nom].filter(Boolean).join(" ") || "—"}</div>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {numero && <a href={`tel:${tel(numero)}`} style={{ ...btnGhost("#0F8A5F"), textDecoration: "none", padding: "6px 10px" }}><Phone size={13} /> {numero}</a>}
+          {c.email && <a href={`mailto:${c.email}`} style={{ ...btnGhost(BRAND.blue), textDecoration: "none", padding: "6px 10px", maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis" }}><Mail size={13} /> {c.email}</a>}
+        </div>
+      </div>
+    );
+  };
+  const memePersonne = site.contactClient && site.contactSite && (site.contactClient.email || site.contactClient.nom) &&
+    (site.contactClient.email || "").toLowerCase() === (site.contactSite.email || "").toLowerCase() && (site.contactClient.nom || "").toLowerCase() === (site.contactSite.nom || "").toLowerCase();
+  return (
+    <div style={{ flex: "1 1 100%", display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, flexWrap: "wrap" }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 20, fontWeight: 800, color: "#1A1F26", fontFamily: "'Rajdhani', 'Inter', sans-serif", letterSpacing: 0.2 }}>{site.nom || "Site sans nom"}</div>
+          <div style={{ fontSize: 13, color: "#5B6B7D" }}>{[site.client, site.local, site.rapport?.offre?.numero && `Offre ${site.rapport.offre.numero}`].filter(Boolean).join(" · ")}</div>
+          {site.adresse && <div style={{ fontSize: 12.5, color: "#3E4A5C", marginTop: 4, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}><MapPin size={13} color="#8B96A3" /> {site.adresse} <BoutonAdresse adresse={site.adresse} /></div>}
+        </div>
+        <button onClick={onModifier} style={btnGhost(BRAND.blue)}><PenLine size={13} /> Modifier les informations</button>
+      </div>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+        {contactCarte("Contact site", site.contactSite)}
+        {!memePersonne && contactCarte("Contact client", site.contactClient)}
+      </div>
+      {site.notesInternes && <div style={{ fontSize: 12, color: "#8A5A0A", background: "#FDF6EC", border: "1px solid #F3DDB3", borderRadius: 8, padding: "6px 10px", whiteSpace: "pre-wrap" }}><b>Notes internes :</b> {site.notesInternes}</div>}
+    </div>
+  );
+}
 function SiteDetail({ site, allSites, update, onBack, onDelete, onPrint, onPrintAnnexe, onCreateIntervention, clientsRegistry, contactsRegistry, caracteristiquesLibrary, apprendreCaracteristique, interventions = [] }) {
+  // Informations client / site / contacts : dépliées pour un site neuf, repliées en résumé une fois renseignées.
+  const [infosOuvertes, setInfosOuvertes] = useState(() => !(site.client || site.nom));
+  const [menuPlus, setMenuPlus] = useState(false);
   const [reprendreOpen, setReprendreOpen] = useState(false);
   const [reprendreSelection, setReprendreSelection] = useState([]);
   // Un onglet par équipement, nommé d'après l'équipement (son repère) et classé selon l'ordre
@@ -12641,7 +12735,7 @@ function SiteDetail({ site, allSites, update, onBack, onDelete, onPrint, onPrint
   const rank = overallRank(site);
   const tabs = [
     { key: "rapport", label: "Rapport", icon: FileText },
-    ...ongletsEquipements.map(({ eq, label }) => ({ key: eq.id, label, icon: eq.type === "Sécurité" ? ShieldCheck : Settings2, type: eq.type, etat: eq.etatFinal })),
+    ...ongletsEquipements.map(({ eq, label }) => ({ key: eq.id, label, icon: iconeTypeEquipement(eq.type), type: eq.type, etat: eq.etatFinal, progression: progressionEquipement(eq) })),
   ];
   const equipementActif = site.equipements.find((e) => e.id === activeTab);
 
@@ -12661,6 +12755,12 @@ function SiteDetail({ site, allSites, update, onBack, onDelete, onPrint, onPrint
 
       <Card style={{ marginBottom: 18 }}>
         <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
+          {!infosOuvertes ? (
+            <ResumeSiteContacts site={site} onModifier={() => setInfosOuvertes(true)} />
+          ) : (<>
+          <div style={{ flex: "1 1 100%", display: "flex", justifyContent: "flex-end" }}>
+            {(site.client || site.nom) && <button onClick={() => setInfosOuvertes(false)} style={btnGhost()}><ChevronDown size={13} style={{ transform: "rotate(180deg)" }} /> Replier les informations</button>}
+          </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 14, flex: "1 1 380px" }}>
             <Field label="Dénomination client">
               <ClientAutocomplete
@@ -12744,20 +12844,32 @@ function SiteDetail({ site, allSites, update, onBack, onDelete, onPrint, onPrint
               />
             </Field>
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          </>)}
+          <div className="barre-actions-site" style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", flex: "1 1 100%", paddingTop: 12, borderTop: "1px solid #E2E6EB" }}>
             <StatusBadge label={rankToLabel(rank)} />
-            <button onClick={() => onPrint(site)} style={btnGhost("#FFC107")}>
-              <FileText size={13} /> Rapport Word
+            <div style={{ flex: "1 1 auto" }} />
+            <button onClick={() => onPrint(site)} style={btnPrimary()}>
+              <FileText size={14} /> Générer le rapport
             </button>
-            <button onClick={envoyerRapportParMail} style={btnGhost("#FFC107")}><Mail size={13} /> Préparer l'email</button>
-            <button onClick={() => onPrintAnnexe(site)} style={btnGhost("#0F8A5F")} title="Génère un fichier Word séparé regroupant toutes les photos du site, classées par équipement et par contrôle">
-              <ImagePlus size={13} /> Annexe photos
-            </button>
-            <BoutonExportPiecesUsure site={site} />
-            <button onClick={() => onCreateIntervention(site, site.equipements)} style={btnGhost(BRAND.blue)} title="Crée un rapport d'intervention pré-rempli avec tous les équipements de ce site">
-              <ClipboardList size={13} /> Rapport d'intervention
-            </button>
-            <InlineConfirmButton icon={Trash2} label="Supprimer le site" onConfirm={() => onDelete(site.id)} />
+            <button onClick={envoyerRapportParMail} style={btnGhost(BRAND.blue)}><Mail size={13} /> Préparer l'email</button>
+            <div style={{ position: "relative" }}>
+              <button onClick={() => setMenuPlus((o) => !o)} style={btnGhost()} title="Autres actions" aria-expanded={menuPlus}>⋯ Plus</button>
+              {menuPlus && (<>
+                <div onClick={() => setMenuPlus(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
+                <div style={{ position: "absolute", right: 0, bottom: "110%", zIndex: 50, background: "#fff", border: "1px solid #D8DEE5", borderRadius: 12, boxShadow: "0 14px 34px rgba(0,0,0,0.18)", padding: 8, display: "flex", flexDirection: "column", gap: 6, minWidth: 250 }}>
+                  <button onClick={() => { setMenuPlus(false); onPrintAnnexe(site); }} style={{ ...btnGhost("#0F8A5F"), justifyContent: "flex-start" }} title="Génère un fichier Word séparé regroupant toutes les photos du site, classées par équipement et par contrôle">
+                    <ImagePlus size={13} /> Annexe photos
+                  </button>
+                  <BoutonExportPiecesUsure site={site} />
+                  <button onClick={() => { setMenuPlus(false); onCreateIntervention(site, site.equipements); }} style={{ ...btnGhost(BRAND.blue), justifyContent: "flex-start" }} title="Crée un rapport d'intervention pré-rempli avec tous les équipements de ce site">
+                    <ClipboardList size={13} /> Rapport d'intervention
+                  </button>
+                  <div style={{ borderTop: "1px solid #E2E6EB", paddingTop: 6 }}>
+                    <InlineConfirmButton icon={Trash2} label="Supprimer le site" onConfirm={() => onDelete(site.id)} />
+                  </div>
+                </div>
+              </>)}
+            </div>
           </div>
         </div>
       </Card>
@@ -12775,8 +12887,14 @@ function SiteDetail({ site, allSites, update, onBack, onDelete, onPrint, onPrint
               }}>
                 <Icon size={13} />
                 <span style={{ maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.label}</span>
+                {t.key !== "rapport" && t.progression && t.progression.total > 0 && (
+                  <span title={`Mesures renseignées : ${t.progression.fait} / ${t.progression.total}`} style={{ fontSize: 10.5, fontWeight: 700, padding: "1px 6px", borderRadius: 999,
+                    background: t.progression.fait >= t.progression.total ? "#EAF7F1" : "#F4F6F8", color: t.progression.fait >= t.progression.total ? "#0F6B3F" : "#5B6B7D", flexShrink: 0 }}>
+                    {t.progression.fait >= t.progression.total ? "✓" : `${t.progression.fait}/${t.progression.total}`}
+                  </span>
+                )}
                 {t.key !== "rapport" && (
-                  <span title={t.etat} style={{ width: 8, height: 8, borderRadius: 999, background: printEtatColor(t.etat), flexShrink: 0 }} />
+                  <span title={t.etat} style={{ width: 9, height: 9, borderRadius: 999, background: printEtatColor(t.etat), flexShrink: 0 }} />
                 )}
               </button>
             );
@@ -13055,9 +13173,7 @@ function InterventionEditor({ iv, update, onBack, onDelete, onPrint, sites = [] 
                 <IvField label="Localisation"><TextInput value={eq.localisation} onChange={(e) => setEquip(eq.id, "localisation", e.target.value)} /></IvField>
                 <IvField label="Référence"><TextInput value={eq.reference} onChange={(e) => setEquip(eq.id, "reference", e.target.value)} /></IvField>
                 <IvField label="Statut">
-                  <Select value={eq.etat || "Conforme"} onChange={(e) => setEquip(eq.id, "etat", e.target.value)}>
-                    {EQUIP_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
-                  </Select>
+                  <EtatRapide value={eq.etat || "Conforme"} onChange={(v) => setEquip(eq.id, "etat", v)} />
                 </IvField>
               </div>
               <div style={{ marginTop: 10 }}>
@@ -19019,7 +19135,19 @@ function fusionnerCaracteristiques(base, local, distant) {
 // ou en échec), le serveur est relu d'abord : si quelqu'un d'autre l'a modifié depuis la dernière
 // synchronisation, on fusionne avant d'écrire plutôt que d'écraser son travail.
 // `appliquerFusion(fusion, fusionJson)` met à jour l'état de l'app (sans perdre ce qui a été tapé pendant la lecture).
-async function ecrireEnFusionnant({ lireDistant, ecrireDistant, serialized, baseRef, aReconcilierRef, fusionner, appliquerFusion, valeurVide }) {
+// Suivi des envois en cours vers le serveur (voyant d'enregistrement dans l'en-tête).
+const SUIVI_ECRITURES = { n: 0, abonnes: new Set() };
+function signalerEcriture(delta) { SUIVI_ECRITURES.n = Math.max(0, SUIVI_ECRITURES.n + delta); SUIVI_ECRITURES.abonnes.forEach((f) => f(SUIVI_ECRITURES.n)); }
+function useEcrituresEnCours() {
+  const [n, setN] = useState(SUIVI_ECRITURES.n);
+  useEffect(() => { SUIVI_ECRITURES.abonnes.add(setN); return () => { SUIVI_ECRITURES.abonnes.delete(setN); }; }, []);
+  return n;
+}
+async function ecrireEnFusionnant(params) {
+  signalerEcriture(1);
+  try { return await ecrireEnFusionnantBrut(params); } finally { signalerEcriture(-1); }
+}
+async function ecrireEnFusionnantBrut({ lireDistant, ecrireDistant, serialized, baseRef, aReconcilierRef, fusionner, appliquerFusion, valeurVide }) {
   let aEcrire = serialized;
   if (aReconcilierRef.current) {
     const distantJson = (await lireDistant()) ?? valeurVide;
@@ -19559,11 +19687,29 @@ function DonneesModal({ user, onFermer, onExporter, derniereSauvegarde, donneesP
   );
 }
 
+// Voyant d'enregistrement (en-tête) : remplace les bandeaux « hors connexion » / « envoi de photos ».
+function VoyantEnregistrement({ enLigne, nbPhotosEnAttente, saveError, charge }) {
+  const enCours = useEcrituresEnCours();
+  const v = !enLigne ? { c: "#B5730A", f: "#FDF3E3", t: "Hors ligne", d: "Hors connexion : la saisie continue et tout est conservé sur cet appareil ; l'envoi reprendra automatiquement au retour du réseau." }
+    : saveError ? { c: "#C0392B", f: "#FDF1F0", t: "Erreur d'enregistrement", d: "La dernière sauvegarde a échoué — nouvelle tentative automatique en cours." }
+    : nbPhotosEnAttente > 0 ? { c: "#0A5DA8", f: "#EEF4FB", t: `Envoi de ${nbPhotosEnAttente} photo${nbPhotosEnAttente > 1 ? "s" : ""}…`, d: "Photos conservées sur l'appareil, envoi en cours." }
+    : enCours > 0 ? { c: "#0A5DA8", f: "#EEF4FB", t: "Enregistrement…", d: "Envoi des modifications au serveur." }
+    : charge ? { c: "#0F8A5F", f: "#EAF7F1", t: "Enregistré ✓", d: "Toutes les modifications sont enregistrées." }
+    : { c: "#8B96A3", f: "#F4F6F8", t: "Chargement…", d: "" };
+  return (
+    <span title={v.d} style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "5px 10px", borderRadius: 999, background: v.f, color: v.c, fontSize: 11.5, fontWeight: 700, whiteSpace: "nowrap" }}>
+      {!enLigne ? <WifiOff size={12} /> : <span style={{ width: 7, height: 7, borderRadius: 999, background: v.c, display: "inline-block" }} />} {v.t}
+    </span>
+  );
+}
 // Point d'entrée : l'application entière est protégée par le filet de sécurité (jamais de page blanche).
 export default function App(props) {
   return <FiletSecurite global><AppPrincipale {...props} /></FiletSecurite>;
 }
 function AppPrincipale({ currentUser, onLogout }) {
+  // Mode « plein soleil » : contraste renforcé et cibles plus grandes, mémorisé sur l'appareil.
+  const [contraste, setContraste] = useState(() => { try { return localStorage.getItem("ht-contraste") === "1"; } catch (e) { return false; } });
+  const basculerContraste = () => setContraste((c) => { const n = !c; try { localStorage.setItem("ht-contraste", n ? "1" : "0"); } catch (e) { /* ignoré */ } return n; });
   useEffect(() => { CURRENT_USER_FOR_STORAGE = currentUser; }, [currentUser]);
   const [sites, setSites] = useState([]);
   // Miroir synchrone de `sites`, lu par le poll et la migration photo — une ref est à jour
@@ -20537,6 +20683,14 @@ function AppPrincipale({ currentUser, onLogout }) {
         .app-shell img, .app-shell canvas, .app-shell video { max-width: 100%; }
         .app-shell table { max-width: none; }
         .site-row, .iv-row { display: flex; align-items: center; gap: 14px; }
+        .nav-mobile { display: none; }
+        /* Mode plein soleil : textes plus foncés, champs et cartes mieux délimités, cibles plus grandes. */
+        .contraste { color: #000; }
+        .contraste input, .contraste select, .contraste textarea { border: 1.5px solid #5B6B7D !important; background: #fff !important; color: #000 !important; font-size: 15px !important; min-height: 42px; }
+        .contraste button { min-height: 38px; }
+        .contraste [style*="color: rgb(139, 150, 163)"], .contraste [style*="color: rgb(154, 165, 177)"] { color: #3E4A5C !important; }
+        .contraste [style*="color: rgb(91, 107, 125)"], .contraste [style*="color: rgb(62, 74, 92)"] { color: #1A1F26 !important; }
+        .contraste [style*="border: 1px solid rgb(216, 222, 229)"], .contraste [style*="border: 1px solid rgb(226, 230, 235)"] { border-color: #8B96A3 !important; }
         .site-row-meta, .iv-row-meta { flex: 0 0 130px; }
         @media (max-width: 720px) {
           .app-shell { padding: 12px; }
@@ -20546,26 +20700,38 @@ function AppPrincipale({ currentUser, onLogout }) {
           .tab-bar-scroll { overflow-x: auto; flex-wrap: nowrap !important; -webkit-overflow-scrolling: touch; padding-bottom: 4px; }
           .tab-bar-scroll::-webkit-scrollbar { height: 4px; }
           .hide-mobile { display: none !important; }
+          .semaine-grille { display: flex !important; overflow-x: auto; -webkit-overflow-scrolling: touch; padding-bottom: 4px; scroll-snap-type: x mandatory; }
+          .semaine-grille > * { flex: 0 0 128px; scroll-snap-align: start; }
+          .kpi-carte { box-sizing: border-box; min-width: calc(50% - 8px) !important; max-width: calc(50% - 6px); flex: 1 1 calc(50% - 8px) !important; padding: 12px !important; }
+          .nav-mobile { display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 90; background: #1A1F26; padding: 6px 4px calc(6px + env(safe-area-inset-bottom)); justify-content: space-around; box-shadow: 0 -6px 18px rgba(0,0,0,0.18); }
+          .app-shell { padding-bottom: 86px !important; }
+          .onglets-haut { display: none !important; }
+          .entete-app { border-radius: 0 0 14px 14px !important; margin: -12px -12px 14px !important; }
         }
       `}</style>
 
-      <div className="no-print app-shell" style={{ position: "relative", minHeight: "100%", background: "#F1F3F6", fontFamily: "'Inter', system-ui, -apple-system, sans-serif", color: "#1A1F26" }}>
+      <div className={`no-print app-shell${contraste ? " contraste" : ""}`} style={{ position: "relative", minHeight: "100%", background: "#F1F3F6", fontFamily: "'Inter', system-ui, -apple-system, sans-serif", color: "#1A1F26" }}>
         <div style={{ maxWidth: 1100, margin: "0 auto" }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18, flexWrap: "wrap", gap: 12 }}>
+          <div className="entete-app" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18, flexWrap: "wrap", gap: 12, background: "#1A1F26", borderRadius: 14, padding: "10px 16px", borderBottom: `3px solid ${BRAND.amber}` }}>
             <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              <img src={LOGO_DARK} alt="HT Maintenance" style={{ width: 88, height: 44, objectFit: "contain" }} />
+              <img src={LOGO_TRANSPARENT} alt="HT Maintenance" style={{ width: 78, height: 44, objectFit: "contain" }} />
               <div>
-                <h1 style={{ margin: 0, fontSize: 20, fontWeight: 800, letterSpacing: 0.3, fontFamily: "'Rajdhani', 'Inter', sans-serif", textTransform: "uppercase" }}>
+                <h1 style={{ margin: 0, fontSize: 20, fontWeight: 800, letterSpacing: 1.2, fontFamily: "'Rajdhani', 'Inter', sans-serif", textTransform: "uppercase", color: "#FFFFFF" }}>
                   HT <span style={{ color: BRAND.amber }}>Maintenance</span>
                 </h1>
-                <div style={{ fontSize: 12, color: "#5B6B7D" }}>
+                <div style={{ fontSize: 12, color: BRAND.silver }}>
                   {selected ? "Fiche site" : selectedIv ? "Rapport d'intervention" : view === "sites" ? "Suivi des interventions de maintenance préventive HT" : view === "interventions" ? "Rapports d'intervention" : "Calendrier des interventions"}
                 </div>
               </div>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              <VoyantEnregistrement enLigne={enLigne} nbPhotosEnAttente={nbPhotosEnAttente} saveError={saveError} charge={loaded && ivLoaded} />
+              <button onClick={basculerContraste} title={contraste ? "Revenir à l'affichage normal" : "Mode plein soleil : contraste renforcé"} aria-pressed={contraste}
+                style={{ ...btnGhost(contraste ? BRAND.amber : undefined), padding: "6px 10px", ...(contraste ? { background: BRAND.amber, color: "#1A1F26" } : {}) }}>
+                <Sun size={14} /> <span className="hide-mobile">Plein soleil</span>
+              </button>
               {currentUser && (
-                <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "#8B96A3", marginRight: 4 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: BRAND.silver, marginRight: 4 }}>
                   <span className="hide-mobile">{currentUser.email}</span>
                   <button onClick={deconnexion} style={{ ...btnGhost(), padding: "6px 10px" }} title="Se déconnecter">
                     Déconnexion
@@ -20626,7 +20792,7 @@ function AppPrincipale({ currentUser, onLogout }) {
           </div>
 
           {!selected && !selectedIv && (
-            <div style={{ display: "flex", gap: 6, marginBottom: 20, flexWrap: "wrap" }}>
+            <div className="onglets-haut" style={{ display: "flex", gap: 6, marginBottom: 20, flexWrap: "wrap" }}>
               <button onClick={() => setView("sites")} style={{
                 display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: 999,
                 border: view === "sites" ? "1px solid #FFC10755" : "1px solid #D8DEE5", background: view === "sites" ? "rgba(255,193,7,0.12)" : "transparent",
@@ -20658,14 +20824,7 @@ function AppPrincipale({ currentUser, onLogout }) {
             </div>
           )}
 
-          {(!enLigne || nbPhotosEnAttente > 0) && (
-            <div style={{ background: "rgba(245,158,11,0.12)", border: "1px solid rgba(245,158,11,0.45)", color: "#92400E", borderRadius: 10, padding: "10px 14px", fontSize: 12.5, marginBottom: 14, lineHeight: 1.5 }}>
-              {!enLigne
-                ? <>📡 <b>Hors connexion</b> — vous pouvez continuer à saisir et à ajouter des photos : tout sera envoyé automatiquement au retour du réseau. Tout est conservé sur cet appareil, même si vous fermez l'application.{nbPhotosEnAttente > 0 && <> ({nbPhotosEnAttente} photo{nbPhotosEnAttente > 1 ? "s" : ""} en attente d'envoi.)</>}</>
-                : <>⏳ Envoi de {nbPhotosEnAttente} photo{nbPhotosEnAttente > 1 ? "s" : ""} conservée{nbPhotosEnAttente > 1 ? "s" : ""} sur cet appareil en cours — l'enregistrement reprendra automatiquement.</>}
-            </div>
-          )}
-          {saveError && enLigne && !(saveError === "taille" && nbPhotosEnAttente > 0) && (
+          {saveError === "taille" && enLigne && nbPhotosEnAttente === 0 && (
             <div style={{ background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)", color: "#B91C1C", borderRadius: 10, padding: "10px 14px", fontSize: 12.5, marginBottom: 14, fontWeight: saveError === "taille" ? 700 : 400 }}>
               {saveError === "taille"
                 ? "⚠ Sauvegarde impossible : trop de photos accumulées sur vos sites (limite de taille dépassée). Supprimez quelques anciennes photos pour débloquer l'enregistrement — nouvelle tentative automatique en cours."
@@ -20693,6 +20852,18 @@ function AppPrincipale({ currentUser, onLogout }) {
           )}
           </FiletSecurite>
         </div>
+        {/* Navigation au pouce sur téléphone */}
+        <nav className="nav-mobile" aria-label="Navigation principale">
+          {[["sites", "Interventions", Building2], ["interventions", "RI", ClipboardList], ["calendrier", "Calendrier", Clock], ["rapports", "Rapports", FileText], ["scanner", "Scanner", QrCode]].map(([k, libelle, Icone]) => {
+            const actif = k !== "scanner" && !selected && !selectedIv && view === k;
+            return (
+              <button key={k} onClick={() => { if (k === "scanner") { setScannerOuvert(true); return; } setSelectedId(null); setSelectedIvId(null); setView(k); window.scrollTo(0, 0); }}
+                style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 3, background: "none", border: "none", color: actif ? BRAND.amber : BRAND.silver, fontSize: 10.5, fontWeight: 700, padding: "6px 2px", cursor: "pointer", fontFamily: "inherit" }}>
+                <Icone size={20} />{libelle}
+              </button>
+            );
+          })}
+        </nav>
       </div>
 
       {donneesOuvert && (
