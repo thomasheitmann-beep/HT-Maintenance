@@ -1761,7 +1761,7 @@ const GRADIN_FIELD_DEFS = [
   // Pièces d'usure détaillées : marque, modèle et description séparés (+ tension de bobine du contacteur).
   { key: "contacteurMarque" }, { key: "contacteurModele" }, { key: "contacteurDescription" }, { key: "contacteurBobine" },
   { key: "fusiblesMarque" }, { key: "fusiblesModele" }, { key: "fusiblesDescription" },
-  { key: "condensateursMarque" }, { key: "condensateursModele" }, { key: "condensateursDescription" },
+  { key: "condensateursMarque" }, { key: "condensateursModele" }, { key: "condensateursDescription" }, { key: "condensateursQuantite" }, // nombre de condensateurs du gradin (vide = 1)
 ];
 const PIECES_GRADIN = [["contacteur", "Contacteur"], ["fusibles", "Fusibles"], ["condensateurs", "Condensateurs"]];
 // Ventilateurs d'une batterie de compensation : plusieurs modèles possibles dans une même armoire (controles.ventilateurs).
@@ -4062,7 +4062,7 @@ function dupliquerEquipementPourNouvelleVisite(source) {
   if (src.usure?.ventilation_usure && fresh.controles.usure) fresh.controles.usure = { ...fresh.controles.usure, ventilation_usure: clone(src.usure.ventilation_usure) };
   if (Array.isArray(src.ventilateurs)) fresh.controles.ventilateurs = clone(src.ventilateurs);
   if (Array.isArray(src.gradins_dynamique) && src.gradins_dynamique.length) {
-    const garder = ["contacteurMarque", "contacteurModele", "contacteurDescription", "contacteurBobine", "fusiblesMarque", "fusiblesModele", "fusiblesDescription", "condensateursMarque", "condensateursModele", "condensateursDescription", "q", "u", "selfMA", "selfFrequence", "contacteurRef", "contacteurAnnee", "contacteurDuree", "fusiblesRef", "fusiblesAnnee", "fusiblesDuree", "condensateursRef", "condensateursAnnee", "condensateursDuree"];
+    const garder = ["contacteurMarque", "contacteurModele", "contacteurDescription", "contacteurBobine", "fusiblesMarque", "fusiblesModele", "fusiblesDescription", "condensateursMarque", "condensateursModele", "condensateursDescription", "condensateursQuantite", "q", "u", "selfMA", "selfFrequence", "contacteurRef", "contacteurAnnee", "contacteurDuree", "fusiblesRef", "fusiblesAnnee", "fusiblesDuree", "condensateursRef", "condensateursAnnee", "condensateursDuree"];
     fresh.controles.gradins_dynamique = src.gradins_dynamique.map((g) => {
       const base = emptyDynamicEntry(g.label, GRADIN_FIELD_DEFS, true);
       garder.forEach((k) => { if (g.fields && g.fields[k] !== undefined) base.fields[k] = g.fields[k]; });
@@ -4112,7 +4112,7 @@ function emptyLocal(nom) {
 function worstRank(labels) { return labels.reduce((worst, l) => Math.max(worst, RANK_OF[l] ?? 0), 0); }
 
 /* =========================================================================
-   Rapport d'intervention (document client, indépendant du suivi de maintenance)
+   Compte rendu d'intervention (document client, indépendant du suivi de maintenance)
    ========================================================================= */
 const ACTIONS_INTERVENTION = [
   "Contrôle visuel", "Nettoyage", "Resserrage des connexions", "Contrôle des mesures de sécurité",
@@ -4132,8 +4132,10 @@ const INTERVENTIONS_STORAGE_KEY = "ht-interventions-v1";
 
 function nextNumeroRI(interventions) {
   const year = new Date().getFullYear();
-  const n = interventions.filter((i) => i.numeroRI && i.numeroRI.startsWith(`RI-${year}-`)).length + 1;
-  return `RI-${year}-${String(n).padStart(3, "0")}`;
+  // Numérotation CRI (compte rendu d'intervention) ; les anciens numéros RI-AAAA-NNN de l'année sont pris en compte pour ne pas créer de doublon.
+  const motif = new RegExp(`^C?RI-${year}-(\\d+)`);
+  const n = interventions.reduce((max, i) => { const m = motif.exec(i.numeroRI || ""); return m ? Math.max(max, Number(m[1])) : max; }, 0) + 1;
+  return `CRI-${year}-${String(n).padStart(3, "0")}`;
 }
 
 function emptyEquipementIv() {
@@ -4155,7 +4157,7 @@ function emptyIntervention(numeroRI) {
     statut: "En cours",
     linkedSiteId: null,
     linkedEquipementId: null,
-    offre: { numero: "", fichier: [] }, // idem site : numéro visible dans le RI, fichier réservé aux techniciens
+    offre: { numero: "", fichier: [] }, // idem site : numéro visible dans le CRI, fichier réservé aux techniciens
   };
 }
 // Filet de sécurité / migration : les interventions créées avant l'introduction du support
@@ -7595,6 +7597,9 @@ function GradinsPanel({ eq, update, idPrefix }) {
                               <div>{etiquette("Marque")}<input type="text" value={e.fields[k + "Marque"] ?? ""} onChange={(ev) => setField(e.id, k + "Marque", ev.target.value)} placeholder="ex. Schneider" style={cellStyle} /></div>
                               <div>{etiquette("Modèle / référence")}<input type="text" value={e.fields[k + "Modele"] || modelePieceGradin(e.fields, k)} onChange={(ev) => setEntry(e.id, { fields: { ...e.fields, [k + "Modele"]: ev.target.value, [k + "Ref"]: "" } })} placeholder={k === "contacteur" ? "ex. LC1DFK" : k === "fusibles" ? "ex. NH00 gG" : "ex. VarplusCan"} style={cellStyle} /></div>
                               <div style={{ gridColumn: "span 2" }}>{etiquette("Description")}<input type="text" value={e.fields[k + "Description"] ?? ""} onChange={(ev) => setField(e.id, k + "Description", ev.target.value)} placeholder={k === "contacteur" ? "ex. contacteur condensateur 25 kvar AC-6b" : k === "fusibles" ? "ex. 80 A gG taille 00" : "ex. 25 kvar 440 V triphasé"} style={cellStyle} /></div>
+                              {k === "condensateurs" && (
+                                <div>{etiquette("Quantité")}<input type="number" step="1" min="1" inputMode="numeric" value={e.fields.condensateursQuantite ?? ""} onChange={(ev) => setField(e.id, "condensateursQuantite", ev.target.value)} placeholder="1" style={cellStyle} /></div>
+                              )}
                               {k === "contacteur" && (
                                 <div>{etiquette("Tension bobine")}<Combo value={e.fields.contacteurBobine ?? ""} onChange={(v) => setField(e.id, "contacteurBobine", v)} options={LISTE_TENSION_BOBINE_CONTACTEUR} listId={`${e.id}-bobine`} placeholder="ex. 230 V AC" /></div>
                               )}
@@ -9227,7 +9232,7 @@ function piecesUsureEquipement(eq) {
         if (!g.fields[k + "Ref"] && !g.fields[k + "Annee"] && !g.fields[k + "Marque"] && !g.fields[k + "Modele"] && !g.fields[k + "Description"]) return;
         ajouter({ cle: `gradin:${g.id}:${k}`, categorie: `${nom} — ${g.label}`, marque: g.fields[k + "Marque"] || "", reference: modelePieceGradin(g.fields, k),
           description: [g.fields[k + "Description"] || nom, k === "condensateurs" && !g.fields[k + "Description"] && g.fields.q && `${g.fields.q} kVAR`, k === "condensateurs" && !g.fields[k + "Description"] && g.fields.u && `${g.fields.u} V`, k === "contacteur" && g.fields.contacteurBobine && `bobine ${g.fields.contacteurBobine}`].filter(Boolean).join(" · "),
-          quantite: qte, anneeMiseEnService: g.fields[k + "Annee"], dureeVie: g.fields[k + "Duree"] || 10 });
+          quantite: k === "condensateurs" ? (numOf(g.fields.condensateursQuantite) ?? qte) : qte, anneeMiseEnService: g.fields[k + "Annee"], dureeVie: g.fields[k + "Duree"] || 10 });
       });
     });
     const ventilos = ventilateursBatterie(eq);
@@ -9494,7 +9499,7 @@ function PiecesRemplaceesRI({ eqIv, siteEq, onChange, ivDate }) {
         </div>
       ))}
       {formulaire && pieces.length > 0 && (
-        <FormulaireRemplacement pieces={pieces} avecDate={false} labelValider="Ajouter au RI"
+        <FormulaireRemplacement pieces={pieces} avecDate={false} labelValider="Ajouter au CRI"
           onAnnuler={() => setFormulaire(false)}
           onValider={(r) => { const piece = pieces.find((x) => x.cle === r.cle); onChange([...liste, { ...r, id: uid(), date: ivDate, categorie: piece ? piece.categorie : "Pièce", ancien: piece ? { marque: piece.marque, reference: piece.reference } : null }]); setFormulaire(false); }} />
       )}
@@ -9505,7 +9510,7 @@ function PiecesRemplaceesRI({ eqIv, siteEq, onChange, ivDate }) {
             <label key={k} style={{ display: "flex", flexDirection: "column", gap: 3, fontSize: 10.5, color: "#5B6B7D", fontWeight: 600 }}>{l}<input value={libre[k]} onChange={(e) => setLibre((x) => ({ ...x, [k]: e.target.value }))} style={{ ...inputStyle, width: w, padding: "6px 8px", fontSize: 12.5 }} /></label>
           ))}
           <button onClick={() => setFormulaire(false)} style={btnGhost("#5B6B7D")}>Annuler</button>
-          <button onClick={() => { if (!libre.categorie) return; onChange([...liste, { ...libre, id: uid(), libre: true, identique: false, date: ivDate }]); setLibre({ categorie: "", marque: "", reference: "", quantite: "" }); setFormulaire(false); }} style={{ ...btnGhost(BRAND.blue), background: BRAND.blue, color: "#fff" }}>Ajouter au RI</button>
+          <button onClick={() => { if (!libre.categorie) return; onChange([...liste, { ...libre, id: uid(), libre: true, identique: false, date: ivDate }]); setLibre({ categorie: "", marque: "", reference: "", quantite: "" }); setFormulaire(false); }} style={{ ...btnGhost(BRAND.blue), background: BRAND.blue, color: "#fff" }}>Ajouter au CRI</button>
         </div>
       )}
     </div>
@@ -11593,7 +11598,8 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
             </div>
           )}
 
-          {schema.sections.map((sec) => {
+          {/* Conversion d'énergie : la saisie des pièces d'usure vient juste après l'identification (le rapport Word garde son ordre). */}
+          {(TYPES_AVEC_PIECES_USURE.includes(eq.type) ? [...schema.sections.filter((x) => x.key === "pieces_usure_ups"), ...schema.sections.filter((x) => x.key !== "pieces_usure_ups")] : schema.sections).map((sec) => {
             // Fiche batterie : saisie une seule fois, dans Pièces d'usure → Batteries (premier modèle).
             // Les données restent dans controles.batterie_id (reprises par le relevé des tensions, les branches, l'autonomie et le rapport Word).
             if (sec.key === "batterie_id" && TYPES_AVEC_PIECES_USURE.includes(eq.type) && schema.sections.some((x) => x.key === "pieces_usure_ups")) return null;
@@ -12956,8 +12962,8 @@ function SiteDetail({ site, allSites, update, onBack, onDelete, onPrint, onPrint
                     <ImagePlus size={13} /> Annexe photos
                   </button>
                   <BoutonExportPiecesUsure site={site} />
-                  <button onClick={() => { setMenuPlus(false); onCreateIntervention(site, site.equipements); }} style={{ ...btnGhost(BRAND.blue), justifyContent: "flex-start" }} title="Crée un rapport d'intervention pré-rempli avec tous les équipements de ce site">
-                    <ClipboardList size={13} /> Rapport d'intervention
+                  <button onClick={() => { setMenuPlus(false); onCreateIntervention(site, site.equipements); }} style={{ ...btnGhost(BRAND.blue), justifyContent: "flex-start" }} title="Crée un compte rendu d'intervention pré-rempli avec tous les équipements de ce site">
+                    <ClipboardList size={13} /> Compte rendu d'intervention
                   </button>
                   <div style={{ borderTop: "1px solid #E2E6EB", paddingTop: 6 }}>
                     <InlineConfirmButton icon={Trash2} label="Supprimer le site" onConfirm={() => onDelete(site.id)} />
@@ -13103,7 +13109,7 @@ function SiteDetail({ site, allSites, update, onBack, onDelete, onPrint, onPrint
 }
 
 /* =========================================================================
-   Rapport d'intervention — édition
+   Compte rendu d'intervention — édition
    ========================================================================= */
 function IvField({ label, children, span }) {
   return (
@@ -13134,9 +13140,9 @@ function InterventionEditor({ iv, update, onBack, onDelete, onPrint, sites = [] 
   const duree = dureeIntervention(iv.heureDebut, iv.heureFin);
 
   function envoyerParMail() {
-    const subject = encodeURIComponent(`Rapport d'intervention ${iv.numeroRI} — ${iv.client || ""}`);
+    const subject = encodeURIComponent(`Compte rendu d'intervention ${iv.numeroRI} — ${iv.client || ""}`);
     const body = encodeURIComponent(
-      `Bonjour,\n\nVeuillez trouver ci-joint le rapport d'intervention ${iv.numeroRI} du ${dateFrIso(iv.date)} concernant le site ${iv.site || ""}.\n\n(Pensez à joindre le document Word généré via le bouton « Rapport Word » avant l'envoi.)\n\nCordialement,\n${iv.technicien || "HT Maintenance"}`
+      `Bonjour,\n\nVeuillez trouver ci-joint le compte rendu d'intervention ${iv.numeroRI} du ${dateFrIso(iv.date)} concernant le site ${iv.site || ""}.\n\n(Pensez à joindre le document Word généré via le bouton « Rapport Word » avant l'envoi.)\n\nCordialement,\n${iv.technicien || "HT Maintenance"}`
     );
     const to = iv.emailClient || "";
     window.open(`mailto:${to}?subject=${subject}&body=${body}`, "_blank");
@@ -13144,7 +13150,7 @@ function InterventionEditor({ iv, update, onBack, onDelete, onPrint, sites = [] 
 
   return (
     <div>
-      <button onClick={onBack} style={{ ...btnGhost(), marginBottom: 16 }}><ArrowLeft size={14} /> Retour aux rapports d'intervention</button>
+      <button onClick={onBack} style={{ ...btnGhost(), marginBottom: 16 }}><ArrowLeft size={14} /> Retour aux comptes rendus d'intervention</button>
 
       <Card style={{ marginBottom: 18 }}>
         <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
@@ -13806,14 +13812,14 @@ function FicheEquipementHistorique({ p, interventions, onRetour, onOpenSite, onO
 
       {ivs.length > 0 && (
         <Card style={{ marginBottom: 14 }}>
-          <SectionTitle>Rapports d'intervention ({ivs.length})</SectionTitle>
+          <SectionTitle>Comptes rendus d'intervention ({ivs.length})</SectionTitle>
           {ivs.sort((a, b) => String(b.date).localeCompare(String(a.date))).map((iv) => {
             const e = (iv.equipements || []).find((x) => equipementRICorrespond(iv, x, p, ids));
             const auto = e && equipementRICorrespond(iv, e, p, ids) === "auto";
             return (
               <div key={iv.id} onClick={() => onOpenIntervention(iv.id)} style={{ display: "flex", gap: 10, alignItems: "center", padding: "7px 0", borderBottom: "1px solid #E2E6EB", cursor: "pointer", fontSize: 12.5, flexWrap: "wrap" }}>
                 <b>{iv.numeroRI}</b><span>{dateFrCourte(iv.date)}</span>{e?.etat && <StatusBadge label={e.etat} size="sm" />}
-                {auto && <span title="Ancien RI sans lien direct : rattaché par client, site, type et n° de série / repère" style={{ fontSize: 10.5, color: "#8B96A3", border: "1px solid #D8DEE5", borderRadius: 999, padding: "1px 7px" }}>rapprochement auto</span>}
+                {auto && <span title="Ancien CRI sans lien direct : rattaché par client, site, type et n° de série / repère" style={{ fontSize: 10.5, color: "#8B96A3", border: "1px solid #D8DEE5", borderRadius: 999, padding: "1px 7px" }}>rapprochement auto</span>}
                 <span style={{ color: "#5B6B7D", flex: "1 1 200px" }}>{String(e?.remarque || "").slice(0, 120)}</span>
                 <ChevronRight size={14} color="#9AA5B1" />
               </div>
@@ -14340,7 +14346,7 @@ function InterventionsOverview({ interventions, sites, onOpen, onCreate, onPlani
       <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
         <div style={{ flex: "1 1 220px", position: "relative" }}>
           <Search size={15} style={{ position: "absolute", left: 11, top: 10, color: "#8B96A3" }} />
-          <TextInput placeholder="Rechercher N° RI, client, site, technicien…" value={query} onChange={(e) => setQuery(e.target.value)} style={{ paddingLeft: 32 }} />
+          <TextInput placeholder="Rechercher N° CRI, client, site, technicien…" value={query} onChange={(e) => setQuery(e.target.value)} style={{ paddingLeft: 32 }} />
         </div>
         <Select value={groupeMode} onChange={(e) => setGroupeMode(e.target.value)} style={{ width: 180 }}>
           <option value="date">Trier par date</option>
@@ -14356,7 +14362,7 @@ function InterventionsOverview({ interventions, sites, onOpen, onCreate, onPlani
         <div style={{ textAlign: "center", padding: "60px 20px", background: "#FFFFFF", border: "1px dashed #D8DEE5", borderRadius: 14 }}>
           <ClipboardList size={28} color="#9AA5B1" style={{ marginBottom: 10 }} />
           <div style={{ fontSize: 14, fontWeight: 600, color: "#3E4A5C", marginBottom: 4 }}>
-            {interventions.length === 0 ? "Aucun rapport d'intervention" : "Aucun résultat pour cette recherche"}
+            {interventions.length === 0 ? "Aucun compte rendu d'intervention" : "Aucun résultat pour cette recherche"}
           </div>
           <div style={{ fontSize: 12.5, color: "#8B96A3" }}>Créez votre premier rapport à transmettre au client.</div>
         </div>
@@ -14469,7 +14475,7 @@ function lignesEquipementsCalendrier(equipements, annee) {
   });
   return l;
 }
-// Site physique lié à un rapport d'intervention (lien direct, sinon client + nom du site).
+// Site physique lié à un compte rendu d'intervention (lien direct, sinon client + nom du site).
 function siteDeIntervention(iv, sites) {
   const id = iv.linkedSiteId || (iv.equipements || []).map((e) => e.sourceSiteId).find(Boolean);
   if (id) { const s = sites.find((x) => x.id === id); if (s) return s; }
@@ -14477,7 +14483,7 @@ function siteDeIntervention(iv, sites) {
   return sites.filter((s) => n(s.client) === n(iv.client) && (!n(iv.site) || n(s.nom || s.local) === n(iv.site)))
     .sort((a, b) => String(b.rapport?.date || "").localeCompare(String(a.rapport?.date || "")))[0] || null;
 }
-// Événements de l'agenda : RMP (sites) et rapports d'intervention, du passé récent à l'avenir.
+// Événements de l'agenda : RMP (sites) et comptes rendus d'intervention, du passé récent à l'avenir.
 function evenementsCalendrier(sites, interventions) {
   const limite = new Date(); limite.setDate(limite.getDate() - CALENDRIER_FENETRE_PASSE_JOURS);
   const depuis = limite.toISOString().slice(0, 10);
@@ -14688,7 +14694,7 @@ function DayDetailPanel({ dateISO, events, onOpenSite, onOpenIntervention, onCre
         <SectionTitle>{label}</SectionTitle>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button onClick={() => onCreateForDate(dateISO)} style={btnGhost(BRAND.amber)}><Plus size={13} /> Préparer un rapport ce jour</button>
-          <button onClick={() => onCreateInterventionForDate(dateISO)} style={btnGhost(BRAND.blue)}><ClipboardList size={13} /> Créer un rapport d'intervention</button>
+          <button onClick={() => onCreateInterventionForDate(dateISO)} style={btnGhost(BRAND.blue)}><ClipboardList size={13} /> Créer un compte rendu d'intervention</button>
         </div>
       </div>
       {events.length === 0 ? (
@@ -14703,7 +14709,7 @@ function DayDetailPanel({ dateISO, events, onOpenSite, onOpenIntervention, onCre
               {ev.kind === "site" ? <Building2 size={14} color="#5B6B7D" /> : <ClipboardList size={14} color="#5B6B7D" />}
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 13, fontWeight: 600, color: "#1A1F26", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{ev.label}</div>
-                <div style={{ fontSize: 11, color: "#5B6B7D" }}>{ev.kind === "site" ? "Site" : "Rapport d'intervention"} {ev.sub ? "· " + ev.sub : ""}</div>
+                <div style={{ fontSize: 11, color: "#5B6B7D" }}>{ev.kind === "site" ? "Site" : "Compte rendu d'intervention"} {ev.sub ? "· " + ev.sub : ""}</div>
               </div>
               <StatusBadge label={ev.statusLabel} size="sm" />
             </div>
@@ -15624,8 +15630,43 @@ function docxValCell(text, state, garder = false) {
 }
 // Constructeur générique : lignes [Grandeur, val1, val2, val3, Moyenne] → un seul tableau,
 // réutilisé par toutes les sections de mesures par phase (Onduleur, Batterie de compensation…).
-function docxBuildMesuresTable(rows, headers, enteteDerniere = "Moyenne des valeurs") {
+// Monophasé : une seule colonne de valeur (pas de L2 / L3 vides) + une colonne « Calcul / seuil »
+// seulement si une ligne a une information différente de sa mesure (seuil THD, valeur calculée…).
+function docxBuildMesuresTableMono(rows) {
+  const vide = (v) => v === "" || v === null || v === undefined;
+  const memes = (a, b) => String(a).trim() === String(b).trim() || (numOf(a) !== null && numOf(a) === numOf(b));
+  const lignes = rows.map((r) => {
+    const mesure = !vide(r[1]) ? r[1] : r[4];
+    const complement = !vide(r[1]) && !vide(r[4]) && !memes(r[1], r[4]) ? r[4] : "";
+    return { libelle: r[0], mesure, complement, etat: !vide(r[1]) ? (r[5] || [])[0] : null };
+  });
+  const avecComplement = lignes.some((l) => !vide(l.complement));
+  const L = avecComplement ? [4000, 2800, 2800] : [5400, 4200];
+  const garderLigne = (idx) => (rows.length <= 14 ? idx < rows.length - 1 : idx < 2);
+  const headCell = (text, width) => new DOCX.TableCell({
+    width: { size: width, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS_ENTETE, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_ENTETE },
+    children: [new DOCX.Paragraph({ keepNext: true, alignment: DOCX.AlignmentType.CENTER, children: [new DOCX.TextRun({ text, size: 17, bold: true, color: DOCX_WHITE })] })],
+  });
+  const valeur = (text, state, width, garder, bleu = false) => {
+    const t = vide(text) ? "—" : String(text);
+    const c = state && DOCX_ETAT_COULEURS[state];
+    return new DOCX.TableCell({
+      width: { size: width, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, verticalAlign: DOCX.VerticalAlign.CENTER,
+      shading: c ? { type: DOCX.ShadingType.CLEAR, fill: c.fond } : undefined,
+      children: [new DOCX.Paragraph({ keepNext: garder, alignment: DOCX.AlignmentType.CENTER, children: [new DOCX.TextRun({ text: t, size: bleu ? 16 : 17, bold: !!c || bleu, color: c ? c.texte : bleu ? "0A5DA8" : DOCX_DARK })] })],
+    });
+  };
+  const entete = new DOCX.TableRow({ cantSplit: true, tableHeader: true, children: [headCell("Grandeur", L[0]), headCell("Valeur", L[1]), ...(avecComplement ? [headCell("Calcul / seuil", L[2])] : [])] });
+  const corps = lignes.map((l, idx) => { const garder = garderLigne(idx); return new DOCX.TableRow({ cantSplit: true, children: [
+    new DOCX.TableCell({ width: { size: L[0], type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, verticalAlign: DOCX.VerticalAlign.CENTER, shading: idx % 2 === 1 ? { type: DOCX.ShadingType.CLEAR, fill: DOCX_ZEBRE } : undefined, children: [new DOCX.Paragraph({ keepNext: garder, children: [new DOCX.TextRun({ text: l.libelle, size: 17, bold: true, color: "4A5563" })] })] }),
+    valeur(l.mesure, l.etat, L[1], garder),
+    ...(avecComplement ? [valeur(l.complement, null, L[2], garder, true)] : []),
+  ] }); });
+  return docxTable({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: L, rows: [entete, ...corps] });
+}
+function docxBuildMesuresTable(rows, headers, enteteDerniere = "Moyenne des valeurs", mono = false) {
   if (!rows.length) return null;
+  if (mono) return docxBuildMesuresTableMono(rows);
   const h = headers || ["L1", "L2", "L3"];
   const garderLigne = (idx) => (rows.length <= 14 ? idx < rows.length - 1 : idx < 2); // tableau court : d'un seul tenant
   const headCell = (text, width) => new DOCX.TableCell({
@@ -15645,7 +15686,7 @@ function moyenneOf(...vals) {
   if (!nums.length) return "";
   return Math.round((nums.reduce((a, b) => a + b, 0) / nums.length) * 100) / 100;
 }
-function docxTableauMesures(items, controlesSection) {
+function docxTableauMesures(items, controlesSection, mono = false) {
   const rows = [];
   items.forEach((item) => {
     const value = controlesSection[item.key] || { fields: {} };
@@ -15701,7 +15742,7 @@ function docxTableauMesures(items, controlesSection) {
     const parts = printFieldParts(item, value).map((p) => p.text);
     if (parts.length) rows.push([item.label, "", "", "", parts.map((p) => p.includes(" : ") ? p.split(" : ").slice(1).join(" : ") : p).join("  ·  ")]);
   });
-  return docxBuildMesuresTable(rows);
+  return docxBuildMesuresTable(rows, null, undefined, mono);
 }
 // Correspondance couleur hex (héritée de l'appelant, ex. DOCX_ORANGE) -> état, pour réutiliser le
 // même rendu case colorée (fond clair + bordure foncée) que docxValCell.
@@ -17946,18 +17987,18 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
           if (parts.length) rows.push([item.label, "", "", "", parts.map((p) => p.includes(" : ") ? p.split(" : ").slice(1).join(" : ") : p).join("  ·  ")]);
         }
       });
-      const t = docxBuildMesuresTable(rows);
+      const t = docxBuildMesuresTable(rows, null, undefined, estBatterieMono(eq));
       if (t) elements.push(t);
       if (lignesPuissance.length) {
         if (t) elements.push(docxSpacer(80));
-        elements.push(docxBuildMesuresTable(lignesPuissance, null, "Total"));
+        elements.push(docxBuildMesuresTable(lignesPuissance, null, "Total", estBatterieMono(eq)));
       }
       elements.push(docxSpacer());
       return;
     }
     if ((sec.key === "mesures_reseau_normal" || sec.key === "mesures_reseau_secours") && TYPES_AVEC_BRANCHES_UPS.includes(eq.type)) {
       elements.push(docxHeading(sec.title));
-      const tM = docxTableauMesures(sec.items, eq.controles[sec.key]);
+      const tM = docxTableauMesures(sec.items, eq.controles[sec.key], eq.controles?.regimes_reseaux?.[sec.key === "mesures_reseau_normal" ? "normal" : "secours"] === "Monophasé");
       if (tM) elements.push(tM);
       const suffixRes = sec.key === "mesures_reseau_normal" ? "normal" : "secours";
       const monoRes = eq.controles?.regimes_reseaux?.[suffixRes] === "Monophasé";
@@ -17979,14 +18020,14 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
     }
     if ((sec.key === "mesures_source1" || sec.key === "mesures_source2") && eq.type === "Inverseur de source") {
       elements.push(docxHeading(sec.title));
-      const tS = docxTableauMesures(sec.items, eq.controles[sec.key]);
+      const tS = docxTableauMesures(sec.items, eq.controles[sec.key], eq.controles?.regimes_reseaux?.[sec.key === "mesures_source1" ? "source1" : "source2"] === "Monophasé");
       if (tS) elements.push(tS);
       elements.push(docxSpacer());
       return;
     }
     if (sec.key === "mesures_utilisation" && TYPES_AVEC_MESURES_UTILISATION.includes(eq.type)) {
       elements.push(docxHeading(sec.title));
-      const tU = docxTableauMesures(sec.items, eq.controles[sec.key]);
+      const tU = docxTableauMesures(sec.items, eq.controles[sec.key], eq.controles?.regimes_reseaux?.utilisation === "Monophasé");
       if (tU) elements.push(tU);
       const monoUtil = eq.controles?.regimes_reseaux?.utilisation === "Monophasé";
       const sUtil = calcPuissanceApparente(eq, sec.key, "utilisation");
@@ -18030,7 +18071,7 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
     }
     if (sec.key === "mesures_onduleur_item" && TYPES_AVEC_BRANCHES_UPS.includes(eq.type)) {
       elements.push(docxHeading(sec.title));
-      const tO = docxTableauMesures(sec.items, eq.controles[sec.key]);
+      const tO = docxTableauMesures(sec.items, eq.controles[sec.key], eq.controles?.regimes_reseaux?.onduleur === "Monophasé");
       if (tO) elements.push(tO);
       const capaF = calcCapaciteFiltre(eq);
       if (capaF) {
@@ -18624,9 +18665,9 @@ async function generateSiteDocx(site, allSites) {
   return DOCX.Packer.toBlob(doc);
 }
 
-// ===== Rapport d'intervention (Word) =====
+// ===== Compte rendu d'intervention (Word) =====
 // Document court remis au client à la fin de l'intervention : ce n'est PAS le rapport de maintenance détaillé du site (qui reste le
-// document de référence), mais le rapport d'intervention — synthèse de
+// document de référence), mais le compte rendu d'intervention — synthèse de
 // l'intervention, équipements contrôlés et leur état, points importants, conclusion et signatures.
 function dateFrIso(iso) {
   const m = String(iso || "").match(/^(\d{4})-(\d{2})-(\d{2})/);
@@ -18666,8 +18707,8 @@ function phraseSyntheseIntervention(iv, tousTechniciens) {
   return phrases.join(" ");
 }
 
-// En-tête du rapport d'intervention : même charte que la couverture du rapport de site (bloc sombre, bande ambre, cartes chiffrées), sans page de garde séparée
-// puisque le rapport d'intervention tient sur une à deux pages. La barre verticale du bloc reprend la couleur du statut.
+// En-tête du compte rendu d'intervention : même charte que la couverture du rapport de site (bloc sombre, bande ambre, cartes chiffrées), sans page de garde séparée
+// puisque le compte rendu d'intervention tient sur une à deux pages. La barre verticale du bloc reprend la couleur du statut.
 function docxEnteteIntervention(iv, couleurStatut) {
   const logo = docxImage(LOGO_TRANSPARENT, 120, Math.round(120 / LOGO_TRANSPARENT_RATIO));
   const aucune = docxToutesAucune();
@@ -18683,8 +18724,8 @@ function docxEnteteIntervention(iv, couleurStatut) {
       borders: { top: aucune.top, bottom: aucune.bottom, right: aucune.right, left: { style: DOCX.BorderStyle.SINGLE, size: 72, color: couleurStatut } },
       children: [
         new DOCX.Paragraph({ spacing: { before: 0, after: 0 }, children: logo ? [logo] : [] }),
-        new DOCX.Paragraph({ spacing: { before: 240, after: 0 }, children: [new DOCX.TextRun({ text: "RAPPORT D'INTERVENTION", bold: true, color: DOCX_AMBER, size: 17, characterSpacing: 50 })] }),
-        new DOCX.Paragraph({ spacing: { before: 100, after: 60 }, children: [new DOCX.TextRun({ text: iv.numeroRI || "Rapport d'intervention", bold: true, color: DOCX_WHITE, size: 56 })] }),
+        new DOCX.Paragraph({ spacing: { before: 240, after: 0 }, children: [new DOCX.TextRun({ text: "COMPTE RENDU D'INTERVENTION", bold: true, color: DOCX_AMBER, size: 17, characterSpacing: 50 })] }),
+        new DOCX.Paragraph({ spacing: { before: 100, after: 60 }, children: [new DOCX.TextRun({ text: iv.numeroRI || "Compte rendu d'intervention", bold: true, color: DOCX_WHITE, size: 56 })] }),
         new DOCX.Paragraph({ spacing: { before: 0, after: 0 }, children: [new DOCX.TextRun({ text: [iv.client, iv.site].filter(Boolean).join("  —  "), color: DOCX_SILVER, size: 22 })] }),
         new DOCX.Paragraph({ spacing: { before: 220, after: 0 }, indent: { right: 7400 }, border: { bottom: { style: DOCX.BorderStyle.SINGLE, size: 30, color: DOCX_AMBER, space: 1 } }, children: [new DOCX.TextRun({ text: "", size: 4 })] }),
         new DOCX.Paragraph({ spacing: { before: 0, after: 0 }, children: [new DOCX.TextRun({ text: "", size: 12 })] }),
@@ -18896,7 +18937,7 @@ async function generateInterventionDocx(iv, sites = []) {
   return DOCX.Packer.toBlob(doc);
 }
 
-// Nom des fichiers Word : <PRÉFIXE>_<date>_<client>_<site>.docx — RI pour un rapport d'intervention,
+// Nom des fichiers Word : <PRÉFIXE>_<date>_<client>_<site>.docx — RI pour un compte rendu d'intervention,
 // RMP pour un rapport de maintenance. Date au format AAAA-MM-JJ (classement chronologique) ; accents
 // retirés pour rester lisible sur tous les systèmes. Une partie vide est simplement omise.
 function morceauNomFichier(texte) {
@@ -18908,7 +18949,7 @@ function nomFichierDocument(prefixe, dateISO, client, site) {
   const parties = [c, s && s !== c ? s : ""].filter(Boolean);
   return `${prefixe}_${date}_${parties.length ? parties.join("_") : "site"}.docx`;
 }
-function nomFichierIntervention(iv) { return nomFichierDocument("RI", iv.date, iv.client, iv.site); }
+function nomFichierIntervention(iv) { return nomFichierDocument("CRI", iv.date, iv.client, iv.site); }
 function nomFichierMaintenance(site) { return nomFichierDocument("RMP", site.rapport && site.rapport.date, site.client, site.nom || site.local); }
 function downloadBlob(blob, filename) {
   const url = URL.createObjectURL(blob);
@@ -19686,7 +19727,7 @@ function DonneesModal({ user, onFermer, onExporter, derniereSauvegarde, donneesP
         <div style={carte}>
           <div style={titre}>Télécharger une sauvegarde complète</div>
           <div style={texte}>
-            Tous les RMP (archives comprises), les rapports d'intervention, les clients, les contacts et la bibliothèque de caractéristiques, dans un fichier à conserver (Mac, iCloud…).
+            Tous les RMP (archives comprises), les comptes rendus d'intervention, les clients, les contacts et la bibliothèque de caractéristiques, dans un fichier à conserver (Mac, iCloud…).
             Les photos restent sur le serveur : la sauvegarde contient leurs liens.
           </div>
           <div style={{ ...texte, marginTop: 6, color: jours === null || jours > 30 ? "#B5730A" : "#0F8A5F", fontWeight: 600 }}>
@@ -19716,7 +19757,7 @@ function DonneesModal({ user, onFermer, onExporter, derniereSauvegarde, donneesP
                   </tr></thead>
                   <tbody>
                     {ligneBilan("RMP (sites)", fichier.analyse.sites)}
-                    {ligneBilan("Rapports d'intervention", fichier.analyse.interventions)}
+                    {ligneBilan("Comptes rendus d'intervention", fichier.analyse.interventions)}
                     {ligneBilan("Contacts", fichier.analyse.contacts)}
                     {ligneBilan("Clients", fichier.analyse.clients, "(jamais modifiés)")}
                   </tbody>
@@ -19740,7 +19781,7 @@ function DonneesModal({ user, onFermer, onExporter, derniereSauvegarde, donneesP
           <div style={carte}>
             <div style={titre}>Photos et documents inutilisés</div>
             <div style={texte}>
-              Recherche, dans le stockage, les photos et PDF qui ne sont plus cités par aucun RMP, rapport d'intervention, client ou contact (archives comprises) et datent de plus de {AGE_MINI_ORPHELIN_JOURS} jours.
+              Recherche, dans le stockage, les photos et PDF qui ne sont plus cités par aucun RMP, compte rendu d'intervention, client ou contact (archives comprises) et datent de plus de {AGE_MINI_ORPHELIN_JOURS} jours.
               L'analyse ne supprime rien : la liste s'affiche d'abord pour vérification.
             </div>
             {(photos.etat === "repos" || photos.etat === "erreur" || photos.etat === "fini") && (
@@ -20517,7 +20558,7 @@ function AppPrincipale({ currentUser, onLogout }) {
     });
   };
 
-  // Génère le document (rapport de maintenance ou rapport d'intervention) et le télécharge en .docx
+  // Génère le document (rapport de maintenance ou compte rendu d'intervention) et le télécharge en .docx
   // réel (compatible Microsoft Word ET Pages sur Mac), entièrement modifiable.
   useEffect(() => {
     if (!printSite && !printIv && !printAnnexeSite) return;
@@ -20624,7 +20665,7 @@ function AppPrincipale({ currentUser, onLogout }) {
     setSelectedIvId(null);
   }
 
-  // Sauvegarde manuelle : exporte toutes les données (sites + rapports d'intervention) dans un
+  // Sauvegarde manuelle : exporte toutes les données (sites + comptes rendus d'intervention) dans un
   // fichier téléchargeable, et permet de les recharger ensuite (autre appareil, restauration…).
   const importInputRef = useRef(null);
   const [importError, setImportError] = useState(false);
@@ -20722,7 +20763,7 @@ function AppPrincipale({ currentUser, onLogout }) {
     if (data.caracteristiques && typeof data.caracteristiques === "object") setCaracteristiquesLibrary((cur) => fusionnerCaracteristiques(null, data.caracteristiques, cur));
     const morceaux = [
       [sitesAjout.length, "RMP ajouté", "RMP ajoutés"], [sitesRempl.length, "RMP remplacé", "RMP remplacés"],
-      [ivAjout.length, "rapport d'intervention ajouté", "rapports d'intervention ajoutés"], [ivRempl.length, "rapport d'intervention remplacé", "rapports d'intervention remplacés"],
+      [ivAjout.length, "compte rendu d'intervention ajouté", "comptes rendus d'intervention ajoutés"], [ivRempl.length, "compte rendu d'intervention remplacé", "comptes rendus d'intervention remplacés"],
       [ctAjout.length, "contact ajouté", "contacts ajoutés"], [ctRempl.length, "contact remplacé", "contacts remplacés"], [clAjout.length, "client ajouté", "clients ajoutés"],
     ].filter(([n]) => n).map(([n, un, plusieurs]) => `${n} ${n > 1 ? plusieurs : un}`);
     return morceaux.length ? `Restauration effectuée : ${morceaux.join(", ")}. L'enregistrement sur le serveur se fait automatiquement.` : "Rien à restaurer : tout ce que contient la sauvegarde est déjà présent.";
@@ -20832,7 +20873,7 @@ function AppPrincipale({ currentUser, onLogout }) {
                   HT <span style={{ color: BRAND.amber }}>Maintenance</span>
                 </h1>
                 <div style={{ fontSize: 12, color: BRAND.silver }}>
-                  {selected ? "Fiche site" : selectedIv ? "Rapport d'intervention" : view === "sites" ? "Suivi des interventions de maintenance préventive HT" : view === "interventions" ? "Rapports d'intervention" : "Calendrier des interventions"}
+                  {selected ? "Fiche site" : selectedIv ? "Compte rendu d'intervention" : view === "sites" ? "Suivi des interventions de maintenance préventive HT" : view === "interventions" ? "Comptes rendus d'intervention" : "Calendrier des interventions"}
                 </div>
               </div>
             </div>
@@ -20917,7 +20958,7 @@ function AppPrincipale({ currentUser, onLogout }) {
                 border: view === "interventions" ? "1px solid #FFC10755" : "1px solid #D8DEE5", background: view === "interventions" ? "rgba(255,193,7,0.12)" : "transparent",
                 color: view === "interventions" ? BRAND.amber : "#5B6B7D", fontSize: 12.5, fontWeight: 600, cursor: "pointer",
               }}>
-                <ClipboardList size={13} /> Rapports d'intervention
+                <ClipboardList size={13} /> Comptes rendus d'intervention
               </button>
               <button onClick={() => setView("calendrier")} style={{
                 display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: 999,
@@ -20966,7 +21007,7 @@ function AppPrincipale({ currentUser, onLogout }) {
         </div>
         {/* Navigation au pouce sur téléphone */}
         <nav className="nav-mobile" aria-label="Navigation principale">
-          {[["sites", "Interventions", Building2], ["interventions", "RI", ClipboardList], ["calendrier", "Calendrier", Clock], ["rapports", "Rapports", FileText], ["scanner", "Scanner", QrCode]].map(([k, libelle, Icone]) => {
+          {[["sites", "Interventions", Building2], ["interventions", "CRI", ClipboardList], ["calendrier", "Calendrier", Clock], ["rapports", "Rapports", FileText], ["scanner", "Scanner", QrCode]].map(([k, libelle, Icone]) => {
             const actif = k !== "scanner" && !selected && !selectedIv && view === k;
             return (
               <button key={k} onClick={() => { if (k === "scanner") { setScannerOuvert(true); return; } setSelectedId(null); setSelectedIvId(null); setView(k); window.scrollTo(0, 0); }}
