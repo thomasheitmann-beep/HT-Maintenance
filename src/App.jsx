@@ -3846,23 +3846,31 @@ const RANK_COLOR = {
 const EQUIP_STATUSES = ["Conforme", "Dégradé", "Défaillant", "Non réalisé", "Non présent"];
 // Choix de l'état en un geste : trois boutons de couleur (Conforme / Dégradé / Défaillant) + un petit menu pour les autres états.
 const ETATS_RAPIDES = [["Conforme", "✓", "#0F8A5F"], ["Dégradé", "!", "#B5730A"], ["Défaillant", "✕", "#C0392B"]];
+const ICONES_ETATS = {
+  Conforme: <path d="M5 12.5l4.2 4.2L19 7" />,
+  "Dégradé": <><path d="M12 4.5L21 19.5H3z" /><path d="M12 10v4.2" /><path d="M12 17.2v.1" /></>,
+  "Défaillant": <path d="M6.5 6.5l11 11M17.5 6.5l-11 11" />,
+};
+// Sur ordinateur : boutons avec libellé. Sur téléphone (≤ 720 px) : pastilles rondes à icône (classe etat-rapide).
 function EtatRapide({ value, onChange, accord = (x) => x, grand = false }) {
   const autre = !ETATS_RAPIDES.some(([e]) => e === value);
   return (
-    <div style={{ display: "inline-flex", alignItems: "stretch", gap: 4, flexWrap: "nowrap" }}>
-      <div role="group" style={{ display: "inline-flex", border: "1px solid #D8DEE5", borderRadius: 8, overflow: "hidden", background: "#fff" }}>
+    <div className={`etat-rapide${grand ? " etat-rapide-grand" : ""}`} style={{ display: "inline-flex", alignItems: "stretch", gap: 4, flexWrap: "nowrap" }}>
+      <div role="group" className="etat-rapide-groupe" style={{ display: "inline-flex", border: "1px solid #D8DEE5", borderRadius: 8, overflow: "hidden", background: "#fff" }}>
         {ETATS_RAPIDES.map(([e, sym, c], i) => {
           const actif = value === e;
           return (
-            <button key={e} type="button" onClick={() => onChange(e)} aria-pressed={actif} title={accord(e)}
-              style={{ border: "none", borderLeft: i ? "1px solid #D8DEE5" : "none", background: actif ? c : "#fff", color: actif ? "#fff" : c, fontWeight: 700,
+            <button key={e} type="button" onClick={() => onChange(e)} aria-pressed={actif} aria-label={accord(e)} title={accord(e)}
+              className={`etat-pastille${actif ? " actif" : ""}`}
+              style={{ "--etat-c": c, border: "none", borderLeft: i ? "1px solid #D8DEE5" : "none", background: actif ? c : "#fff", color: actif ? "#fff" : c, fontWeight: 700,
                 fontSize: grand ? 13 : 11.5, padding: grand ? "9px 14px" : "6px 9px", minHeight: grand ? 40 : 32, cursor: "pointer", whiteSpace: "nowrap", fontFamily: "inherit" }}>
-              {sym} {accord(e)}
+              <span className="etat-texte">{sym} {accord(e)}</span>
+              <svg className="etat-icone" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{ICONES_ETATS[e]}</svg>
             </button>
           );
         })}
       </div>
-      <select value={autre ? value || "" : ""} onChange={(ev) => ev.target.value && onChange(ev.target.value)} title="Autre état (non réalisé, non présent)"
+      <select className={`etat-autre${autre && value ? " choisi" : ""}`} value={autre ? value || "" : ""} onChange={(ev) => ev.target.value && onChange(ev.target.value)} title="Autre état (non réalisé, non présent)"
         style={{ ...inputStyle, width: autre && value ? "auto" : 34, padding: "0 6px", fontSize: 12, minHeight: grand ? 40 : 32, color: autre && value ? "#5B6B7D" : "#8B96A3", fontWeight: autre && value ? 700 : 400, WebkitAppearance: "none", appearance: "none", textAlign: "center", cursor: "pointer" }}>
         <option value="">⋯</option>
         {EQUIP_STATUSES.filter((e) => !ETATS_RAPIDES.some(([r]) => r === e)).map((e) => <option key={e} value={e}>{accord(e)}</option>)}
@@ -4989,14 +4997,14 @@ function unitFamilyFor(u) {
 // Champ texte sur une ligne qui passe à la ligne et grandit en hauteur quand la saisie dépasse sa
 // largeur (au lieu de défiler à l'intérieur) : toute la saisie reste visible, sur iPhone comme sur iPad.
 // La touche Entrée ne crée pas de saut de ligne (texte destiné à une seule ligne du rapport).
-function AutoTextArea({ value, onChange, style, placeholder, onFocus, onBlur }) {
+function AutoTextArea({ value, onChange, style, placeholder, onFocus, onBlur, className }) {
   const ref = useRef(null);
   const ajuster = () => { const el = ref.current; if (!el) return; el.style.height = "auto"; el.style.height = el.scrollHeight + 2 + "px"; };
   useEffect(ajuster, [value]);
   useEffect(() => { window.addEventListener("resize", ajuster); return () => window.removeEventListener("resize", ajuster); }, []);
   return (
     <textarea
-      ref={ref} rows={1} value={value ?? ""} placeholder={placeholder}
+      ref={ref} rows={1} value={value ?? ""} placeholder={placeholder} className={className}
       onChange={(e) => onChange(e.target.value.replace(/\n/g, " "))}
       onKeyDown={(e) => { if (e.key === "Enter") e.preventDefault(); }}
       onFocus={onFocus} onBlur={onBlur}
@@ -5033,7 +5041,7 @@ function ChoixLocalEquipement({ eq, locaux, update, listId }) {
     </>
   );
 }
-function Combo({ value, onChange, options, listId, style, placeholder, numeric, onBlur, multiline = false }) {
+function Combo({ value, onChange, options, listId, style, placeholder, numeric, onBlur, multiline = false, className }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
   useEffect(() => {
@@ -5052,7 +5060,7 @@ function Combo({ value, onChange, options, listId, style, placeholder, numeric, 
   // reste visible plutôt que de se réduire au seul élément déjà sélectionné.
   const filtered = (value && !options.includes(value)) ? options.filter((o) => String(o).toLowerCase().includes(String(value).toLowerCase())) : options;
   return (
-    <div ref={ref} style={{ position: "relative", width: (style && style.width) || "100%" }}>
+    <div ref={ref} className={className} style={{ position: "relative", width: (style && style.width) || "100%" }}>
       {multiline && !numeric ? (
         <AutoTextArea
           value={value}
@@ -6577,6 +6585,7 @@ function ControlRow({ item, value, onChange, idPrefix, toleranceOverride }) {
               listId={`${idPrefix}-${item.key}-action`}
               placeholder="Action"
               multiline
+              className="champ-action"
               style={{ width: actionInputWidth(value.action), padding: "5px 7px", fontSize: 12 }}
             />
           )}
@@ -6601,7 +6610,7 @@ function CustomActionsList({ custom, onAdd, onChange, onRemove, idPrefix }) {
               placeholder="Intitulé du contrôle ajouté"
               style={{ ...inputStyle, flex: "1 1 240px", padding: "6px 9px", fontSize: 12.5 }}
             />
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+            <div className="ligne-action" style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
               <Combo
                 value={c.action}
                 onChange={(v) => onChange(c.id, { action: v })}
@@ -6609,6 +6618,7 @@ function CustomActionsList({ custom, onAdd, onChange, onRemove, idPrefix }) {
                 listId={`${idPrefix}-custom-${c.id}-action`}
                 placeholder="Action"
                 multiline
+                className="champ-action"
                 style={{ width: actionInputWidth(c.action), padding: "5px 7px", fontSize: 12 }}
               />
               <EtatRapide value={c.etat} onChange={(v) => onChange(c.id, { etat: v })} />
@@ -7603,7 +7613,7 @@ function GradinsPanel({ eq, update, idPrefix }) {
                 </div>
 
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                  <AutoTextArea placeholder="Action" value={e.action} onChange={(v) => setEntry(e.id, { action: v })} style={{ width: actionInputWidth(e.action), padding: "5px 7px", fontSize: 12 }} />
+                  <AutoTextArea className="champ-action" placeholder="Action" value={e.action} onChange={(v) => setEntry(e.id, { action: v })} style={{ width: actionInputWidth(e.action), padding: "5px 7px", fontSize: 12 }} />
                   <EtatRapide value={e.etat} onChange={(__v) => setEntry(e.id, { etat: __v })} />
                 </div>
               </div>
@@ -7809,7 +7819,7 @@ function DynamicListPanel({ title, entries, onChange, typeOptions, fieldDefs, wi
                   )}
                   {withActionEtat && (
                     <>
-                      <AutoTextArea placeholder="Action" value={e.action} onChange={(v) => setEntry(e.id, { action: v })} style={{ width: actionInputWidth(e.action), padding: "5px 7px", fontSize: 12 }} />
+                      <AutoTextArea className="champ-action" placeholder="Action" value={e.action} onChange={(v) => setEntry(e.id, { action: v })} style={{ width: actionInputWidth(e.action), padding: "5px 7px", fontSize: 12 }} />
                       <EtatRapide value={e.etat} onChange={(__v) => setEntry(e.id, { etat: __v })} />
                     </>
                   )}
@@ -10492,7 +10502,7 @@ function DisjoncteurRelaisPanel({ eq, update, custom, onAddCustom, onChangeCusto
                     );
                   })()}
                   {tol && <MiniComputed label="Tolérance attendue" unit={tol.unite} value={`${tol.min} – ${tol.max}`} />}
-                  <AutoTextArea placeholder="Action" value={s.essai.action} onChange={(v) => setEssai(s.id, { action: v })} style={{ width: actionInputWidth(s.essai.action), padding: "5px 7px", fontSize: 12 }} />
+                  <AutoTextArea className="champ-action" placeholder="Action" value={s.essai.action} onChange={(v) => setEssai(s.id, { action: v })} style={{ width: actionInputWidth(s.essai.action), padding: "5px 7px", fontSize: 12 }} />
                   <EtatRapide value={s.essai.etat} onChange={(__v) => setEssai(s.id, { etat: __v })} />
                 </div>
               </div>
@@ -10503,7 +10513,7 @@ function DisjoncteurRelaisPanel({ eq, update, custom, onAddCustom, onChangeCusto
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
             <span style={{ fontSize: 12.5, color: "#3E4A5C", flex: "1 1 240px" }}>Contrôle du circuit de mesures et commande</span>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-              <AutoTextArea placeholder="Action" value={circuit.action} onChange={(v) => setCircuit({ action: v })} style={{ width: actionInputWidth(circuit.action), padding: "5px 7px", fontSize: 12 }} />
+              <AutoTextArea className="champ-action" placeholder="Action" value={circuit.action} onChange={(v) => setCircuit({ action: v })} style={{ width: actionInputWidth(circuit.action), padding: "5px 7px", fontSize: 12 }} />
               <EtatRapide value={circuit.etat} onChange={(__v) => setCircuit({ etat: __v })} />
             </div>
           </div>
@@ -20778,7 +20788,23 @@ function AppPrincipale({ currentUser, onLogout }) {
         .contraste [style*="color: rgb(91, 107, 125)"], .contraste [style*="color: rgb(62, 74, 92)"] { color: #1A1F26 !important; }
         .contraste [style*="border: 1px solid rgb(216, 222, 229)"], .contraste [style*="border: 1px solid rgb(226, 230, 235)"] { border-color: #8B96A3 !important; }
         .site-row-meta, .iv-row-meta { flex: 0 0 130px; }
+        .etat-icone { display: none; }
         @media (max-width: 720px) {
+          .champ-action { flex: 1 1 110px; width: auto !important; min-width: 110px; }
+          .ligne-action { flex: 1 1 100%; flex-wrap: nowrap !important; }
+          .etat-rapide { gap: 6px !important; align-items: center !important; }
+          .etat-rapide-groupe { border: none !important; background: transparent !important; overflow: visible !important; gap: 6px; }
+          .etat-pastille { width: 32px; height: 32px; min-height: 32px !important; padding: 0 !important; border-radius: 50% !important; border: 1.5px solid var(--etat-c) !important; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; }
+          .etat-pastille:not(.actif) { opacity: 0.85; }
+          .etat-pastille.actif { box-shadow: 0 2px 6px rgba(0,0,0,0.22); opacity: 1; }
+          .etat-pastille .etat-texte { display: none; }
+          .etat-pastille .etat-icone { display: block; }
+          .etat-rapide-grand .etat-pastille { width: 40px; height: 40px; min-height: 40px !important; }
+          .etat-rapide-grand .etat-icone { width: 22px; height: 22px; }
+          .etat-autre { width: 32px !important; height: 32px; min-height: 32px !important; border-radius: 50% !important; padding: 0 !important; font-size: 14px !important; }
+          .etat-autre.choisi { width: auto !important; border-radius: 16px !important; padding: 0 10px !important; font-size: 11.5px !important; }
+          .etat-rapide-grand .etat-autre { width: 40px !important; height: 40px; min-height: 40px !important; }
+          .etat-rapide-grand .etat-autre.choisi { width: auto !important; }
           .app-shell { padding: 12px; }
           .site-row, .iv-row { flex-wrap: wrap; align-items: flex-start; gap: 6px 14px; padding: 12px !important; }
           .site-row-main, .iv-row-main { flex-basis: 100% !important; order: -1; }
