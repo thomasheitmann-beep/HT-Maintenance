@@ -5107,7 +5107,7 @@ function Combo({ value, onChange, options, listId, style, placeholder, numeric, 
 
 // Valeur numérique + unité : si l'unité appartient à une famille (V/A/Ω/VA), un sélecteur
 // permet de changer d'échelle (mV/V/kV…) ; sinon l'unité reste affichée telle quelle.
-function NumberWithUnit({ value, unit, onValueChange, onUnitChange, width, fontSize, validState, baseUnit }) {
+function NumberWithUnit({ value, unit, onValueChange, onUnitChange, width, fontSize, validState, baseUnit, pleineLargeur = false }) {
   const family = unitFamilyFor(unit);
   // Brouillon pendant la saisie (évite qu'une conversion ne réécrive « 0, » en « 0 ») ; hors saisie,
   // la valeur enregistrée (unité de base) est affichée dans l'unité choisie.
@@ -5116,6 +5116,15 @@ function NumberWithUnit({ value, unit, onValueChange, onUnitChange, width, fontS
   const affiche = brouillon !== null ? brouillon : (base ? depuisUniteBase(value, base, unit || base) : value);
   const borderColor = validState === "ok" ? "#0F8A5F" : validState === "bad" ? "#C0392B" : validState === "warning" ? "#B5730A" : "#D8DEE5";
   const bgColor = validState === "ok" ? "#F0FBF6" : validState === "bad" ? "#FDF1F0" : validState === "warning" ? "#FDF3E3" : inputStyle.background;
+  if (pleineLargeur) {
+    // Cellule de grille : champ seul (l'unité est choisie une fois pour la ligne).
+    return (
+      <input type="number" step="any" value={affiche ?? ""}
+        onChange={(e) => { const t = e.target.value; if (base) { setBrouillon(t); onValueChange(versUniteBase(t, unit || base, base)); } else onValueChange(t); }}
+        onBlur={() => setBrouillon(null)}
+        style={{ ...inputStyle, height: 36, padding: "0 6px", fontSize: 14, fontWeight: 600, textAlign: "center", border: `1.5px solid ${validState ? borderColor : "#CBD3DC"}`, background: validState ? bgColor : "#fff" }} />
+    );
+  }
   return (
     <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
       <input
@@ -6339,6 +6348,95 @@ function KpiCard({ icon: Icon, label, value, accent, onClick = null, actif = fal
 }
 
 /* ---- ligne de contrôle générique (control / info / setting) ---- */
+// Ordre d'affichage des sections dans la fiche équipement (conversion d'énergie : pièces d'usure juste après l'identification).
+function ordreSectionsSaisie(eq, schema) {
+  const secs = TYPES_AVEC_PIECES_USURE.includes(eq.type) ? [...schema.sections.filter((x) => x.key === "pieces_usure_ups"), ...schema.sections.filter((x) => x.key !== "pieces_usure_ups")] : schema.sections;
+  return secs.filter((sec) => !(sec.key === "batterie_id" && TYPES_AVEC_PIECES_USURE.includes(eq.type) && schema.sections.some((x) => x.key === "pieces_usure_ups")));
+}
+// Barre d'étapes (collante en haut) : une pastille par section, avec l'avancement des mesures (3/8, ✓) ; un appui y amène.
+function BarreEtapesSections({ eq, sections }) {
+  const [active, setActive] = useState(null);
+  const refBarre = useRef(null);
+  const etapes = sections.map((sec) => {
+    const items = (sec.items || []).filter(controleAvecMesures);
+    const vals = (eq.controles && eq.controles[sec.key]) || {};
+    const n = items.filter((it) => controleRenseigne(it, vals[it.key])).length;
+    return { cle: sec.key, titre: String(sec.title || "").replace(/^Mesures\s*[—-]\s*/i, ""), total: items.length, n };
+  });
+  useEffect(() => {
+    const surDefilement = () => {
+      let courant = null;
+      etapes.forEach((e) => { const el = document.getElementById(`sec-${eq.id}-${e.cle}`); if (el && el.offsetHeight > 0 && el.getBoundingClientRect().top < 150) courant = e.cle; });
+      setActive(courant);
+    };
+    surDefilement();
+    window.addEventListener("scroll", surDefilement, { passive: true });
+    return () => window.removeEventListener("scroll", surDefilement);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [eq.id, sections.length]);
+  useEffect(() => {
+    const barre = refBarre.current; if (!barre || !active) return;
+    const chip = barre.querySelector(`[data-etape="${active}"]`); if (!chip) return;
+    const gauche = chip.offsetLeft - barre.offsetLeft;
+    if (gauche < barre.scrollLeft || gauche + chip.offsetWidth > barre.scrollLeft + barre.clientWidth) barre.scrollTo({ left: Math.max(0, gauche - 16), behavior: "smooth" });
+  }, [active]);
+  if (etapes.length < 3) return null;
+  return (
+    <div ref={refBarre} className="barre-etapes no-print" style={{ position: "sticky", top: 0, zIndex: 20, display: "flex", gap: 6, overflowX: "auto", padding: "8px 2px", margin: "0 0 10px", background: "rgba(241,243,246,0.96)", backdropFilter: "blur(6px)", WebkitOverflowScrolling: "touch" }}>
+      {etapes.map((e) => {
+        const fini = e.total > 0 && e.n === e.total;
+        const estActive = active === e.cle;
+        return (
+          <button key={e.cle} data-etape={e.cle} type="button"
+            onClick={() => { const el = document.getElementById(`sec-${eq.id}-${e.cle}`); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); }}
+            style={{ flex: "0 0 auto", whiteSpace: "nowrap", fontSize: 11.5, fontWeight: 700, padding: "6px 11px", borderRadius: 999, cursor: "pointer", fontFamily: "inherit",
+              border: `1px solid ${estActive ? "#1A1F26" : fini ? "#BFE3D2" : "#D8DEE5"}`, background: estActive ? "#1A1F26" : fini ? "#EAF7F1" : "#fff", color: estActive ? "#fff" : fini ? "#0F6B3F" : "#5B6B7D" }}>
+            {e.titre}{e.total > 0 ? (fini ? " ✓" : ` ${e.n}/${e.total}`) : ""}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+// ----- Saisie des contrôles chargés -----
+// Regroupe les champs « par phase » (L1/L2/L3 ou U12/U23/U31) d'un contrôle pour les afficher en grille :
+// une ligne par grandeur, une colonne par phase, une seule unité par ligne.
+const SUFFIXE_PHASE_SAISIE = { "1": 0, "2": 1, "3": 2, "12": 0, "23": 1, "31": 2 };
+const RE_LIBELLE_PHASE = /\s*[—:-]?\s*\b(L[123]|U ?(?:12|23|31)|Ph(?:ase)? ?[123])\s*$/i;
+function groupesParPhase(champs) {
+  const groupes = new Map();
+  champs.forEach((f) => {
+    if (f.hidden || f.longText || f.key === "realise") return;
+    const m = /^(.+?)(12|23|31|1|2|3)$/.exec(f.key);
+    if (!m || !RE_LIBELLE_PHASE.test(f.label || "")) return;
+    const compose = m[2].length === 2;
+    const cle = m[1] + (compose ? "#c" : "");
+    if (!groupes.has(cle)) groupes.set(cle, { cle, compose, cellules: [null, null, null] });
+    const g = groupes.get(cle);
+    const idx = SUFFIXE_PHASE_SAISIE[m[2]];
+    if (!g.cellules[idx]) g.cellules[idx] = f;
+  });
+  return [...groupes.values()].filter((g) => g.cellules.filter(Boolean).length >= 2).map((g) => {
+    const ref = g.cellules.find(Boolean);
+    return { ...g, libelle: (ref.label || "").replace(RE_LIBELLE_PHASE, "").replace(/\bfondamental\b/i, "fond.").trim(), unite: g.cellules.find((f) => f && f.unit) || null };
+  });
+}
+// « Tension (moyenne calculée) » → « Tension moy. », « Déséquilibre (calculé) » → « Déséquilibre ».
+function libelleCourtCalcul(label) {
+  return String(label || "").replace(/\s*\(moyenne calcul[ée]+\)/i, " moy.").replace(/\s*\(max calcul[ée]+\)/i, " max").replace(/\s*\(calcul[ée]+\)/i, "").replace(/\s*\(.*\)\s*$/, "").trim();
+}
+const ETAT_COULEURS_SAISIE = {
+  "Conforme": { bord: "#0F8A5F", fond: "#EAF7F1", texte: "#0F6B3F" },
+  "Dégradé": { bord: "#B5730A", fond: "#FDF3E3", texte: "#8A5A0A" },
+  "Défaillant": { bord: "#C0392B", fond: "#FDF1F0", texte: "#9A2E22" },
+  autre: { bord: "#9AA5B1", fond: "#EEF1F4", texte: "#5A6573" },
+};
+// Un contrôle est « renseigné » dès qu'une mesure (hors listes et calculs) est saisie.
+function controleRenseigne(item, value) {
+  const f = (value && value.fields) || {};
+  return (item.fields || []).some((d) => !d.hidden && !d.compute && !d.options && d.key !== "realise" && f[d.key] !== undefined && f[d.key] !== null && String(f[d.key]).trim() !== "");
+}
+function controleAvecMesures(item) { return (item.fields || []).some((d) => !d.hidden && !d.compute && !d.options && d.key !== "realise"); }
 function ControlRow({ item, value, onChange, idPrefix, toleranceOverride }) {
   if (!value) return null; // donnée incompatible (ancien format) : on ignore plutôt que de planter
   const fields = value.fields || {};
@@ -6406,20 +6504,59 @@ function ControlRow({ item, value, onChange, idPrefix, toleranceOverride }) {
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uneMesureHorsTolerance, value.etat]);
-  return (
-    <div style={{ padding: "10px 0", borderBottom: "1px solid #E2E6EB" }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-        <span style={{ fontSize: 12.5, color: "#3E4A5C", flex: "1 1 240px", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          {item.label}
-          {aDesChampsPlaque(item.fields) && (
-            <BoutonLirePlaque compact libelle="Plaque" typeEquipement={item.label}
-              contexte={contextePlaqueComposant(item.label)}
-              champs={champsPlaqueDepuisDefs(item.fields, fields)}
-              valeursActuelles={fields} onAppliquer={(patch) => onChange({ ...valueRef.current, fields: { ...(valueRef.current.fields || {}), ...patch } })} />
-          )}
-        </span>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-          {(item.fields || []).map((f) =>
+  // ----- Mise en forme des contrôles chargés : grille par phase, calculs en pastilles, repli -----
+  const visibles = (item.fields || []).filter((f) => !f.hidden);
+  const groupes = groupesParPhase(visibles);
+  const dansGroupe = new Set(groupes.flatMap((g) => g.cellules.filter(Boolean).map((f) => f.key)));
+  const pastillesDefs = visibles.filter((f) => f.compute && !f.longText && !dansGroupe.has(f.key));
+  const autres = visibles.filter((f) => !dansGroupe.has(f.key) && !(f.compute && !f.longText));
+  const dense = groupes.length > 0 || visibles.length >= 3;
+  const entetesPhases = groupes.length && groupes.every((g) => g.compose) ? ["U12", "U23", "U31"] : ["L1", "L2", "L3"];
+  const uniteAffichee = (f) => (f.unitFrom ? (fields[f.unitFrom + "Unite"] || f.unit) : (fields[f.key + "Unite"] || f.unit)) || "";
+  const valeurCalculee = (f) => { const brut = f.compute(fields); const v = f.unitFrom && f.unit ? depuisUniteBase(brut, f.unit, fields[f.unitFrom + "Unite"] || f.unit) : brut; return v === null || v === undefined ? "" : v; };
+  const pastilles = pastillesDefs.map((f) => {
+    const v = valeurCalculee(f);
+    const vide = v === "" || (typeof v === "number" && Number.isNaN(v));
+    const seuil = f.key === "tol_max" || f.key === "tol_min";
+    const u = uniteAffichee(f);
+    const txt = vide ? "—" : `${String(v).replace(".", ",")}${u ? " " + u : ""}`;
+    return { cle: f.key, titre: f.label, seuil, vide, etat: seuil || vide ? null : fieldValidState(f.key), texte: seuil ? `seuil ${txt}` : `${libelleCourtCalcul(f.label)} ${txt}` };
+  }).filter((p) => !(p.seuil && p.vide));
+  const champsMesures = [...groupes.flatMap((g) => g.cellules.filter((f) => f && !f.compute)), ...autres.filter((f) => !f.compute && !f.options && f.key !== "realise")];
+  const rempli = champsMesures.some((f) => { const v = fields[f.key]; return v !== undefined && v !== null && String(v).trim() !== ""; });
+  const repliable = dense && value.etat !== undefined;
+  const [replie, setReplie] = useState(() => repliable && rempli && !!value.etat);
+  const resume = [
+    ...groupes.map((g) => { const vals = g.cellules.map((f) => (f ? (f.compute ? valeurCalculee(f) : fields[f.key]) : "")); if (vals.every((x) => x === "" || x === undefined || x === null)) return null; return `${g.libelle ? g.libelle + " " : ""}${vals.map((x) => (x === "" || x === undefined || x === null ? "—" : String(x).replace(".", ","))).join(" · ")}${g.unite ? " " + (fields[g.unite.key + "Unite"] || g.unite.unit || "") : ""}`; }),
+    ...autres.filter((f) => !f.longText && fields[f.key] !== undefined && String(fields[f.key]).trim() !== "" && f.key !== "realise").slice(0, 3).map((f) => `${f.label} ${fields[f.key]}${f.unit ? " " + (fields[f.key + "Unite"] || f.unit) : ""}`),
+    ...pastilles.filter((p) => !p.seuil && !p.vide).slice(0, 2).map((p) => p.texte),
+  ].filter(Boolean).join("  ·  ");
+  const celluleGrille = (f) => {
+    if (f.compute) {
+      const v = valeurCalculee(f);
+      return <div style={{ height: 36, borderRadius: 8, background: "#EEF4FB", color: "#0A5DA8", fontWeight: 700, fontSize: 13.5, display: "flex", alignItems: "center", justifyContent: "center" }}>{v === "" ? "—" : String(v).replace(".", ",")}</div>;
+    }
+    if (f.options) {
+      return <Combo value={fields[f.key]} onChange={(v) => setField(f.key, v)} options={typeof f.options === "function" ? f.options(fields) || [] : f.options} listId={`${idPrefix}-${item.key}-${f.key}`} style={{ width: "100%", height: 36, padding: "0 6px", fontSize: 13, fontWeight: 600, textAlign: "center", background: "#fff", border: "1.5px solid #CBD3DC" }} />;
+    }
+    if (f.unit || MESURE_KEYS.includes(f.key) || fieldValidState(f.key)) {
+      return <NumberWithUnit pleineLargeur value={fields[f.key]} unit={f.unit ? (fields[f.key + "Unite"] || f.unit) : ""} baseUnit={f.unit || undefined} onValueChange={(v) => setField(f.key, v)} onUnitChange={() => {}} validState={fieldValidState(f.key)} />;
+    }
+    return <input type="text" inputMode={/^(fp|cosphi)/.test(f.key) ? "decimal" : undefined} value={fields[f.key] ?? ""} onChange={(e) => setField(f.key, e.target.value)} style={{ ...inputStyle, height: 36, padding: "0 6px", fontSize: 14, fontWeight: 600, textAlign: "center", background: "#fff", border: "1.5px solid #CBD3DC" }} />;
+  };
+  const uniteGrille = (g) => {
+    const f = g.unite;
+    const fam = unitFamilyFor(f.unit);
+    if (fam && !f.compute) {
+      return (
+        <select value={fields[f.key + "Unite"] || f.unit} onChange={(e) => setUniteGroupe(f, e.target.value)} style={{ ...inputStyle, height: 36, padding: "0 4px", fontSize: 12, background: "#F4F6F8", textAlign: "center" }}>
+          {fam.map((u) => <option key={u} value={u}>{u}</option>)}
+        </select>
+      );
+    }
+    return <div style={{ fontSize: 12, color: "#5B6B7D", textAlign: "center" }}>{uniteAffichee(f)}</div>;
+  };
+  const renderChampClassique = (f) => (
             f.hidden ? null :
             f.compute && f.longText ? (
               (() => {
@@ -6578,23 +6715,106 @@ function ControlRow({ item, value, onChange, idPrefix, toleranceOverride }) {
                 )}
               </label>
             )
-          )}
-          {value.action !== undefined && (
-            <Combo
-              value={value.action}
-              onChange={(v) => onChange({ ...value, action: v })}
-              options={item.actionOptions || ["SANS OBJET"]}
-              listId={`${idPrefix}-${item.key}-action`}
-              placeholder="Action"
-              multiline
-              className="champ-action"
-              style={{ width: actionInputWidth(value.action), padding: "5px 7px", fontSize: 12 }}
-            />
-          )}
-          {value.etat !== undefined && (
-            <EtatRapide value={value.etat} onChange={(v) => { const { etatAuto, ...reste } = value; onChange({ ...reste, etat: v }); }} accord={(s) => agree(s, itemAgreement(item.label).gender, itemAgreement(item.label).plural)} />
-          )}
+  );
+  const setEtatItem = (v) => { const { etatAuto, ...reste } = value; onChange({ ...reste, etat: v }); if (v === "Conforme" && repliable && rempli) setReplie(true); };
+  const accordEtat = (s) => agree(s, itemAgreement(item.label).gender, itemAgreement(item.label).plural);
+  const piedAction = (
+    <>
+      {value.action !== undefined && (
+        <Combo
+          value={value.action}
+          onChange={(v) => onChange({ ...value, action: v })}
+          options={item.actionOptions || ["SANS OBJET"]}
+          listId={`${idPrefix}-${item.key}-action`}
+          placeholder="Action"
+          multiline
+          className="champ-action"
+          style={{ width: actionInputWidth(value.action), padding: "5px 7px", fontSize: 12 }}
+        />
+      )}
+      {value.etat !== undefined && <EtatRapide value={value.etat} onChange={setEtatItem} accord={accordEtat} />}
+    </>
+  );
+  const boutonPlaque = aDesChampsPlaque(item.fields) && (
+    <BoutonLirePlaque compact libelle="Plaque" typeEquipement={item.label}
+      contexte={contextePlaqueComposant(item.label)}
+      champs={champsPlaqueDepuisDefs(item.fields, fields)}
+      valeursActuelles={fields} onAppliquer={(patch) => onChange({ ...valueRef.current, fields: { ...(valueRef.current.fields || {}), ...patch } })} />
+  );
+  // Contrôle simple (pas de champ, ou un seul) : une ligne, comme avant.
+  if (!dense) {
+    return (
+      <div style={{ padding: "10px 0", borderBottom: "1px solid #E2E6EB" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 12.5, color: "#3E4A5C", flex: "1 1 240px", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            {item.label}
+            {boutonPlaque}
+          </span>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+            {(item.fields || []).map(renderChampClassique)}
+            {piedAction}
+          </div>
         </div>
+      </div>
+    );
+  }
+  const couleurEtat = ETAT_COULEURS_SAISIE[value.etat] || ETAT_COULEURS_SAISIE.autre;
+  // Contrôle rempli et validé : résumé sur une ligne (valeurs + état), un appui pour rouvrir.
+  if (replie) {
+    return (
+      <div className="controle-replie" role="button" tabIndex={0} onClick={() => setReplie(false)} onKeyDown={(e) => { if (e.key === "Enter") setReplie(false); }}
+        style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, background: "#fff", border: "1px solid #E2E6EB", borderLeft: `4px solid ${couleurEtat.bord}`, borderRadius: 10, padding: "9px 12px", margin: "8px 0", cursor: "pointer" }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "#1A1F26" }}>{item.label}</div>
+          <div style={{ fontSize: 11.5, color: "#5B6B7D", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{resume || "—"}{value.action ? ` — ${value.action}` : ""}</div>
+        </div>
+        <span style={{ flex: "0 0 auto", fontSize: 11, fontWeight: 800, padding: "3px 9px", borderRadius: 999, background: couleurEtat.fond, color: couleurEtat.texte, whiteSpace: "nowrap" }}>{(ETATS_RAPIDES.find(([e]) => e === value.etat) || [null, "•"])[1]} {accordEtat(value.etat || "—")}</span>
+      </div>
+    );
+  }
+  const avecLibelles = groupes.length > 1 || groupes.some((g) => g.libelle);
+  const avecUnites = groupes.some((g) => g.unite);
+  const colonnes = `${avecLibelles ? "minmax(0, 1.15fr) " : ""}repeat(3, minmax(0, 1fr))${avecUnites ? " 62px" : ""}`;
+  return (
+    <div className="controle-dense" style={{ background: "#fff", border: "1px solid #E2E6EB", borderRadius: 12, padding: "11px 12px 10px", margin: "8px 0" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
+        <span style={{ fontSize: 13.5, fontWeight: 700, color: "#1A1F26", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>{item.label}{boutonPlaque}</span>
+        {repliable && rempli && (
+          <button type="button" onClick={() => setReplie(true)} title="Replier ce contrôle" style={{ border: "none", background: "none", color: "#8B96A3", cursor: "pointer", fontSize: 12, padding: 4 }}>Replier ▴</button>
+        )}
+      </div>
+      {groupes.length > 0 && (
+        <div className="grille-phases" style={{ display: "grid", gridTemplateColumns: colonnes, gap: 6, alignItems: "center", maxWidth: avecLibelles ? 720 : 560 }}>
+          {avecLibelles && <div />}
+          {entetesPhases.map((h) => <div key={h} style={{ fontSize: 10.5, fontWeight: 800, color: "#8B96A3", textAlign: "center", letterSpacing: 0.5 }}>{h}</div>)}
+          {avecUnites && <div style={{ fontSize: 10.5, fontWeight: 800, color: "#8B96A3", textAlign: "center", letterSpacing: 0.5 }}>Unité</div>}
+          {groupes.map((g) => (
+            <React.Fragment key={g.cle}>
+              {avecLibelles && <div lang="fr" style={{ fontSize: 11.5, fontWeight: 700, color: "#3E4A5C", lineHeight: 1.25, hyphens: "auto", WebkitHyphens: "auto", overflowWrap: "break-word" }}>{(g.libelle || (g.compose ? "Tension" : "Valeur")) + (g.compose && entetesPhases[0] !== "U12" ? " (U12 · U23 · U31)" : "")}</div>}
+              {g.cellules.map((f, i) => <div key={i} style={{ minWidth: 0 }}>{f ? celluleGrille(f) : null}</div>)}
+              {avecUnites && <div style={{ minWidth: 0 }}>{g.unite ? uniteGrille(g) : null}</div>}
+            </React.Fragment>
+          ))}
+        </div>
+      )}
+      {autres.length > 0 && (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginTop: groupes.length ? 10 : 0 }}>
+          {autres.map(renderChampClassique)}
+        </div>
+      )}
+      {pastilles.length > 0 && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 9, paddingTop: 9, borderTop: "1px dashed #E2E6EB" }}>
+          {pastilles.map((p) => (
+            <span key={p.cle} title={p.titre} style={p.seuil
+              ? { fontSize: 11.5, padding: "3px 9px", borderRadius: 999, background: "#fff", border: "1px dashed #9AA5B1", color: "#5B6B7D", fontWeight: 600 }
+              : { fontSize: 11.5, padding: "4px 9px", borderRadius: 999, fontWeight: 700, background: p.etat === "ok" ? "#EAF7F1" : p.etat === "warning" ? "#FDF3E3" : p.etat === "bad" ? "#FDF1F0" : "#EEF4FB", color: p.etat === "ok" ? "#0F6B3F" : p.etat === "warning" ? "#8A5A0A" : p.etat === "bad" ? "#9A2E22" : p.vide ? "#9AA5B1" : "#0A5DA8" }}>
+              {p.texte}
+            </span>
+          ))}
+        </div>
+      )}
+      <div className="pied-controle" style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginTop: 10 }}>
+        {piedAction}
       </div>
     </div>
   );
@@ -11599,7 +11819,8 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
           )}
 
           {/* Conversion d'énergie : la saisie des pièces d'usure vient juste après l'identification (le rapport Word garde son ordre). */}
-          {(TYPES_AVEC_PIECES_USURE.includes(eq.type) ? [...schema.sections.filter((x) => x.key === "pieces_usure_ups"), ...schema.sections.filter((x) => x.key !== "pieces_usure_ups")] : schema.sections).map((sec) => {
+          <BarreEtapesSections eq={eq} sections={ordreSectionsSaisie(eq, schema)} />
+          {ordreSectionsSaisie(eq, schema).map((sec) => <div key={sec.key} id={`sec-${eq.id}-${sec.key}`} className="bloc-section-saisie">{(() => {
             // Fiche batterie : saisie une seule fois, dans Pièces d'usure → Batteries (premier modèle).
             // Les données restent dans controles.batterie_id (reprises par le relevé des tensions, les branches, l'autonomie et le rapport Word).
             if (sec.key === "batterie_id" && TYPES_AVEC_PIECES_USURE.includes(eq.type) && schema.sections.some((x) => x.key === "pieces_usure_ups")) return null;
@@ -12196,7 +12417,7 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
                 }
               />
             );
-          })}
+          })()}</div>)}
 
           <RemplacementsPiecesPanel eq={eq} update={update} enAttente={remplacementsEnAttente} rapportDate={rapportDate} />
 
@@ -20830,8 +21051,13 @@ function AppPrincipale({ currentUser, onLogout }) {
         .contraste [style*="border: 1px solid rgb(216, 222, 229)"], .contraste [style*="border: 1px solid rgb(226, 230, 235)"] { border-color: #8B96A3 !important; }
         .site-row-meta, .iv-row-meta { flex: 0 0 130px; }
         .etat-icone { display: none; }
+        .bloc-section-saisie { scroll-margin-top: 56px; }
+        .barre-etapes::-webkit-scrollbar { display: none; }
         @media (max-width: 720px) {
           .champ-action { flex: 1 1 110px; width: auto !important; min-width: 110px; }
+          .controle-dense, .controle-replie { margin-left: -8px !important; margin-right: -8px !important; padding: 10px !important; }
+          .pied-controle { flex-wrap: nowrap !important; }
+          .pied-controle .champ-action { min-width: 80px; }
           .ligne-action { flex: 1 1 100%; flex-wrap: nowrap !important; }
           .etat-rapide { gap: 6px !important; align-items: center !important; }
           .etat-rapide-groupe { border: none !important; background: transparent !important; overflow: visible !important; gap: 6px; }
