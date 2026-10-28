@@ -1043,6 +1043,13 @@ const LISTE_REGIME_SORTIE_UPS = ["3+N", "3", "1"];
 const LISTE_TECHNO_BATTERIE = ["PE", "PO", "GEL", "Cd-Ni"];
 // Durée de vie prévue d'une batterie (ans) : sert à calculer l'échéance de remplacement dans la prévision des pièces d'usure (saisie libre possible).
 const LISTE_DUREE_VIE_BATTERIE = ["4", "5", "6", "8", "10", "12", "15", "20"];
+// Durée de vie préconisée d'une batterie selon sa capacité (Ah) : appliquée tant qu'aucune durée n'est saisie.
+const PALIERS_DUREE_VIE_BATTERIE = [[12, 4], [40, 5], [75, 6], [Infinity, 8]];
+function dureeVieBatterieParCapacite(capacite) {
+  const ah = numOf(capacite);
+  if (ah === null || ah <= 0) return null;
+  return PALIERS_DUREE_VIE_BATTERIE.find(([max]) => ah <= max)[1];
+}
 const LISTE_NB_BRANCHES = ["1", "2", "3", "4", "5", "6"];
 const LISTE_REGIME_C_BATTERIE = ["C5", "C8", "C10", "C15", "C20"];
 const LISTE_MACHINE_ETAT = ["Propre", "À nettoyer", "Nettoyé"];
@@ -1691,7 +1698,7 @@ function calcEcheancesUsureUPS(eq) {
       const repliBatterie = cat.key === "batteries" && i === 0;
       // Modèle 1 des batteries = fiche batterie : ses valeurs priment (saisie unique), l'ancienne saisie du modèle sert de repli.
       const annee = repliBatterie ? (numOf(batterieInfo.anneeMiseEnService) ?? numOf(m.anneeMiseEnService)) : numOf(m.anneeMiseEnService);
-      const duree = repliBatterie ? (numOf(batterieInfo.dureeVie) ?? numOf(m.dureeVie)) : numOf(m.dureeVie);
+      const duree = repliBatterie ? (numOf(batterieInfo.dureeVie) ?? numOf(m.dureeVie) ?? dureeVieBatterieParCapacite(batterieInfo.capacite)) : numOf(m.dureeVie);
       if (annee === null || duree === null) return;
       const label = cat.key === "batteries" && i === 0 ? (batterieInfo.typeBloc || batterieInfo.marque || `Modèle ${i + 1}`) : (m.modele || m.description || `Modèle ${i + 1}`);
       const nbLots = (data[cat.key] || []).length;
@@ -1707,7 +1714,15 @@ const LISTE_NOM_BRANCHE = Array.from({ length: 6 }, (_, i) => `Branche ${i + 1}`
 // IEEE 1188 (VRLA) / IEEE 450 (plomb ouvert) : la résistance/impédance interne de chaque élément
 // est un indicateur de dégradation souvent plus sensible et plus précoce que la seule tension —
 // recommandée en complément, pas en remplacement, du relevé de tension.
-const ELEMENT_FIELD_DEFS = [{ key: "tension" }, { key: "resistance", label: "Résistance interne", unit: "mΩ" }];
+const ELEMENT_FIELD_DEFS = [{ key: "tension" }, { key: "resistance", label: "Résistance interne", unit: "mΩ" }, { key: "nbElementsDefectueux" }];
+// Préconisation quand des blocs de batterie sont défectueux.
+const PRECO_REMPLACEMENT_BATTERIE = ["Automatique (selon la durée de vie)", "Remplacer uniquement les blocs défectueux", "Remplacer l'ensemble des batteries"];
+// « Branche 2 — Élément 5 » → « bloc n° 5 de la branche 2 » (un « élément » du relevé est un bloc batterie).
+function libelleBlocBatterie(label) {
+  const m = String(label || "").match(/Branche\s*(\d+)\s*—\s*(Élément|Bloc|Groupe)\s*(\d+)(?:\s*\((?:élts|blocs)\s*([\d-]+)\))?/i);
+  if (!m) return String(label || "bloc");
+  return /groupe/i.test(m[2]) ? `groupe n° ${m[3]}${m[4] ? ` (blocs ${m[4]})` : ""} de la branche ${m[1]}` : `bloc n° ${m[3]} de la branche ${m[1]}`;
+}
 // Un élément est signalé "défectueux" s'il sort de la bande [moyenne - toléranceBasse% ; moyenne + toléranceHaute%].
 function elementBatterieStatus(tension, moyenne, toleranceBasse, toleranceHaute) {
   const v = numOf(tension), m = numOf(moyenne);
@@ -8242,6 +8257,11 @@ function ElementsBatteriePanel({ eq, update, idPrefix }) {
         <MiniSelect label="Mode" options={["Floating", "Décharge", "Repos"]} value={cfg.mode} onChange={(v) => setCfg({ mode: v })} />
         <MiniSelect label="Saisie" options={["Par élément", "Par groupe"]} value={cfg.saisieParGroupe ? "Par groupe" : "Par élément"} onChange={(v) => setCfg({ saisieParGroupe: v === "Par groupe" })} />
         {cfg.saisieParGroupe && <MiniInput label="Éléments / groupe" value={cfg.tailleGroupe} onChange={(v) => setCfg({ tailleGroupe: v })} width={70} />}
+        <MiniField label="Si bloc défectueux">
+          <select value={cfg.preconisationRemplacement || PRECO_REMPLACEMENT_BATTERIE[0]} onChange={(ev) => setCfg({ preconisationRemplacement: ev.target.value })} style={{ ...inputStyle, width: 250, padding: "5px 7px", fontSize: 12 }}>
+            {PRECO_REMPLACEMENT_BATTERIE.map((o) => <option key={o} value={o}>{o}</option>)}
+          </select>
+        </MiniField>
         <MiniInput label="Tolérance basse" unit="%" value={cfg.toleranceBasse} onChange={(v) => setCfg({ toleranceBasse: v })} width={62} />
         <MiniInput label="Tolérance haute" unit="%" value={cfg.toleranceHaute} onChange={(v) => setCfg({ toleranceHaute: v })} width={62} />
         <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: "#5B6B7D", cursor: "pointer" }} title="À cocher uniquement si vous disposez d'un appareil de mesure de résistance/impédance interne">
@@ -8283,6 +8303,13 @@ function ElementsBatteriePanel({ eq, update, idPrefix }) {
                   border: `1.5px solid ${elementBatterieStatus(e.fields.tension, moyenne, cfg.toleranceBasse, cfg.toleranceHaute) === "bad" ? "#C0392B" : elementBatterieStatus(e.fields.tension, moyenne, cfg.toleranceBasse, cfg.toleranceHaute) === "ok" ? "#0F8A5F" : "#D8DEE5"}`,
                 }}
               />
+              {elementBatterieStatus(e.fields.tension, moyenne, cfg.toleranceBasse, cfg.toleranceHaute) === "bad" && (
+                <input
+                  type="number" step="1" min="1" value={e.fields.nbElementsDefectueux ?? ""} onChange={(ev) => setField(e.id, "nbElementsDefectueux", ev.target.value)}
+                  placeholder="élts déf." title="Nombre d'éléments défectueux dans ce bloc (facultatif, repris dans la remarque)"
+                  style={{ ...inputStyle, width: "100%", padding: "2px 2px", fontSize: 10, textAlign: "center", marginTop: 2, color: "#C0392B", border: "1px solid #E8B4AE", background: "#FDF6F5" }}
+                />
+              )}
               {cfg.avecResistance && (
                 <input
                   type="number" step="any" value={e.fields.resistance ?? ""} onChange={(ev) => setField(e.id, "resistance", ev.target.value)}
@@ -9731,7 +9758,7 @@ function piecesUsureEquipement(eq) {
           if (!b.marque && !b.typeBloc && !b.anneeMiseEnService) return;
           ajouter({ cle: "ups:batteries:fiche", categorie: cat.label, marque: b.marque || "", reference: b.typeBloc || "",
             description: ["Batterie", b.technologie, b.tensionNominale && `${b.tensionNominale} V`, b.capacite && `${b.capacite} Ah`, nb && nbl && `${nb} branche(s) × ${nbl} bloc(s)`].filter(Boolean).join(" · "),
-            quantite: nb !== null && nbl !== null ? nb * nbl : 1, anneeMiseEnService: b.anneeMiseEnService ?? m.anneeMiseEnService, dureeVie: b.dureeVie ?? m.dureeVie });
+            quantite: nb !== null && nbl !== null ? nb * nbl : 1, anneeMiseEnService: b.anneeMiseEnService ?? m.anneeMiseEnService, dureeVie: b.dureeVie || m.dureeVie || dureeVieBatterieParCapacite(b.capacite) });
           return;
         }
         if (!m.description && !m.marque && !m.modele && !m.anneeMiseEnService) return;
@@ -10298,6 +10325,17 @@ function PiecesUsureUPSPanel({ eq, update, itemFicheBatterie }) {
               <div style={{ marginBottom: 6 }}>
                 <div style={{ fontSize: 11.5, color: "#8B96A3", marginBottom: 4 }}>Modèle 1 — fiche batterie de l'équipement (reprise par le relevé des tensions, les branches, l'autonomie et le rapport). Un modèle différent s'ajoute avec « Ajouter un modèle ».</div>
                 <ControlRow item={itemFicheBatterie} value={valeurFiche} onChange={setFiche} idPrefix={`${eq.id}-fiche-batterie`} />
+                {(() => {
+                  const preco = dureeVieBatterieParCapacite(batterieInfo.capacite);
+                  const saisie = numOf(batterieInfo.dureeVie);
+                  return (
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 11.5, color: "#5B6B7D", background: "#F4F6F8", borderRadius: 8, padding: "6px 10px", marginTop: 4 }}>
+                      <span>Durée de vie préconisée selon la capacité : <b>{preco ? `${preco} ans` : "—"}</b>{batterieInfo.capacite ? ` (${String(batterieInfo.capacite).replace(".", ",")} Ah)` : " (renseigner la capacité)"} — ≤ 12 Ah : 4 ans · ≤ 40 Ah : 5 ans · ≤ 75 Ah : 6 ans · au-delà : 8 ans.</span>
+                      {preco && saisie === null && <span style={{ color: "#0A5DA8" }}>Appliquée tant que la durée de vie n'est pas saisie.</span>}
+                      {preco && saisie !== null && saisie !== preco && <button type="button" onClick={() => setFiche({ ...valeurFiche, fields: { ...(valeurFiche.fields || {}), dureeVie: String(preco) } })} style={{ ...btnGhost(BRAND.blue), padding: "3px 9px", fontSize: 11.5 }}>Appliquer {preco} ans</button>}
+                    </div>
+                  );
+                })()}
               </div>
             )}
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -11462,8 +11500,22 @@ function analyserAnomaliesEquipement(eq, contexte) {
       const moyenne = moyenneReferenceBatterie(valeurs, cfg.toleranceBasse, cfg.toleranceHaute);
       const horsTol = elementsBatt.filter((e) => elementBatterieStatus(e.fields.tension, moyenne, cfg.toleranceBasse, cfg.toleranceHaute) === "bad");
       if (horsTol.length) {
-        const liste = horsTol.slice(0, 6).map((e) => `${e.label} ${String(e.fields.tension).replace(".", ",")} V`).join(", ") + (horsTol.length > 6 ? "…" : "");
-        ajouter(`Batterie : ${horsTol.length} élément${horsTol.length > 1 ? "s" : ""} hors tolérance — ${liste} (moyenne ${String(moyenne).replace(".", ",")} V).`, 1, "batterie", `${horsTol.length} élément${horsTol.length > 1 ? "s" : ""}`);
+        // Un constat par bloc défectueux (au plus 6, puis regroupés) : « 2 éléments défectueux dans le bloc n° 3 de la branche 1 ».
+        const fr = (v) => String(v).replace(".", ",");
+        const phraseBloc = (e) => {
+          const nb = Math.round(numOf(e.fields.nbElementsDefectueux) || 0);
+          const ou = libelleBlocBatterie(e.label);
+          return nb > 0 ? `${nb} élément${nb > 1 ? "s" : ""} défectueux dans le ${ou} (${fr(e.fields.tension)} V)` : `${ou} défectueux (${fr(e.fields.tension)} V)`;
+        };
+        const details = horsTol.slice(0, 6).map(phraseBloc);
+        const texte = horsTol.length === 1 ? `Batterie : ${details[0]}` : `Batterie : ${horsTol.length} blocs défectueux — ${details.join(" ; ")}${horsTol.length > 6 ? " ; …" : ""}`;
+        // Remplacement préconisé : blocs défectueux seuls, ou ensemble des batteries (automatique : ensemble si la durée de vie est atteinte).
+        const choix = cfg.preconisationRemplacement || PRECO_REMPLACEMENT_BATTERIE[0];
+        const finDeVie = calcEcheancesUsureUPS(eq).some((l) => l.famille === "Batteries" && l.annee !== null && l.annee <= new Date().getFullYear());
+        const mode = choix === PRECO_REMPLACEMENT_BATTERIE[2] ? "ensemble" : choix === PRECO_REMPLACEMENT_BATTERIE[1] ? "blocs" : finDeVie ? "ensemble" : "blocs";
+        ajouter(`${texte} — moyenne des blocs ${fr(Math.round(moyenne * 100) / 100)} V.`, 1, "batterie", horsTol.length > 3 ? `${horsTol.length} blocs` : horsTol.map((e) => libelleBlocBatterie(e.label)).join(", "));
+        constats[constats.length - 1].modeBatterie = mode;
+        constats[constats.length - 1].nbBlocs = horsTol.length;
       }
     }
   }
@@ -11585,7 +11637,9 @@ const RECO_PAR_CATEGORIE = {
   mise_terre: (s) => `Reprendre la liaison de mise à la terre (${s}).`,
   protection: (s) => `Contrôler le réglage et le déclenchement des protections (${s}).`,
   disjoncteur: (s) => `Contrôler et corriger les réglages de déclenchement du disjoncteur (${s}).`,
-  batterie: (s) => `Remplacer les éléments de batterie hors tolérance (${s}).`,
+  batterie: (s, g) => g && g.mode === "ensemble"
+    ? `Remplacer l'ensemble des batteries${g.finDeVie ? " (durée de vie atteinte" + (g.nbBlocs ? `, ${g.nbBlocs} bloc${g.nbBlocs > 1 ? "s" : ""} défectueux)` : ")") : g.nbBlocs ? ` (${g.nbBlocs} bloc${g.nbBlocs > 1 ? "s" : ""} défectueux)` : ""}.`
+    : `Remplacer ${g && g.nbBlocs > 1 ? "les blocs défectueux" : "le bloc défectueux"} (${s})${g && g.finDeVie ? " ; prévoir ensuite le remplacement de l'ensemble des batteries (durée de vie atteinte)" : ""}.`,
   gradin: (s) => `Contrôler les condensateurs et contacteurs des gradins hors tolérance (${s}).`,
   module: (s) => `Remplacer ou réparer les modules de puissance concernés (${s}).`,
   redondance_modules: () => "Rétablir la redondance : remettre en service les modules en défaut ou ajouter un module.",
@@ -11612,10 +11666,20 @@ function preconisationsDepuisConstats(constats) {
     groupes[cle].rang = Math.max(groupes[cle].rang, c.rang);
     groupes[cle].sujets.push(c.sujet);
     if (c.seuilMin) groupes[cle].seuilMin = c.seuilMin;
+    if (c.modeBatterie) { groupes[cle].mode = c.modeBatterie; groupes[cle].nbBlocs = c.nbBlocs; }
   });
   // Calibre inadapté : le remplacement « par des fusibles de caractéristiques identiques » serait contradictoire — la préconisation de calibre le remplace.
   if (groupes.fusible_calibre) delete groupes.fusible;
   delete groupes.corrige; // défauts corrigés lors de la visite : aucune préconisation
+  // Batteries : blocs défectueux ET fin de vie → une seule préconisation de remplacement, jamais les deux.
+  if (groupes.batterie) {
+    const usureBat = !!(groupes.usure && groupes.usure.sujets.some((x) => /batteri/i.test(x)));
+    groupes.batterie.finDeVie = usureBat;
+    if (usureBat) {
+      groupes.usure.sujets = groupes.usure.sujets.filter((x) => !/batteri/i.test(x));
+      if (!groupes.usure.sujets.length) delete groupes.usure;
+    }
+  }
   // Un même sujet ne reçoit que la préconisation la plus forte (pas « surveiller » et « remettre en conformité » ensemble).
   if (groupes.etat_degrade) {
     const dejaTraites = new Set(Object.entries(groupes).filter(([k]) => k !== "etat_degrade").flatMap(([, g]) => g.sujets));
