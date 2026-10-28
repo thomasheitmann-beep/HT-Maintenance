@@ -3655,10 +3655,9 @@ function getSchema(eq) {
     if (eq.identification?.configuration === "Parallèle modulaire") {
       const idxConfig = out.identification.findIndex((f) => f.key === "configuration");
       const champsModulaires = [
-        { key: "nombreModules", label: "Nombre de modules installés", numeric: true },
+        { key: "nombreModules", label: "Modules en service (prennent la charge)", numeric: true },
         { key: "puissanceParModule", label: "Puissance par module (kVA)", numeric: true },
-        { key: "nombreModulesRedondants", label: "Dont modules redondants (N+x, installés)", numeric: true },
-        { key: "nombreModulesReserve", label: "Modules en réserve (spares non installés)", numeric: true },
+        { key: "nombreModulesReserve", label: "Modules de réserve (installés, ne prennent pas la charge)", numeric: true },
         { key: "moduleBypass", label: "By-pass statique", options: LISTE_BYPASS_MODULES },
         { key: "batteriesModules", label: "Batteries", options: LISTE_BATTERIES_MODULES },
       ];
@@ -3682,11 +3681,10 @@ function getSchema(eq) {
     if (/^Modulaire/.test(eq.identification?.configuration || "")) {
       const idx = out.identification.findIndex((f) => f.key === "configuration");
       const champsModulaires = [
-        { key: "nombreModules", label: "Nombre de modules installés", numeric: true },
+        { key: "nombreModules", label: "Modules en service (prennent la charge)", numeric: true },
         { key: "puissanceParModule", label: "Puissance par module (kW)", numeric: true },
         { key: "courantParModule", label: "Courant nominal par module (A)", numeric: true },
-        { key: "nombreModulesRedondants", label: "Dont modules redondants (N+x, installés)", numeric: true },
-        { key: "nombreModulesReserve", label: "Modules en réserve (spares non installés)", numeric: true },
+        { key: "nombreModulesReserve", label: "Modules de réserve (installés, ne prennent pas la charge)", numeric: true },
         { key: "batteriesModules", label: "Batteries", options: LISTE_BATTERIES_MODULES },
       ];
       return { ...out, identification: [...out.identification.slice(0, idx + 1), ...champsModulaires, ...out.identification.slice(idx + 1)] };
@@ -17289,13 +17287,13 @@ function docxTableauModules(eq) {
     const fond = i % 2 === 1 ? { type: DOCX.ShadingType.CLEAR, fill: DOCX_ZEBRE } : undefined;
     return new DOCX.TableRow({ cantSplit: true, children: [
       cel(0, [txt(`Module ${i + 1}`, { gauche: true, gras: true })], fond),
-      cel(1, [txt(m.redondant ? `Redondant (N+${info.red})` : "Puissance", { couleur: m.redondant ? DOCX_GREEN : DOCX_DARK })], fond),
+      cel(1, [txt(m.reserve ? "Réserve (hors charge)" : "En service", { couleur: m.reserve ? "6B7785" : DOCX_DARK })], fond),
       cel(2, [docxPastilleEtat(m.etat)], fond),
       cel(3, [txt(m.numeroSerie || "")], fond),
       cel(4, [txt(m.observation || "", { gauche: true })], fond),
     ] });
   });
-  const pied = [`${info.n} module${info.n > 1 ? "s" : ""} installé${info.n > 1 ? "s" : ""}${info.puissance ? ` de ${String(info.puissance).replace(".", ",")} ${eq.type === "Onduleur" ? "kVA" : "kW"}` : ""}`, info.red ? `redondance N+${info.red}` : "", info.reserve ? `${info.reserve} en réserve` : "", `batteries ${info.batteriesCommunes ? "communes à tous les modules" : "indépendantes par module"}`, eq.type === "Onduleur" && eq.identification?.typeUPS !== "Onduleur sécurité" ? `by-pass statique ${bypassParModule(eq) ? "propre à chaque module" : "commun à l'ensemble des modules"}` : ""].filter(Boolean).join(" · ");
+  const pied = [`${info.n} module${info.n > 1 ? "s" : ""} en service${info.puissance ? ` de ${String(info.puissance).replace(".", ",")} ${eq.type === "Onduleur" ? "kVA" : "kW"}` : ""}`, info.reserve ? `${info.reserve} de réserve (installé${info.reserve > 1 ? "s" : ""}, hors charge)` : "", `batteries ${info.batteriesCommunes ? "communes à tous les modules" : "indépendantes par module"}`, eq.type === "Onduleur" && eq.identification?.typeUPS !== "Onduleur sécurité" ? `by-pass statique ${bypassParModule(eq) ? "propre à chaque module" : "commun à l'ensemble des modules"}` : ""].filter(Boolean).join(" · ");
   const bilan = bilanRedondanceModules(eq);
   return [
     docxTable({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: L, rows: [new DOCX.TableRow({ tableHeader: true, cantSplit: true, children: ["Module", "Rôle", "État", "N° de série", "Observation"].map(entete) }), ...lignes] }),
@@ -17325,20 +17323,20 @@ function ModulesPuissancePanel({ eq, update }) {
   const cellStyle = { ...inputStyle, width: "100%", boxSizing: "border-box", padding: "6px 8px", fontSize: 12.5 };
   return (
     <Card style={{ marginBottom: 14 }}>
-      <SectionTitle>Modules de puissance ({info.n}{info.red ? ` dont ${info.red} redondant${info.red > 1 ? "s" : ""} N+${info.red}` : ""}{info.reserve ? ` · ${info.reserve} en réserve` : ""})</SectionTitle>
+      <SectionTitle>Modules de puissance ({info.n} en service{info.reserve ? ` · ${info.reserve} de réserve` : ""})</SectionTitle>
       {bilan && bilan.texte && (
         <div style={{ fontSize: 12.5, borderRadius: 8, padding: "8px 12px", marginBottom: 10, background: bilan.rang >= 2 ? "#FDF1F0" : bilan.rang === 1 ? "#FDF3E3" : "#EAF7F1", color: bilan.rang >= 2 ? "#9A2E22" : bilan.rang === 1 ? "#8A5A0A" : "#0F6B3F" }}>
           {bilan.texte}
         </div>
       )}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(190px, 1fr))", gap: 10 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(100%, 330px), 1fr))", gap: 10 }}>
         {info.modules.map((m, i) => {
           const c = ETAT_COULEURS_SAISIE[m.etat] || ETAT_COULEURS_SAISIE.autre;
           return (
-            <div key={i} style={{ border: `1.5px ${m.redondant && m.etat === "Conforme" ? "dashed" : "solid"} ${c.bord}`, borderRadius: 10, padding: 10, background: m.etat === "Défaillant" ? "#FDF1F0" : "#fff" }}>
+            <div key={i} style={{ boxSizing: "border-box", minWidth: 0, border: `1.5px ${m.reserve && m.etat === "Conforme" ? "dashed" : "solid"} ${m.reserve && m.etat === "Conforme" ? "#9AA5B1" : c.bord}`, borderRadius: 10, padding: 10, background: m.etat === "Défaillant" ? "#FDF1F0" : "#fff" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, gap: 6 }}>
                 <b style={{ fontSize: 13.5 }}>Module {i + 1}</b>
-                {m.redondant && <span style={{ fontSize: 10.5, fontWeight: 800, color: "#0F8A5F", background: "#EAF7F1", borderRadius: 999, padding: "2px 7px" }}>N+{info.red}</span>}
+                {m.reserve && <span style={{ fontSize: 10.5, fontWeight: 800, color: "#5A6573", background: "#EEF1F4", borderRadius: 999, padding: "2px 7px" }}>Réserve — hors charge</span>}
               </div>
               <div style={{ marginBottom: 8 }}><EtatRapide value={m.etat} onChange={(v) => setModule(i, { etat: v })} /></div>
               <input type="text" value={m.numeroSerie || ""} onChange={(e) => setModule(i, { numeroSerie: e.target.value })} placeholder="N° de série" style={{ ...cellStyle, marginBottom: 6 }} />
@@ -17355,21 +17353,20 @@ function ModulesPuissancePanel({ eq, update }) {
 function bilanRedondanceModules(eq) {
   const info = modulesEquipement(eq);
   if (!info) return null;
+  // Modules capables de reprendre la charge : tous les modules installés (en service et de réserve) qui ne sont ni en défaut ni absents.
   const horsService = info.modules.filter((m) => m.etat === "Défaillant" || m.etat === "Non présent");
-  const dispo = info.n - horsService.length;
+  const dispo = info.total - horsService.length;
   const charge = eq.type === "Onduleur" ? calcPuissanceApparente(eq, "mesures_utilisation", "utilisation") : null;
   const fr = (v) => String(Math.round(v * 10) / 10).replace(".", ",");
+  const pl = (n, mot) => `${n} ${mot}${n > 1 ? "s" : ""}`;
   if (charge !== null && info.puissance) {
     const besoin = Math.max(1, Math.ceil(charge / info.puissance - 1e-9));
     const marge = dispo - besoin;
-    if (marge < 0) return { rang: 2, texte: `Capacité insuffisante : ${dispo} module${dispo > 1 ? "s" : ""} disponible${dispo > 1 ? "s" : ""} (${fr(dispo * info.puissance)} kVA) pour une charge mesurée de ${fr(charge)} kVA.` };
-    if (info.red && marge < info.red) return { rang: 1, texte: `Redondance N+${info.red} non assurée : ${dispo} module${dispo > 1 ? "s" : ""} disponible${dispo > 1 ? "s" : ""}, ${besoin} nécessaire${besoin > 1 ? "s" : ""} pour une charge mesurée de ${fr(charge)} kVA (${marge > 0 ? `marge N+${marge}` : "aucun module de secours"}).` };
-    return { rang: 0, texte: `Redondance assurée : ${dispo} module${dispo > 1 ? "s" : ""} disponible${dispo > 1 ? "s" : ""} pour ${besoin} nécessaire${besoin > 1 ? "s" : ""} (charge mesurée ${fr(charge)} kVA)${marge ? ` — marge N+${marge}` : ""}.` };
+    if (marge < 0) return { rang: 2, texte: `Capacité insuffisante : ${pl(dispo, "module")} disponible${dispo > 1 ? "s" : ""} (${fr(dispo * info.puissance)} kVA) pour une charge mesurée de ${fr(charge)} kVA.` };
+    if (marge === 0) return { rang: 1, texte: `Redondance non assurée : la charge mesurée (${fr(charge)} kVA) nécessite ${besoin > 1 ? `les ${besoin} modules disponibles` : "le seul module disponible"} ; la perte d'un module entraînerait un passage sur by-pass ou batterie.` };
+    return { rang: 0, texte: `Redondance assurée : la charge mesurée (${fr(charge)} kVA) peut être reprise par ${pl(besoin, "module")} ; ${pl(dispo, "module")} disponible${dispo > 1 ? "s" : ""} (N+${marge}).` };
   }
-  if (horsService.length && info.red) {
-    const reste = Math.max(0, info.red - horsService.length);
-    return { rang: 1, texte: `Redondance réduite : ${horsService.length} module${horsService.length > 1 ? "s" : ""} hors service, redondance restante N+${reste} (charge mesurée non disponible pour conclure).` };
-  }
+  if (horsService.length) return { rang: 1, texte: `${pl(horsService.length, "module")} hors service sur ${info.total} : redondance à vérifier (charge mesurée en sortie non disponible).` };
   return null;
 }
 // ----- Équipements modulaires (onduleur « Parallèle modulaire », redresseur chargeur modulaire) -----
@@ -17378,24 +17375,25 @@ function estEquipementModulaire(eq) {
   const c = eq?.identification?.configuration || "";
   return (eq?.type === "Onduleur" && c === "Parallèle modulaire") || (eq?.type === "Redresseur chargeur" && /^Modulaire/.test(c));
 }
-// Modules installés (avec leur état saisi), redondance N+x et modules en réserve.
+// Modules installés : en service (prennent la charge) puis de réserve (installés, hors charge), avec leur état saisi.
+// La redondance n'est plus déclarée : elle se déduit de la charge mesurée (voir bilanRedondanceModules).
 function modulesEquipement(eq) {
   if (!estEquipementModulaire(eq)) return null;
   const n = Math.max(0, Math.round(numOf(eq.identification.nombreModules) || 0));
   if (!n) return null;
-  const red = Math.min(n, Math.max(0, Math.round(numOf(eq.identification.nombreModulesRedondants) || 0)));
+  const reserve = Math.max(0, Math.round(numOf(eq.identification.nombreModulesReserve) || 0));
   const saisis = Array.isArray(eq.controles?.modules_puissance) ? eq.controles.modules_puissance : [];
-  const modules = Array.from({ length: n }, (_, i) => ({ index: i, nom: `M${i + 1}`, redondant: i >= n - red, ...(saisis[i] || {}), etat: (saisis[i] && saisis[i].etat) || "Conforme" }));
+  const modules = Array.from({ length: n + reserve }, (_, i) => ({ index: i, nom: `M${i + 1}`, ...(saisis[i] || {}), reserve: i >= n, etat: (saisis[i] && saisis[i].etat) || "Conforme" }));
   return {
-    n, red, modules,
-    reserve: Math.max(0, Math.round(numOf(eq.identification.nombreModulesReserve) || 0)),
+    n, total: n + reserve, modules,
+    reserve,
     puissance: numOf(eq.identification.puissanceParModule),
     batteriesCommunes: eq.identification.batteriesModules !== "Indépendantes par module",
   };
 }
 // Mise en page des colonnes de modules dans un synoptique.
 function dispositionModulesSchema(info, { x0 = 78, avecChargeur = false } = {}) {
-  const nAff = Math.min(info.n, MAX_MODULES_SCHEMA);
+  const nAff = Math.min(info.total, MAX_MODULES_SCHEMA);
   const pas = info.batteriesCommunes ? 86 : 108;
   const xs = Array.from({ length: nAff }, (_, i) => x0 + pas / 2 + i * pas);
   const xFin = x0 + nAff * pas;
@@ -17422,9 +17420,11 @@ function dessinerModulesSchema(ctx, info, disp, { yHaut, avecOnduleur, avecCharg
     texte("By-pass statiques", 10, yCS + csH / 2, "#5B6B7D", "9.5px", "left");
     if (xR2 !== null) line(disp.xs[0] + 20, yR2Bus, xR2, yR2Bus); // bus du réseau secours vers chaque by-pass
   }
-  const couleurEtat = (m) => (m.etat === "Défaillant" ? "#C0392B" : m.etat === "Dégradé" ? "#B5730A" : m.etat === "Non présent" || m.etat === "Non réalisé" ? "#9AA5B1" : m.redondant ? "#0F8A5F" : null);
+  const couleurEtat = (m) => (m.etat === "Défaillant" ? "#C0392B" : m.etat === "Dégradé" ? "#B5730A" : m.etat === "Non présent" || m.etat === "Non réalisé" ? "#9AA5B1" : m.reserve ? "#8B96A3" : null);
   info.modules.slice(0, disp.nAff).forEach((m, i) => {
     const x = disp.xs[i];
+    // Module de réserve : installé et raccordé, mais ne prend pas la charge (liaisons et blocs en pointillés).
+    ctx.save(); if (m.reserve) ctx.setLineDash([4, 3]);
     line(x, yHaut, x, yRed);
     drawIconRedresseur(ctx, x - bw / 2, yRed, bw, bh);
     if (avecOnduleur) {
@@ -17447,16 +17447,17 @@ function dessinerModulesSchema(ctx, info, disp, { yHaut, avecOnduleur, avecCharg
       line(x, yDC, x + 34, yDC);
       drawBatterie(ctx, x + 44, yDC, 9);
     }
+    ctx.restore();
     const c = couleurEtat(m);
-    const tag = m.etat === "Défaillant" ? " · défaut" : m.etat === "Dégradé" ? " · dégradé" : m.etat === "Non présent" ? " · absent" : m.redondant ? " · N+1" : "";
+    const tag = m.etat === "Défaillant" ? " · défaut" : m.etat === "Dégradé" ? " · dégradé" : m.etat === "Non présent" ? " · absent" : m.reserve ? " · réserve" : "";
     texte(m.nom + tag, x, yNom, c || SCHEMA_SYMBOLE, "bold 10px");
     if (c) {
-      ctx.save(); ctx.strokeStyle = c; ctx.lineWidth = 1.6; if (m.redondant && m.etat === "Conforme") ctx.setLineDash([5, 4]);
+      ctx.save(); ctx.strokeStyle = c; ctx.lineWidth = 1.6; if (m.reserve && m.etat === "Conforme") ctx.setLineDash([5, 4]);
       const xg = x - bw / 2 - 7, larg = bw + 14 + (info.batteriesCommunes ? 0 : 0);
       ctx.beginPath(); ctx.roundRect ? ctx.roundRect(xg, yHaut + 6, larg, yBas - yHaut - 12, 9) : ctx.rect(xg, yHaut + 6, larg, yBas - yHaut - 12); ctx.stroke(); ctx.restore();
     }
   });
-  if (info.n > disp.nAff) texte(`… + ${info.n - disp.nAff} module(s)`, disp.xFin + 8, yRed + bh / 2, "#5B6B7D", "10px", "left");
+  if (info.total > disp.nAff) texte(`… + ${info.total - disp.nAff} module(s)`, disp.xFin + 8, yRed + bh / 2, "#5B6B7D", "10px", "left");
   // Bus continu commun et batterie commune.
   if (info.batteriesCommunes) {
     const yBus = avecOnduleur ? yDC : yBas;
@@ -17477,7 +17478,6 @@ function dessinerModulesSchema(ctx, info, disp, { yHaut, avecOnduleur, avecCharg
   busEpais(busG, busD, yBas);
   return { yBas: yBas + (info.batteriesCommunes ? 0 : 14), yDC, yRedBas: yRed + bh, yR2Bus: bpm ? yR2Bus : null };
 }
-// Encart « modules en réserve » (stock, hors armoire).
 function dessinerReserveSchema(ctx, info, x, y) {
   if (!info.reserve) return 0;
   const nb = Math.min(info.reserve, 6), w = Math.max(160, 18 + nb * 40), h = 58;
@@ -17517,7 +17517,7 @@ function genererSchemaOnduleur(eq) {
     const cxR2Mod = dispModules ? Math.max(390, dispModules.xDroite + 50) : 390;
     const w = dispModules ? Math.max(480, cxR2Mod + 90) : 480;
     const bypassModules = !!(infoModules && avecBypass && bypassParModule(eq));
-    const h = (avecBypass ? 780 : 560) + (avecTransfoR1 || avecTransfoR2 ? TRANSFO_H : 0) + (avecTransfoSortie ? 75 : 0) + (infoModules ? 140 + (infoModules.reserve ? 70 : 0) + (bypassModules ? 70 : 0) : 0);
+    const h = (avecBypass ? 780 : 560) + (avecTransfoR1 || avecTransfoR2 ? TRANSFO_H : 0) + (avecTransfoSortie ? 75 : 0) + (infoModules ? 140 + (bypassModules ? 70 : 0) : 0);
     const { canvas, ctx } = canevasSchema(w, h);
     ctx.textAlign = "center"; ctx.textBaseline = "middle";
     const line = (x1, y1, x2, y2) => { ctx.strokeStyle = SCHEMA_TRAIT; ctx.lineWidth = 1.8; ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); };
@@ -17695,9 +17695,8 @@ function genererSchemaOnduleur(eq) {
     }
 
     ctx.textAlign = "left";
-    if (infoModules && infoModules.reserve) { yBasDessin += 6; yBasDessin += dessinerReserveSchema(ctx, infoModules, 14, yBasDessin); }
     const yLegende = Math.min(h - 12, Math.max(yBasDessin, yBatt + 60) + 22);
-    const legendeModules = infoModules ? ` · ${infoModules.n} module${infoModules.n > 1 ? "s" : ""}${infoModules.puissance ? ` × ${String(infoModules.puissance).replace(".", ",")} kVA` : ""}${infoModules.red ? ` (N+${infoModules.red})` : ""} · batteries ${infoModules.batteriesCommunes ? "communes" : "par module"}${avecBypass ? ` · by-pass ${bypassModules ? "par module" : "commun"}` : ""}` : "";
+    const legendeModules = infoModules ? ` · ${infoModules.n} en service${infoModules.reserve ? ` + ${infoModules.reserve} de réserve` : ""}${infoModules.puissance ? ` × ${String(infoModules.puissance).replace(".", ",")} kVA` : ""} · batteries ${infoModules.batteriesCommunes ? "communes" : "par module"}${avecBypass ? ` · by-pass ${bypassModules ? "par module" : "commun"}` : ""}` : "";
     label(avecBypass ? "Configuration : avec commutateur statique et réseau secours" : "Configuration : Onduleur sécurité (sans commutateur statique)", 14, yLegende, "#8B96A3", "italic 10.5px " + SCHEMA_POLICE);
     if (legendeModules) label("Modules" + legendeModules.replace(/^ ·/, " :"), 14, yLegende + 15, "#8B96A3", "italic 10.5px " + SCHEMA_POLICE);
     // Cadre redessiné à la hauteur utile puis recadrage.
@@ -17718,7 +17717,7 @@ function genererSchemaRedresseurChargeur(eq) {
     const regime = (k) => (r[k] === "Monophasé" ? "1~" : "3~");
     const infoModules = modulesEquipement(eq);
     const dispModules = infoModules ? dispositionModulesSchema(infoModules, { x0: 120 }) : null;
-    const w = dispModules ? Math.max(440, dispModules.xDroite + 40) : 440, h = 430 + (infoModules ? 80 + (infoModules.reserve ? 70 : 0) : 0);
+    const w = dispModules ? Math.max(440, dispModules.xDroite + 40) : 440, h = 430 + (infoModules ? 80 : 0);
     const { canvas, ctx } = canevasSchema(w, h);
     ctx.font = "13px " + SCHEMA_POLICE; ctx.textAlign = "center"; ctx.textBaseline = "middle";
     const line = (x1, y1, x2, y2) => { ctx.strokeStyle = SCHEMA_TRAIT; ctx.lineWidth = 1.8; ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); };
@@ -17762,7 +17761,6 @@ function genererSchemaRedresseurChargeur(eq) {
       ctx.font = "13px " + SCHEMA_POLICE; pastilleSchema(ctx, "RS", cx, yFin + 18);
       libelleSousRepere(ctx, "Utilisation continue", cx, yFin + 18);
     }
-    if (infoModules && infoModules.reserve) { dessinerReserveSchema(ctx, infoModules, 14, yFin + 52); yFin += 70; }
     ctx.font = "italic 10.5px " + SCHEMA_POLICE; ctx.fillStyle = "#8B96A3"; ctx.textAlign = "left";
     const yLeg = yFin + 72;
     ctx.fillText("Redresseur chargeur — sortie continue régulée, batterie en tampon (floating)", 14, yLeg);
