@@ -5043,7 +5043,7 @@ function ChoixLocalEquipement({ eq, locaux, update, listId }) {
     </>
   );
 }
-function Combo({ value, onChange, options, listId, style, placeholder, numeric, onBlur, multiline = false, className }) {
+function Combo({ value, onChange, options, listId, style, placeholder, numeric, onBlur, multiline = false, className, dictee = false }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
   useEffect(() => {
@@ -5070,7 +5070,7 @@ function Combo({ value, onChange, options, listId, style, placeholder, numeric, 
           onFocus={() => setOpen(true)}
           onBlur={() => { setTimeout(() => setOpen(false), 120); if (onBlur) onBlur(); }}
           placeholder={placeholder}
-          style={{ ...(style || {}), width: "100%" }}
+          style={{ ...(style || {}), width: "100%", ...(dictee && reconnaissanceVocaleDisponible() ? { paddingRight: 30 } : {}) }}
         />
       ) : (
       <input
@@ -5084,6 +5084,7 @@ function Combo({ value, onChange, options, listId, style, placeholder, numeric, 
         style={{ ...inputStyle, ...(style || {}), width: "100%" }}
       />
       )}
+      {dictee && multiline && !numeric && <BoutonDicteeTexte valeur={value} onChange={onChange} />}
       {open && filtered.length > 0 && (
         <div style={{
           position: "absolute", top: "calc(100% + 3px)", left: 0, right: 0, zIndex: 300,
@@ -5119,10 +5120,10 @@ function NumberWithUnit({ value, unit, onValueChange, onUnitChange, width, fontS
   if (pleineLargeur) {
     // Cellule de grille : champ seul (l'unité est choisie une fois pour la ligne).
     return (
-      <input type="number" step="any" value={affiche ?? ""}
+      <input type="number" step="any" enterKeyHint="next" value={affiche ?? ""}
         onChange={(e) => { const t = e.target.value; if (base) { setBrouillon(t); onValueChange(versUniteBase(t, unit || base, base)); } else onValueChange(t); }}
         onBlur={() => setBrouillon(null)}
-        style={{ ...inputStyle, height: 36, padding: "0 6px", fontSize: 14, fontWeight: 600, textAlign: "center", border: `1.5px solid ${validState ? borderColor : "#CBD3DC"}`, background: validState ? bgColor : "#fff" }} />
+        style={{ ...inputStyle, height: 40, padding: "0 4px", fontSize: 15, fontWeight: 600, textAlign: "center", border: `1.5px solid ${validState ? borderColor : "#CBD3DC"}`, background: validState ? bgColor : "#fff" }} />
     );
   }
   return (
@@ -5574,6 +5575,24 @@ function CourbeDechargeModal({ eq, onFermer, onValider }) {
     });
   }
   const bouton = { ...btnGhost("#3E4A5C"), padding: "5px 10px" };
+  // Dictée pendant l'essai : chaque tension prononcée s'ajoute à la liste ; horodatée (minutes depuis le début) si demandé.
+  const [horodater, setHorodater] = useState(true);
+  const [entenduCourbe, setEntenduCourbe] = useState("");
+  const t0Ref = useRef(null);
+  const dicteeCourbe = useDictee((phrase) => {
+    setEntenduCourbe(phrase.trim());
+    const cmd = commandeDictee(phrase);
+    if (cmd === "stop") { dicteeCourbe.arreter(); return; }
+    if (cmd === "retour") { setTexte((t) => t.replace(/\n?[^\n]*$/, "")); return; }
+    const nombres = nombresDictes(phrase);
+    if (!nombres.length) return;
+    if (t0Ref.current === null) t0Ref.current = Date.now();
+    const minutes = Math.round(((Date.now() - t0Ref.current) / 60000) * 100) / 100;
+    const lignes = nombres.map((n) => (horodater ? `${String(minutes).replace(".", ",")};${n.replace(".", ",")}` : n.replace(".", ",")));
+    setTexte((t) => (t.trim() ? `${t.replace(/\s+$/, "")}\n` : "") + lignes.join("\n"));
+    sourceRef.current = "dictee";
+    if (horodater) setUniteTemps("min");
+  });
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(10,15,25,0.62)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 10 }}>
       <div style={{ background: "#FFFFFF", borderRadius: 12, width: "min(900px, 100%)", maxHeight: "96vh", display: "flex", flexDirection: "column", boxShadow: "0 20px 60px rgba(0,0,0,0.35)" }}>
@@ -5591,7 +5610,23 @@ function CourbeDechargeModal({ eq, onFermer, onValider }) {
             </button>
             <button style={bouton} onClick={() => fichierRef.current && fichierRef.current.click()}><Upload size={13} /> Ouvrir un fichier texte / CSV</button>
             <input ref={fichierRef} type="file" accept=".txt,.csv,.tsv,text/plain,text/csv" style={{ display: "none" }} onChange={(e) => { if (e.target.files && e.target.files[0]) lireFichier(e.target.files[0]); e.target.value = ""; }} />
+            {reconnaissanceVocaleDisponible() && (
+              <button style={dicteeCourbe.actif ? { ...bouton, background: "#C0392B", color: "#fff", border: "1px solid #C0392B" } : bouton} onClick={() => (dicteeCourbe.actif ? dicteeCourbe.arreter() : dicteeCourbe.demarrer())} title="Dicter les tensions au fil de la décharge">
+                <IconeMicro taille={13} /> {dicteeCourbe.actif ? "Arrêter la dictée" : "Dicter les tensions"}
+              </button>
+            )}
+            {reconnaissanceVocaleDisponible() && (
+              <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#3E4A5C" }} title="Ajoute devant chaque tension le temps écoulé (en minutes) depuis la première valeur dictée">
+                <input type="checkbox" checked={horodater} onChange={(e) => setHorodater(e.target.checked)} /> Horodater (minutes)
+              </label>
+            )}
           </div>
+          {dicteeCourbe.erreur && <div style={{ fontSize: 12, color: "#C0392B" }}>{dicteeCourbe.erreur}</div>}
+          {dicteeCourbe.actif && (
+            <div style={{ fontSize: 12, color: "#fff", background: "#1A1F26", borderRadius: 8, padding: "8px 12px", lineHeight: 1.5 }}>
+              <b>Dictée en cours</b> — dites chaque tension relevée (« cinq cent trente-deux virgule un »). « retour » efface la dernière ligne, « stop » termine.{entenduCourbe ? ` Entendu : « ${entenduCourbe} »` : ""}
+            </div>
+          )}
           {message && <div style={{ fontSize: 12, color: "#0A5DA8", background: "#EEF2F6", borderRadius: 6, padding: "6px 10px" }}>{message}</div>}
           <textarea
             value={texte}
@@ -6244,8 +6279,19 @@ function InlineConfirmButton({ icon: Icon, label, color = "#EF4444", onConfirm }
 function Card({ children, style, ...rest }) {
   return <div style={{ background: "#FFFFFF", border: "1px solid #D8DEE5", borderRadius: 14, padding: 20, ...(style || {}) }} {...rest}>{children}</div>;
 }
+// Dans une fiche équipement, le titre d'une section sert aussi à la replier (contexte fourni par BlocSectionSaisie).
+const ContexteRepliSection = React.createContext(null);
 function SectionTitle({ children }) {
-  return <div style={{ fontSize: 11.5, fontWeight: 700, color: "#5B6B7D", letterSpacing: 0.6, textTransform: "uppercase", marginBottom: 12, fontFamily: "'Rajdhani', 'Inter', sans-serif" }}>{children}</div>;
+  const repli = React.useContext(ContexteRepliSection);
+  const style = { fontSize: 11.5, fontWeight: 700, color: "#5B6B7D", letterSpacing: 0.6, textTransform: "uppercase", marginBottom: 12, fontFamily: "'Rajdhani', 'Inter', sans-serif" };
+  if (!repli) return <div style={style}>{children}</div>;
+  return (
+    <div role="button" tabIndex={0} onClick={repli.basculer} onKeyDown={(e) => { if (e.key === "Enter") repli.basculer(); }} title="Replier cette zone"
+      style={{ ...style, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, cursor: "pointer", flex: "1 1 auto" }}>
+      <span>{children}</span>
+      <span style={{ fontSize: 11.5, fontWeight: 600, color: "#8B96A3", textTransform: "none", letterSpacing: 0, fontFamily: "'Inter', system-ui, sans-serif", whiteSpace: "nowrap" }}>Replier ▴</span>
+    </div>
+  );
 }
 // Repère technicien affiché tel quel (toutes les sections), plutôt que de faire choisir une seule
 // section — plusieurs sections de conducteur différentes peuvent être présentes sur les connexions
@@ -6353,15 +6399,49 @@ function ordreSectionsSaisie(eq, schema) {
   const secs = TYPES_AVEC_PIECES_USURE.includes(eq.type) ? [...schema.sections.filter((x) => x.key === "pieces_usure_ups"), ...schema.sections.filter((x) => x.key !== "pieces_usure_ups")] : schema.sections;
   return secs.filter((sec) => !(sec.key === "batterie_id" && TYPES_AVEC_PIECES_USURE.includes(eq.type) && schema.sections.some((x) => x.key === "pieces_usure_ups")));
 }
+function avancementSection(eq, sec) {
+  const items = (sec.items || []).filter(controleAvecMesures);
+  const vals = (eq.controles && eq.controles[sec.key]) || {};
+  return { total: items.length, n: items.filter((it) => controleRenseigne(it, vals[it.key])).length };
+}
+const SECTIONS_REPLIEES = new Set(); // mémorisé le temps de la session (changement d'onglet compris)
+function BlocSectionSaisie({ eq, sec, children }) {
+  const cle = `${eq.id}:${sec.key}`;
+  const [replie, setReplie] = useState(() => SECTIONS_REPLIEES.has(cle));
+  const changer = (v) => { if (v) SECTIONS_REPLIEES.add(cle); else SECTIONS_REPLIEES.delete(cle); setReplie(v); };
+  const ctx = useMemo(() => ({ basculer: () => changer(true) }), [cle]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    const ouvrir = (e) => { if (e.detail === cle) changer(false); };
+    window.addEventListener("ht-ouvrir-section", ouvrir);
+    return () => window.removeEventListener("ht-ouvrir-section", ouvrir);
+  }, [cle]); // eslint-disable-line react-hooks/exhaustive-deps
+  const id = `sec-${eq.id}-${sec.key}`;
+  if (children === null || children === undefined || children === false) return <div id={id} className="bloc-section-saisie" />;
+  if (replie) {
+    const av = avancementSection(eq, sec);
+    const fini = av.total > 0 && av.n === av.total;
+    return (
+      <div id={id} className="bloc-section-saisie">
+        <div role="button" tabIndex={0} onClick={() => changer(false)} onKeyDown={(e) => { if (e.key === "Enter") changer(false); }} title="Déplier cette zone"
+          style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, background: "#fff", border: "1px solid #D8DEE5", borderLeft: `4px solid ${fini ? "#0F8A5F" : "#9AA5B1"}`, borderRadius: 14, padding: "12px 16px", marginBottom: 10, cursor: "pointer" }}>
+          <span style={{ fontSize: 11.5, fontWeight: 700, color: "#3E4A5C", letterSpacing: 0.6, textTransform: "uppercase", fontFamily: "'Rajdhani', 'Inter', sans-serif" }}>{sec.title}</span>
+          <span style={{ display: "flex", alignItems: "center", gap: 8, whiteSpace: "nowrap" }}>
+            {av.total > 0 && <span style={{ fontSize: 11, fontWeight: 800, padding: "2px 8px", borderRadius: 999, background: fini ? "#EAF7F1" : "#EEF1F4", color: fini ? "#0F6B3F" : "#5A6573" }}>{fini ? "✓ complet" : `${av.n}/${av.total}`}</span>}
+            <span style={{ fontSize: 11.5, color: "#8B96A3" }}>Déplier ▾</span>
+          </span>
+        </div>
+      </div>
+    );
+  }
+  return <div id={id} className="bloc-section-saisie"><ContexteRepliSection.Provider value={ctx}>{children}</ContexteRepliSection.Provider></div>;
+}
 // Barre d'étapes (collante en haut) : une pastille par section, avec l'avancement des mesures (3/8, ✓) ; un appui y amène.
 function BarreEtapesSections({ eq, sections }) {
   const [active, setActive] = useState(null);
   const refBarre = useRef(null);
   const etapes = sections.map((sec) => {
-    const items = (sec.items || []).filter(controleAvecMesures);
-    const vals = (eq.controles && eq.controles[sec.key]) || {};
-    const n = items.filter((it) => controleRenseigne(it, vals[it.key])).length;
-    return { cle: sec.key, titre: String(sec.title || "").replace(/^Mesures\s*[—-]\s*/i, ""), total: items.length, n };
+    const av = avancementSection(eq, sec);
+    return { cle: sec.key, titre: String(sec.title || "").replace(/^Mesures\s*[—-]\s*/i, ""), total: av.total, n: av.n };
   });
   useEffect(() => {
     const surDefilement = () => {
@@ -6388,8 +6468,9 @@ function BarreEtapesSections({ eq, sections }) {
         const estActive = active === e.cle;
         return (
           <button key={e.cle} data-etape={e.cle} type="button"
-            onClick={() => { const el = document.getElementById(`sec-${eq.id}-${e.cle}`); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); }}
-            style={{ flex: "0 0 auto", whiteSpace: "nowrap", fontSize: 11.5, fontWeight: 700, padding: "6px 11px", borderRadius: 999, cursor: "pointer", fontFamily: "inherit",
+            onClick={() => { window.dispatchEvent(new CustomEvent("ht-ouvrir-section", { detail: `${eq.id}:${e.cle}` })); setTimeout(() => { const el = document.getElementById(`sec-${eq.id}-${e.cle}`); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); }, 30); }}
+            title={e.titre}
+            style={{ flex: "0 0 auto", whiteSpace: "nowrap", maxWidth: 240, overflow: "hidden", textOverflow: "ellipsis", fontSize: 11.5, fontWeight: 700, padding: "6px 11px", borderRadius: 999, cursor: "pointer", fontFamily: "inherit",
               border: `1px solid ${estActive ? "#1A1F26" : fini ? "#BFE3D2" : "#D8DEE5"}`, background: estActive ? "#1A1F26" : fini ? "#EAF7F1" : "#fff", color: estActive ? "#fff" : fini ? "#0F6B3F" : "#5B6B7D" }}>
             {e.titre}{e.total > 0 ? (fini ? " ✓" : ` ${e.n}/${e.total}`) : ""}
           </button>
@@ -6398,11 +6479,162 @@ function BarreEtapesSections({ eq, sections }) {
     </div>
   );
 }
+// ----- Dictée vocale (reconnaissance du navigateur : Safari iPhone/iPad, Chrome) -----
+function reconnaissanceVocaleDisponible() { return typeof window !== "undefined" && !!(window.SpeechRecognition || window.webkitSpeechRecognition); }
+const NOMBRES_EN_LETTRES = { "zéro": 0, "deux": 2, "trois": 3, "quatre": 4, "cinq": 5, "six": 6, "sept": 7, "huit": 8, "neuf": 9, "dix": 10, "onze": 11, "douze": 12, "treize": 13, "quatorze": 14, "quinze": 15, "seize": 16 };
+// « 12,71 », « 12.71 », « 12 virgule 71 », « douze virgule cinq » → ["12.71", ...] (point décimal, comme les champs numériques).
+function nombresDictes(texte) {
+  let t = ` ${String(texte || "").toLowerCase()} `.replace(/ /g, " ");
+  Object.entries(NOMBRES_EN_LETTRES).forEach(([mot, n]) => { t = t.replace(new RegExp(`([\\s-])${mot}(?=[\\s-])`, "g"), `$1${n}`); });
+  t = t.replace(/\s+(virgule|point)\s+/g, ",").replace(/(\d)\s*[,.]\s*(\d)/g, "$1,$2");
+  return (t.match(/-?\d+(?:,\d+)?/g) || []).map((x) => x.replace(",", "."));
+}
+function commandeDictee(texte) {
+  const t = String(texte || "").toLowerCase();
+  if (/\b(stop|terminé|termine|fin de la dictée|arrête)\b/.test(t)) return "stop";
+  if (/\b(retour|annule|annuler|efface|effacer|corrige|corriger)\b/.test(t)) return "retour";
+  if (/\b(suivant|passe|passer)\b/.test(t)) return "suivant";
+  return null;
+}
+// Écoute continue : chaque phrase reconnue est transmise à onPhrase ; relance automatique après un silence.
+function useDictee(onPhrase, { continu = true } = {}) {
+  const [actif, setActif] = useState(false);
+  const [erreur, setErreur] = useState("");
+  const recoRef = useRef(null), actifRef = useRef(false), cbRef = useRef(onPhrase);
+  cbRef.current = onPhrase;
+  const arreter = () => { actifRef.current = false; setActif(false); try { recoRef.current && recoRef.current.stop(); } catch (e) { /* déjà arrêtée */ } };
+  const demarrer = () => {
+    const R = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!R) { setErreur("La dictée n'est pas disponible sur ce navigateur (utilisez Safari ou Chrome)."); return; }
+    setErreur("");
+    const reco = new R();
+    reco.lang = "fr-FR"; reco.continuous = continu; reco.interimResults = false; reco.maxAlternatives = 1;
+    reco.onresult = (e) => { for (let i = e.resultIndex; i < e.results.length; i++) if (e.results[i].isFinal) cbRef.current(e.results[i][0].transcript); };
+    reco.onerror = (e) => { if (e.error === "not-allowed" || e.error === "service-not-allowed") { setErreur("Accès au micro refusé : autorisez le micro pour ce site dans les réglages du navigateur."); arreter(); } };
+    reco.onend = () => { if (actifRef.current && continu) { try { reco.start(); } catch (e) { arreter(); } } else { actifRef.current = false; setActif(false); } };
+    recoRef.current = reco; actifRef.current = true; setActif(true);
+    try { reco.start(); } catch (e) { arreter(); }
+  };
+  useEffect(() => () => { actifRef.current = false; try { recoRef.current && recoRef.current.stop(); } catch (e) { /* rien */ } }, []);
+  return { actif, erreur, demarrer, arreter };
+}
+function IconeMicro({ taille = 14 }) {
+  return <svg width={taille} height={taille} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5 11a7 7 0 0 0 14 0" /><path d="M12 18v3" /></svg>;
+}
+// Petit bouton micro à placer dans un champ texte : dicte une phrase et l'ajoute au texte existant.
+function BoutonDicteeTexte({ valeur, onChange }) {
+  const valRef = useRef(valeur); valRef.current = valeur;
+  const d = useDictee((phrase) => {
+    const p = phrase.trim(); if (!p) return;
+    const actuel = String(valRef.current || "").trim();
+    onChange(actuel ? `${actuel} ${p}` : p.charAt(0).toUpperCase() + p.slice(1));
+  }, { continu: false });
+  if (!reconnaissanceVocaleDisponible()) return null;
+  return (
+    <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => (d.actif ? d.arreter() : d.demarrer())} title={d.erreur || (d.actif ? "Arrêter la dictée" : "Dicter")} aria-label="Dicter"
+      style={{ position: "absolute", right: 4, top: "50%", transform: "translateY(-50%)", width: 26, height: 26, borderRadius: "50%", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", background: d.actif ? "#C0392B" : "transparent", color: d.actif ? "#fff" : d.erreur ? "#C0392B" : "#8B96A3" }}>
+      <IconeMicro />
+    </button>
+  );
+}
+// Cohérence entre phases : repère une phase très différente des autres (faute de frappe, chiffre oublié…).
+// Tensions : écart > 15 % à la médiane ; autres grandeurs : rapport > 3 (ou valeur nulle face à des valeurs non nulles).
+function incoherencesGroupesPhases(groupes, fields, entetes = ["L1", "L2", "L3"]) {
+  const out = [];
+  groupes.forEach((g) => {
+    const cells = g.cellules.map((f, i) => (f && !f.compute ? { i, v: numOf(fields[f.key]) } : null)).filter((x) => x && x.v !== null);
+    if (cells.length < 2) return;
+    const tri = cells.map((c) => c.v).sort((a, b) => a - b);
+    const med = tri.length === 3 ? tri[1] : null;
+    const famille = g.unite ? unitFamilyFor(g.unite.unit) : null;
+    const estTension = famille === UNIT_FAMILIES.tension;
+    const ecart = (v, ref) => (ref === 0 ? v !== 0 : estTension ? Math.abs(v - ref) / Math.abs(ref) > 0.15 : (v === 0 || Math.max(Math.abs(v), Math.abs(ref)) / Math.max(1e-9, Math.min(Math.abs(v), Math.abs(ref))) > 3));
+    const nom = g.compose ? ["U12", "U23", "U31"] : entetes;
+    if (med !== null) {
+      cells.forEach((c) => { if (ecart(c.v, med)) out.push({ cle: `${g.cle}-${c.i}`, texte: `⚠ ${g.libelle ? g.libelle + " " : ""}${nom[c.i]} à vérifier : ${String(c.v).replace(".", ",")} (autres ≈ ${String(med).replace(".", ",")})` }); });
+    } else if (ecart(cells[0].v, cells[1].v)) {
+      out.push({ cle: `${g.cle}-2`, texte: `⚠ ${g.libelle ? g.libelle + " " : ""}écart important entre ${nom[cells[0].i]} et ${nom[cells[1].i]} (${String(cells[0].v).replace(".", ",")} / ${String(cells[1].v).replace(".", ",")})` });
+    }
+  });
+  return out;
+}
+// Vérifications avant génération du rapport : mesures manquantes, état dégradé sans action, phases incohérentes.
+function verificationsControlesSite(site) {
+  const out = [];
+  (site.equipements || []).forEach((eq) => {
+    const nomEq = eq.identification?.repere || eq.type;
+    let schema; try { schema = getSchema(eq); } catch (e) { return; }
+    ordreSectionsSaisie(eq, schema).forEach((sec) => {
+      const vals = (eq.controles && eq.controles[sec.key]) || {};
+      if (typeof vals !== "object" || Array.isArray(vals)) return;
+      const items = (sec.items || []).filter((it) => vals[it.key]);
+      const aMesurer = items.filter((it) => controleAvecMesures(it) && !["Non réalisé", "Non présent"].includes(vals[it.key].etat));
+      const vides = aMesurer.filter((it) => !controleRenseigne(it, vals[it.key]));
+      const titre = String(sec.title || "").replace(/^Mesures\s*[—-]\s*/i, "");
+      if (vides.length) out.push({ eqId: eq.id, secKey: sec.key, type: "vide", texte: `${nomEq} — ${titre} : ${vides.length === aMesurer.length ? "aucune mesure saisie" : `${vides.length} contrôle${vides.length > 1 ? "s" : ""} sans mesure`}${vides.length <= 3 ? ` (${vides.map((it) => it.label).join(", ")})` : ""}` });
+      items.forEach((it) => {
+        const v = vals[it.key];
+        if (["Dégradé", "Défaillant"].includes(v.etat) && !String(v.action || "").trim()) out.push({ eqId: eq.id, secKey: sec.key, type: "action", texte: `${nomEq} — ${it.label} : « ${v.etat} » sans action renseignée` });
+        const gr = groupesParPhase((it.fields || []).filter((f) => !f.hidden));
+        incoherencesGroupesPhases(gr, v.fields || {}).forEach((x) => out.push({ eqId: eq.id, secKey: sec.key, type: "phase", texte: `${nomEq} — ${it.label} : ${x.texte.replace(/^⚠\s*/, "")}` }));
+      });
+    });
+    (eq.controles?.gradins_dynamique || []).forEach((g) => {
+      if (["Dégradé", "Défaillant"].includes(g.etat) && !String(g.action || "").trim()) out.push({ eqId: eq.id, secKey: "gradins", type: "action", texte: `${nomEq} — ${g.label || "Gradin"} : « ${g.etat} » sans action renseignée` });
+    });
+  });
+  return out;
+}
+// ----- Briques de saisie partagées (grille par phase, cellules, pastilles) — même rendu que les contrôles -----
+function CelluleSaisieNombre({ value, onChange, validState }) {
+  const etat = validState === "warn" ? "warning" : validState;
+  const c = etat && DOCX_ETAT_COULEURS_ECRAN[etat];
+  return <input type="number" step="any" enterKeyHint="next" value={value ?? ""} onChange={(e) => onChange(e.target.value)}
+    style={{ ...inputStyle, height: 40, padding: "0 4px", fontSize: 15, fontWeight: 600, textAlign: "center", border: `1.5px solid ${c ? c.bord : "#CBD3DC"}`, background: c ? c.fond : "#fff" }} />;
+}
+function CelluleSaisieCalc({ value }) {
+  const vide = value === null || value === undefined || value === "" || Number.isNaN(value);
+  return <div style={{ height: 40, borderRadius: 8, background: "#EEF4FB", color: "#0A5DA8", fontWeight: 700, fontSize: 13.5, display: "flex", alignItems: "center", justifyContent: "center" }}>{vide ? "—" : String(value).replace(".", ",")}</div>;
+}
+function ChampSaisieEtiquete({ etiquette, unite, children }) {
+  return (
+    <div>
+      <div style={{ fontSize: 10.5, fontWeight: 800, color: "#8B96A3", letterSpacing: 0.4, marginBottom: 3 }}>{etiquette}{unite ? <span style={{ fontWeight: 600 }}> ({unite})</span> : null}</div>
+      {children}
+    </div>
+  );
+}
+function PastilleCalcul({ texte, etat = null, seuil = false, vide = false }) {
+  const st = seuil
+    ? { background: "#fff", border: "1px dashed #9AA5B1", color: "#5B6B7D", fontWeight: 600, padding: "3px 9px" }
+    : { background: etat === "ok" ? "#EAF7F1" : etat === "warning" ? "#FDF3E3" : etat === "bad" ? "#FDF1F0" : "#EEF4FB", color: etat === "ok" ? "#0F6B3F" : etat === "warning" ? "#8A5A0A" : etat === "bad" ? "#9A2E22" : vide ? "#9AA5B1" : "#0A5DA8", fontWeight: 700, padding: "4px 9px" };
+  return <span style={{ fontSize: 11.5, borderRadius: 999, ...st }}>{texte}</span>;
+}
+const DOCX_ETAT_COULEURS_ECRAN = { ok: { bord: "#0F8A5F", fond: "#F0FBF6" }, warning: { bord: "#B5730A", fond: "#FDF3E3" }, bad: { bord: "#C0392B", fond: "#FDF1F0" } };
+// lignes : [{ libelle, unite, cellules: [L1, L2, L3] }] ; mono : une seule colonne « Phase ».
+function GrilleSaisiePhases({ lignes, mono = false }) {
+  const n = mono ? 1 : 3;
+  const entete = { fontSize: 10.5, fontWeight: 800, color: "#8B96A3", textAlign: "center", letterSpacing: 0.5 };
+  return (
+    <div className="grille-phases" style={{ display: "grid", gridTemplateColumns: `fit-content(104px) repeat(${n}, minmax(0, 1fr)) 52px`, gap: 6, alignItems: "center", maxWidth: mono ? 380 : 720 }}>
+      <div />
+      {(mono ? ["Phase"] : ["L1", "L2", "L3"]).map((h) => <div key={h} style={entete}>{h}</div>)}
+      <div style={entete}>Unité</div>
+      {lignes.map((l) => (
+        <React.Fragment key={l.libelle}>
+          <div style={{ fontSize: 11.5, fontWeight: 700, color: "#3E4A5C", lineHeight: 1.25 }}>{l.libelle}</div>
+          {l.cellules.slice(0, n).map((c, i) => <div key={i} style={{ minWidth: 0 }}>{c}</div>)}
+          <div style={{ fontSize: 12, color: "#5B6B7D", textAlign: "center" }}>{l.unite}</div>
+        </React.Fragment>
+      ))}
+    </div>
+  );
+}
 // ----- Saisie des contrôles chargés -----
 // Regroupe les champs « par phase » (L1/L2/L3 ou U12/U23/U31) d'un contrôle pour les afficher en grille :
 // une ligne par grandeur, une colonne par phase, une seule unité par ligne.
 const SUFFIXE_PHASE_SAISIE = { "1": 0, "2": 1, "3": 2, "12": 0, "23": 1, "31": 2 };
-const RE_LIBELLE_PHASE = /\s*[—:-]?\s*\b(L[123]|U ?(?:12|23|31)|Ph(?:ase)? ?[123])\s*$/i;
+const RE_LIBELLE_PHASE = /\s*[—:-]?\s*\b(L[123]|[IV] ?[123]|U ?(?:12|23|31)|Ph(?:ase)? ?[123])\s*(\([^)]*\))?\s*$/i;
 function groupesParPhase(champs) {
   const groupes = new Map();
   champs.forEach((f) => {
@@ -6418,7 +6650,8 @@ function groupesParPhase(champs) {
   });
   return [...groupes.values()].filter((g) => g.cellules.filter(Boolean).length >= 2).map((g) => {
     const ref = g.cellules.find(Boolean);
-    return { ...g, libelle: (ref.label || "").replace(RE_LIBELLE_PHASE, "").replace(/\bfondamental\b/i, "fond.").trim(), unite: g.cellules.find((f) => f && f.unit) || null };
+    const libelle = (ref.label || "").replace(RE_LIBELLE_PHASE, "").replace(/\bfondamental\b/i, "fond.").trim();
+    return { ...g, libelle: libelle || (g.compose ? "" : g.cle.replace(/#c$/, "").toUpperCase().replace(/^L$/, "")), unite: g.cellules.find((f) => f && f.unit) || null };
   });
 }
 // « Tension (moyenne calculée) » → « Tension moy. », « Déséquilibre (calculé) » → « Déséquilibre ».
@@ -6469,7 +6702,12 @@ function ControlRow({ item, value, onChange, idPrefix, toleranceOverride }) {
     return value.etat === "Défaillant" ? "bad" : "warning";
   }
   function fieldValidState(key) {
-    if (tolMinField && tolMinField.unitFrom === key) return colorFromToleranceEtat(toleranceState(fields[key], computedMin, computedMax));
+    if (tolMinField && tolMinField.unitFrom === key) {
+      // Le champ comparé peut être lui-même calculé (ex. déséquilibre) : on compare sa valeur calculée.
+      const def = (item.fields || []).find((x) => x.key === key);
+      const v = def && def.compute ? def.compute(fields) : fields[key];
+      return colorFromToleranceEtat(toleranceState(v, computedMin, computedMax));
+    }
     // L1/L2/L3 (ou le triplet ciblé par phaseKeys) mesurent la même grandeur que le champ
     // "unitFrom" (ex. la résistance d'un fusible), juste par phase plutôt qu'en une seule valeur —
     // elles doivent être comparées à la même tolérance calculée, pas seulement le champ principal.
@@ -6518,10 +6756,11 @@ function ControlRow({ item, value, onChange, idPrefix, toleranceOverride }) {
     const v = valeurCalculee(f);
     const vide = v === "" || (typeof v === "number" && Number.isNaN(v));
     const seuil = f.key === "tol_max" || f.key === "tol_min";
-    const u = uniteAffichee(f);
+    const u = uniteAffichee(f).replace(/\s*\(.*\)\s*$/, "");
     const txt = vide ? "—" : `${String(v).replace(".", ",")}${u ? " " + u : ""}`;
     return { cle: f.key, titre: f.label, seuil, vide, etat: seuil || vide ? null : fieldValidState(f.key), texte: seuil ? `seuil ${txt}` : `${libelleCourtCalcul(f.label)} ${txt}` };
   }).filter((p) => !(p.seuil && p.vide));
+  incoherencesGroupesPhases(groupes, fields, entetesPhases).forEach((x) => pastilles.push({ cle: "coh-" + x.cle, titre: "Écart anormal entre phases : vérifier la saisie", seuil: false, vide: false, etat: "warning", texte: x.texte }));
   const champsMesures = [...groupes.flatMap((g) => g.cellules.filter((f) => f && !f.compute)), ...autres.filter((f) => !f.compute && !f.options && f.key !== "realise")];
   const rempli = champsMesures.some((f) => { const v = fields[f.key]; return v !== undefined && v !== null && String(v).trim() !== ""; });
   const repliable = dense && value.etat !== undefined;
@@ -6534,22 +6773,22 @@ function ControlRow({ item, value, onChange, idPrefix, toleranceOverride }) {
   const celluleGrille = (f) => {
     if (f.compute) {
       const v = valeurCalculee(f);
-      return <div style={{ height: 36, borderRadius: 8, background: "#EEF4FB", color: "#0A5DA8", fontWeight: 700, fontSize: 13.5, display: "flex", alignItems: "center", justifyContent: "center" }}>{v === "" ? "—" : String(v).replace(".", ",")}</div>;
+      return <div style={{ height: 40, borderRadius: 8, background: "#EEF4FB", color: "#0A5DA8", fontWeight: 700, fontSize: 13.5, display: "flex", alignItems: "center", justifyContent: "center" }}>{v === "" ? "—" : String(v).replace(".", ",")}</div>;
     }
     if (f.options) {
-      return <Combo value={fields[f.key]} onChange={(v) => setField(f.key, v)} options={typeof f.options === "function" ? f.options(fields) || [] : f.options} listId={`${idPrefix}-${item.key}-${f.key}`} style={{ width: "100%", height: 36, padding: "0 6px", fontSize: 13, fontWeight: 600, textAlign: "center", background: "#fff", border: "1.5px solid #CBD3DC" }} />;
+      return <Combo value={fields[f.key]} onChange={(v) => setField(f.key, v)} options={typeof f.options === "function" ? f.options(fields) || [] : f.options} listId={`${idPrefix}-${item.key}-${f.key}`} style={{ width: "100%", height: 40, padding: "0 6px", fontSize: 13.5, fontWeight: 600, textAlign: "center", background: "#fff", border: "1.5px solid #CBD3DC" }} />;
     }
     if (f.unit || MESURE_KEYS.includes(f.key) || fieldValidState(f.key)) {
       return <NumberWithUnit pleineLargeur value={fields[f.key]} unit={f.unit ? (fields[f.key + "Unite"] || f.unit) : ""} baseUnit={f.unit || undefined} onValueChange={(v) => setField(f.key, v)} onUnitChange={() => {}} validState={fieldValidState(f.key)} />;
     }
-    return <input type="text" inputMode={/^(fp|cosphi)/.test(f.key) ? "decimal" : undefined} value={fields[f.key] ?? ""} onChange={(e) => setField(f.key, e.target.value)} style={{ ...inputStyle, height: 36, padding: "0 6px", fontSize: 14, fontWeight: 600, textAlign: "center", background: "#fff", border: "1.5px solid #CBD3DC" }} />;
+    return <input type="text" enterKeyHint="next" inputMode={/^(fp|cosphi)/.test(f.key) ? "decimal" : undefined} value={fields[f.key] ?? ""} onChange={(e) => setField(f.key, e.target.value)} style={{ ...inputStyle, height: 40, padding: "0 6px", fontSize: 15, fontWeight: 600, textAlign: "center", background: "#fff", border: "1.5px solid #CBD3DC" }} />;
   };
   const uniteGrille = (g) => {
     const f = g.unite;
     const fam = unitFamilyFor(f.unit);
     if (fam && !f.compute) {
       return (
-        <select value={fields[f.key + "Unite"] || f.unit} onChange={(e) => setUniteGroupe(f, e.target.value)} style={{ ...inputStyle, height: 36, padding: "0 4px", fontSize: 12, background: "#F4F6F8", textAlign: "center" }}>
+        <select value={fields[f.key + "Unite"] || f.unit} onChange={(e) => setUniteGroupe(f, e.target.value)} style={{ ...inputStyle, height: 40, padding: "0 4px", fontSize: 12, background: "#F4F6F8", textAlign: "center" }}>
           {fam.map((u) => <option key={u} value={u}>{u}</option>)}
         </select>
       );
@@ -6728,6 +6967,7 @@ function ControlRow({ item, value, onChange, idPrefix, toleranceOverride }) {
           listId={`${idPrefix}-${item.key}-action`}
           placeholder="Action"
           multiline
+          dictee
           className="champ-action"
           style={{ width: actionInputWidth(value.action), padding: "5px 7px", fontSize: 12 }}
         />
@@ -6774,7 +7014,7 @@ function ControlRow({ item, value, onChange, idPrefix, toleranceOverride }) {
   }
   const avecLibelles = groupes.length > 1 || groupes.some((g) => g.libelle);
   const avecUnites = groupes.some((g) => g.unite);
-  const colonnes = `${avecLibelles ? "minmax(0, 1.15fr) " : ""}repeat(3, minmax(0, 1fr))${avecUnites ? " 62px" : ""}`;
+  const colonnes = `${avecLibelles ? "fit-content(104px) " : ""}repeat(3, minmax(0, 1fr))${avecUnites ? " 60px" : ""}`;
   return (
     <div className="controle-dense" style={{ background: "#fff", border: "1px solid #E2E6EB", borderRadius: 12, padding: "11px 12px 10px", margin: "8px 0" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
@@ -6790,7 +7030,7 @@ function ControlRow({ item, value, onChange, idPrefix, toleranceOverride }) {
           {avecUnites && <div style={{ fontSize: 10.5, fontWeight: 800, color: "#8B96A3", textAlign: "center", letterSpacing: 0.5 }}>Unité</div>}
           {groupes.map((g) => (
             <React.Fragment key={g.cle}>
-              {avecLibelles && <div lang="fr" style={{ fontSize: 11.5, fontWeight: 700, color: "#3E4A5C", lineHeight: 1.25, hyphens: "auto", WebkitHyphens: "auto", overflowWrap: "break-word" }}>{(g.libelle || (g.compose ? "Tension" : "Valeur")) + (g.compose && entetesPhases[0] !== "U12" ? " (U12 · U23 · U31)" : "")}</div>}
+              {avecLibelles && <div lang="fr" style={{ fontSize: 11.5, fontWeight: 700, color: "#3E4A5C", lineHeight: 1.25, hyphens: "auto", WebkitHyphens: "auto", overflowWrap: "break-word" }}>{g.compose && entetesPhases[0] !== "U12" ? "U12/23/31" : (g.libelle || (g.compose ? "Tension" : "Valeur"))}</div>}
               {g.cellules.map((f, i) => <div key={i} style={{ minWidth: 0 }}>{f ? celluleGrille(f) : null}</div>)}
               {avecUnites && <div style={{ minWidth: 0 }}>{g.unite ? uniteGrille(g) : null}</div>}
             </React.Fragment>
@@ -6840,6 +7080,7 @@ function CustomActionsList({ custom, onAdd, onChange, onRemove, idPrefix }) {
                 listId={`${idPrefix}-custom-${c.id}-action`}
                 placeholder="Action"
                 multiline
+                dictee
                 className="champ-action"
                 style={{ width: actionInputWidth(c.action), padding: "5px 7px", fontSize: 12 }}
               />
@@ -7691,6 +7932,10 @@ function GradinsPanel({ eq, update, idPrefix }) {
     setEntries([...entries, copy]);
   };
   const removeEntry = (id) => setEntries(entries.filter((e) => e.id !== id));
+  // Gradins repliables : un gradin déjà mesuré s'affiche résumé sur une ligne (rouvert d'un appui).
+  const gradinMesure = (e) => ["i1", "i2", "i3"].some((k) => numOf(e.fields?.[k]) !== null);
+  const [gradinsReplies, setGradinsReplies] = useState(() => new Set(entries.filter((e) => gradinMesure(e) && e.etat).map((e) => e.id)));
+  const replierGradin = (id, oui) => setGradinsReplies((prev) => { const n = new Set(prev); if (oui) n.add(id); else n.delete(id); return n; });
 
   return (
     <Card style={{ marginBottom: 14 }}>
@@ -7719,12 +7964,28 @@ function GradinsPanel({ eq, update, idPrefix }) {
             const qTotalMesure = pg.source === "mesure" || pg.source === "estime" ? pg.total : null;
             const qStatus = qTotalMesure === null ? null : toleranceState(e.fields.q, Math.round(qTotalMesure * 0.9 * 100) / 100, Math.round(qTotalMesure * 1.1 * 100) / 100);
             const freqAccordTheo = gradinFrequenceAccordTheorique(e.fields.q, e.fields.u, e.fields.selfMA);
+            if (gradinsReplies.has(e.id)) {
+              const c = ETAT_COULEURS_SAISIE[e.etat] || ETAT_COULEURS_SAISIE.autre;
+              const fr = (v) => (v === null || v === undefined || v === "" ? "—" : String(v).replace(".", ","));
+              const resumeGradin = [e.fields.q && `Q ${fr(e.fields.q)} kVAR`, gradinMesure(e) && `I ${(mono ? [e.fields.i1] : [e.fields.i1, e.fields.i2, e.fields.i3]).map(fr).join(" · ")} A`, pg.total !== null && pg.total !== undefined && `Q total ${fr(pg.total)} kVAR`].filter(Boolean).join("  ·  ");
+              return (
+                <div key={e.id} role="button" tabIndex={0} onClick={() => replierGradin(e.id, false)} onKeyDown={(ev) => { if (ev.key === "Enter") replierGradin(e.id, false); }}
+                  style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, background: "#fff", border: "1px solid #E2E6EB", borderLeft: `4px solid ${c.bord}`, borderRadius: 10, padding: "9px 12px", margin: "4px 0", cursor: "pointer" }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: "#1A1F26" }}>{e.label || "Gradin"}</div>
+                    <div style={{ fontSize: 11.5, color: "#5B6B7D", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{resumeGradin || "—"}{e.action ? ` — ${e.action}` : ""}</div>
+                  </div>
+                  <span style={{ flex: "0 0 auto", fontSize: 11, fontWeight: 800, padding: "3px 9px", borderRadius: 999, background: c.fond, color: c.texte, whiteSpace: "nowrap" }}>{(ETATS_RAPIDES.find(([x]) => x === e.etat) || [null, "•"])[1]} {e.etat || "—"}</span>
+                </div>
+              );
+            }
             return (
               <div key={e.id} style={{ padding: "12px 0", borderBottom: "1px solid #E2E6EB" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
                   <div style={{ flex: "1 1 160px" }}>
                     <Combo value={e.label} onChange={(v) => setEntry(e.id, { label: v })} options={options} listId={`${idPrefix}-${e.id}`} placeholder="Nom du gradin" />
                   </div>
+                  <button type="button" onClick={() => replierGradin(e.id, true)} style={{ background: "none", border: "none", color: "#8B96A3", cursor: "pointer", padding: 4, fontSize: 12 }} title="Replier ce gradin">Replier ▴</button>
                   <button onClick={() => duplicateEntry(e)} style={{ background: "none", border: "none", color: "#0A5DA8", cursor: "pointer", padding: 4 }} title="Dupliquer ce gradin">
                     <Copy size={15} />
                   </button>
@@ -7735,39 +7996,29 @@ function GradinsPanel({ eq, update, idPrefix }) {
                   )}
                 </div>
 
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(105px, 1fr))", gap: 10, marginBottom: 8 }}>
-                  {[
-                    { phase: estBatterieMono(eq) ? "Phase" : "L1", i: "i1", iVal: e.fields.i1, c: c1, q: q1 },
-                    { phase: "L2", i: "i2", iVal: e.fields.i2, c: c2, q: q2 },
-                    { phase: "L3", i: "i3", iVal: e.fields.i3, c: c3, q: q3 },
-                  ].filter((ph) => !estBatterieMono(eq) || ph.i === "i1").map((ph) => (
-                    <div key={ph.phase} style={{ border: "1px solid #E2E6EB", borderRadius: 8, padding: 8 }}>
-                      <div style={{ fontSize: 10.5, fontWeight: 700, color: "#8B96A3", marginBottom: 6 }}>{ph.phase}</div>
-                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                        <MiniInput label="I" unit="A" value={ph.iVal} onChange={(v) => setField(e.id, ph.i, v)} validState={iStatus(ph.iVal)} />
-                        <MiniComputed label={estBatterieMono(eq) ? "C" : "C (×3, triangle)"} unit="µF" value={ph.c} />
-                        <MiniComputed label="Q phase" unit="kVAR" value={ph.q} />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 8 }}>
-                  <MiniInput label="Q" unit="kVAR" value={e.fields.q} onChange={(v) => setField(e.id, "q", v)} validState={qStatus} />
-                  <MiniInput label="U" unit="V" value={e.fields.u} onChange={(v) => setField(e.id, "u", v)} />
-                  <MiniComputed label="I théorique" unit="A" value={iTheo} />
-                  <MiniComputed label={pg.source === "estime" ? "Q total (estimé)" : pg.source === "declare" ? "Q total (déclaré)" : "Q total calculé"} unit="kVAR" value={pg.total} />
-                </div>
-
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 8 }}>
-                  <MiniInput label="Self (inductance)" unit="mH" value={e.fields.selfMA} onChange={(v) => setField(e.id, "selfMA", v)} />
-                  <MiniInput label="Self" unit="Hz" value={e.fields.selfFrequence} onChange={(v) => setField(e.id, "selfFrequence", v)} />
-                  {freqAccordTheo !== null && (
-                    <MiniComputed label="Fréq. d'accord déduite (Thomson)" unit="Hz" value={freqAccordTheo} />
-                  )}
-                  {freqAccordTheo !== null && numOf(e.fields.selfFrequence) !== null && Math.abs(freqAccordTheo - numOf(e.fields.selfFrequence)) / numOf(e.fields.selfFrequence) > 0.1 && (
-                    <span style={{ fontSize: 10.5, color: "#B5730A" }}>⚠ écart &gt; 10% avec la valeur mesurée — à vérifier</span>
-                  )}
+                {/* Mesures du gradin : même présentation que les contrôles (grille par phase, calculs en bleu, pastilles). */}
+                <div className="controle-dense" style={{ background: "#fff", border: "1px solid #E2E6EB", borderRadius: 12, padding: "11px 12px 10px", marginBottom: 10 }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 700, color: "#1A1F26", marginBottom: 8 }}>Mesures du gradin</div>
+                  <GrilleSaisiePhases mono={mono} lignes={[
+                    { libelle: "I", unite: "A", cellules: [["i1", c1], ["i2", c2], ["i3", c3]].map(([k]) => <CelluleSaisieNombre key={k} value={e.fields[k]} onChange={(v) => setField(e.id, k, v)} validState={iStatus(e.fields[k])} />) },
+                    { libelle: mono ? "C" : "C (×3)", unite: "µF", cellules: [c1, c2, c3].map((c, i) => <CelluleSaisieCalc key={i} value={c} />) },
+                    { libelle: "Q phase", unite: "kVAR", cellules: [q1, q2, q3].map((q, i) => <CelluleSaisieCalc key={i} value={q} />) },
+                  ]} />
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(118px, 1fr))", gap: 8, marginTop: 10 }}>
+                    <ChampSaisieEtiquete etiquette="Q plaque" unite="kVAR"><CelluleSaisieNombre value={e.fields.q} onChange={(v) => setField(e.id, "q", v)} validState={qStatus} /></ChampSaisieEtiquete>
+                    <ChampSaisieEtiquete etiquette="U" unite="V"><CelluleSaisieNombre value={e.fields.u} onChange={(v) => setField(e.id, "u", v)} /></ChampSaisieEtiquete>
+                    <ChampSaisieEtiquete etiquette="Self" unite="mH"><CelluleSaisieNombre value={e.fields.selfMA} onChange={(v) => setField(e.id, "selfMA", v)} /></ChampSaisieEtiquete>
+                    <ChampSaisieEtiquete etiquette="Self" unite="Hz"><CelluleSaisieNombre value={e.fields.selfFrequence} onChange={(v) => setField(e.id, "selfFrequence", v)} /></ChampSaisieEtiquete>
+                  </div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 9, paddingTop: 9, borderTop: "1px dashed #E2E6EB" }}>
+                    <PastilleCalcul texte={`I théorique ${iTheo === null ? "—" : String(iTheo).replace(".", ",") + " A"}`} vide={iTheo === null} />
+                    {iTheo !== null && <PastilleCalcul seuil texte={`tolérance ${String(tolMin).replace(".", ",")} – ${String(tolMax).replace(".", ",")} A`} />}
+                    <PastilleCalcul texte={`${pg.source === "estime" ? "Q total estimé" : pg.source === "declare" ? "Q total déclaré" : "Q total"} ${pg.total === null || pg.total === undefined ? "—" : String(pg.total).replace(".", ",") + " kVAR"}`} vide={pg.total === null || pg.total === undefined} etat={qStatus && qStatus !== "ok" ? qStatus : null} />
+                    {freqAccordTheo !== null && (() => {
+                      const ecart = numOf(e.fields.selfFrequence) !== null && Math.abs(freqAccordTheo - numOf(e.fields.selfFrequence)) / numOf(e.fields.selfFrequence) > 0.1;
+                      return <PastilleCalcul texte={`Fréq. d'accord (Thomson) ${String(freqAccordTheo).replace(".", ",")} Hz${ecart ? " — écart > 10 % avec la self, à vérifier" : ""}`} etat={ecart ? "warning" : null} />;
+                    })()}
+                  </div>
                 </div>
 
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap", marginBottom: 6 }}>
@@ -7838,8 +8089,11 @@ function GradinsPanel({ eq, update, idPrefix }) {
                 </div>
 
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                  <AutoTextArea className="champ-action" placeholder="Action" value={e.action} onChange={(v) => setEntry(e.id, { action: v })} style={{ width: actionInputWidth(e.action), padding: "5px 7px", fontSize: 12 }} />
-                  <EtatRapide value={e.etat} onChange={(__v) => setEntry(e.id, { etat: __v })} />
+                  <div className="champ-action" style={{ position: "relative", width: actionInputWidth(e.action) }}>
+                    <AutoTextArea placeholder="Action" value={e.action} onChange={(v) => setEntry(e.id, { action: v })} style={{ width: "100%", padding: "5px 30px 5px 7px", fontSize: 12 }} />
+                    <BoutonDicteeTexte valeur={e.action} onChange={(v) => setEntry(e.id, { action: v })} />
+                  </div>
+                  <EtatRapide value={e.etat} onChange={(__v) => { setEntry(e.id, { etat: __v }); if (__v === "Conforme" && gradinMesure(e)) replierGradin(e.id, true); }} />
                 </div>
               </div>
             );
@@ -7932,11 +8186,51 @@ function ElementsBatteriePanel({ eq, update, idPrefix }) {
   const moyenne = moyenneReferenceBatterie(valeurs, cfg.toleranceBasse, cfg.toleranceHaute);
   const nbDefectueux = entries.filter((e) => elementBatterieStatus(e.fields.tension, moyenne, cfg.toleranceBasse, cfg.toleranceHaute) === "bad").length;
 
+  // Dictée : chaque tension prononcée remplit l'élément en cours puis passe au suivant
+  // (« retour » revient en arrière et efface, « suivant » saute un élément, « stop » termine).
+  const [curseur, setCurseur] = useState(0);
+  const [entendu, setEntendu] = useState("");
+  const etatRef = useRef({}); etatRef.current = { eq, entries, curseur, update };
+  const dictee = useDictee((phrase) => {
+    const { eq: eqC, entries: liste, curseur: cur, update: maj } = etatRef.current;
+    setEntendu(phrase.trim());
+    const cmd = commandeDictee(phrase);
+    if (cmd === "stop") { dictee.arreter(); return; }
+    if (cmd === "retour") {
+      const k = Math.max(0, cur - 1);
+      if (liste[k]) maj({ ...eqC, controles: { ...eqC.controles, elements_dynamique: liste.map((x, i) => (i === k ? { ...x, fields: { ...x.fields, tension: "" } } : x)) } });
+      setCurseur(k); return;
+    }
+    if (cmd === "suivant") { setCurseur(Math.min(liste.length - 1, cur + 1)); return; }
+    const nombres = nombresDictes(phrase);
+    if (!nombres.length) return;
+    let k = cur;
+    const next = liste.map((x) => x);
+    nombres.forEach((n) => { if (next[k]) { next[k] = { ...next[k], fields: { ...next[k].fields, tension: n } }; k++; } });
+    maj({ ...eqC, controles: { ...eqC.controles, elements_dynamique: next } });
+    setCurseur(Math.min(k, liste.length - 1));
+    if (k >= liste.length) dictee.arreter();
+  });
+  const lancerDictee = () => {
+    const premierVide = entries.findIndex((e) => numOf(e.fields.tension) === null);
+    setCurseur(premierVide >= 0 ? premierVide : 0); setEntendu(""); dictee.demarrer();
+  };
+  useEffect(() => {
+    if (!dictee.actif) return;
+    const el = document.querySelector(`[data-element-batterie="${entries[curseur]?.id}"]`);
+    if (el) el.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [curseur, dictee.actif]); // eslint-disable-line react-hooks/exhaustive-deps
+
   return (
     <Card style={{ marginBottom: 14 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10, flexWrap: "wrap", gap: 8 }}>
         <SectionTitle>Relevé des tensions batterie</SectionTitle>
-        <div style={{ display: "flex", gap: 8 }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {reconnaissanceVocaleDisponible() && entries.length > 0 && (
+            <button onClick={() => (dictee.actif ? dictee.arreter() : lancerDictee())} style={dictee.actif ? { ...btnGhost("#fff"), background: "#C0392B", color: "#fff", border: "1px solid #C0392B" } : btnGhost(BRAND.blue)} title="Dicter les tensions élément par élément">
+              <IconeMicro taille={13} /> {dictee.actif ? "Arrêter la dictée" : "Dicter les tensions"}
+            </button>
+          )}
           <button onClick={regenerer} style={btnGhost(BRAND.blue)} title="Régénère les emplacements selon le nombre de branches / blocs déclaré"><RefreshCw size={13} /> Régénérer</button>
           <button onClick={addEntry} style={btnGhost(BRAND.blue)}><Plus size={13} /> Ajouter</button>
         </div>
@@ -7964,15 +8258,24 @@ function ElementsBatteriePanel({ eq, update, idPrefix }) {
         {nbDefectueux > 0 && <span style={{ color: "#C0392B", fontWeight: 700 }}>{nbDefectueux} élément(s) défectueux</span>}
       </div>
 
+      {dictee.erreur && <div style={{ fontSize: 12, color: "#C0392B", marginBottom: 8 }}>{dictee.erreur}</div>}
+      {dictee.actif && entries[curseur] && (
+        <div style={{ position: "sticky", top: 52, zIndex: 15, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", background: "#1A1F26", color: "#fff", borderRadius: 10, padding: "9px 12px", marginBottom: 10, boxShadow: "0 6px 16px rgba(0,0,0,0.18)" }}>
+          <span style={{ width: 10, height: 10, borderRadius: "50%", background: "#E74C3C", boxShadow: "0 0 0 4px rgba(231,76,60,0.3)" }} />
+          <span style={{ fontWeight: 700, fontSize: 13 }}>{entries[curseur].label} ({curseur + 1}/{entries.length}) — dites la tension</span>
+          {entendu && <span style={{ fontSize: 12, color: "#C9D1DA" }}>entendu : « {entendu} »</span>}
+          <span style={{ fontSize: 11, color: "#9AA5B1", flex: "1 1 100%" }}>« retour » pour corriger · « suivant » pour passer · « stop » pour finir · dites « virgule » : « douze virgule soixante-dix »</span>
+        </div>
+      )}
       {entries.length === 0 ? (
         <div style={{ textAlign: "center", padding: 18, color: "#8B96A3", fontSize: 12.5, border: "1px dashed #D8DEE5", borderRadius: 10 }}>Aucun élément — utilisez "Régénérer" pour créer les emplacements</div>
       ) : (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(64px, 1fr))", gap: 6 }}>
-          {entries.map((e) => (
-            <div key={e.id} style={{ border: "1px solid #E2E6EB", borderRadius: 6, padding: "4px 5px", textAlign: "center" }} title={e.label}>
+        <div className="grille-elements" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(64px, 1fr))", gap: 6 }}>
+          {entries.map((e, idx) => (
+            <div key={e.id} data-element-batterie={e.id} onClick={() => { if (dictee.actif) setCurseur(idx); }} style={{ border: dictee.actif && idx === curseur ? "2px solid #0A5DA8" : "1px solid #E2E6EB", boxShadow: dictee.actif && idx === curseur ? "0 0 0 3px rgba(10,93,168,0.18)" : "none", borderRadius: 6, padding: "4px 5px", textAlign: "center" }} title={e.label}>
               <div style={{ fontSize: 9, fontWeight: 700, color: "#8B96A3", marginBottom: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{e.label}</div>
               <input
-                type="number" step="any" value={e.fields.tension ?? ""} onChange={(ev) => setField(e.id, "tension", ev.target.value)}
+                type="number" step="any" enterKeyHint="next" value={e.fields.tension ?? ""} onChange={(ev) => setField(e.id, "tension", ev.target.value)}
                 style={{
                   ...inputStyle, width: "100%", padding: "3px 2px", fontSize: 11.5, textAlign: "center",
                   border: `1.5px solid ${elementBatterieStatus(e.fields.tension, moyenne, cfg.toleranceBasse, cfg.toleranceHaute) === "bad" ? "#C0392B" : elementBatterieStatus(e.fields.tension, moyenne, cfg.toleranceBasse, cfg.toleranceHaute) === "ok" ? "#0F8A5F" : "#D8DEE5"}`,
@@ -11820,7 +12123,7 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
 
           {/* Conversion d'énergie : la saisie des pièces d'usure vient juste après l'identification (le rapport Word garde son ordre). */}
           <BarreEtapesSections eq={eq} sections={ordreSectionsSaisie(eq, schema)} />
-          {ordreSectionsSaisie(eq, schema).map((sec) => <div key={sec.key} id={`sec-${eq.id}-${sec.key}`} className="bloc-section-saisie">{(() => {
+          {ordreSectionsSaisie(eq, schema).map((sec) => <BlocSectionSaisie key={sec.key} eq={eq} sec={sec}>{(() => {
             // Fiche batterie : saisie une seule fois, dans Pièces d'usure → Batteries (premier modèle).
             // Les données restent dans controles.batterie_id (reprises par le relevé des tensions, les branches, l'autonomie et le rapport Word).
             if (sec.key === "batterie_id" && TYPES_AVEC_PIECES_USURE.includes(eq.type) && schema.sections.some((x) => x.key === "pieces_usure_ups")) return null;
@@ -12417,7 +12720,7 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
                 }
               />
             );
-          })()}</div>)}
+          })()}</BlocSectionSaisie>)}
 
           <RemplacementsPiecesPanel eq={eq} update={update} enAttente={remplacementsEnAttente} rapportDate={rapportDate} />
 
@@ -12980,6 +13283,20 @@ function SiteDetail({ site, allSites, update, onBack, onDelete, onPrint, onPrint
     });
   }, [site.equipements]);
   const [activeTab, setActiveTab] = useState(ongletInitial && site.equipements.some((e) => e.id === ongletInitial) ? ongletInitial : "rapport");
+  // Depuis la vérification avant génération : ouvre l'équipement, déplie la zone et y amène.
+  useEffect(() => {
+    const aller = (ev) => {
+      const { eqId, secKey } = ev.detail || {};
+      if (!eqId || !site.equipements.some((x) => x.id === eqId)) return;
+      setActiveTab(eqId);
+      setTimeout(() => {
+        window.dispatchEvent(new CustomEvent("ht-ouvrir-section", { detail: `${eqId}:${secKey}` }));
+        setTimeout(() => { const el = document.getElementById(`sec-${eqId}-${secKey}`); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); }, 60);
+      }, 120);
+    };
+    window.addEventListener("ht-aller-controle", aller);
+    return () => window.removeEventListener("ht-aller-controle", aller);
+  }, [site.equipements]);
   const [addMenuOpenHTA, setAddMenuOpenHTA] = useState(false);
   const [addMenuOpenConv, setAddMenuOpenConv] = useState(false);
 
@@ -20064,6 +20381,26 @@ export default function App(props) {
   return <FiletSecurite global><AppPrincipale {...props} /></FiletSecurite>;
 }
 function AppPrincipale({ currentUser, onLogout }) {
+  // Défilement (molette, pad) sur un champ numérique sélectionné : le navigateur modifierait la valeur.
+  // On retire le focus du champ pour que la page défile normalement sans toucher à la saisie.
+  // Touche Entrée / « Suivant » du clavier dans une case de mesure : passe à la case suivante (L1 → L2 → L3 → ligne suivante).
+  useEffect(() => {
+    const surTouche = (e) => {
+      if (e.key !== "Enter" || e.isComposing) return;
+      const el = e.target;
+      if (!el || el.tagName !== "INPUT" || !["number", "text"].includes(el.type) || !el.closest(".grille-phases, .grille-elements, .controle-dense")) return;
+      const toutes = [...document.querySelectorAll(".grille-phases input, .grille-elements input, .controle-dense input")].filter((x) => !x.disabled && x.offsetParent !== null && ["number", "text"].includes(x.type));
+      const i = toutes.indexOf(el);
+      if (i >= 0 && toutes[i + 1]) { e.preventDefault(); toutes[i + 1].focus(); try { toutes[i + 1].select(); } catch (er) { /* champ number */ } }
+    };
+    document.addEventListener("keydown", surTouche);
+    return () => document.removeEventListener("keydown", surTouche);
+  }, []);
+  useEffect(() => {
+    const surMolette = () => { const el = document.activeElement; if (el && el.tagName === "INPUT" && el.type === "number") el.blur(); };
+    document.addEventListener("wheel", surMolette, { passive: true, capture: true });
+    return () => document.removeEventListener("wheel", surMolette, { capture: true });
+  }, []);
   // Mode « plein soleil » : contraste renforcé et cibles plus grandes, mémorisé sur l'appareil.
   const [contraste, setContraste] = useState(() => { try { return localStorage.getItem("ht-contraste") === "1"; } catch (e) { return false; } });
   const basculerContraste = () => setContraste((c) => { const n = !c; try { localStorage.setItem("ht-contraste", n ? "1" : "0"); } catch (e) { /* ignoré */ } return n; });
@@ -20805,7 +21142,7 @@ function AppPrincipale({ currentUser, onLogout }) {
   }, [printSite, printIv, printAnnexeSite]);
 
   function requestPrintSite(site) {
-    const warnings = siteExportWarnings(site);
+    const warnings = [...siteExportWarnings(site), ...verificationsControlesSite(site)];
     if (warnings.length) setExportConfirm({ kind: "site", data: site, warnings });
     else setPrintSite(site);
   }
@@ -21051,6 +21388,8 @@ function AppPrincipale({ currentUser, onLogout }) {
         .contraste [style*="border: 1px solid rgb(216, 222, 229)"], .contraste [style*="border: 1px solid rgb(226, 230, 235)"] { border-color: #8B96A3 !important; }
         .site-row-meta, .iv-row-meta { flex: 0 0 130px; }
         .etat-icone { display: none; }
+        input[type=number]::-webkit-inner-spin-button, input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+        input[type=number] { -moz-appearance: textfield; appearance: textfield; }
         .bloc-section-saisie { scroll-margin-top: 56px; }
         .barre-etapes::-webkit-scrollbar { display: none; }
         @media (max-width: 720px) {
@@ -21262,15 +21601,31 @@ function AppPrincipale({ currentUser, onLogout }) {
 
       {exportConfirm && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(4,9,16,0.72)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200, padding: 16 }} onClick={() => setExportConfirm(null)}>
-          <div onClick={(e) => e.stopPropagation()} style={{ background: "#FFFFFF", border: "1px solid #D8DEE5", borderRadius: 14, padding: 22, maxWidth: 420, width: "100%", boxShadow: "0 20px 50px rgba(0,0,0,0.3)" }}>
-            <div style={{ fontSize: 14, fontWeight: 700, color: "#1A1F26", marginBottom: 4 }}>Quelques champs semblent incomplets</div>
-            <div style={{ fontSize: 12, color: "#8B96A3", marginBottom: 14 }}>Le rapport Word peut quand même être généré — voici ce qui manque :</div>
-            <ul style={{ margin: 0, paddingLeft: 20, marginBottom: 18 }}>
-              {exportConfirm.warnings.map((w, i) => (
-                <li key={i} style={{ fontSize: 12.5, color: "#3E4A5C", marginBottom: 4 }}>{w}</li>
-              ))}
-            </ul>
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ fontFamily: "'Inter', system-ui, -apple-system, sans-serif", background: "#FFFFFF", border: "1px solid #D8DEE5", borderRadius: 14, padding: 20, maxWidth: 560, width: "100%", maxHeight: "88vh", display: "flex", flexDirection: "column", boxShadow: "0 20px 50px rgba(0,0,0,0.3)" }}>
+            <div style={{ fontSize: 15, fontWeight: 700, color: "#1A1F26", marginBottom: 4 }}>Avant de générer le rapport</div>
+            <div style={{ fontSize: 12, color: "#8B96A3", marginBottom: 12 }}>Le rapport Word peut quand même être généré. Touchez un point pour aller le corriger.</div>
+            <div style={{ overflowY: "auto", flex: "1 1 auto", marginBottom: 14 }}>
+              {[["general", "Informations générales"], ["vide", "Mesures manquantes"], ["action", "État dégradé ou défaillant sans action"], ["phase", "Écarts anormaux entre phases (saisie à vérifier)"]].map(([type, titreGroupe]) => {
+                const liste = exportConfirm.warnings.filter((w) => (typeof w === "string" ? "general" : w.type) === type);
+                if (!liste.length) return null;
+                const couleur = type === "phase" || type === "action" ? "#B5730A" : type === "vide" ? "#5B6B7D" : "#3E4A5C";
+                return (
+                  <div key={type} style={{ marginBottom: 12 }}>
+                    <div style={{ fontSize: 11, fontWeight: 800, color: couleur, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>{titreGroupe} ({liste.length})</div>
+                    {liste.map((w, i) => typeof w === "string" ? (
+                      <div key={i} style={{ fontSize: 12.5, color: "#3E4A5C", padding: "5px 0", borderBottom: "1px solid #F0F2F5" }}>{w}</div>
+                    ) : (
+                      <button key={i} type="button"
+                        onClick={() => { const cible = { eqId: w.eqId, secKey: w.secKey }; setExportConfirm(null); window.dispatchEvent(new CustomEvent("ht-aller-controle", { detail: cible })); }}
+                        style={{ display: "flex", width: "100%", alignItems: "center", justifyContent: "space-between", gap: 10, textAlign: "left", background: "none", border: "none", borderBottom: "1px solid #F0F2F5", padding: "6px 0", cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, color: "#1A1F26" }}>
+                        <span>{w.texte}</span><span style={{ color: "#0A5DA8", fontWeight: 700, whiteSpace: "nowrap", fontSize: 12 }}>Voir →</span>
+                      </button>
+                    ))}
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, flexWrap: "wrap" }}>
               <button onClick={() => setExportConfirm(null)} style={btnGhost()}>Annuler, je complète</button>
               <button
                 onClick={() => {
