@@ -11097,10 +11097,33 @@ function toleranceEssaiSeuil(eq, s, multiple) {
     base: surRelais ? "temps du relais seul (contact de sortie)" : `relais ${frN(t * k, d)} ${unite} + ouverture du disjoncteur ${frN(ouv.ms, 0)} ms (${ouv.source})`,
   };
 }
+// Directionnelles : angle d'injection de I par rapport à la tension de polarisation, et contre-essai à +180°.
+//  - 67 / 67N : centre de la zone = angle caractéristique − 90° (polarisation en quadrature, même convention que les limites de zone) ;
+//  - 32P / 32Q / 37P / 37Q / 32N : déphasage de l'aide (0° aval, 180° amont pour 32N).
+const FAMILLES_DIRECTIONNELLES = ["67", "67N", "32P", "32Q", "37P", "37Q", "32N"];
+const normAngle = (a) => { let x = ((a % 360) + 360) % 360; if (x > 180) x -= 360; return Math.round(x * 10) / 10; };
+const fmtAngle = (a) => `${a > 0 ? "+" : a < 0 ? "−" : ""}${frN(Math.abs(a), 1)}°`;
+function angleEssaiDirectionnel(eq, s) {
+  const fam = ansiFamily(s.label);
+  if (!FAMILLES_DIRECTIONNELLES.includes(fam)) return null;
+  let centre = null;
+  if (fam === "67" || fam === "67N") { const a = numOf(s.fields.angle); centre = a === null ? null : normAngle(a - 90); }
+  else { const aide = calcInjectionAide(s.fields.reglage, uniteReglageSeuil(s), eq, fam, s.fields.modeDetection, 1, s.fields.angle, s.fields.zoneMin, s.fields.zoneMax, s.fields.sens); centre = aide && typeof aide === "object" ? normAngle(aide.dephasage || 0) : 0; }
+  if (centre === null) return null;
+  const ref = fam === "67" ? "Ubc (pour I1)" : fam === "67N" || fam === "32N" ? "U0" : "Va (même phase)";
+  return { centre, oppose: normAngle(centre + 180), ref };
+}
 // Valeur à injecter pour un multiple k du réglage (seuil 0,95 / 1,05 ou point de temps 2 ×, 5 ×…), selon le mode d'injection.
 function valeurInjectionSeuil(eq, s, k, mode) {
   const u = uniteReglageSeuil(s), R = numOf(s.fields.reglage);
   if (R === null || !u || sansInjectionCalculee(s)) return null;
+  if (ansiFamily(s.label) === "24") {
+    const m = String((eq.identification && eq.identification.rapportTPProtection) || "").match(/^\s*[\d.,]+\s*\/\s*([\d.,]+)/);
+    const uSec = m ? parseFloat(m[1].replace(",", ".")) : null;
+    if (!uSec) return { valeur: null, unite: "V", texte: `${frN(R * k, 1)} % de Un secondaire à 50 Hz (renseigner le rapport TP pour la valeur en volts)` };
+    const v = arrondiN((R * k / 100) * uSec, 2);
+    return { valeur: v, unite: "V", texte: `${frN(v, 2)} V secondaire (entre phases) à 50 Hz — à 45 Hz : ${frN(v * 0.9, 2)} V` };
+  }
   if (FAMILLES_TIERS_TENSION.includes(ansiFamily(s.label))) {
     const aideV = calcInjectionAide(s.fields.reglage, "V", eq, ansiFamily(s.label), null, 1);
     if (typeof aideV !== "number") return { valeur: null, unite: "V", texte: `${frN(3 * R * k, 1)} V primaire sur une phase (renseigner le rapport TP pour la valeur secondaire)` };
@@ -11116,7 +11139,10 @@ function valeurInjectionSeuil(eq, s, k, mode) {
     const v = arrondiN(aide * k, 3);
     return { valeur: v, unite: u, texte: `${frN(v, 3)} ${u}${u === "A" || u === "V" ? " secondaire" : ""}` };
   }
-  if (aide && aide.type === "courant_directionnel") { const v = arrondiN(aide.i * k, 3); return { valeur: v, unite: "A", texte: `I = ${frN(v, 3)} A à l'angle caractéristique, U = ${aide.u} V (polarisation)` }; }
+  if (aide && aide.type === "courant_directionnel") {
+    const v = arrondiN(aide.i * k, 3), ang = angleEssaiDirectionnel(eq, s);
+    return { valeur: v, unite: "A", texte: ang ? `I = ${frN(v, 3)} A à ${fmtAngle(ang.centre)} de ${ang.ref}, U = ${aide.u} V` : `I = ${frN(v, 3)} A, U = ${aide.u} V — renseigner l'angle caractéristique pour l'angle d'injection` };
+  }
   if (aide && aide.type === "puissance") { const v = arrondiN(aide.i * k, 3); return { valeur: null, unite: "A", texte: `U = ${aide.u} V, I = ${frN(v, 3)} A, déphasage ${aide.dephasage}°` }; }
   const v = arrondiN(R * k, 3);
   return { valeur: null, unite: u, texte: `${frN(v, 3)} ${u}${u === "A" ? " primaire (renseigner le TC pour la valeur secondaire)" : u === "V" ? " primaire (renseigner le rapport TP pour la valeur secondaire)" : ""}` };
@@ -11555,6 +11581,8 @@ function AssistantEssaiSeuil({ eq, seuils, s, onFermer, onEnregistrer }) {
   const ouvAuto = tempsOuvertureDisjoncteur({ ...eq, controles: { ...eq.controles, config_essais_relais: { mesureSur, tempsOuverture: "" } } });
   const fac = facteursSeuil(s);
   const vNon = valeurInjectionSeuil(eq, s, fac.nonDeclenche, mode), vOui = valeurInjectionSeuil(eq, s, fac.declenche, mode);
+  const angDir = angleEssaiDirectionnel(eq, s);
+  const vOppose = angDir && vOui ? { texte: vOui.texte.replace(fmtAngle(angDir.centre), fmtAngle(angDir.oppose)).replace(/déphasage [^,]*$/, `déphasage ${fmtAngle(angDir.oppose)}`) } : null;
   const uT = uniteTempsSeuil(s);
   const fiche = ficheMethodeRelais(eq);
   // Dictée : chaque nombre remplit la case vide suivante (L1, L2, L3 du 1er point, puis du suivant…) ; « retour » efface la dernière.
@@ -11586,7 +11614,7 @@ function AssistantEssaiSeuil({ eq, seuils, s, onFermer, onEnregistrer }) {
     return vals.every((v) => v >= t.min && v <= t.max) ? "ok" : "bad";
   };
   const etatsPoints = points.map(etatPoint);
-  const etatPropose = seuil.declenche === "Pas de déclenchement" ? "Défaillant"
+  const etatPropose = (seuil.declenche === "Pas de déclenchement" || seuil.sensOppose === "Déclenchement") ? "Défaillant"
     : (seuil.nonDeclenche === "Déclenchement" || etatsPoints.includes("bad")) ? "Dégradé"
     : (etatsPoints.includes("ok") || seuil.declenche === "Déclenchement") ? "Conforme" : "";
   const [etatChoisi, setEtatChoisi] = useState("");
@@ -11675,11 +11703,11 @@ function AssistantEssaiSeuil({ eq, seuils, s, onFermer, onEnregistrer }) {
                 {blocRaccord}
                 {alerteTerre && <div style={{ fontSize: 12, color: alerteTerre.bloquant ? "#C0392B" : "#B5730A", marginTop: 4 }}>⚠ {alerteTerre.texte}</div>}
               </div>
-              {[["nonDeclenche", fac.nonDeclenche, vNon, "Pas de déclenchement"], ["declenche", fac.declenche, vOui, "Déclenchement"]].map(([cle, k, v, attendu]) => (
+              {[["nonDeclenche", fac.nonDeclenche, vNon, "Pas de déclenchement"], ["declenche", fac.declenche, vOui, "Déclenchement"], ...(vOppose ? [["sensOppose", fac.declenche, vOppose, "Pas de déclenchement", `Contre-essai sens opposé — ${libelleMultiple(s, fac.declenche)} à ${fmtAngle(angDir.oppose)}`]] : [])].map(([cle, k, v, attendu, titre]) => (
                 <div key={cle} style={carte}>
                   <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                     <div>
-                      <div style={{ fontSize: 12.5, fontWeight: 700, color: "#1A1F26" }}>{libelleMultiple(s, k)}</div>
+                      <div style={{ fontSize: 12.5, fontWeight: 700, color: "#1A1F26" }}>{titre || libelleMultiple(s, k)}</div>
                       <div style={{ fontSize: 12.5, color: "#0A5DA8", marginTop: 2 }}>Injecter : <b>{v ? v.texte : "renseignez le réglage"}</b></div>
                       <div style={{ fontSize: 11.5, color: "#8B96A3", marginTop: 2 }}>Attendu : {attendu.toLowerCase()}</div>
                     </div>
@@ -11733,7 +11761,7 @@ function AssistantEssaiSeuil({ eq, seuils, s, onFermer, onEnregistrer }) {
               <div style={carte}>
                 <div style={{ fontSize: 12, fontWeight: 700, color: "#1A1F26", marginBottom: 6 }}>Bilan</div>
                 <div style={{ fontSize: 12.5, color: "#3E4A5C", lineHeight: 1.6 }}>
-                  <div>Seuil : {seuil.nonDeclenche || "—"} à {libelleMultiple(s, fac.nonDeclenche)} · {seuil.declenche || "—"} à {libelleMultiple(s, fac.declenche)}</div>
+                  <div>Seuil : {seuil.nonDeclenche || "—"} à {libelleMultiple(s, fac.nonDeclenche)} · {seuil.declenche || "—"} à {libelleMultiple(s, fac.declenche)}{angDir ? ` · sens opposé (${fmtAngle(angDir.oppose)}) : ${seuil.sensOppose || "—"}` : ""}</div>
                   {points.map((p, i) => <div key={i}>Temps à {libelleMultiple(s, p.M)} : {[p.l1, p.l2, p.l3].filter((x) => String(x || "").trim()).join(" / ") || "—"} {uT} {etatsPoints[i] === "ok" ? "✓" : etatsPoints[i] === "bad" ? "✕ hors tolérance" : ""}</div>)}
                 </div>
                 <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", marginTop: 10 }}>
@@ -11792,9 +11820,11 @@ async function genererPlanEssaiRelais(eq) {
       ...(methodeAnsi(s) ? [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: methodeAnsi(s).injection ? "Méthode : " : "Méthode (pas de valeur d'injection calculée) : ", size: 15, color: "5B6B7D" }), new DOCX.TextRun({ text: methodeAnsi(s).texte, size: 15, color: DOCX_DARK })] })] : []),
     ] })] }));
     if (sansInjectionCalculee(s)) return;
-    [[fac.nonDeclenche, "Pas de déclenchement"], [fac.declenche, "Déclenchement"]].forEach(([k, att]) => {
-      const v = valeurInjectionSeuil(eq, s, k, mode);
-      rows.push(new DOCX.TableRow({ cantSplit: true, children: [cel(0, "   Seuil", { fond }), cel(1, libelleMultiple(s, k), { fond }), cel(2, v ? v.texte : "—", { fond }), cel(3, att, { fond }), cel(4, "☐ oui   ☐ non", { fond })] }));
+    const angP = angleEssaiDirectionnel(eq, s);
+    [[fac.nonDeclenche, "Pas de déclenchement"], [fac.declenche, "Déclenchement"], ...(angP ? [[fac.declenche, "Pas de déclenchement", true]] : [])].forEach(([k, att, oppose]) => {
+      let v = valeurInjectionSeuil(eq, s, k, mode);
+      if (oppose && v) v = { ...v, texte: v.texte.replace(fmtAngle(angP.centre), fmtAngle(angP.oppose)).replace(/déphasage [^,]*$/, `déphasage ${fmtAngle(angP.oppose)}`) };
+      rows.push(new DOCX.TableRow({ cantSplit: true, children: [cel(0, oppose ? "   Sens opposé" : "   Seuil", { fond }), cel(1, libelleMultiple(s, k), { fond }), cel(2, v ? v.texte : "—", { fond }), cel(3, att, { fond }), cel(4, "☐ oui   ☐ non", { fond })] }));
     });
     pointsTempsSeuil(seuils, s).forEach((p) => {
       const v = valeurInjectionSeuil(eq, s, p.M, mode), t = toleranceEssaiSeuil(eq, s, estSeuilCEI(s) ? p.M : null);
@@ -12458,13 +12488,20 @@ function DisjoncteurRelaisPanel({ eq, update, custom, onAddCustom, onChangeCusto
                           <span style={pill}>{estHomopolaire ? "U0 inj." : "U inj. (Va, phase A)"} : {aide.u} V</span>
                           <span style={pill}>{estHomopolaire ? "I0 inj." : "I inj. (Ia, phase A)"} : {aide.i} A</span>
                           <span style={pill}>Déphasage : {aide.dephasage}°</span>
+                          <span style={pill}>Contre-essai : {fmtAngle(normAngle((aide.dephasage || 0) + 180))} → pas de déclenchement</span>
                           {(aide.limiteHaute !== null && aide.limiteBasse !== null) && <span style={pill}>Limites secteur : {aide.limiteHaute}° et {aide.limiteBasse}°</span>}
                         </span>
                       );
                     }
                     if (aide && typeof aide === "object" && aide.type === "courant_directionnel") {
-                      const limites = (aide.limiteHaute !== null && aide.limiteBasse !== null) && (
-                        <span style={pill}>Limites zone : {aide.limiteHaute}° et {aide.limiteBasse}°</span>
+                      const angD = angleEssaiDirectionnel(eq, s);
+                      const limites = (
+                        <>
+                          {angD ? <span style={{ ...pill, fontWeight: 700 }}>Angle I / {angD.ref} : {fmtAngle(angD.centre)}</span> : <span style={{ ...pill, color: "#B5730A" }}>Renseigner l'angle caractéristique</span>}
+                          {angD && <span style={pill}>Contre-essai : {fmtAngle(angD.oppose)} → pas de déclenchement</span>}
+                          {(aide.limiteHaute !== null && aide.limiteBasse !== null) && <span style={pill}>Limites zone : {aide.limiteHaute}° et {aide.limiteBasse}°</span>}
+                          <span style={{ fontSize: 10.5, color: "#8B96A3", flexBasis: "100%" }}>Angle compté sur la tension de polarisation (centre de zone = angle caractéristique − 90°) ; sens avance / retard selon la convention du relais — à vérifier sur la notice.</span>
+                        </>
                       );
                       if (en3U3I) {
                         return (
@@ -12478,8 +12515,8 @@ function DisjoncteurRelaisPanel({ eq, update, custom, onAddCustom, onChangeCusto
                       }
                       return (
                         <span style={{ display: "flex", gap: 6, flexWrap: "wrap" }} title="Aide au technicien — non imprimée dans le rapport">
-                          <span style={pill}>I1 = {aide.i} A</span>
-                          <span style={pill}>Ubc = {aide.u} V</span>
+                          <span style={pill}>{ansiFamily(s.label) === "67N" ? "I0" : "I1"} = {aide.i} A</span>
+                          <span style={pill}>{ansiFamily(s.label) === "67N" ? "U0" : "Ubc"} = {aide.u} V</span>
                           {limites}
                         </span>
                       );
@@ -12505,7 +12542,7 @@ function DisjoncteurRelaisPanel({ eq, update, custom, onAddCustom, onChangeCusto
                   )}
                   {["67", "67N", "32P", "32Q", "37P", "37Q", "32N"].includes(ansiFamily(s.label)) && (
                     <div style={{ fontSize: 10.5, color: "#8B96A3", marginTop: 2, marginBottom: 4, lineHeight: 1.45, flexBasis: "100%" }} title="Aide au technicien — non imprimée dans le rapport">
-                      Protection directionnelle (sens réglé : {s.fields.sens || "non renseigné"}) — un simple dépassement du seuil ne suffit pas à valider l'essai, le relais compare aussi la phase du courant injecté à une tension de référence (polarisation). <b>La tension de référence à utiliser n'est pas la même selon la protection</b> : {ansiFamily(s.label) === "67" || ansiFamily(s.label) === "67N" ? "pour 67/67N, c'est une tension composée d'une AUTRE phase (ex. I1 avec Ubc, pas Va — montage en quadrature)." : ansiFamily(s.label) === "32N" ? "pour 32N, ce sont les grandeurs homopolaires U0/I0 (prises sur le circuit terre/neutre), pas une phase en particulier." : "pour cette protection de puissance, c'est la tension de la MÊME phase que le courant injecté (ex. Ia avec Va, pas une tension composée — montage direct, à la différence de 67/67N)."} Méthode : injecter au seuil {ansiFamily(s.label).startsWith("67") ? `à l'angle caractéristique réglé (${s.fields.angle || "?"}°)` : "en phase (0°)"} par rapport à cette tension de référence et vérifier le déclenchement, PUIS répéter à +180° (courant inversé) et vérifier que le relais NE déclenche PAS cette fois (restriction dans le sens opposé). La correspondance exacte entre un angle et « Amont »/« Aval » dépend du câblage du TC/TP de ce relais précis (polarité) — à confirmer avec la doc constructeur ou un essai de polarité, ce n'est pas une convention universelle.
+                      Protection directionnelle (sens réglé : {s.fields.sens || "non renseigné"}) — un simple dépassement du seuil ne suffit pas à valider l'essai, le relais compare aussi la phase du courant injecté à une tension de référence (polarisation). <b>La tension de référence à utiliser n'est pas la même selon la protection</b> : {ansiFamily(s.label) === "67" || ansiFamily(s.label) === "67N" ? "pour 67/67N, c'est une tension composée d'une AUTRE phase (ex. I1 avec Ubc, pas Va — montage en quadrature)." : ansiFamily(s.label) === "32N" ? "pour 32N, ce sont les grandeurs homopolaires U0/I0 (prises sur le circuit terre/neutre), pas une phase en particulier." : "pour cette protection de puissance, c'est la tension de la MÊME phase que le courant injecté (ex. Ia avec Va, pas une tension composée — montage direct, à la différence de 67/67N)."} Méthode : injecter au seuil {ansiFamily(s.label).startsWith("67") ? (angleEssaiDirectionnel(eq, s) ? `à ${fmtAngle(angleEssaiDirectionnel(eq, s).centre)} (angle caractéristique ${s.fields.angle}° − 90°, centre de la zone)` : "au centre de la zone (angle caractéristique − 90°, angle à renseigner)") : "en phase (0°)"} par rapport à cette tension de référence et vérifier le déclenchement, PUIS répéter à +180° (courant inversé) et vérifier que le relais NE déclenche PAS cette fois (restriction dans le sens opposé). La correspondance exacte entre un angle et « Amont »/« Aval » dépend du câblage du TC/TP de ce relais précis (polarité) — à confirmer avec la doc constructeur ou un essai de polarité, ce n'est pas une convention universelle.
                       {s.essai.fields.typeValise !== "3U3I (triphasé)" && " En injection monophasée (1U1I), la tension de référence à utiliser n'est pas forcément celle de la même phase que le courant injecté : selon le montage de polarisation du relais (connexion 0°/30°/60°/90°, propre à ce modèle), il peut falloir une tension composée d'une autre phase (ex. injecter Ia avec Vbc, pas Va) — à vérifier dans la doc du relais avant l'essai, sous peine de fausser le résultat sans que ça se voie."}
                     </div>
                   )}
@@ -19775,6 +19812,7 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
           { text: modeInjectionEssai(s), etat: null },
           s.essai.fields.courant_injecte && { text: `Valeur injectée : ${s.essai.fields.courant_injecte} ${uInjecte}${modeInjectionEssai(s) === "Injection primaire" && uInjecte === "A" ? " (primaire)" : ""}`, etat: null },
           tol && { text: `Tolérance attendue : ${tol.min} – ${tol.max} ${tol.unite}`, etat: null },
+          asst && asst.seuil?.sensOppose && { text: `Contre-essai sens opposé : ${asst.seuil.sensOppose.toLowerCase()}`, etat: asst.seuil.sensOppose === "Déclenchement" ? "bad" : "ok" },
           asst && (asst.seuil?.nonDeclenche || asst.seuil?.declenche) && { text: `Seuil vérifié : ${asst.seuil.nonDeclenche ? `${asst.seuil.nonDeclenche.toLowerCase()} à ${libelleMultiple(s, facA.nonDeclenche)}` : ""}${asst.seuil.nonDeclenche && asst.seuil.declenche ? ", " : ""}${asst.seuil.declenche ? `${asst.seuil.declenche.toLowerCase()} à ${libelleMultiple(s, facA.declenche)}` : ""}`, etat: asst.seuil.declenche === "Pas de déclenchement" ? "bad" : asst.seuil.nonDeclenche === "Déclenchement" ? "warning" : null },
           ...(asst && Array.isArray(asst.points) ? asst.points.slice(1).filter((p) => [p.l1, p.l2, p.l3].some((x) => String(x || "").trim())).map((p) => {
             const tp = toleranceEssaiSeuil(eq, s, estSeuilCEI(s) ? p.M : null);
