@@ -1369,7 +1369,7 @@ const MARQUE_MATERIEL_INVERSEUR = {
 const LISTE_MATERIEL_INVERSEUR_OPTIONS = optionsParMarque(MARQUE_MATERIEL_INVERSEUR, combineValues(MARQUE_MATERIEL_INVERSEUR));
 const LISTE_COUPLAGE_TDY = ["Yzn11", "Dyn11", "Dzn10", "Dzn6", "Yyn6", "Yzn5", "Dyn5", "Yyn0", "Yz11", "Yd11", "Dy11", "Dz10", "Dz6", "Yy6", "Dd6", "Yz5", "Yd5", "Dy5", "Yy0", "Dd0"];
 const OUI_NON_LIST = ["OUI", "NON"];
-const TENSION_ISOLEMENT = ["200", "500", "1000", "5000", "10000", "15000"];
+const TENSION_ISOLEMENT = ["200", "500", "1000", "2500", "5000", "10000", "15000"];
 // CEI 62271-100 : la résistance de contact (quelques dizaines à centaines de µΩ) n'est fiable et
 // répétable qu'avec un courant d'essai DC suffisant (100 A minimum usuel) — sans lui, la valeur
 // mesurée n'a pas de sens comparatif d'une visite à l'autre.
@@ -2103,6 +2103,14 @@ function emptySeuilEntry(label) {
   };
 }
 const LISTE_TYPE_VALISE = ["1U1I (monophasé)", "3U3I (triphasé)"];
+// Mode d'injection de l'essai : secondaire (valise sur les entrées du relais, en aval des TC) ou primaire
+// (courant injecté dans le primaire du TC / du tore). Par défaut : primaire pour une protection de terre
+// mesurée par tore homopolaire (50N/51N), secondaire pour tout le reste (max de I, tension, fréquence…).
+const LISTE_MODE_INJECTION = ["Injection secondaire", "Injection primaire"];
+function modeInjectionDefaut(ansiCode, modeDetection) {
+  return ["50N", "51N", "50G", "51G"].includes(ansiCode) && modeDetection !== "Somme des 3I (calculée)" ? "Injection primaire" : "Injection secondaire";
+}
+function modeInjectionEssai(s) { return (s.essai && s.essai.fields && s.essai.fields.modeInjection) || modeInjectionDefaut(ansiFamily(s.label), s.fields && s.fields.modeDetection); }
 // Extrait le code ANSI en tête d'un libellé de seuil (ex. "50-1 — Max I..." → "50", "81H — ..." → "81H").
 function ansiFamily(label) {
   if (/^DEC\b/.test(label || "")) return "DEC";
@@ -2157,7 +2165,89 @@ const ANSI_REGLAGE_FIELDS = {
   // ParametrageRelaisPanel. Les seuils numériques réels (27, 59, 59N, 81O, 81U) se paramètrent
   // séparément, comme des seuils à part entière dans cette même liste.
   "DEC": [],
+  // Fonctions qui retombaient à tort sur les champs du max de I (A) : chacune reçoit sa grandeur propre.
+  "12": [{ key: "reglage", label: "Seuil de vitesse", unit: "% Nn" }],
+  "14": [{ key: "reglage", label: "Seuil de vitesse", unit: "% Nn" }],
+  "21": [{ key: "reglage", label: "Impédance (zone 1)", unit: "Ω" }],
+  "21B": [{ key: "reglage", label: "Impédance", unit: "Ω" }],
+  "21FL": [],
+  "21YN": [{ key: "reglage", label: "Admittance", unit: "mS" }],
+  "24": [{ key: "reglage", label: "Seuil U/f", unit: "% Un/fn" }],
+  "26": [{ key: "reglage", label: "Seuil", unit: "°C" }],
+  "38": [{ key: "reglage", label: "Seuil", unit: "°C" }],
+  "27D": [{ key: "reglage", label: "Réglage (tension directe Vd)", unit: "V" }],
+  "27R": [{ key: "reglage", label: "Réglage (tension rémanente)", unit: "V" }],
+  "27TN": [{ key: "reglage", label: "Réglage (V3 harmonique)", unit: "% Un" }],
+  "37": [{ key: "reglage", label: "Réglage", unit: "A" }],
+  "40": [{ key: "reglage", label: "Diamètre / impédance", unit: "Ω" }],
+  "47": [{ key: "reglage", label: "Réglage (tension inverse Vi)", unit: "V" }],
+  "48": [{ key: "reglage", label: "Courant de démarrage Is", unit: "A" }],
+  "49F": [{ key: "seuil_alarme", label: "Seuil alarme", unit: "%" }, { key: "seuil_declenchement", label: "Seuil déclenchement", unit: "%" }, { key: "constante_temps", label: "Constante de temps", unit: "min" }],
+  "50BF": [{ key: "reglage", label: "Seuil de courant", unit: "A" }],
+  "50HS": [{ key: "reglage", label: "Réglage", unit: "A" }],
+  "50V": [{ key: "reglage", label: "Réglage (à tension nominale)", unit: "A" }, { key: "u_retenue", label: "Tension de retenue", unit: "% Un" }],
+  "51V": [{ key: "courbe", label: "Courbe à temps", options: LISTE_COURBE_RELAIS }, { key: "reglage", label: "Réglage (à tension nominale)", unit: "A" }, { key: "tms", label: "Multiplicateur de temps (TMS)" }, { key: "u_retenue", label: "Tension de retenue", unit: "% Un" }],
+  "51C": [{ key: "reglage", label: "Courant de déséquilibre", unit: "A" }],
+  "50ARC": [{ key: "reglage", label: "Seuil de courant (mode lumière + courant)", unit: "A" }],
+  "64REF": [{ key: "reglage", label: "Réglage", unit: "% In" }],
+  "64G": [{ key: "reglage", label: "Réglage", unit: "%" }],
+  "66": [{ key: "nb_demarrages", label: "Nombre de démarrages" }, { key: "periode", label: "Période", unit: "min" }],
+  "67NI": [{ key: "reglage", label: "Seuil (Vo)", unit: "V" }],
+  "68": [],
+  "68H": [{ key: "reglage", label: "Seuil (H5 / H1)", unit: "%" }],
+  "78": [{ key: "reglage", label: "Saut de vecteur", unit: "°" }],
+  "78PS": [],
+  "87G": [{ key: "reglage", label: "Réglage (pente)", unit: "%" }],
+  "87L": [{ key: "reglage", label: "Réglage (pente)", unit: "%" }],
+  "87M": [{ key: "reglage", label: "Réglage (pente)", unit: "%" }],
 };
+// Méthode d'essai propre à certaines fonctions. injection: false → pas de calcul d'injection (méthode constructeur) ;
+// injection: true → l'aide au calcul reste valable, ce texte la complète. Repères à vérifier sur la notice du relais.
+const METHODE_ANSI = {
+  "12": { injection: false, texte: "Vitesse mesurée par un capteur (roue phonique, tachymètre) : simuler la fréquence d'impulsions du capteur au seuil réglé avec un générateur de fréquence, ou essai réel en survitesse — selon la notice." },
+  "14": { injection: false, texte: "Vitesse mesurée par un capteur : simuler la fréquence d'impulsions correspondant au seuil bas, ou essai au ralentissement de la machine — selon la notice." },
+  "21": { injection: false, texte: "Protection de distance : essai par zones avec une valise triphasée capable de simuler l'impédance de défaut (U et I déphasés) — hors des possibilités du Compano 100 ; méthode et valeurs du constructeur." },
+  "21B": { injection: false, texte: "Minimum d'impédance : injection simultanée U et I (Z = U / I) avec l'angle de la caractéristique — méthode du constructeur." },
+  "21FL": { injection: false, texte: "Localisateur de défaut : fonction de mesure (distance en km), pas de déclenchement — vérifier les paramètres de ligne et la lecture lors d'un défaut simulé, selon la notice." },
+  "21YN": { injection: false, texte: "Admittance homopolaire : injection de U0 et I0 avec un déphasage précis — méthode du constructeur." },
+  "24": { injection: true, texte: "Contrôle de flux (U/f) : à fréquence nominale, le seuil est atteint pour U = réglage × Un secondaire ; vérifier aussi à fréquence réduite (U/f constant)." },
+  "26": { injection: false, texte: "Thermostat : contact sec — vérifier le basculement en chauffant le bulbe (bain ou décapeur) ou en actionnant le contact, contrôler la remontée de l'information et le déclenchement." },
+  "38": { injection: false, texte: "Sonde de palier (PT100) : simuler la résistance de la sonde à la température réglée avec une boîte à décades." },
+  "27D": { injection: true, texte: "Tension directe Vd : avec une injection sur une seule phase (Compano 100), Vd = U injectée ÷ 3 — injecter 3 × le seuil sur une phase, les deux autres à 0 V. Fonction à minimum : déclenche quand on descend sous le seuil." },
+  "27R": { injection: true, texte: "Tension rémanente : contrôle la décroissance de la tension après ouverture (autorisation de réenclenchement / transfert). Injecter la tension puis la réduire sous le seuil." },
+  "27TN": { injection: false, texte: "Tension résiduelle harmonique 3 (100 % stator) : nécessite l'injection d'une tension à 150 Hz — méthode du constructeur." },
+  "37": { injection: true, texte: "Minimum de courant : déclenche quand le courant descend sous le seuil (désamorçage de pompe, perte de charge) — partir au-dessus du seuil puis descendre." },
+  "40": { injection: false, texte: "Perte d'excitation (cercle d'impédance) : injection U et I avec déphasage — méthode du constructeur." },
+  "47": { injection: true, texte: "Tension inverse Vi : avec une injection sur une seule phase (Compano 100), Vi = U injectée ÷ 3 — injecter 3 × le seuil sur une phase, les deux autres à 0 V." },
+  "48": { injection: true, texte: "Démarrage trop long : injecter un courant > Is pendant plus que la temporisation de démarrage. Blocage rotor : courant > Is maintenu après la fin du démarrage. Vérifier la temporisation propre à chaque cas sur la notice." },
+  "49F": { injection: true, texte: "Image thermique câble / ligne : injection soutenue dans le temps, déclenchement selon la constante de temps — partir d'un état froid (image thermique remise à zéro)." },
+  "50BF": { injection: true, texte: "Défaillance disjoncteur : injecter au-dessus du seuil avec un ordre de déclenchement maintenu, disjoncteur qui ne s'ouvre PAS (bobine isolée). Chronométrer l'ordre de secours (sortie 50BF du relais), pas les contacts du disjoncteur." },
+  "50HS": { injection: true, texte: "Enclenchement sur défaut (SOTF) : actif seulement pendant une courte fenêtre après la fermeture du disjoncteur — fermer le disjoncteur avec l'injection déjà présente." },
+  "50V": { injection: true, texte: "Max de I à retenue de tension : le seuil baisse quand la tension baisse. Vérifier le seuil à tension nominale, puis à tension réduite (seuil attendu selon la loi de retenue de la notice)." },
+  "51V": { injection: true, texte: "Max de I temporisé à retenue de tension : vérifier la courbe à tension nominale, puis le seuil abaissé à tension réduite (loi de retenue de la notice)." },
+  "51C": { injection: true, texte: "Déséquilibre batterie de condensateurs : courant mesuré par le TC entre les deux neutres (double étoile) — injection sur ce TC seul." },
+  "50ARC": { injection: false, texte: "Protection arc : détection de lumière (capteurs) seule ou lumière + courant. Essai avec une lampe flash / source lumineuse sur chaque capteur ; en mode lumière + courant, injecter en même temps un courant au-dessus du seuil. Vérifier le temps de déclenchement (quelques ms)." },
+  "64REF": { injection: false, texte: "Différentielle de terre restreinte : injection simultanée sur le TC de neutre et les TC de phase (stabilité puis déclenchement) — méthode du constructeur." },
+  "64G": { injection: false, texte: "100 % stator : combinaison 59N et harmonique 3 — méthode du constructeur." },
+  "66": { injection: false, texte: "Limitation du nombre de démarrages : pas d'injection — vérifier le paramétrage et, si besoin, simuler des démarrages successifs pour contrôler le blocage." },
+  "67NI": { injection: false, texte: "Défaut terre intermittent : nécessite la simulation de transitoires (réamorçages) — méthode et outils du constructeur." },
+  "68": { injection: false, texte: "Sélectivité logique : vérifier l'émission de l'attente logique (injection au-dessus du seuil 50/51 → sortie AL active) et la réception (attente logique reçue → le seuil concerné ne déclenche pas)." },
+  "68H": { injection: false, texte: "Détection harmonique 5 (blocage de la différentielle) : injection d'un courant 50 Hz superposé à du 250 Hz — hors des possibilités du Compano 100 ; méthode du constructeur." },
+  "78": { injection: false, texte: "Saut de vecteur : nécessite une valise capable d'un saut de phase instantané de la tension — méthode du constructeur (à vérifier si votre valise le permet)." },
+  "78PS": { injection: false, texte: "Perte de synchronisme : simulation de glissement de pôles — méthode du constructeur." },
+  "87": { injection: false, texte: "Différentielle : injection simultanée des deux côtés (stabilité et pente) — méthode du constructeur." },
+  "87T": { injection: false, texte: "Différentielle transformateur : tenir compte du couplage et des rapports TC ; injection des deux côtés (stabilité, seuil, pente, blocage H2/H5) — méthode du constructeur." },
+  "87B": { injection: false, texte: "Différentielle jeu de barres : injection sur plusieurs départs (stabilité et déclenchement) — méthode du constructeur." },
+  "87G": { injection: false, texte: "Différentielle générateur : injection côté neutre et côté ligne — méthode du constructeur." },
+  "87L": { injection: false, texte: "Différentielle ligne : essai en liaison avec le relais distant (communication) — méthode du constructeur." },
+  "87M": { injection: false, texte: "Différentielle moteur : injection côté alimentation et côté neutre — méthode du constructeur." },
+};
+const methodeAnsi = (s) => METHODE_ANSI[ansiFamily(s && s.label)] || null;
+const sansInjectionCalculee = (s) => { const m = methodeAnsi(s); return !!(m && m.injection === false); };
+// Image thermique (moteur / transformateur 49, câble / ligne 49F) : même calcul de temps.
+const estThermique49 = (s) => ["49", "49F"].includes(ansiFamily(s && s.label));
+// Tension directe / inverse : injection sur une seule phase → la composante vaut le tiers de la tension injectée.
+const FAMILLES_TIERS_TENSION = ["27D", "47"];
 // Repère par type de protection de découplage (guide UTE/NF C15-400, types HTA H1 à H5) — ce que
 // les sources disponibles confirment de façon cohérente sur le comportement de chaque type. Pour
 // H3-1/H3-2 et H5, la distinction précise n'a pas pu être confirmée avec une source suffisamment
@@ -2909,7 +2999,7 @@ function isolementFields(itemType, classeIsolation, avecRealise) {
     // température, donc insensibles à celle-ci), la résistance d'isolement BRUTE dépend fortement
     // de la température : elle double environ tous les 10 °C de baisse (ou est divisée par 2 tous
     // les 10 °C de hausse). Règle générale IEEE 43-2013 (référence 40 °C) : R40 = R_mesuré ×
-    // 2^((40−T)/10). Repère indicatif — certaines classes d'isolation ont des coefficients plus
+    // 0,5^((40−T)/10). Repère indicatif — certaines classes d'isolation ont des coefficients plus
     // précis (ex. 1,4 pour classe B, 1,6 pour classe F par 10 °C, selon certaines sources), non
     // repris ici faute de confirmation suffisamment fiable. Ne calcule que si température ET valeur
     // sont renseignées — jamais de température supposée par défaut.
@@ -2919,7 +3009,7 @@ function isolementFields(itemType, classeIsolation, avecRealise) {
         const mesureMO = versMegaohms(f.valeur, f.unite);
         const temp = numOf(f.temperature);
         if (mesureMO === null || temp === null) return "";
-        const corrige = Math.round(mesureMO * Math.pow(2, (40 - temp) / 10) * 1000) / 1000;
+        const corrige = Math.round(mesureMO * Math.pow(0.5, (40 - temp) / 10) * 1000) / 1000; // R40 = R × 0,5^((40 − T)/10) : à 20 °C, R40 = R ÷ 4
         return `${corrige} MΩ à 40 °C (mesuré ${mesureMO} MΩ à ${temp} °C) — règle générale (facteur ×2 par tranche de 10 °C d'écart), repère indicatif à comparer à l'historique de l'équipement, pas une formule réglementaire unique pour les transformateurs.`;
       },
     },
@@ -3057,14 +3147,14 @@ function buildTransformateurSchema({ sec = false, classeIsolation = null, deuxSe
           C("resistance_enroulements_secondaire2", "Résistance des enroulements — Secondaire 2", [...L1L2L3AvecToleranceEcart("mΩ"), F("temperature", "Température enroulement", "°C")]),
         ] : []),
       ]},
-      { key: "mesure_isolement", title: "Mesure d'isolement", items: [
-        C("hta_terre", "HTA - Terre (BT shuntée à la terre)", isolementFields("hta_terre", classeIsolation)),
-        C("bt_terre", "BT" + (deuxSecondaires ? "1" : "") + " - Terre (HTA shuntée à la terre)", isolementFields("bt_terre", classeIsolation)),
-        C("hta_bt", "HTA - BT" + (deuxSecondaires ? "1" : "") + " (enroulements court-circuités entre eux)", isolementFields("hta_bt", classeIsolation)),
+      { key: "mesure_isolement", title: "Mesure d'isolement (optionnelle)", items: [
+        C("hta_terre", "HTA - Terre (BT shuntée à la terre)", isolementFields("hta_terre", classeIsolation, true)),
+        C("bt_terre", "BT" + (deuxSecondaires ? "1" : "") + " - Terre (HTA shuntée à la terre)", isolementFields("bt_terre", classeIsolation, true)),
+        C("hta_bt", "HTA - BT" + (deuxSecondaires ? "1" : "") + " (enroulements court-circuités entre eux)", isolementFields("hta_bt", classeIsolation, true)),
         ...(deuxSecondaires ? [
-          C("bt2_terre", "BT2 - Terre (HTA et BT1 shuntées à la terre)", isolementFields("bt_terre", classeIsolation)),
-          C("hta_bt2", "HTA - BT2 (enroulements court-circuités entre eux)", isolementFields("hta_bt", classeIsolation)),
-          C("bt_bt2", "BT1 - BT2 (entre les deux enroulements secondaires)", isolementFields("hta_bt", classeIsolation)),
+          C("bt2_terre", "BT2 - Terre (HTA et BT1 shuntées à la terre)", isolementFields("bt_terre", classeIsolation, true)),
+          C("hta_bt2", "HTA - BT2 (enroulements court-circuités entre eux)", isolementFields("hta_bt", classeIsolation, true)),
+          C("bt_bt2", "BT1 - BT2 (entre les deux enroulements secondaires)", isolementFields("hta_bt", classeIsolation, true)),
         ] : []),
       ]},
     ],
@@ -3604,13 +3694,13 @@ const SCHEMAS = {
         C("continuite_masses_jdb", "Continuité des masses et mise à la terre", CHAMPS_CONTINUITE_MASSES),
         C("thermographie", "Contrôle thermographique / points chauds", [F("temperature", "Température relevée", "°C"), F("charge", "Charge au moment du contrôle", "%")]),
       ]},
-      { key: "mesure_isolement", title: "Mesure d'isolement", items: [
-        C("phase1_terre", "Phase 1 - Terre", isolementFields("phase1_terre_jdb", null, false)),
-        C("phase2_terre", "Phase 2 - Terre", isolementFields("phase2_terre_jdb", null, false)),
-        C("phase3_terre", "Phase 3 - Terre", isolementFields("phase3_terre_jdb", null, false)),
-        C("phase1_phase2", "Phase 1 - Phase 2", isolementFields("phase1_phase2_jdb", null, false)),
-        C("phase2_phase3", "Phase 2 - Phase 3", isolementFields("phase2_phase3_jdb", null, false)),
-        C("phase3_phase1", "Phase 3 - Phase 1", isolementFields("phase3_phase1_jdb", null, false)),
+      { key: "mesure_isolement", title: "Mesure d'isolement (optionnelle)", items: [
+        C("phase1_terre", "Phase 1 - Terre", isolementFields("phase1_terre_jdb", null, true)),
+        C("phase2_terre", "Phase 2 - Terre", isolementFields("phase2_terre_jdb", null, true)),
+        C("phase3_terre", "Phase 3 - Terre", isolementFields("phase3_terre_jdb", null, true)),
+        C("phase1_phase2", "Phase 1 - Phase 2", isolementFields("phase1_phase2_jdb", null, true)),
+        C("phase2_phase3", "Phase 2 - Phase 3", isolementFields("phase2_phase3_jdb", null, true)),
+        C("phase3_phase1", "Phase 3 - Phase 1", isolementFields("phase3_phase1_jdb", null, true)),
       ]},
     ],
   },
@@ -6360,6 +6450,8 @@ const ETATS_SANS_MESURE = ["Non réalisé", "Non présent"];
 // quand le total est relevé ; un contrôle « Non réalisé / Non présent » n'attend plus rien.
 function champsManquantsControle(item, value) {
   if (!controleAvecMesures(item) || !value || ETATS_SANS_MESURE.includes(value.etat)) return [];
+  if (!mesureRealisee(item, value)) return []; // mesure optionnelle non réalisée
+
   const f = value.fields || {};
   const vide = (k) => f[k] === undefined || f[k] === null || String(f[k]).trim() === "";
   const mesurables = (item.fields || []).filter((d) => !d.hidden && !d.compute && !d.options && d.key !== "realise");
@@ -6372,6 +6464,15 @@ function champsManquantsControle(item, value) {
   return groupesParPhase((item.fields || []).filter((d) => !d.hidden))
     .filter((g) => !(totalPuissance && /^[pqs]$/.test(g.cle)))
     .flatMap((g) => g.cellules.filter((d) => d && !d.compute && !d.options && vide(d.key)).map((d) => d.key));
+}
+// Mesure optionnelle (case « Mesure réalisée ? ») : réalisée si la case est cochée — ou, pour un relevé
+// antérieur à la case (champ absent), si des valeurs ont déjà été saisies.
+function mesureRealisee(item, value) {
+  if (!(item.fields || []).some((d) => d.key === "realise")) return true;
+  const r = (value && value.fields || {}).realise;
+  if (r === "OUI") return true;
+  if (r === undefined || r === null || r === "") return controleRenseigne(item, value);
+  return false;
 }
 function controleACompleter(item, value) { return champsManquantsControle(item, value).length > 0; }
 function avancementSection(eq, sec) {
@@ -6978,6 +7079,19 @@ function ControlRow({ item, value, onChange, idPrefix, toleranceOverride }) {
       champs={champsPlaqueDepuisDefs(item.fields, fields)}
       valeursActuelles={fields} onAppliquer={(patch) => onChange({ ...valueRef.current, fields: { ...(valueRef.current.fields || {}), ...patch } })} />
   );
+  // Mesure optionnelle (case « Mesure réalisée ? ») : tant qu'elle n'est pas cochée, seule la case est affichée.
+  const champRealise = (item.fields || []).find((f) => f.key === "realise" && f.options);
+  if (champRealise && !mesureRealisee(item, value)) {
+    return (
+      <div id={idControle} style={{ padding: "10px 0", borderBottom: "1px solid #E2E6EB", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+        <span style={{ fontSize: 12.5, color: "#3E4A5C" }}>{item.label}</span>
+        <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          {renderChampClassique(champRealise)}
+          <span style={{ fontSize: 11, color: "#8B96A3" }}>non réalisée — cocher pour saisir</span>
+        </span>
+      </div>
+    );
+  }
   // Contrôle simple (pas de champ, ou un seul) : une ligne, comme avant.
   if (!dense) {
     return (
@@ -7852,10 +7966,10 @@ function MiniInput({ label, unit, value, onChange, width, validState, type = "nu
     </MiniField>
   );
 }
-function MiniSelect({ label, options, value, onChange }) {
+function MiniSelect({ label, options, value, onChange, width = 90 }) {
   return (
     <MiniField label={label}>
-      <select value={value ?? ""} onChange={(e) => onChange(e.target.value)} style={{ ...inputStyle, width: 90, padding: "5px 7px", fontSize: 12 }}>
+      <select value={value ?? ""} onChange={(e) => onChange(e.target.value)} style={{ ...inputStyle, width, padding: "5px 7px", fontSize: 12 }}>
         {options.map((o) => <option key={o} value={o}>{o}</option>)}
       </select>
     </MiniField>
@@ -9513,15 +9627,17 @@ function HistoriqueTransformateur({ eq, allSites }) {
   const idStable = eq.lignageId || eq.id;
   const histoResPrim = useMemo(() => getHistoriqueChamp(allSites, eq, (e) => moyenneL1L2L3(e.controles?.rapport_transformation?.resistance_enroulements_primaire?.fields)), [allSites, idStable]);
   const histoResSec = useMemo(() => getHistoriqueChamp(allSites, eq, (e) => moyenneL1L2L3(e.controles?.rapport_transformation?.resistance_enroulements_secondaire?.fields)), [allSites, idStable]);
-  const histoIsolHT = useMemo(() => getHistoriqueChamp(allSites, eq, (e) => numOf(e.controles?.mesure_isolement?.hta_terre?.fields?.valeur)), [allSites, idStable]);
-  const histoIsolBT = useMemo(() => getHistoriqueChamp(allSites, eq, (e) => numOf(e.controles?.mesure_isolement?.bt_terre?.fields?.valeur)), [allSites, idStable]);
-  const histoIsolHTBT = useMemo(() => getHistoriqueChamp(allSites, eq, (e) => numOf(e.controles?.mesure_isolement?.hta_bt?.fields?.valeur)), [allSites, idStable]);
+  // Isolement : valeur ramenée à 40 °C quand la température est connue (sinon valeur brute, en MΩ) — comparable d'une visite à l'autre.
+  const isol40 = (f) => { if (!f) return null; const r = irA40(f); const v = r !== null ? r : versMegaohms(f.valeur, f.unite); return v === null ? null : Math.round(v * 10) / 10; };
+  const histoIsolHT = useMemo(() => getHistoriqueChamp(allSites, eq, (e) => isol40(e.controles?.mesure_isolement?.hta_terre?.fields)), [allSites, idStable]);
+  const histoIsolBT = useMemo(() => getHistoriqueChamp(allSites, eq, (e) => isol40(e.controles?.mesure_isolement?.bt_terre?.fields)), [allSites, idStable]);
+  const histoIsolHTBT = useMemo(() => getHistoriqueChamp(allSites, eq, (e) => isol40(e.controles?.mesure_isolement?.hta_bt?.fields)), [allSites, idStable]);
   const series = [
     { label: "Résistance enroulement primaire", unite: "mΩ", points: histoResPrim },
     { label: "Résistance enroulement secondaire", unite: "mΩ", points: histoResSec },
-    { label: "Isolement HTA - Terre", unite: eq.controles?.mesure_isolement?.hta_terre?.fields?.unite || "", points: histoIsolHT },
-    { label: "Isolement BT - Terre", unite: eq.controles?.mesure_isolement?.bt_terre?.fields?.unite || "", points: histoIsolBT },
-    { label: "Isolement HTA - BT", unite: eq.controles?.mesure_isolement?.hta_bt?.fields?.unite || "", points: histoIsolHTBT },
+    { label: "Isolement HTA - Terre", unite: "MΩ, ramené à 40 °C si température connue", points: histoIsolHT },
+    { label: "Isolement BT - Terre", unite: "MΩ, ramené à 40 °C si température connue", points: histoIsolBT },
+    { label: "Isolement HTA - BT", unite: "MΩ, ramené à 40 °C si température connue", points: histoIsolHTBT },
   ].filter((s) => s.points.length >= 2);
   if (!series.length) return null;
   return (
@@ -10792,7 +10908,7 @@ function SelecteurAssistantRelais({ eq, update }) {
     </div>
   );
 }
-function ParametrageRelaisPanel({ eq, update, idPrefix, locaux = [] }) {
+function ParametrageRelaisPanel({ eq, update, idPrefix, locaux = [], allSites = [], rapportDate = "" }) {
   const seuils = eq.controles.parametrage_relais_seuils;
   const setSeuils = (next) => update({ ...eq, controles: { ...eq.controles, parametrage_relais_seuils: next } });
   const setSeuilField = (id, k, v) => setSeuils(seuils.map((s) => (s.id === id ? { ...s, fields: { ...s.fields, [k]: v } } : s)));
@@ -10813,13 +10929,29 @@ function ParametrageRelaisPanel({ eq, update, idPrefix, locaux = [] }) {
   }
   const localEquipement = locaux.find((l) => l.id === eq.localId);
   const typeDecouplageLocal = localEquipement?.typeDecouplage || "";
+  // Aides facultatives (jamais imprimées) : cohérence du paramétrage et écarts avec la visite précédente.
+  const alertesCoherence = alertesParametrageRelais(eq, seuils);
+  const precedent = useMemo(() => equipementPrecedent(allSites, eq, rapportDate), [allSites, eq.lignageId, eq.id, rapportDate]);
+  const changements = changementsParametrage(precedent, seuils);
 
   return (
     <Card style={{ marginBottom: 14 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
         <SectionTitle>Paramétrage du relais de protection</SectionTitle>
-        <button onClick={addSeuil} style={btnGhost(BRAND.amber)}><Plus size={13} /> Ajouter un seuil</button>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "flex-start" }}>
+          <BoutonLirePlaque champs={CHAMPS_LECTURE_PARAMETRAGE} valeursActuelles={{}} typeEquipement={eq.type} libelle="Lire le paramétrage"
+            contexte={`Photo d'écran, de la face avant ou d'un export de paramétrage d'un relais de protection${eq.identification?.referenceRelais ? " " + eq.identification.referenceRelais : ""}. Relever chaque seuil de protection actif (max de I phase I>, I>>, terre Io>, Io>>, tension, fréquence…) dans l'ordre : fonction (choisir le libellé ANSI correspondant), réglage (en A primaires si affiché, sinon la valeur telle qu'affichée), courbe, TMS, temporisation et son unité. Ne rien inventer : laisser vide ce qui n'est pas lisible.`}
+            onAppliquer={(patch) => setSeuils(appliquerLectureParametrage(seuils, patch))} compact />
+          <button onClick={addSeuil} style={btnGhost(BRAND.amber)}><Plus size={13} /> Ajouter un seuil</button>
+        </div>
       </div>
+      {(alertesCoherence.length > 0 || changements.length > 0) && (
+        <div style={{ fontSize: 11.5, lineHeight: 1.5, marginBottom: 10, padding: "8px 10px", border: "1px solid #F1D9B0", borderRadius: 8, background: "#FDF8EF" }} title="Aide au technicien — non imprimée dans le rapport">
+          {alertesCoherence.map((a, i) => <div key={"c" + i} style={{ color: "#B5730A" }}>⚠ {a}</div>)}
+          {changements.length > 0 && <div style={{ color: "#3E4A5C", fontWeight: 700, marginTop: alertesCoherence.length ? 6 : 0 }}>Changements depuis {moisAnneeVisite(precedent.date)} :</div>}
+          {changements.map((c, i) => <div key={"p" + i} style={{ color: "#3E4A5C" }}>• {c}</div>)}
+        </div>
+      )}
       {!typeRelaisAutonome(eq.identification) && !typeRelaisSiprotec(eq.identification) && <SelecteurAssistantRelais eq={eq} update={update} />}
       {(typeRelaisAutonome(eq.identification) || eq.assistantRelaisType) && <AssistantRelaisAutonome key={typeRelaisAutonome(eq.identification) || eq.assistantRelaisType} eq={eq} update={update} type={typeRelaisAutonome(eq.identification) || eq.assistantRelaisType} />}
       {typeRelaisSiprotec(eq.identification) && <div style={{ fontSize: 11.5, color: "#5B6B7D", lineHeight: 1.5, marginBottom: 10, padding: "8px 10px", border: "1px solid #D8DEE5", borderRadius: 8, background: "rgba(10,93,168,0.04)" }}>{RELAIS_SIPROTEC[typeRelaisSiprotec(eq.identification)].plages}{RELAIS_SIPROTEC[typeRelaisSiprotec(eq.identification)].autres && <div style={{ marginTop: 6 }}>{RELAIS_SIPROTEC[typeRelaisSiprotec(eq.identification)].autres}</div>}</div>}
@@ -10878,7 +11010,1276 @@ function ParametrageRelaisPanel({ eq, update, idPrefix, locaux = [] }) {
   );
 }
 
-function DisjoncteurRelaisPanel({ eq, update, custom, onAddCustom, onChangeCustom, onRemoveCustom, idPrefix }) {
+// =============================================================================================
+// AIDE AUX ESSAIS DES PROTECTIONS — complément facultatif : rien ici n'est obligatoire pour valider
+// un essai. Les champs de l'essai (L1/L2/L3, valeur injectée, état) restent saisissables directement.
+// =============================================================================================
+// Où est pris le temps de déclenchement : sur les contacts du disjoncteur (entrée binaire de la valise),
+// le temps mesuré = temporisation du relais + temps mécanique d'ouverture du disjoncteur.
+const LISTE_MESURE_TEMPS_ESSAI = ["Contacts du disjoncteur", "Contact de sortie du relais"];
+function configEssaisRelais(eq) {
+  const c = (eq.controles && eq.controles.config_essais_relais) || {};
+  return { mesureSur: c.mesureSur || "Contacts du disjoncteur", tempsOuverture: c.tempsOuverture === undefined || c.tempsOuverture === null ? "" : String(c.tempsOuverture), prise: c.prise || "Prise Essailec" };
+}
+// Injection secondaire : prises d'essai Essailec (fiche verte = courant, fiche blanche = tension ; cordons 1, 2, 3 = phases,
+// 4 = commun). Les fiches ne servent qu'à injecter : le temps est pris à part (entrée binaire de la valise).
+const LISTE_PRISE_ESSAI = ["Prise Essailec", "Bornier d'essai"];
+const estTerreCalculee = (s) => ["50N", "51N"].includes(ansiFamily(s.label)) && s.fields.modeDetection === "Somme des 3I (calculée)";
+function raccordementEssai(eq, s, mode) {
+  if (mode === "Injection primaire" || configEssaisRelais(eq).prise !== "Prise Essailec") return null;
+  const fam = ansiFamily(s.label), u = uniteReglageSeuil(s);
+  if (sansInjectionCalculee(s)) return null;
+  if (FAMILLES_TIERS_TENSION.includes(fam)) return "Fiche blanche (tension) : cordon 1 → commun 4 — une seule phase injectée, les deux autres à 0 V";
+  if (["50N", "51N", "50G", "51G"].includes(fam)) return estTerreCalculee(s)
+    ? "Fiche verte (courant) : cordon 1 → commun 4 — une seule phase injectée (somme des 3I)"
+    : "Fiche verte du tore homopolaire (fiche dédiée, seule la borne 1 câblée) : cordon 1 → commun 4";
+  if (fam === "67") return "Fiche verte : cordon 1 → 4 (I1) + fiche blanche : cordons 2 → 3 (Ubc, polarisation)";
+  if (fam === "67N" || fam === "32N") return "Fiche verte : cordon 1 → 4 (I0) + fiche blanche : tension résiduelle U0 selon le câblage du relais";
+  if (["32P", "32Q", "37P", "37Q"].includes(fam)) return "Fiche verte : cordon 1 → 4 (Ia) + fiche blanche : cordon 1 → 4 (Va, même phase)";
+  if (u === "A" || fam === "46") return "Fiche verte (courant) : cordon 1 → commun 4 pour L1, puis 2 → 4 et 3 → 4 pour L2 et L3";
+  if (u === "V") return fam === "59N" ? "Fiche blanche (tension) : cordon 1 → commun 4" : "Fiche blanche (tension) : cordons 1 → 2 (U12) pour une tension composée, 1 → 4 pour une tension simple";
+  if (u === "Hz" || u === "Hz/s") return "Fiche blanche (tension) : cordons 1 → 2, tension nominale à fréquence variable";
+  return null;
+}
+// Temps d'ouverture du disjoncteur (ms) : valeur saisie dans la configuration des essais, sinon moyenne de la
+// mesure du temps d'ouverture (L1/L2/L3) faite sur ce disjoncteur, sinon inconnu (marge générique).
+function tempsOuvertureDisjoncteur(eq) {
+  const saisi = numOf(configEssaisRelais(eq).tempsOuverture);
+  if (saisi !== null && saisi > 0) return { ms: saisi, source: "saisi" };
+  const f = eq.controles && eq.controles.controles_disjoncteur && eq.controles.controles_disjoncteur.temps_ouverture && eq.controles.controles_disjoncteur.temps_ouverture.fields;
+  const moy = moyenneL1L2L3(f);
+  if (moy !== null && moy > 0) return { ms: moy, source: "mesuré" };
+  return null;
+}
+const arrondiN = (x, d) => Math.round(x * Math.pow(10, d)) / Math.pow(10, d);
+const estSeuilCEI = (s) => !!(s && s.fields && s.fields.courbe && s.fields.courbe !== "Constant");
+function uniteReglageSeuil(s) {
+  const defs = ANSI_REGLAGE_FIELDS[ansiFamily(s.label)] || ANSI_REGLAGE_FIELDS_DEFAUT;
+  return (defs.find((d) => d.key === "reglage") || {}).unit || null;
+}
+// Fonctions « à minimum » : le relais déclenche quand la grandeur DESCEND sous le seuil.
+const FAMILLES_MINIMUM = ["27", "27D", "27R", "37", "37P", "37Q", "81L", "14"];
+const estFonctionMinimum = (s) => FAMILLES_MINIMUM.includes(ansiFamily(s.label));
+// Temps attendu du relais seul (s) : courbe CEI au multiple donné, ou temporisation à temps constant.
+function tempsRelaisAttendu(s, multiple) {
+  if (estSeuilCEI(s)) return calcTempsTheoriqueCEI(s.fields.courbe, s.fields.tms, multiple !== undefined && multiple !== null ? multiple : s.essai && s.essai.fields && s.essai.fields.multipleInjection);
+  const t = numOf(s.fields.temporisation);
+  if (t === null) return null;
+  return (s.fields.temporisation_unite || "ms") === "ms" ? t / 1000 : t;
+}
+// Tolérance de l'essai de déclenchement, dans l'unité de saisie des temps (s pour une courbe, unité de la temporisation sinon).
+//  - contacts du disjoncteur, temps d'ouverture connu : t × 0,95 + ouverture − 20 ms … t × 1,05 + ouverture + 40 ms
+//  - contact de sortie du relais : t × 0,95 − 20 ms … t × 1,05 + 40 ms
+//  - temps d'ouverture inconnu : marge générique d'origine (inchangée)
+//  - image thermique (49) : inchangée.
+function toleranceEssaiSeuil(eq, s, multiple) {
+  if (estThermique49(s)) {
+    const tt = calcTempsThermique(s.fields.constante_temps, (s.essai && s.essai.fields && s.essai.fields.multipleThermique) || "150");
+    return tt === null ? null : { ...calcToleranceThermique(tt), base: "image thermique" };
+  }
+  const cei = estSeuilCEI(s);
+  const t = tempsRelaisAttendu(s, multiple);
+  if (t === null) return null;
+  const unite = cei ? "s" : (s.fields.temporisation_unite || "ms");
+  const cfg = configEssaisRelais(eq);
+  // 50BF : on chronomètre l'ordre de secours du relais (le disjoncteur ne s'ouvre pas pendant cet essai).
+  const surRelais = cfg.mesureSur === "Contact de sortie du relais" || ansiFamily(s.label) === "50BF";
+  const ouv = surRelais ? null : tempsOuvertureDisjoncteur(eq);
+  if (!surRelais && !ouv) {
+    const r = cei ? calcToleranceCEI(t) : calcToleranceEssai(s.fields.temporisation, s.fields.temporisation_unite);
+    return r ? { ...r, tRelais: t, base: "marge générique (temps d'ouverture du disjoncteur non renseigné)" } : null;
+  }
+  const o = ouv ? ouv.ms / 1000 : 0;
+  const min = Math.max(0, t * 0.95 + o - 0.02), max = t * 1.05 + o + 0.04;
+  const k = unite === "ms" ? 1000 : 1, d = unite === "ms" ? 0 : 3;
+  return {
+    min: arrondiN(min * k, d), max: arrondiN(max * k, d), unite, tRelais: t, ouvertureMs: ouv ? ouv.ms : null,
+    base: surRelais ? "temps du relais seul (contact de sortie)" : `relais ${frN(t * k, d)} ${unite} + ouverture du disjoncteur ${frN(ouv.ms, 0)} ms (${ouv.source})`,
+  };
+}
+// Valeur à injecter pour un multiple k du réglage (seuil 0,95 / 1,05 ou point de temps 2 ×, 5 ×…), selon le mode d'injection.
+function valeurInjectionSeuil(eq, s, k, mode) {
+  const u = uniteReglageSeuil(s), R = numOf(s.fields.reglage);
+  if (R === null || !u || sansInjectionCalculee(s)) return null;
+  if (FAMILLES_TIERS_TENSION.includes(ansiFamily(s.label))) {
+    const aideV = calcInjectionAide(s.fields.reglage, "V", eq, ansiFamily(s.label), null, 1);
+    if (typeof aideV !== "number") return { valeur: null, unite: "V", texte: `${frN(3 * R * k, 1)} V primaire sur une phase (renseigner le rapport TP pour la valeur secondaire)` };
+    const v = arrondiN(aideV * 3 * k, 2);
+    return { valeur: v, unite: "V", texte: `${frN(v, 2)} V secondaire sur une seule phase (composante = U ÷ 3)` };
+  }
+  if (mode === "Injection primaire" && u === "A") {
+    const v = arrondiN(R * k, 2);
+    return { valeur: v, unite: "A", texte: `${frN(v, 2)} A primaire${v > 20 ? ` (10 spires : ${frN(v / 10, 2)} A)` : ""}` };
+  }
+  const aide = calcInjectionAide(s.fields.reglage, u, eq, ansiFamily(s.label), s.fields.modeDetection, 1, s.fields.angle, s.fields.zoneMin, s.fields.zoneMax, s.fields.sens);
+  if (typeof aide === "number") {
+    const v = arrondiN(aide * k, 3);
+    return { valeur: v, unite: u, texte: `${frN(v, 3)} ${u}${u === "A" || u === "V" ? " secondaire" : ""}` };
+  }
+  if (aide && aide.type === "courant_directionnel") { const v = arrondiN(aide.i * k, 3); return { valeur: v, unite: "A", texte: `I = ${frN(v, 3)} A à l'angle caractéristique, U = ${aide.u} V (polarisation)` }; }
+  if (aide && aide.type === "puissance") { const v = arrondiN(aide.i * k, 3); return { valeur: null, unite: "A", texte: `U = ${aide.u} V, I = ${frN(v, 3)} A, déphasage ${aide.dephasage}°` }; }
+  const v = arrondiN(R * k, 3);
+  return { valeur: null, unite: u, texte: `${frN(v, 3)} ${u}${u === "A" ? " primaire (renseigner le TC pour la valeur secondaire)" : u === "V" ? " primaire (renseigner le rapport TP pour la valeur secondaire)" : ""}` };
+}
+// Facteurs de vérification du seuil : [ne doit pas déclencher, doit déclencher].
+function facteursSeuil(s) {
+  const u = uniteReglageSeuil(s);
+  const [bas, haut] = u === "Hz" ? [0.998, 1.002] : [0.95, 1.05];
+  return estFonctionMinimum(s) ? { nonDeclenche: haut, declenche: bas } : { nonDeclenche: bas, declenche: haut };
+}
+// Terre calculée : le courant injecté sur une phase doit rester sous le plus petit réglage phase actif.
+function alerteTerreCalculee(seuils, s) {
+  if (!estTerreCalculee(s)) return null;
+  const R = numOf(s.fields.reglage);
+  const ph = (seuils || []).filter((x) => x.label && ["50", "51"].includes(ansiFamily(x.label)) && (x.fields.etat || "") !== "Inactif").map((x) => numOf(x.fields.reglage)).filter((v) => v !== null);
+  if (R === null || !ph.length) return null;
+  const Rph = Math.min(...ph);
+  if (Rph > 1.05 * R) return { texte: `Somme des 3I : courant injecté sur une seule phase, à garder sous le réglage phase (${frN(Rph, 1)} A)`, bloquant: false };
+  return { texte: `Somme des 3I : 1,05 × le réglage terre (${frN(1.05 * R, 1)} A) atteint le réglage phase (${frN(Rph, 1)} A) — inhiber le max de I phase pendant l'essai`, bloquant: true };
+}
+// Points de mesure du temps : 2 × / 5 × / 10 × pour une courbe, un seul point sinon. Signale un seuil supérieur
+// de la même fonction qui déclencherait avant (multiple ramené sous ce seuil, ou seuil à inhiber pendant l'essai).
+function pointsTempsSeuil(seuils, s) {
+  const u = uniteReglageSeuil(s), R = numOf(s.fields.reglage), fam = ansiFamily(s.label);
+  // Terre calculée (somme des 3I) : le courant injecté sur une seule phase est aussi vu par le max de I phase — il doit
+  // rester sous les réglages phase, sinon la protection phase déclenche avant la terre.
+  const terreCalc = estTerreCalculee(s);
+  const familles = terreCalc ? [fam, "50", "51"] : [fam];
+  const superieurs = R === null ? [] : (seuils || []).filter((x) => x.id !== s.id && x.label && familles.includes(ansiFamily(x.label)) && (x.fields.etat || "") !== "Inactif" && numOf(x.fields.reglage) !== null && numOf(x.fields.reglage) > R);
+  const R2 = superieurs.length ? Math.min(...superieurs.map((x) => numOf(x.fields.reglage))) : null;
+  const sup2 = superieurs.find((x) => numOf(x.fields.reglage) === R2);
+  const nomSup = sup2 && terreCalc && ["50", "51"].includes(ansiFamily(sup2.label)) ? `le max de I phase ${sup2.label.split(" — ")[0]}` : "le seuil supérieur";
+  const noteSup = (M) => (R2 !== null && M * R >= R2 ? `à ${frN(M, 1)} ×, ${nomSup} (${frN(R2, 1)} ${u}) déclenchera avant : l'inhiber pendant ce point` : "");
+  if (estSeuilCEI(s)) return [2, 5, 10].map((M) => ({ M, note: noteSup(M) }));
+  if (estThermique49(s)) return [{ M: (numOf(s.essai && s.essai.fields && s.essai.fields.multipleThermique) || 150) / 100, note: "" }];
+  if (u === "A") {
+    let M = 2, note = "";
+    if (R2 !== null && R2 <= 2.05 * R) { M = Math.max(1.2, Math.floor((R2 / R) * 0.9 * 10) / 10); note = `${nomSup === "le seuil supérieur" ? "seuil supérieur" : nomSup.replace("le max", "max")} à ${frN(R2, 1)} A : multiple ramené à ${frN(M, 1)} × pour ne pas le faire déclencher`; }
+    return [{ M, note }];
+  }
+  if (u === "Hz") return [{ M: estFonctionMinimum(s) ? 0.99 : 1.01, note: "" }];
+  return [{ M: estFonctionMinimum(s) ? 0.8 : 1.2, note: "" }];
+}
+const libelleMultiple = (s, M) => (uniteReglageSeuil(s) === "Hz" ? `${frN(numOf(s.fields.reglage) * M, 2)} Hz` : `${frN(M, 2)} × réglage`);
+const moyenneTemps = (p) => moyenneL1L2L3(p);
+const enSecondes = (v, unite) => (v === null || v === undefined ? null : unite === "ms" ? v / 1000 : unite === "min" ? v * 60 : v);
+const uniteTempsSeuil = (s) => (estThermique49(s) ? "min" : estSeuilCEI(s) ? "s" : (s.fields.temporisation_unite || "ms"));
+// Points mesurés d'un seuil (assistant s'il a servi, sinon l'essai principal) — temps en secondes.
+function pointsMesuresSeuil(s) {
+  const u = uniteTempsSeuil(s);
+  const conv = (p) => ({ M: numOf(p.M), valeurs: [p.l1, p.l2, p.l3].map(numOf).filter((v) => v !== null).map((v) => enSecondes(v, u)) });
+  const a = s.essai && s.essai.assistant;
+  if (a && Array.isArray(a.points) && a.points.some((p) => numOf(p.l1) !== null || numOf(p.l2) !== null || numOf(p.l3) !== null)) return a.points.map(conv).filter((p) => p.M && p.valeurs.length);
+  const f = (s.essai && s.essai.fields) || {};
+  const M = estSeuilCEI(s) ? numOf(f.multipleInjection) : 2;
+  const p = conv({ M, l1: f.l1, l2: f.l2, l3: f.l3 });
+  return p.M && p.valeurs.length ? [p] : [];
+}
+// ----- Fiche méthode par famille de relais (repères usuels — toujours à vérifier sur la notice) -----
+const FICHES_METHODE_RELAIS = [
+  { cle: "sepam", re: /sepam/i, nom: "Schneider Electric — Sepam", lignes: [
+    "Lecture / modification du paramétrage : face avant (IHM avancée) ou logiciel SFT2841 (série 20/40/80) ; Easergy pour les gammes récentes.",
+    "Mot de passe de réglage : souvent 0000 en sortie d'usine — à vérifier sur la notice, l'exploitant l'a généralement changé.",
+    "Injection secondaire sur le connecteur des TC (CCA) ; tore homopolaire CSH : injection primaire avec un fil d'essai dans le tore, ou via l'adaptateur prévu.",
+    "Contrôler en face avant les courants mesurés pendant l'injection : valide le rapport TC paramétré.",
+  ] },
+  { cle: "micom", re: /micom|\bP1[2-4]\d\b|\bP[1-9]\d\d\b/i, nom: "Schneider / Alstom — MiCOM", lignes: [
+    "Paramétrage : face avant ou logiciel MiCOM S1 / S1 Studio.",
+    "Mot de passe usuel en sortie d'usine : AAAA — à vérifier sur la notice.",
+    "Colonne « Commission Tests » : blocage des contacts de sortie, test des LED et des entrées — à remettre en service en fin d'essai.",
+    "Vérifier si les seuils sont exprimés en valeurs primaires ou en multiples de In avant de comparer.",
+  ] },
+  { cle: "siprotec", re: /siprotec|7SJ|7SR|7UT|7SA/i, nom: "Siemens — SIPROTEC", lignes: [
+    "Paramétrage : face avant ou logiciel DIGSI.",
+    "Mots de passe d'usine souvent 000000 — à vérifier sur la notice.",
+    "Mode test / blocage de transmission disponibles dans DIGSI : à désactiver en fin d'essai.",
+    "Réglages saisis au secondaire ou au primaire selon le paramétrage du poste : contrôler l'adresse « Valeurs en » avant comparaison.",
+  ] },
+  { cle: "autonome", re: /vip\s?-?\d|wic\s?-?1|statimax|rah\s?-?411|rej\s?-?60/i, nom: "Relais autoalimenté (VIP, WIC1, Statimax, REJ…)", lignes: [
+    "Relais alimenté par ses propres capteurs : pas de source auxiliaire, il ne fonctionne qu'avec du courant dans les capteurs.",
+    "Essai par injection primaire (fil d'essai dans le capteur) ou avec le kit d'essai dédié du constructeur (ex. VAP6 pour le VIP) — l'injection secondaire classique ne convient pas toujours.",
+    "Le déclenchement passe par un Mitop / une bobine à faible consommation : vérifier son réarmement après chaque essai.",
+  ] },
+  { cle: "flair", re: /flair/i, nom: "Détecteur de défaut Flair", lignes: [
+    "Détecteur de passage de défaut, pas une protection : il ne fait pas déclencher le disjoncteur.",
+    "Essai : bouton test ou injection primaire dans les capteurs ; vérifier le voyant et le report vers la téléconduite.",
+  ] },
+  { cle: "abb", re: /\bREF\s?-?\d|\bREJ|\bREU|\bRET|\bABB\b/i, nom: "ABB — Relion / SPACOM", lignes: [
+    "Paramétrage : face avant ou logiciel PCM600 (Relion).",
+    "Mode test disponible : blocage des sorties pendant les essais, à lever en fin d'intervention.",
+    "Mot de passe : à vérifier sur la notice.",
+  ] },
+];
+const FICHE_METHODE_GENERIQUE = { cle: "generique", nom: "Méthode générale", lignes: [
+  "Relever le paramétrage (photo ou export) avant toute intervention, et le comparer en fin d'essai.",
+  "Vérifier le seuil à 0,95 × (pas de déclenchement) puis 1,05 × (déclenchement) ; inverser pour une fonction à minimum (27, 37, 81<).",
+  "Mesurer le temps au-delà du seuil (2 × pour un temps constant, 2 × / 5 × / 10 × pour une courbe).",
+  "Mot de passe, mode test et logiciel : à vérifier sur la notice du relais.",
+] };
+function ficheMethodeRelais(eq) {
+  const id = eq.identification || {};
+  const txt = `${id.marqueRelais || ""} ${id.referenceRelais || ""}`;
+  return FICHES_METHODE_RELAIS.find((f) => f.re.test(txt)) || FICHE_METHODE_GENERIQUE;
+}
+// ----- Listes de contrôle de l'assistant (cases facultatives, jamais bloquantes) -----
+function checklistPreparation(mode, mesureSur, prise = "Prise Essailec") {
+  const essailec = prise === "Prise Essailec" && mode !== "Injection primaire";
+  return [
+    "Autorisation de travail / consignation de la cellule selon les règles de l'exploitant",
+    "Paramétrage relevé (photo ou export) avant toute modification",
+    mode === "Injection primaire" ? "Fil d'essai passé dans le tore / le primaire du TC (un seul conducteur)" : essailec ? "Fiche verte (courant) insérée dans la prise Essailec : TC court-circuités par la prise — à vérifier selon le modèle" : "Secondaires TC court-circuités côté TC et ouverts côté relais (bornier d'essai) — jamais de secondaire TC ouvert",
+    essailec ? "Fiche blanche (tension) insérée si un essai en tension est prévu : TP isolés côté ligne" : "Circuits TP isolés côté TP avant d'injecter une tension",
+    "Déclenchements vers l'extérieur inhibés si nécessaire (amont, téléconduite, découplage)",
+    mesureSur === "Contact de sortie du relais" ? "Entrée binaire de la valise sur le contact de déclenchement du relais" : "Disjoncteur fermé en position essai, ressorts armés — entrée binaire de la valise sur un pôle du disjoncteur (sans tension)",
+  ];
+}
+const CHECKLIST_REMISE_SERVICE = [
+  "Valise débranchée, fiches d'essai retirées (capots des prises Essailec remis) ou bornes d'essai refermées",
+  "Circuits TP rétablis",
+  "Inhibitions levées, déclenchements vers l'extérieur rétablis",
+  "Paramétrage identique au relevé initial (aucun réglage d'essai laissé)",
+  "Alarmes, voyants et enregistrements acquittés ; relais en service sans défaut",
+  "Disjoncteur remis dans l'état demandé par l'exploitant",
+];
+function texteCablageEssai(mode, mesureSur, prise = "Prise Essailec") {
+  const sortie = mode === "Injection primaire" ? "Sortie courant de la valise → fil d'essai passé dans le tore / le TC."
+    : prise === "Prise Essailec" ? "Injection par la prise Essailec : fiche verte = courant, fiche blanche = tension ; cordons 1, 2, 3 = phases L1, L2, L3, cordon 4 = commun. Les fiches servent uniquement à injecter, pas au chronométrage."
+    : "Sortie de la valise → entrées du relais pour la phase testée (bornier d'essai).";
+  const chrono = mesureSur === "Contact de sortie du relais"
+    ? "Entrée binaire → contact de sortie de déclenchement du relais : le temps mesuré est celui du relais seul."
+    : "Entrée binaire → contacts principaux du disjoncteur (un pôle, hors tension) : la valise s'arrête à l'ouverture, le temps mesuré = temporisation du relais + ouverture du disjoncteur.";
+  return `${sortie} ${chrono}`;
+}
+// ----- Visite précédente (même équipement physique, suivi par lignageId) -----
+function equipementPrecedent(allSites, eq, rapportDate) {
+  if (!allSites || !allSites.length) return null;
+  const lig = eq.lignageId || eq.id;
+  let best = null;
+  allSites.forEach((st) => (st.equipements || []).forEach((e) => {
+    if (e.id === eq.id || (e.lignageId || e.id) !== lig) return;
+    const d = (st.rapport && st.rapport.date) || "";
+    if (rapportDate && d && d >= rapportDate) return;
+    if (!best || d > best.date) best = { eq: e, date: d };
+  }));
+  return best;
+}
+const moisAnneeVisite = (d) => (/^\d{4}-\d{2}/.test(d || "") ? `${d.slice(5, 7)}/${d.slice(0, 4)}` : "visite précédente");
+// Écart de paramétrage avec la visite précédente.
+function changementsParametrage(precedent, seuils) {
+  if (!precedent) return [];
+  const anciens = (precedent.eq.controles && precedent.eq.controles.parametrage_relais_seuils) || [];
+  const out = [];
+  const fmt = (f, k) => (k === "temporisation" ? `${f.temporisation || "—"} ${f.temporisation_unite || ""}`.trim() : f[k] || "—");
+  (seuils || []).filter((s) => s.label).forEach((s) => {
+    const a = anciens.find((x) => x.label === s.label);
+    if (!a) { out.push(`${s.label.split(" — ")[0]} : seuil absent à la visite précédente`); return; }
+    const diffs = [["reglage", "réglage"], ["temporisation", "tempo."], ["courbe", "courbe"], ["tms", "TMS"], ["etat", "état"]]
+      .filter(([k]) => (k === "temporisation" ? fmt(a.fields || {}, k) !== fmt(s.fields, k) : String((a.fields || {})[k] || "") !== String(s.fields[k] || "")))
+      .map(([k, nom]) => `${nom} ${fmt(a.fields || {}, k)} → ${fmt(s.fields, k)}`);
+    if (diffs.length) out.push(`${s.label.split(" — ")[0]} : ${diffs.join(", ")}`);
+  });
+  anciens.filter((a) => a.label && !(seuils || []).some((s) => s.label === a.label)).forEach((a) => out.push(`${a.label.split(" — ")[0]} : seuil présent à la visite précédente, retiré depuis`));
+  return out;
+}
+// Dérive du temps mesuré par rapport à la visite précédente (même seuil, même multiple).
+function deriveTempsSeuil(precedent, s) {
+  if (!precedent) return null;
+  const a = ((precedent.eq.controles && precedent.eq.controles.parametrage_relais_seuils) || []).find((x) => x.label === s.label);
+  if (!a || !a.essai) return null;
+  const pa = pointsMesuresSeuil(a), pc = pointsMesuresSeuil(s);
+  if (!pa.length || !pc.length) return null;
+  const commun = pc.find((p) => pa.some((q) => Math.abs(q.M - p.M) < 1e-6)) || (pa.length === 1 && pc.length === 1 ? pc[0] : null);
+  if (!commun) return null;
+  const q = pa.find((x) => Math.abs(x.M - commun.M) < 1e-6) || pa[0];
+  const moy = (v) => v.reduce((x, y) => x + y, 0) / v.length;
+  const tA = moy(q.valeurs), tC = moy(commun.valeurs);
+  if (!(tA > 0)) return null;
+  const ecart = (tC - tA) / tA;
+  return { tA, tC, ecart, date: precedent.date, alerte: Math.abs(ecart) > 0.1 };
+}
+// Cohérence du paramétrage (aide à l'écran, jamais imprimée).
+function etageSeuil(label) { return Number(((String(label || "").match(/^\d+[A-Za-z]*-(?:\d+[A-Za-z]*-)?(\d)\b/) || [])[1])) || 1; }
+function alertesParametrageRelais(eq, seuils) {
+  const out = [];
+  const actifs = (seuils || []).filter((s) => s.label && (s.fields.etat || "") !== "Inactif");
+  const groupes = {};
+  actifs.forEach((s) => { const f = ansiFamily(s.label); if (["50", "51", "50N", "51N"].includes(f)) (groupes[f.replace("51", "50")] = groupes[f.replace("51", "50")] || []).push(s); });
+  Object.values(groupes).forEach((liste) => {
+    const tri = liste.slice().sort((a, b) => etageSeuil(a.label) - etageSeuil(b.label));
+    for (let i = 1; i < tri.length; i++) {
+      const a = tri[i - 1], b = tri[i], ra = numOf(a.fields.reglage), rb = numOf(b.fields.reglage);
+      const na = a.label.split(" — ")[0], nb = b.label.split(" — ")[0];
+      if (ra !== null && rb !== null && rb <= ra) out.push(`${nb} (${frN(rb, 1)} A) n'est pas au-dessus de ${na} (${frN(ra, 1)} A) : seuils inversés ?`);
+      const ta = !estSeuilCEI(a) ? tempsRelaisAttendu(a) : null, tb = !estSeuilCEI(b) ? tempsRelaisAttendu(b) : null;
+      if (ta !== null && tb !== null && tb >= ta) out.push(`Temporisation de ${nb} (${frN(tb, 3)} s) ≥ celle de ${na} (${frN(ta, 3)} s) : le seuil haut devrait être le plus rapide.`);
+    }
+  });
+  const minReg = (fams) => { const v = actifs.filter((s) => fams.includes(ansiFamily(s.label))).map((s) => numOf(s.fields.reglage)).filter((x) => x !== null); return v.length ? Math.min(...v) : null; };
+  const rPhase = minReg(["50", "51"]), rTerre = minReg(["50N", "51N"]);
+  if (rPhase !== null && rTerre !== null && rTerre > rPhase) out.push(`Réglage terre (${frN(rTerre, 1)} A) supérieur au réglage phase (${frN(rPhase, 1)} A) : inhabituel, à confirmer.`);
+  const tc = ((eq.controles && eq.controles.tc_dynamique) || []).find((t) => t.fields && t.fields.rapportPrimaire && t.label !== "Homopolaire (terre)");
+  const inTC = tc ? numOf(tc.fields.rapportPrimaire) : null;
+  if (inTC) actifs.filter((s) => ["50", "51"].includes(ansiFamily(s.label))).forEach((s) => {
+    const r = numOf(s.fields.reglage); if (r === null) return;
+    const n = s.label.split(" — ")[0];
+    if (r < 0.1 * inTC) out.push(`${n} : ${frN(r, 1)} A < 10 % du calibre du TC (${frN(inTC, 0)} A) — précision de mesure dégradée.`);
+    if (r > 20 * inTC) out.push(`${n} : ${frN(r, 0)} A > 20 × le calibre du TC (${frN(inTC, 0)} A) — saturation possible (TC 5P20 / 10P20).`);
+  });
+  actifs.filter((s) => /actif/i.test(s.fields.etat || "") && ansiFamily(s.label) !== "DEC" && uniteReglageSeuil(s) && numOf(s.fields.reglage) === null).forEach((s) => out.push(`${s.label.split(" — ")[0]} : actif mais sans réglage.`));
+  actifs.filter((s) => estSeuilCEI(s) && numOf(s.fields.tms) === null).forEach((s) => out.push(`${s.label.split(" — ")[0]} : courbe ${s.fields.courbe} sans TMS — temps théorique incalculable.`));
+  return out;
+}
+// ----- Lecture du paramétrage depuis une photo d'écran ou un export (même service que la lecture de plaque) -----
+const NB_SEUILS_LECTURE = 6;
+const CHAMPS_LECTURE_PARAMETRAGE = Array.from({ length: NB_SEUILS_LECTURE }, (_, i) => i + 1).flatMap((i) => [
+  { key: `s${i}_fonction`, label: `Seuil ${i} — fonction de protection (code ANSI et libellé)`, options: PARAM_SEUIL_TYPES },
+  { key: `s${i}_reglage`, label: `Seuil ${i} — réglage (valeur numérique)` },
+  { key: `s${i}_courbe`, label: `Seuil ${i} — courbe (temps constant ou courbe inverse)`, options: LISTE_COURBE_RELAIS },
+  { key: `s${i}_tms`, label: `Seuil ${i} — TMS / multiplicateur de temps` },
+  { key: `s${i}_temporisation`, label: `Seuil ${i} — temporisation (valeur numérique)` },
+  { key: `s${i}_unite`, label: `Seuil ${i} — unité de la temporisation`, options: LISTE_TEMPO_UNITE },
+]);
+function appliquerLectureParametrage(seuils, patch) {
+  let liste = [...(seuils || [])];
+  for (let i = 1; i <= NB_SEUILS_LECTURE; i++) {
+    const label = patch[`s${i}_fonction`];
+    const vals = { reglage: patch[`s${i}_reglage`], courbe: patch[`s${i}_courbe`], tms: patch[`s${i}_tms`], temporisation: patch[`s${i}_temporisation`], temporisation_unite: patch[`s${i}_unite`] };
+    Object.keys(vals).forEach((k) => { if (vals[k] === undefined || vals[k] === "") delete vals[k]; else vals[k] = k === "courbe" || k === "temporisation_unite" ? vals[k] : String(vals[k]).replace(",", "."); });
+    if (!label && !Object.keys(vals).length) continue;
+    const idx = label ? liste.findIndex((s) => s.label === label) : i - 1;
+    if (idx >= 0 && liste[idx]) liste[idx] = { ...liste[idx], fields: { ...liste[idx].fields, ...vals, etat: liste[idx].fields.etat || "Actif" } };
+    else if (label) { const n = emptySeuilEntry(label); n.fields = { ...n.fields, ...vals, etat: "Actif" }; liste = [...liste, n]; }
+  }
+  // Les seuils restés vierges (seuil proposé par défaut à la création, jamais renseigné) sont retirés après une lecture.
+  const vierge = (s) => !["reglage", "temporisation", "tms", "etat", "courbe"].some((k) => String((s.fields || {})[k] || "").trim()) && !["l1", "l2", "l3"].some((k) => String(((s.essai || {}).fields || {})[k] || "").trim());
+  return liste.filter((s) => !vierge(s));
+}
+// ----- Courbe de déclenchement (échelles logarithmiques) : courbe théorique, plage de tolérance, points mesurés -----
+function genererCourbeDeclenchementRelais(eq, s) {
+  if (typeof document === "undefined" || !document.createElement) return null;
+  if (uniteReglageSeuil(s) !== "A" || estThermique49(s)) return null;
+  const cei = estSeuilCEI(s);
+  const tAt = (M) => tempsRelaisAttendu(s, M);
+  if (tAt(cei ? 2 : null) === null) return null;
+  try {
+    const w = 560, h = 330;
+    const { canvas, ctx } = canevasSchema(w, h);
+    const x0 = 62, x1 = w - 24, y0 = 64, y1 = h - 44;
+    const Mmin = 1, Mmax = 20;
+    const Ms = []; for (let i = 0; i <= 120; i++) Ms.push(Math.pow(10, Math.log10(1.1) + (i / 120) * (Math.log10(Mmax) - Math.log10(1.1))));
+    const tolS = (M) => { const t = toleranceEssaiSeuil(eq, s, M); return t ? { min: enSecondes(t.min, t.unite), max: enSecondes(t.max, t.unite) } : null; };
+    const mesures = pointsMesuresSeuil(s);
+    const valeurs = [...Ms.map(tAt), ...Ms.map((M) => (tolS(M) || {}).max), ...Ms.map((M) => (tolS(M) || {}).min), ...mesures.flatMap((p) => p.valeurs)].filter((v) => v > 0 && isFinite(v));
+    const tMin = Math.pow(10, Math.floor(Math.log10(Math.min(...valeurs) * 0.8))), tMax = Math.pow(10, Math.ceil(Math.log10(Math.max(...valeurs) * 1.25)));
+    const X = (M) => x0 + ((Math.log10(M) - Math.log10(Mmin)) / (Math.log10(Mmax) - Math.log10(Mmin))) * (x1 - x0);
+    const Y = (t) => y1 - ((Math.log10(Math.max(t, tMin)) - Math.log10(tMin)) / (Math.log10(tMax) - Math.log10(tMin))) * (y1 - y0);
+    // Titre
+    ctx.textBaseline = "middle"; ctx.textAlign = "left";
+    ctx.fillStyle = SCHEMA_MARINE; ctx.font = `bold 12.5px ${SCHEMA_POLICE}`;
+    ctx.fillText(`Courbe de déclenchement — ${s.label.split(" — ")[0]}`, 16, 20);
+    ctx.font = `10.5px ${SCHEMA_POLICE}`; ctx.fillStyle = "#5B6B7D";
+    ctx.fillText(`${cei ? `${s.fields.courbe} · TMS ${s.fields.tms || "—"}` : `Temps constant · ${s.fields.temporisation || "—"} ${s.fields.temporisation_unite || ""}`} · réglage ${s.fields.reglage || "—"} A`, 16, 37);
+    // Grille
+    ctx.strokeStyle = "#EEF1F4"; ctx.lineWidth = 1;
+    [1, 1.5, 2, 3, 5, 7, 10, 15, 20].forEach((M) => { ctx.beginPath(); ctx.moveTo(X(M), y0); ctx.lineTo(X(M), y1); ctx.stroke(); });
+    for (let d = tMin; d <= tMax * 1.0001; d *= 10) [1, 2, 5].forEach((k) => { const t = d * k; if (t > tMax * 1.0001) return; ctx.strokeStyle = k === 1 ? "#E2E6EB" : "#F2F4F7"; ctx.beginPath(); ctx.moveTo(x0, Y(t)); ctx.lineTo(x1, Y(t)); ctx.stroke(); });
+    ctx.strokeStyle = "#B0B8C1"; ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x0, y1); ctx.lineTo(x1, y1); ctx.stroke();
+    ctx.fillStyle = "#8B96A3"; ctx.font = `10px ${SCHEMA_POLICE}`; ctx.textAlign = "center";
+    [1, 2, 5, 10, 20].forEach((M) => ctx.fillText(`${M} ×`, X(M), y1 + 13));
+    ctx.textAlign = "left"; ctx.fillText("Multiple du réglage (I / Is)", x0, y1 + 29);
+    ctx.textAlign = "right";
+    for (let d = tMin; d <= tMax * 1.0001; d *= 10) ctx.fillText(`${String(arrondiN(d, 3)).replace(".", ",")} s`, x0 - 6, Y(d));
+    // Plage de tolérance
+    const bande = Ms.map((M) => [M, tolS(M)]).filter(([, t]) => t && t.max > 0);
+    if (bande.length > 1) {
+      ctx.fillStyle = "rgba(15,138,95,0.13)"; ctx.beginPath();
+      bande.forEach(([M, t], i) => (i ? ctx.lineTo(X(M), Y(t.max)) : ctx.moveTo(X(M), Y(t.max))));
+      bande.slice().reverse().forEach(([M, t]) => ctx.lineTo(X(M), Y(Math.max(t.min, tMin))));
+      ctx.closePath(); ctx.fill();
+    }
+    // Courbe théorique (relais seul)
+    ctx.strokeStyle = SCHEMA_SYMBOLE; ctx.lineWidth = 2.4; ctx.beginPath();
+    if (!cei) { const t = tAt(null); ctx.moveTo(X(1), y0); ctx.lineTo(X(1), Y(t)); ctx.lineTo(X(Mmax), Y(t)); }
+    else Ms.forEach((M, i) => { const t = tAt(M); if (t === null) return; i ? ctx.lineTo(X(M), Y(t)) : ctx.moveTo(X(M), Y(t)); });
+    ctx.stroke();
+    // Points mesurés
+    mesures.forEach((p) => {
+      if (p.M < Mmin || p.M > Mmax) return;
+      const t = tolS(p.M);
+      p.valeurs.forEach((v) => {
+        const ok = !t || (v >= t.min - 1e-9 && v <= t.max + 1e-9);
+        ctx.fillStyle = ok ? "#0F8A5F" : "#C0392B"; ctx.strokeStyle = "#FFFFFF"; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.arc(X(p.M), Y(v), 4.2, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      });
+      const moy = p.valeurs.reduce((a, b) => a + b, 0) / p.valeurs.length;
+      ctx.fillStyle = SCHEMA_MARINE; ctx.font = `bold 10px ${SCHEMA_POLICE}`; ctx.textAlign = "left";
+      ctx.fillText(`${String(arrondiN(moy, 3)).replace(".", ",")} s`, X(p.M) + 8, Y(moy) - 9);
+    });
+    // Légende
+    ctx.font = `10px ${SCHEMA_POLICE}`; ctx.textAlign = "left"; let lx = w - 300; const ly = 37;
+    ctx.strokeStyle = SCHEMA_SYMBOLE; ctx.lineWidth = 2.4; ctx.beginPath(); ctx.moveTo(lx, ly); ctx.lineTo(lx + 16, ly); ctx.stroke();
+    ctx.fillStyle = "#5B6B7D"; ctx.fillText("Théorique (relais)", lx + 20, ly); lx += 108;
+    ctx.fillStyle = "rgba(15,138,95,0.25)"; ctx.fillRect(lx, ly - 5, 16, 10); ctx.fillStyle = "#5B6B7D"; ctx.fillText("Tolérance", lx + 20, ly); lx += 76;
+    ctx.fillStyle = "#0F8A5F"; ctx.beginPath(); ctx.arc(lx + 5, ly, 4, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = "#5B6B7D"; ctx.fillText("Mesures", lx + 13, ly);
+    const tol0 = toleranceEssaiSeuil(eq, s, cei ? 2 : null);
+    if (tol0 && tol0.ouvertureMs) { ctx.fillStyle = "#8B96A3"; ctx.textAlign = "right"; ctx.fillText(`Tolérance incluant l'ouverture du disjoncteur (${frN(tol0.ouvertureMs, 0)} ms)`, x1, y1 + 29); }
+    return canvas.toDataURL("image/png");
+  } catch (e) {
+    return null;
+  }
+}
+// ----- Courbe de déclenchement par fonction (phase 50/51, terre 50N/51N) : tous les seuils réunis en escalier,
+// en ampères primaires, avec la plage de tolérance du seuil actif et les points mesurés de chaque seuil.
+const GROUPES_COURBE_RELAIS = { phase: { familles: ["50", "51"], nom: "protection phase (50/51)" }, terre: { familles: ["50N", "51N", "50G", "51G"], nom: "protection terre (50N/51N)" } };
+const groupeCourbeSeuil = (s) => Object.keys(GROUPES_COURBE_RELAIS).find((g) => GROUPES_COURBE_RELAIS[g].familles.includes(ansiFamily(s.label))) || null;
+function etagesCourbeRelais(eq, groupe) {
+  const fams = GROUPES_COURBE_RELAIS[groupe].familles;
+  return ((eq.controles && eq.controles.parametrage_relais_seuils) || [])
+    .filter((s) => s.label && fams.includes(ansiFamily(s.label)) && (s.fields.etat || "") !== "Inactif" && numOf(s.fields.reglage) > 0)
+    .map((s) => ({ s, R: numOf(s.fields.reglage), cei: estSeuilCEI(s) }))
+    .filter((e) => tempsRelaisAttendu(e.s, e.cei ? 2 : null) !== null)
+    .sort((a, b) => a.R - b.R);
+}
+function genererCourbeFamilleRelais(eq, groupe) {
+  if (typeof document === "undefined" || !document.createElement || !GROUPES_COURBE_RELAIS[groupe]) return null;
+  const etages = etagesCourbeRelais(eq, groupe);
+  if (!etages.length) return null;
+  try {
+    // Courbe à temps inverse tracée à partir de 1,1 × le réglage (point de démarrage usuel des relais) : évite les temps quasi infinis au ras du seuil.
+    const tEtage = (e, I) => (I <= e.R * (e.cei ? 1.1 : 1.00001) ? null : tempsRelaisAttendu(e.s, e.cei ? I / e.R : null));
+    const actif = (I) => { let best = null; etages.forEach((e) => { const t = tEtage(e, I); if (t !== null && (best === null || t < best.t)) best = { e, t }; }); return best; };
+    const tolS = (e, I) => { const t = toleranceEssaiSeuil(eq, e.s, e.cei ? I / e.R : null); return t ? { min: enSecondes(t.min, t.unite), max: enSecondes(t.max, t.unite) } : null; };
+    const Rmin = etages[0].R, Rmax = etages[etages.length - 1].R;
+    const Imin = Rmin * 0.8, Imax = Math.max(20 * Rmin, 4 * Rmax);
+    const ech = []; for (let i = 0; i <= 320; i++) ech.push(Math.pow(10, Math.log10(Imin) + (i / 320) * (Math.log10(Imax) - Math.log10(Imin))));
+    etages.forEach((e) => ech.push(e.R * (e.cei ? 1.1001 : 1.0001), e.R * (e.cei ? 1.102 : 1.002)));
+    ech.sort((a, b) => a - b);
+    const pts = ech.map((I) => { const a = actif(I); return a ? { I, t: a.t, e: a.e, tol: tolS(a.e, I) } : null; }).filter(Boolean);
+    // Essai saisi sans l'assistant sur un seuil à temps constant : multiple inconnu, placé au multiple conseillé (2 ×, ou moins sous un seuil supérieur).
+    const tousSeuils = (eq.controles && eq.controles.parametrage_relais_seuils) || [];
+    const multipleDe = (e, p) => (!e.cei && !(e.s.essai && e.s.essai.assistant && Array.isArray(e.s.essai.assistant.points)) ? pointsTempsSeuil(tousSeuils, e.s)[0].M : p.M);
+    const mesures = etages.flatMap((e) => pointsMesuresSeuil(e.s).map((p) => { const M = multipleDe(e, p); return { e, I: M * e.R, M, valeurs: p.valeurs }; }));
+    const tous = [...pts.map((p) => p.t), ...pts.filter((p) => p.tol).flatMap((p) => [p.tol.min, p.tol.max]), ...mesures.flatMap((m) => m.valeurs)].filter((v) => v > 0 && isFinite(v));
+    const tMin = Math.pow(10, Math.floor(Math.log10(Math.min(...tous) * 0.8))), tMax = Math.pow(10, Math.ceil(Math.log10(Math.max(...tous) * 1.25)));
+    const w = 600, h = 340;
+    const { canvas, ctx } = canevasSchema(w, h);
+    const x0 = 62, x1 = w - 24, y0 = 64, y1 = h - 48;
+    const X = (I) => x0 + ((Math.log10(I) - Math.log10(Imin)) / (Math.log10(Imax) - Math.log10(Imin))) * (x1 - x0);
+    const Y = (t) => y1 - ((Math.log10(Math.min(Math.max(t, tMin), tMax)) - Math.log10(tMin)) / (Math.log10(tMax) - Math.log10(tMin))) * (y1 - y0);
+    ctx.textBaseline = "middle"; ctx.textAlign = "left";
+    ctx.fillStyle = SCHEMA_MARINE; ctx.font = `bold 12.5px ${SCHEMA_POLICE}`;
+    ctx.fillText(`Courbe de déclenchement — ${GROUPES_COURBE_RELAIS[groupe].nom}`, 16, 20);
+    ctx.font = `10.5px ${SCHEMA_POLICE}`; ctx.fillStyle = "#5B6B7D";
+    ctx.fillText(etages.map((e) => `${e.s.label.split(" — ")[0]} : ${frN(e.R, 1)} A, ${e.cei ? `${e.s.fields.courbe}, TMS ${e.s.fields.tms}` : `${e.s.fields.temporisation} ${e.s.fields.temporisation_unite || ""}`.trim()}`).join("   ·   "), 16, 38);
+    // Grille
+    const ticksI = []; for (let d = Math.pow(10, Math.floor(Math.log10(Imin))); d <= Imax; d *= 10) [1, 2, 5].forEach((k) => { const v = d * k; if (v >= Imin && v <= Imax) ticksI.push(v); });
+    ctx.lineWidth = 1;
+    ticksI.forEach((v) => { ctx.strokeStyle = "#EEF1F4"; ctx.beginPath(); ctx.moveTo(X(v), y0); ctx.lineTo(X(v), y1); ctx.stroke(); });
+    for (let d = tMin; d <= tMax * 1.0001; d *= 10) [1, 2, 5].forEach((k) => { const t = d * k; if (t > tMax * 1.0001) return; ctx.strokeStyle = k === 1 ? "#E2E6EB" : "#F2F4F7"; ctx.beginPath(); ctx.moveTo(x0, Y(t)); ctx.lineTo(x1, Y(t)); ctx.stroke(); });
+    ctx.strokeStyle = "#B0B8C1"; ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x0, y1); ctx.lineTo(x1, y1); ctx.stroke();
+    ctx.fillStyle = "#8B96A3"; ctx.font = `10px ${SCHEMA_POLICE}`; ctx.textAlign = "center";
+    ticksI.forEach((v) => ctx.fillText(`${frN(v, v < 10 ? 1 : 0)}`, X(v), y1 + 13));
+    ctx.textAlign = "left"; ctx.fillText("Courant primaire (A)", x0, y1 + 30);
+    ctx.textAlign = "right";
+    for (let d = tMin; d <= tMax * 1.0001; d *= 10) ctx.fillText(`${String(Number(d.toPrecision(1))).replace(".", ",")} s`, x0 - 6, Y(d));
+    // Repères verticaux des seuils
+    etages.forEach((e) => { ctx.strokeStyle = "#C9D3DE"; ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.moveTo(X(e.R), y0); ctx.lineTo(X(e.R), y1); ctx.stroke(); ctx.setLineDash([]); });
+    // Plage de tolérance (seuil actif), par tronçon continu
+    let troncon = [];
+    const fermer = () => {
+      if (troncon.length > 1) {
+        ctx.fillStyle = "rgba(15,138,95,0.13)"; ctx.beginPath();
+        troncon.forEach((p, i) => (i ? ctx.lineTo(X(p.I), Y(p.tol.max)) : ctx.moveTo(X(p.I), Y(p.tol.max))));
+        troncon.slice().reverse().forEach((p) => ctx.lineTo(X(p.I), Y(Math.max(p.tol.min, tMin))));
+        ctx.closePath(); ctx.fill();
+      }
+      troncon = [];
+    };
+    pts.forEach((p) => { if (!p.tol || (troncon.length && troncon[troncon.length - 1].e !== p.e)) fermer(); if (p.tol) troncon.push(p); });
+    fermer();
+    // Caractéristique théorique (relais seul), en escalier
+    ctx.strokeStyle = SCHEMA_SYMBOLE; ctx.lineWidth = 2.4; ctx.beginPath();
+    ctx.moveTo(X(pts[0].I), y0);
+    pts.forEach((p) => ctx.lineTo(X(p.I), Y(p.t)));
+    ctx.stroke();
+    // Points mesurés
+    mesures.forEach((m) => {
+      if (m.I < Imin || m.I > Imax) return;
+      const t = tolS(m.e, m.I);
+      m.valeurs.forEach((v) => {
+        const ok = !t || (v >= t.min - 1e-9 && v <= t.max + 1e-9);
+        ctx.fillStyle = ok ? "#0F8A5F" : "#C0392B"; ctx.strokeStyle = "#FFFFFF"; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.arc(X(m.I), Y(v), 4.2, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      });
+      const moy = m.valeurs.reduce((a, b) => a + b, 0) / m.valeurs.length;
+      ctx.fillStyle = SCHEMA_MARINE; ctx.font = `bold 10px ${SCHEMA_POLICE}`; ctx.textAlign = "left";
+      ctx.fillText(`${String(arrondiN(moy, 3)).replace(".", ",")} s`, X(m.I) + 8, Y(moy) - 9);
+    });
+    // Légende
+    ctx.font = `10px ${SCHEMA_POLICE}`; ctx.textAlign = "left"; let lx = x1 - 290; const ly = y1 + 30;
+    ctx.strokeStyle = SCHEMA_SYMBOLE; ctx.lineWidth = 2.4; ctx.beginPath(); ctx.moveTo(lx, ly); ctx.lineTo(lx + 16, ly); ctx.stroke();
+    ctx.fillStyle = "#5B6B7D"; ctx.fillText("Théorique (relais)", lx + 20, ly); lx += 108;
+    ctx.fillStyle = "rgba(15,138,95,0.25)"; ctx.fillRect(lx, ly - 5, 16, 10); ctx.fillStyle = "#5B6B7D"; ctx.fillText("Tolérance", lx + 20, ly); lx += 76;
+    ctx.fillStyle = "#0F8A5F"; ctx.beginPath(); ctx.arc(lx + 5, ly, 4, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = "#5B6B7D"; ctx.fillText("Mesures", lx + 13, ly);
+    const o = tempsOuvertureDisjoncteur(eq);
+    if (o && configEssaisRelais(eq).mesureSur === "Contacts du disjoncteur") { ctx.fillStyle = "#8B96A3"; ctx.textAlign = "right"; ctx.fillText(`Tolérance incluant l'ouverture du disjoncteur (${frN(o.ms, 0)} ms)`, x1, y0 - 8); }
+    return canvas.toDataURL("image/png");
+  } catch (e) {
+    return null;
+  }
+}
+// ----- Assistant d'essai pas à pas (facultatif) -----
+function AssistantEssaiSeuil({ eq, seuils, s, onFermer, onEnregistrer }) {
+  const a = (s.essai && s.essai.assistant) || {};
+  const cfg0 = configEssaisRelais(eq);
+  const cei = estSeuilCEI(s);
+  const pts0 = pointsTempsSeuil(seuils, s);
+  const [etape, setEtape] = useState(0);
+  const [mode, setMode] = useState(modeInjectionEssai(s));
+  const [mesureSur, setMesureSur] = useState(cfg0.mesureSur);
+  const [tOuv, setTOuv] = useState(cfg0.tempsOuverture);
+  const [prise, setPrise] = useState(cfg0.prise);
+  const [prep, setPrep] = useState(a.prep || {});
+  const [fin, setFin] = useState(a.fin || {});
+  const [seuil, setSeuil] = useState(a.seuil || { nonDeclenche: "", declenche: "" });
+  const [points, setPoints] = useState(() => {
+    if (Array.isArray(a.points) && a.points.length) return a.points;
+    const f = s.essai.fields || {};
+    return pts0.map((p, i) => ({ M: p.M, l1: i === 0 ? f.l1 || "" : "", l2: i === 0 ? f.l2 || "" : "", l3: i === 0 ? f.l3 || "" : "" }));
+  });
+  const [action, setAction] = useState(s.essai.action || "");
+  const eqCfg = { ...eq, controles: { ...eq.controles, config_essais_relais: { mesureSur, tempsOuverture: tOuv, prise } } };
+  const raccord = raccordementEssai(eqCfg, s, mode);
+  const alerteTerre = alerteTerreCalculee(seuils, s);
+  const blocRaccord = raccord ? <div style={{ fontSize: 12, color: "#3E4A5C", marginTop: 2 }}>Raccordement : <b>{raccord}</b></div> : null;
+  const ouvAuto = tempsOuvertureDisjoncteur({ ...eq, controles: { ...eq.controles, config_essais_relais: { mesureSur, tempsOuverture: "" } } });
+  const fac = facteursSeuil(s);
+  const vNon = valeurInjectionSeuil(eq, s, fac.nonDeclenche, mode), vOui = valeurInjectionSeuil(eq, s, fac.declenche, mode);
+  const uT = uniteTempsSeuil(s);
+  const fiche = ficheMethodeRelais(eq);
+  // Dictée : chaque nombre remplit la case vide suivante (L1, L2, L3 du 1er point, puis du suivant…) ; « retour » efface la dernière.
+  const remplies = useRef([]);
+  const dictee = useDictee((phrase) => {
+    if (commandeDictee(phrase) === "retour") {
+      const der = remplies.current.pop();
+      if (der) setPoints((ps) => ps.map((p, i) => (i === der[0] ? { ...p, [der[1]]: "" } : p)));
+      return;
+    }
+    const nombres = nombresDictes(phrase);
+    if (!nombres.length) return;
+    setPoints((ps) => {
+      const next = ps.map((p) => ({ ...p }));
+      nombres.forEach((n) => {
+        for (let i = 0; i < next.length; i++) {
+          const k = ["l1", "l2", "l3"].find((c) => String(next[i][c] || "").trim() === "");
+          if (k) { next[i][k] = n; remplies.current.push([i, k]); return; }
+        }
+      });
+      return next;
+    });
+  });
+  const tolPoint = (M) => toleranceEssaiSeuil(eqCfg, s, cei ? M : null);
+  const etatPoint = (p) => {
+    const t = tolPoint(p.M);
+    const vals = [p.l1, p.l2, p.l3].map(numOf).filter((v) => v !== null);
+    if (!vals.length || !t) return null;
+    return vals.every((v) => v >= t.min && v <= t.max) ? "ok" : "bad";
+  };
+  const etatsPoints = points.map(etatPoint);
+  const etatPropose = seuil.declenche === "Pas de déclenchement" ? "Défaillant"
+    : (seuil.nonDeclenche === "Déclenchement" || etatsPoints.includes("bad")) ? "Dégradé"
+    : (etatsPoints.includes("ok") || seuil.declenche === "Déclenchement") ? "Conforme" : "";
+  const [etatChoisi, setEtatChoisi] = useState("");
+  const etatFinal = etatChoisi || etatPropose || s.essai.etat || "Conforme";
+  const ETAPES = ["Préparation", "Seuil", "Temps", "Remise en service"];
+  const carte = { border: "1px solid #D8DEE5", borderRadius: 10, padding: "10px 12px", background: "#FAFBFC" };
+  const bouton = btnGhost(BRAND.blue);
+  const Case = ({ coche, onChange, children }) => (
+    <label style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: 12.5, color: "#3E4A5C", lineHeight: 1.45, cursor: "pointer" }}>
+      <input type="checkbox" checked={!!coche} onChange={(e) => onChange(e.target.checked)} style={{ marginTop: 2, flexShrink: 0, width: 15, height: 15 }} /> <span>{children}</span>
+    </label>
+  );
+  const ChoixResultat = ({ valeur, onChange, attendu }) => (
+    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+      {["Pas de déclenchement", "Déclenchement"].map((o) => {
+        const actif = valeur === o, bon = o === attendu;
+        return <button key={o} type="button" onClick={() => onChange(actif ? "" : o)} style={{ ...btnGhost(), padding: "6px 10px", background: actif ? (bon ? "#0F8A5F" : "#C0392B") : "#fff", color: actif ? "#fff" : "#3E4A5C", border: `1px solid ${actif ? (bon ? "#0F8A5F" : "#C0392B") : "#D8DEE5"}` }}>{o}</button>;
+      })}
+    </div>
+  );
+  function enregistrer() {
+    const p0 = points[0] || {};
+    const u = uniteReglageSeuil(s);
+    const v0 = p0.M ? valeurInjectionSeuil(eq, s, p0.M, mode) : null;
+    const fields = { ...s.essai.fields, l1: p0.l1 || "", l2: p0.l2 || "", l3: p0.l3 || "", modeInjection: mode };
+    if (cei && p0.M) fields.multipleInjection = String(p0.M);
+    if (v0 && v0.valeur !== null && v0.unite === u) fields.courant_injecte = String(v0.valeur);
+    onEnregistrer({
+      essai: { ...s.essai, fields, etat: etatFinal, action, assistant: { date: todayISO(), prep, fin, seuil, points, mode } },
+      config: { mesureSur, tempsOuverture: tOuv, prise },
+    });
+  }
+  const pastilleEtape = (i) => (
+    <button key={i} type="button" onClick={() => setEtape(i)} style={{ flex: "1 1 0", minWidth: 0, border: "none", background: "none", cursor: "pointer", padding: "6px 2px", borderBottom: `3px solid ${i === etape ? "#0A5DA8" : i < etape ? "#9CC3E6" : "#E2E6EB"}`, color: i === etape ? "#0A5DA8" : "#5B6B7D", fontSize: 12, fontWeight: i === etape ? 700 : 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+      {i + 1}. {ETAPES[i]}
+    </button>
+  );
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(10,15,25,0.62)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 10 }}>
+      <div className="assistant-essai" style={{ background: "#FFFFFF", borderRadius: 12, width: "min(760px, 100%)", maxHeight: "96vh", display: "flex", flexDirection: "column", boxShadow: "0 20px 60px rgba(0,0,0,0.35)" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", borderBottom: "1px solid #E2E6EB", gap: 10 }}>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontWeight: 700, color: "#1A1F26", fontSize: 14 }}>Assistant d'essai</div>
+            <div style={{ fontSize: 11.5, color: "#5B6B7D", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.label}</div>
+          </div>
+          <button onClick={onFermer} style={{ background: "none", border: "none", cursor: "pointer", color: "#5B6B7D", display: "flex" }} title="Fermer sans enregistrer"><X size={18} /></button>
+        </div>
+        <div style={{ display: "flex", padding: "0 12px", borderBottom: "1px solid #E2E6EB" }}>{ETAPES.map((_, i) => pastilleEtape(i))}</div>
+        <div style={{ overflow: "auto", padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
+          {etape === 0 && (
+            <>
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+                <MiniSelect label="Mode d'injection" options={LISTE_MODE_INJECTION} value={mode} onChange={setMode} width={160} />
+                {mode !== "Injection primaire" && <MiniSelect label="Prise d'essai" options={LISTE_PRISE_ESSAI} value={prise} onChange={setPrise} width={150} />}
+                <MiniSelect label="Temps mesuré sur" options={LISTE_MESURE_TEMPS_ESSAI} value={mesureSur} onChange={setMesureSur} width={190} />
+                {mesureSur === "Contacts du disjoncteur" && <MiniInput label="Ouverture disjoncteur" unit="ms" value={tOuv} onChange={setTOuv} />}
+              </div>
+              {mesureSur === "Contacts du disjoncteur" && (
+                <div style={{ fontSize: 11.5, color: tOuv || ouvAuto ? "#5B6B7D" : "#B5730A", lineHeight: 1.45 }}>
+                  {tOuv ? "Temps d'ouverture saisi : ajouté à la temporisation pour la tolérance." : ouvAuto ? `Repris de la mesure du temps d'ouverture de ce disjoncteur : ${frN(ouvAuto.ms, 1)} ms (moyenne L1/L2/L3).` : "Temps d'ouverture inconnu : la tolérance garde la marge générique. Mesurez-le (contrôles du disjoncteur) ou saisissez-le pour une tolérance juste."}
+                </div>
+              )}
+              <div style={carte}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#1A1F26", marginBottom: 6 }}>Câblage de la valise (Compano 100)</div>
+                <div style={{ fontSize: 12.5, color: "#3E4A5C", lineHeight: 1.5 }}>{texteCablageEssai(mode, mesureSur, prise)}</div>
+                {blocRaccord}
+                {methodeAnsi(s) && <div style={{ fontSize: 12, color: "#B5730A", lineHeight: 1.5, marginTop: 6 }}>Méthode : {methodeAnsi(s).texte}</div>}
+                <div style={{ fontSize: 12.5, color: "#3E4A5C", lineHeight: 1.5, marginTop: 6 }}>Réglage : <b>{s.fields.reglage || "—"} {uniteReglageSeuil(s) || ""}</b>{cei ? <> · courbe <b>{s.fields.courbe}</b>, TMS <b>{s.fields.tms || "—"}</b></> : s.fields.temporisation ? <> · temporisation <b>{s.fields.temporisation} {s.fields.temporisation_unite}</b></> : null}</div>
+              </div>
+              <div style={carte}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#1A1F26", marginBottom: 6 }}>Avant l'essai <span style={{ fontWeight: 500, color: "#8B96A3" }}>(repères, rien n'est obligatoire)</span></div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {checklistPreparation(mode, mesureSur, prise).map((t, i) => <Case key={i} coche={prep[i]} onChange={(v) => setPrep({ ...prep, [i]: v })}>{t}</Case>)}
+                </div>
+              </div>
+              <div style={{ ...carte, background: "rgba(10,93,168,0.04)" }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#0A5DA8", marginBottom: 6 }}>Fiche méthode — {fiche.nom}</div>
+                {fiche.lignes.map((l, i) => <div key={i} style={{ fontSize: 12, color: "#3E4A5C", lineHeight: 1.5 }}>• {l}</div>)}
+              </div>
+            </>
+          )}
+          {etape === 1 && (
+            <>
+              <div style={{ fontSize: 12.5, color: "#3E4A5C", lineHeight: 1.5 }}>
+                Vérification du seuil{estFonctionMinimum(s) ? " (fonction à minimum : on descend sous le réglage pour déclencher)" : ""}. Injecter sans temporisation de rampe, attendre au-delà de la temporisation.
+                {blocRaccord}
+                {alerteTerre && <div style={{ fontSize: 12, color: alerteTerre.bloquant ? "#C0392B" : "#B5730A", marginTop: 4 }}>⚠ {alerteTerre.texte}</div>}
+              </div>
+              {[["nonDeclenche", fac.nonDeclenche, vNon, "Pas de déclenchement"], ["declenche", fac.declenche, vOui, "Déclenchement"]].map(([cle, k, v, attendu]) => (
+                <div key={cle} style={carte}>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                    <div>
+                      <div style={{ fontSize: 12.5, fontWeight: 700, color: "#1A1F26" }}>{libelleMultiple(s, k)}</div>
+                      <div style={{ fontSize: 12.5, color: "#0A5DA8", marginTop: 2 }}>Injecter : <b>{v ? v.texte : "renseignez le réglage"}</b></div>
+                      <div style={{ fontSize: 11.5, color: "#8B96A3", marginTop: 2 }}>Attendu : {attendu.toLowerCase()}</div>
+                    </div>
+                    <ChoixResultat valeur={seuil[cle]} onChange={(r) => setSeuil({ ...seuil, [cle]: r })} attendu={attendu} />
+                  </div>
+                </div>
+              ))}
+            </>
+          )}
+          {etape === 2 && (
+            <>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                <div style={{ fontSize: 12.5, color: "#3E4A5C", lineHeight: 1.5, flex: "1 1 260px" }}>Temps de déclenchement en <b>{uT}</b>{mesureSur === "Contacts du disjoncteur" ? " (sur les contacts du disjoncteur)" : " (contact de sortie du relais)"}.</div>
+                {reconnaissanceVocaleDisponible() && (
+                  <button type="button" style={dictee.actif ? { ...bouton, background: "#C0392B", color: "#fff", border: "1px solid #C0392B" } : bouton} onClick={() => (dictee.actif ? dictee.arreter() : dictee.demarrer())} title="Chaque nombre dicté remplit la case vide suivante ; « retour » efface la dernière">
+                    <IconeMicro taille={13} /> {dictee.actif ? "Arrêter la dictée" : "Dicter les temps"}
+                  </button>
+                )}
+              </div>
+              {dictee.erreur && <div style={{ fontSize: 12, color: "#C0392B" }}>{dictee.erreur}</div>}
+              {points.map((p, i) => {
+                const t = tolPoint(p.M), v = valeurInjectionSeuil(eq, s, p.M, mode), note = (pts0[i] || {}).note;
+                const tTheo = tempsRelaisAttendu(s, cei ? p.M : null);
+                return (
+                  <div key={i} style={carte}>
+                    <div style={{ fontSize: 12.5, fontWeight: 700, color: "#1A1F26" }}>Point {i + 1} — {libelleMultiple(s, p.M)}</div>
+                    <div style={{ fontSize: 12.5, color: "#0A5DA8", marginTop: 2 }}>Injecter : <b>{v ? v.texte : "—"}</b></div>
+                    {blocRaccord}
+                    <div style={{ fontSize: 11.5, color: "#5B6B7D", marginTop: 2 }}>
+                      {tTheo !== null ? `Relais : ${frN(tTheo, 3)} s` : ""}{t ? ` · attendu ${t.min} – ${t.max} ${t.unite}` : ""}
+                    </div>
+                    {note && <div style={{ fontSize: 11.5, color: "#B5730A", marginTop: 2 }}>⚠ {note}</div>}
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+                      {["l1", "l2", "l3"].map((c) => (
+                        <MiniInput key={c} label={c.toUpperCase()} unit={uT} value={p[c] || ""} validState={t ? toleranceState(p[c], t.min, t.max) : null} onChange={(val) => setPoints(points.map((q, j) => (j === i ? { ...q, [c]: val } : q)))} />
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </>
+          )}
+          {etape === 3 && (
+            <>
+              <div style={carte}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#1A1F26", marginBottom: 6 }}>Remise en service <span style={{ fontWeight: 500, color: "#8B96A3" }}>(repères)</span></div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {CHECKLIST_REMISE_SERVICE.map((t, i) => <Case key={i} coche={fin[i]} onChange={(v) => setFin({ ...fin, [i]: v })}>{t}</Case>)}
+                </div>
+              </div>
+              <div style={carte}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#1A1F26", marginBottom: 6 }}>Bilan</div>
+                <div style={{ fontSize: 12.5, color: "#3E4A5C", lineHeight: 1.6 }}>
+                  <div>Seuil : {seuil.nonDeclenche || "—"} à {libelleMultiple(s, fac.nonDeclenche)} · {seuil.declenche || "—"} à {libelleMultiple(s, fac.declenche)}</div>
+                  {points.map((p, i) => <div key={i}>Temps à {libelleMultiple(s, p.M)} : {[p.l1, p.l2, p.l3].filter((x) => String(x || "").trim()).join(" / ") || "—"} {uT} {etatsPoints[i] === "ok" ? "✓" : etatsPoints[i] === "bad" ? "✕ hors tolérance" : ""}</div>)}
+                </div>
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", marginTop: 10 }}>
+                  <span style={{ fontSize: 12, color: "#5B6B7D" }}>État de l'essai{etatPropose ? ` (proposé : ${etatPropose})` : ""} :</span>
+                  <EtatRapide value={etatFinal} onChange={setEtatChoisi} />
+                </div>
+                <AutoTextArea className="champ-action" placeholder="Action (facultatif)" value={action} onChange={setAction} style={{ width: "100%", marginTop: 8, padding: "6px 8px", fontSize: 12.5 }} />
+              </div>
+            </>
+          )}
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 8, padding: "10px 16px", borderTop: "1px solid #E2E6EB", flexWrap: "wrap", alignItems: "center" }}>
+          <span style={{ fontSize: 11, color: "#8B96A3", flex: "1 1 300px" }}>Aide facultative : l'essai reste saisissable directement sans l'assistant.</span>
+          <div style={{ display: "flex", gap: 8, whiteSpace: "nowrap", marginLeft: "auto", flexWrap: "wrap", justifyContent: "flex-end" }}>
+            {etape > 0 && <button type="button" style={btnGhost()} onClick={() => setEtape(etape - 1)}>Précédent</button>}
+            {etape < ETAPES.length - 1 && <button type="button" style={btnGhost(BRAND.blue)} onClick={() => setEtape(etape + 1)}>Suivant</button>}
+            <button type="button" style={btnPrimary()} onClick={enregistrer}>Enregistrer dans l'essai</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+// ----- Plan d'essai (Word), généré depuis le paramétrage : à imprimer ou à suivre sur le terrain -----
+async function genererPlanEssaiRelais(eq) {
+  await ensureDocx();
+  const id = eq.identification || {};
+  const seuils = ((eq.controles && eq.controles.parametrage_relais_seuils) || []).filter((s) => s.label && ansiFamily(s.label) !== "DEC");
+  const cfg = configEssaisRelais(eq), ouv = tempsOuvertureDisjoncteur(eq), fiche = ficheMethodeRelais(eq);
+  const tcs = ((eq.controles && eq.controles.tc_dynamique) || []).filter((t) => t.fields && t.fields.rapportPrimaire && t.fields.secondaire).map((t) => `${t.label || "TC"} ${t.fields.rapportPrimaire}/${t.fields.secondaire} A`);
+  const P = (text, o = {}) => new DOCX.Paragraph({ spacing: { after: o.apres ?? 60 }, children: [new DOCX.TextRun({ text, size: o.size || 18, bold: !!o.gras, color: o.couleur || DOCX_DARK })] });
+  const children = [];
+  children.push(new DOCX.Paragraph({ spacing: { after: 80 }, children: [new DOCX.TextRun({ text: "PLAN D'ESSAI — RELAIS DE PROTECTION", bold: true, size: 30, color: DOCX_BLUE })] }));
+  children.push(P(`${eq.type}${id.repere ? " · " + id.repere : ""} — édité le ${todayISO().split("-").reverse().join("/")}`, { couleur: "5B6B7D" }));
+  children.push(P(`Relais : ${[id.marqueRelais, id.referenceRelais].filter(Boolean).join(" ") || "—"}${id.numeroSerieRelais ? ` (n° ${id.numeroSerieRelais})` : ""}`));
+  children.push(P(`TC : ${tcs.join(" · ") || "—"}${id.rapportTPProtection ? ` · TP ${id.rapportTPProtection}` : ""}`));
+  children.push(P(`Temps mesuré sur : ${cfg.mesureSur}${cfg.mesureSur === "Contacts du disjoncteur" ? ` — ouverture du disjoncteur ${ouv ? `${frN(ouv.ms, 0)} ms (${ouv.source}), incluse dans les temps attendus` : "non renseignée (marge générique)"}` : ""}`, { apres: 160 }));
+  children.push(docxHeading(`Fiche méthode — ${fiche.nom}`, 200, 100));
+  fiche.lignes.forEach((l) => children.push(P(`• ${l}`)));
+  children.push(docxHeading("Avant l'essai", 240, 100));
+  checklistPreparation("Injection secondaire", cfg.mesureSur, cfg.prise).forEach((l) => children.push(P(`☐  ${l}`)));
+  children.push(docxHeading("Points d'essai", 240, 120));
+  const L = [2600, 1500, 2300, 1700, 1500];
+  const ent = (t, i) => new DOCX.TableCell({ width: { size: L[i], type: DOCX.WidthType.DXA }, margins: CELL_MARGINS_ENTETE, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_ENTETE }, children: [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: t, bold: true, size: 15, color: DOCX_WHITE })] })] });
+  const cel = (i, t, o = {}) => new DOCX.TableCell({ width: { size: L[i], type: DOCX.WidthType.DXA }, margins: { top: 60, bottom: 60, left: 90, right: 80 }, shading: o.fond, children: (Array.isArray(t) ? t : [t]).map((x) => new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: x || "", size: o.size || 15, bold: !!o.gras, color: o.couleur || DOCX_DARK })] })) });
+  const rows = [new DOCX.TableRow({ tableHeader: true, cantSplit: true, children: ["Fonction / essai", "Multiple", "Valeur à injecter", "Attendu", "Mesuré"].map(ent) })];
+  seuils.forEach((s, n) => {
+    const fond = n % 2 === 1 ? { type: DOCX.ShadingType.CLEAR, fill: DOCX_ZEBRE } : undefined;
+    const mode = modeInjectionEssai(s), fac = facteursSeuil(s);
+    const regl = `${s.fields.reglage || "—"} ${uniteReglageSeuil(s) || ""} · ${estSeuilCEI(s) ? `${s.fields.courbe}, TMS ${s.fields.tms || "—"}` : `${s.fields.temporisation || "—"} ${s.fields.temporisation_unite || ""}`} · ${mode}`;
+    const rac = raccordementEssai(eq, s, mode), alT = alerteTerreCalculee(seuils, s);
+    rows.push(new DOCX.TableRow({ cantSplit: true, children: [new DOCX.TableCell({ columnSpan: 5, width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, margins: { top: 80, bottom: 60, left: 90, right: 80 }, shading: fond, children: [
+      new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: s.label, size: 16, bold: true, color: DOCX_DARK }), new DOCX.TextRun({ text: "   " + regl, size: 15, color: "5B6B7D" })] }),
+      ...(rac ? [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: "Raccordement : ", size: 15, color: "5B6B7D" }), new DOCX.TextRun({ text: rac, size: 15, bold: true, color: DOCX_BLUE })] })] : []),
+      ...(alT ? [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: `⚠ ${alT.texte}`, size: 15, color: alT.bloquant ? DOCX_RED : DOCX_ORANGE })] })] : []),
+      ...(methodeAnsi(s) ? [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: methodeAnsi(s).injection ? "Méthode : " : "Méthode (pas de valeur d'injection calculée) : ", size: 15, color: "5B6B7D" }), new DOCX.TextRun({ text: methodeAnsi(s).texte, size: 15, color: DOCX_DARK })] })] : []),
+    ] })] }));
+    if (sansInjectionCalculee(s)) return;
+    [[fac.nonDeclenche, "Pas de déclenchement"], [fac.declenche, "Déclenchement"]].forEach(([k, att]) => {
+      const v = valeurInjectionSeuil(eq, s, k, mode);
+      rows.push(new DOCX.TableRow({ cantSplit: true, children: [cel(0, "   Seuil", { fond }), cel(1, libelleMultiple(s, k), { fond }), cel(2, v ? v.texte : "—", { fond }), cel(3, att, { fond }), cel(4, "☐ oui   ☐ non", { fond })] }));
+    });
+    pointsTempsSeuil(seuils, s).forEach((p) => {
+      const v = valeurInjectionSeuil(eq, s, p.M, mode), t = toleranceEssaiSeuil(eq, s, estSeuilCEI(s) ? p.M : null);
+      rows.push(new DOCX.TableRow({ cantSplit: true, children: [cel(0, "   Temps", { fond }), cel(1, libelleMultiple(s, p.M), { fond }), cel(2, [v ? v.texte : "—", ...(p.note ? [`⚠ ${p.note}`] : [])], { fond }), cel(3, t ? `${frN(t.min, 3)} – ${frN(t.max, 3)} ${t.unite}` : "—", { fond, gras: true }), cel(4, "L1        L2        L3", { fond, couleur: "8B96A3" })] }));
+    });
+  });
+  children.push(docxTable({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: L, rows }));
+  children.push(docxHeading("Remise en service", 240, 100));
+  CHECKLIST_REMISE_SERVICE.forEach((l) => children.push(P(`☐  ${l}`)));
+  children.push(P("Valeurs à injecter calculées depuis le paramétrage et les rapports TC/TP saisis ; tolérances : ±5 % du temps du relais, −20 / +40 ms, plus l'ouverture du disjoncteur si le temps est pris sur ses contacts. Repères à confirmer avec la notice du relais.", { couleur: "8B96A3", size: 15 }));
+  const doc = new DOCX.Document({ styles: DOCX_STYLES, sections: [{ properties: { page: PAGE_CORPS }, footers: { default: docxFooterPagination() }, children }] });
+  return DOCX.Packer.toBlob(doc);
+}
+
+// =============================================================================================
+// AIDE AUX MESURES D'ISOLEMENT DES TRANSFORMATEURS — complément facultatif (mégohmmètre Megger MIT520).
+// Rien n'est obligatoire : les champs de la mesure restent saisissables directement.
+// =============================================================================================
+// Montage de chaque mesure : borne du MIT520 (ou liaison à la terre) sur chaque élément. Chaque enroulement a toujours
+// ses bornes court-circuitées entre elles ; « terre » = enroulement court-circuité ET relié à la masse.
+const MONTAGES_ISOLEMENT_TRANSFO = {
+  hta_terre: { nom: "HTA – Terre", teste: "HTA", c: { HTA: "−", BT: "terre", BT2: "terre", Masse: "+" } },
+  bt_terre: { nom: "BT – Terre", teste: "BT", c: { HTA: "terre", BT: "−", BT2: "terre", Masse: "+" } },
+  hta_bt: { nom: "HTA – BT", teste: "HTA", c: { HTA: "−", BT: "+", BT2: "terre", Masse: "G" } },
+  bt2_terre: { nom: "BT2 – Terre", teste: "BT2", c: { HTA: "terre", BT: "terre", BT2: "−", Masse: "+" } },
+  hta_bt2: { nom: "HTA – BT2", teste: "HTA", c: { HTA: "−", BT: "terre", BT2: "+", Masse: "G" } },
+  bt_bt2: { nom: "BT1 – BT2", teste: "BT", c: { HTA: "terre", BT: "−", BT2: "+", Masse: "G" } },
+};
+// DAR = R(60 s) ÷ R(10 s), PI = R(10 min) ÷ R(1 min).
+const RELEVES_ISOLEMENT = [["t10", 10, "10 s"], ["t30", 30, "30 s"], ["t60", 60, "1 min"], ["t600", 600, "10 min"]];
+const estTransfoSec = (eq) => /sec/i.test((eq.identification && eq.identification.typeIsolation) || "");
+const deuxSecondairesTransfo = (eq) => (eq.identification && eq.identification.deuxEnroulementsSecondaires) === "Oui";
+function texteMontageIsolement(cle, eq) {
+  const m = MONTAGES_ISOLEMENT_TRANSFO[cle];
+  if (!m) return "";
+  const nomEl = (k) => (k === "BT" ? (deuxSecondairesTransfo(eq) ? "BT1" : "BT") : k === "Masse" ? "masse / cuve" : k);
+  const el = Object.keys(m.c).filter((k) => k !== "BT2" || deuxSecondairesTransfo(eq));
+  const par = (b) => el.filter((k) => m.c[k] === b).map(nomEl);
+  const parts = [];
+  if (par("−").length) parts.push(`borne − sur ${par("−").join(" + ")}`);
+  if (par("+").length) parts.push(`borne + sur ${par("+").join(" + ")}`);
+  if (par("G").length) parts.push(`garde G sur ${par("G").join(" + ")}`);
+  if (par("terre").length) parts.push(`${par("terre").join(" et ")} court-circuitée${par("terre").length > 1 ? "s" : ""} et reliée${par("terre").length > 1 ? "s" : ""} à la masse`);
+  return parts.join(" ; ");
+}
+// Tension d'essai proposée selon la tension assignée de l'enroulement testé (IEEE 43, plafonnée aux 5 kV du MIT520).
+function tensionEssaiProposee(eq, cle) {
+  const m = MONTAGES_ISOLEMENT_TRANSFO[cle];
+  if (!m) return null;
+  const id = eq.identification || {};
+  const u = m.teste === "HTA" ? (numOf(id.tensionPrimaire) === null ? null : numOf(id.tensionPrimaire) * 1000) : numOf(m.teste === "BT2" ? id.tensionSecondaire2 : id.tensionSecondaire);
+  if (u === null) return m.teste === "HTA" ? "5000" : "500";
+  if (u < 1000) return "500";
+  if (u <= 2500) return "1000";
+  if (u <= 5000) return "2500";
+  return "5000";
+}
+// IR ramené à 40 °C (règle générale ×2 par 10 °C, IEEE 43) — en MΩ ; null si valeur ou température manquante.
+function irA40(f) {
+  const r = versMegaohms(f && f.valeur, f && f.unite), t = numOf(f && f.temperature);
+  if (r === null || t === null) return null;
+  return r * Math.pow(0.5, (40 - t) / 10); // la résistance baisse de moitié par 10 °C de hausse : R40 = R × 0,5^((40 − T) / 10)
+}
+const fmtMO = (x) => (x === null || x === undefined ? "—" : x >= 1000 ? `${frN(x / 1000, 2)} GΩ` : `${frN(x, x < 10 ? 2 : 0)} MΩ`);
+function itemsIsolementTransfo(eq) {
+  return ["hta_terre", "bt_terre", "hta_bt", ...(deuxSecondairesTransfo(eq) ? ["bt2_terre", "hta_bt2", "bt_bt2"] : [])];
+}
+// Appréciation d'une mesure : seuil 1 MΩ/kV, PI (IEEE 43 : 2,0 ou 1,5 en classe A), DAR (1,25 / 1,6).
+function appreciationIsolement(f, classeIsolation) {
+  const r = versMegaohms(f.valeur, f.unite), v = numOf(f.v), pi = numOf(f.pi), dar = numOf(f.dar);
+  const piMin = classeIsolation === "A" ? 1.5 : 2.0;
+  const notes = [];
+  let rang = r === null ? -1 : 0;
+  if (r !== null && v !== null && r < v / 1000) { rang = 2; notes.push(`sous le repère 1 MΩ/kV (${frN(v / 1000, 2)} MΩ)`); }
+  if (pi !== null && pi < piMin) { rang = Math.max(rang, 1); notes.push(`PI ${frN(pi, 2)} < ${frN(piMin, 1)}`); }
+  if (dar !== null && dar < 1.25) { rang = Math.max(rang, 1); notes.push(`DAR ${frN(dar, 2)} < 1,25`); }
+  return { rang, etat: rang === 2 ? "Défaillant" : rang === 1 ? "Dégradé" : rang === 0 ? "Conforme" : "", notes };
+}
+// Alertes à l'écran (jamais imprimées) : cohérence des mesures et écart avec la visite précédente (valeurs ramenées à 40 °C).
+function alertesIsolementTransfo(eq, precedent) {
+  const out = [];
+  const vals = (eq.controles && eq.controles.mesure_isolement) || {};
+  const id = eq.identification || {};
+  const r = (k) => (vals[k] && vals[k].fields ? versMegaohms(vals[k].fields.valeur, vals[k].fields.unite) : null);
+  itemsIsolementTransfo(eq).forEach((k) => {
+    const f = (vals[k] && vals[k].fields) || {}, nom = MONTAGES_ISOLEMENT_TRANSFO[k].nom;
+    if (r(k) === null) return;
+    if (numOf(f.temperature) === null) out.push(`${nom} : température non renseignée — pas de correction à 40 °C, comparaison d'une visite à l'autre faussée.`);
+    const v = numOf(f.v), teste = MONTAGES_ISOLEMENT_TRANSFO[k].teste;
+    const uBT = numOf(teste === "BT2" ? id.tensionSecondaire2 : id.tensionSecondaire);
+    if (teste !== "HTA" && v !== null && v > 1000 && (uBT === null || uBT < 1000)) out.push(`${nom} : ${v} V appliqués sur un enroulement BT — 500 V (ou 1 000 V) suffisent.`);
+    const pi = numOf(f.pi), dar = numOf(f.dar);
+    if (pi !== null && dar !== null && ((pi >= 2 && dar < 1.25) || (pi < 1.5 && dar >= 1.6))) out.push(`${nom} : PI (${frN(pi, 2)}) et DAR (${frN(dar, 2)}) contradictoires — vérifier les relevés.`);
+    if (estTransfoSec(eq) && ISOLEMENT_TYPIQUE_TRIHAL[k] && r(k) < ISOLEMENT_TYPIQUE_TRIHAL[k] / 10) out.push(`${nom} : ${fmtMO(r(k))}, très loin de la valeur typique (≈ ${ISOLEMENT_TYPIQUE_TRIHAL[k]} MΩ) — humidité, condensation ou défaut à confirmer.`);
+  });
+  if (r("hta_bt") !== null && r("hta_terre") !== null && r("hta_bt") < 0.2 * r("hta_terre")) out.push(`HTA – BT (${fmtMO(r("hta_bt"))}) très inférieure à HTA – Terre (${fmtMO(r("hta_terre"))}) — vérifier le montage (garde G sur la cuve) et l'état de l'isolation entre enroulements.`);
+  if (precedent) {
+    const anc = (precedent.eq.controles && precedent.eq.controles.mesure_isolement) || {};
+    itemsIsolementTransfo(eq).forEach((k) => {
+      const fa = (anc[k] && anc[k].fields) || {}, fc = (vals[k] && vals[k].fields) || {};
+      const a40 = irA40(fa), c40 = irA40(fc);
+      const a = a40 !== null && c40 !== null ? a40 : versMegaohms(fa.valeur, fa.unite), c = a40 !== null && c40 !== null ? c40 : versMegaohms(fc.valeur, fc.unite);
+      if (a === null || c === null || !(a > 0)) return;
+      const ecart = (c - a) / a;
+      if (ecart < -0.5) out.push(`${MONTAGES_ISOLEMENT_TRANSFO[k].nom} : baisse de ${frN(-ecart * 100, 0)} % depuis ${moisAnneeVisite(precedent.date)} (${fmtMO(a)} → ${fmtMO(c)}${a40 !== null && c40 !== null ? ", valeurs ramenées à 40 °C" : ", valeurs brutes — températures manquantes"}).`);
+    });
+  }
+  return out;
+}
+const FICHE_MIT520 = [
+  "Megger MIT520 : tensions d'essai 500 V, 1 000 V, 2 500 V et 5 000 V (tension réglable possible) ; modes IR, IR(t), DAR, PI, SV et DD.",
+  "En mode PI ou DAR, l'appareil calcule le rapport en fin d'essai ; les relevés intermédiaires peuvent aussi être notés ici pour tracer la courbe d'absorption.",
+  "Borne − sur l'élément testé, + sur la référence, G (garde) pour écarter les courants de fuite de surface — montage usuel, à vérifier sur la notice.",
+  "Décharge automatique en fin d'essai : attendre que l'indication de tension soit retombée avant de toucher les connexions.",
+];
+const FICHE_ISOLEMENT_HUILE = [
+  "Transformateur immergé : relever la température d'huile haute (≈ température des enroulements à l'arrêt, après stabilisation).",
+  "Une baisse d'IR et de PI d'une visite à l'autre oriente vers l'humidité : à rapprocher de la teneur en eau de l'analyse d'huile.",
+  "Nettoyer et sécher les traversées : une traversée humide ou souillée fausse la mesure (utiliser la garde G).",
+];
+const FICHE_ISOLEMENT_SEC = [
+  "Transformateur sec enrobé : valeurs typiques à froid ≈ 250 MΩ (MT/masse), 50 MΩ (BT/masse), 250 MΩ (MT/BT).",
+  "La résine est sensible à l'humidité de surface et à la condensation : une valeur basse peut simplement indiquer un appareil humide — nettoyer, sécher et remesurer.",
+  "Noter la température des enroulements (sonde PT100 ou thermomètre) et, si possible, l'hygrométrie du local.",
+];
+const CHECKLIST_ISOLEMENT_PREPARATION = [
+  "Consignation HTA et BT selon les règles de l'exploitant, vérification d'absence de tension (VAT) et mise à la terre",
+  "Câbles HTA et BT déconnectés des bornes (sinon noter « mesure avec câbles » : la valeur inclut les câbles)",
+  "Parafoudres, TP / transformateurs auxiliaires et liaison du neutre BT à la terre déconnectés",
+  "Bornes de chaque enroulement court-circuitées entre elles (y compris le neutre)",
+  "Traversées / enrobage propres et secs",
+  "Température relevée (enroulement, ou huile haute pour un transformateur immergé)",
+];
+const CHECKLIST_ISOLEMENT_REMISE = [
+  "Enroulements déchargés : mise à la terre maintenue au moins 4 fois la durée d'application de la tension (10 min d'essai → 40 min)",
+  "Courts-circuits et fils d'essai retirés",
+  "Liaison du neutre BT, parafoudres et TP / auxiliaires reconnectés",
+  "Câbles HTA et BT reconnectés et serrés au couple",
+  "Mises à la terre d'intervention retirées avant la remise sous tension",
+];
+// Schéma de montage (SVG) : HTA, BT (BT1/BT2), masse — borne du MIT520 ou liaison à la terre sur chaque élément.
+function SchemaMontageIsolement({ cle, eq }) {
+  const m = MONTAGES_ISOLEMENT_TRANSFO[cle];
+  if (!m) return null;
+  const deux = deuxSecondairesTransfo(eq);
+  const blocs = [["HTA", "HTA"], ["BT", deux ? "BT1" : "BT"], ...(deux ? [["BT2", "BT2"]] : []), ["Masse", "Masse / cuve"]];
+  const couleur = { "−": "#C0392B", "+": "#1A1F26", G: "#0A5DA8", terre: "#0F8A5F" };
+  const W = 120 * blocs.length + 20;
+  return (
+    <svg viewBox={`0 0 ${W} 96`} style={{ width: "100%", maxWidth: W, height: "auto", display: "block" }} role="img" aria-label="Schéma de montage">
+      <rect x="10" y="4" width={W - 20} height="20" rx="6" fill="#26364A" />
+      <text x={W / 2} y="18" textAnchor="middle" fontSize="11" fontWeight="700" fill="#fff">Megger MIT520 — {m.nom}</text>
+      {blocs.map(([k, nom], i) => {
+        const x = 20 + i * 120, b = m.c[k];
+        const c = b ? couleur[b] : "#B0B8C1";
+        return (
+          <g key={k}>
+            {b && b !== "terre" && <line x1={x + 50} y1="24" x2={x + 50} y2="44" stroke={c} strokeWidth="2" strokeDasharray={b === "G" ? "4 3" : undefined} />}
+            <rect x={x} y="44" width="100" height="28" rx="6" fill={k === "Masse" ? "#EEF1F4" : "#F7F9FB"} stroke={c} strokeWidth="1.6" />
+            <text x={x + 50} y="62" textAnchor="middle" fontSize="11.5" fontWeight="700" fill="#1A1F26">{nom}</text>
+            <text x={x + 50} y="88" textAnchor="middle" fontSize="10.5" fontWeight="700" fill={c}>{b === "terre" ? "⏚ à la masse" : b === "G" ? "garde G" : b ? `borne ${b}` : "—"}</text>
+            {b && b !== "terre" && <text x={x + 56} y="38" fontSize="10.5" fontWeight="700" fill={c}>{b}</text>}
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+// Courbe d'absorption : résistance en fonction du temps (échelles logarithmiques), une courbe par mesure.
+function genererCourbeAbsorptionIsolement(eq) {
+  if (typeof document === "undefined" || !document.createElement) return null;
+  const vals = (eq.controles && eq.controles.mesure_isolement) || {};
+  const PAL = ["#0A5DA8", "#EF6C00", "#00897B", "#7E57C2", "#C0392B", "#5B6B7D"];
+  const series = itemsIsolementTransfo(eq).map((k, i) => {
+    const rel = (vals[k] && vals[k].releves) || {};
+    const pts = [...RELEVES_ISOLEMENT, ["t15", 15]].sort((a, b) => a[1] - b[1]).map(([c, t]) => [t, versMegaohms(rel[c], rel.unite)]).filter(([, v]) => v !== null && v > 0);
+    return { nom: MONTAGES_ISOLEMENT_TRANSFO[k].nom, pts, couleur: PAL[i % PAL.length] };
+  }).filter((s) => s.pts.length >= 2);
+  if (!series.length) return null;
+  try {
+    const w = 560, h = 300;
+    const { canvas, ctx } = canevasSchema(w, h);
+    const x0 = 66, x1 = w - 24, y0 = 58, y1 = h - 44;
+    const tous = series.flatMap((s) => s.pts.map(([, v]) => v));
+    const vMin = Math.pow(10, Math.floor(Math.log10(Math.min(...tous) * 0.8))), vMax = Math.pow(10, Math.ceil(Math.log10(Math.max(...tous) * 1.25)));
+    const X = (t) => x0 + ((Math.log10(t) - Math.log10(10)) / (Math.log10(600) - Math.log10(10))) * (x1 - x0);
+    const Y = (v) => y1 - ((Math.log10(v) - Math.log10(vMin)) / (Math.log10(vMax) - Math.log10(vMin))) * (y1 - y0);
+    ctx.textBaseline = "middle"; ctx.textAlign = "left";
+    ctx.fillStyle = SCHEMA_MARINE; ctx.font = `bold 12.5px ${SCHEMA_POLICE}`; ctx.fillText("Courbe d'absorption — résistance d'isolement", 16, 20);
+    ctx.font = `10.5px ${SCHEMA_POLICE}`; ctx.fillStyle = "#5B6B7D"; ctx.fillText("Une courbe qui monte indique un isolant sain ; une courbe plate oriente vers l'humidité ou la pollution.", 16, 38);
+    ctx.strokeStyle = "#EEF1F4"; ctx.lineWidth = 1;
+    [10, 30, 60, 120, 300, 600].forEach((t) => { ctx.beginPath(); ctx.moveTo(X(t), y0); ctx.lineTo(X(t), y1); ctx.stroke(); });
+    for (let d = vMin; d <= vMax * 1.0001; d *= 10) { ctx.strokeStyle = "#E2E6EB"; ctx.beginPath(); ctx.moveTo(x0, Y(d)); ctx.lineTo(x1, Y(d)); ctx.stroke(); }
+    ctx.strokeStyle = "#B0B8C1"; ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x0, y1); ctx.lineTo(x1, y1); ctx.stroke();
+    ctx.fillStyle = "#8B96A3"; ctx.font = `10px ${SCHEMA_POLICE}`; ctx.textAlign = "center";
+    [[10, "10 s"], [30, "30 s"], [60, "1 min"], [120, "2 min"], [300, "5 min"], [600, "10 min"]].forEach(([t, l]) => ctx.fillText(l, X(t), y1 + 13));
+    ctx.textAlign = "right";
+    for (let d = vMin; d <= vMax * 1.0001; d *= 10) ctx.fillText(fmtMO(d), x0 - 6, Y(d));
+    series.forEach((s) => {
+      ctx.strokeStyle = s.couleur; ctx.lineWidth = 2.2; ctx.beginPath();
+      s.pts.forEach(([t, v], i) => (i ? ctx.lineTo(X(t), Y(v)) : ctx.moveTo(X(t), Y(v)))); ctx.stroke();
+      s.pts.forEach(([t, v]) => { ctx.fillStyle = s.couleur; ctx.beginPath(); ctx.arc(X(t), Y(v), 3.6, 0, Math.PI * 2); ctx.fill(); });
+    });
+    ctx.font = `10.5px ${SCHEMA_POLICE}`; ctx.textAlign = "left"; let lx = x0;
+    series.forEach((s) => { ctx.strokeStyle = s.couleur; ctx.lineWidth = 2.4; ctx.beginPath(); ctx.moveTo(lx, y1 + 29); ctx.lineTo(lx + 16, y1 + 29); ctx.stroke(); ctx.fillStyle = "#5B6B7D"; ctx.fillText(s.nom, lx + 20, y1 + 29); lx += ctx.measureText(s.nom).width + 40; });
+    return canvas.toDataURL("image/png");
+  } catch (e) {
+    return null;
+  }
+}
+// Petit bip aux instants de relevé (si le navigateur l'autorise) — sans effet sinon.
+function bipReleve() {
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
+    const ac = new AC(), o = ac.createOscillator(), g = ac.createGain();
+    o.frequency.value = 880; g.gain.value = 0.15; o.connect(g); g.connect(ac.destination); o.start(); o.stop(ac.currentTime + 0.25);
+    setTimeout(() => { try { ac.close(); } catch (e) { /* rien */ } }, 600);
+    if (navigator.vibrate) navigator.vibrate(200);
+  } catch (e) { /* bip non disponible */ }
+}
+// ----- Assistant pas à pas (facultatif) -----
+function AssistantIsolementTransfo({ eq, onFermer, onEnregistrer }) {
+  const vals = (eq.controles && eq.controles.mesure_isolement) || {};
+  const cles = itemsIsolementTransfo(eq);
+  const classe = eq.identification && eq.identification.classeIsolation;
+  const [etape, setEtape] = useState(0);
+  const [prep, setPrep] = useState({});
+  const [fin, setFin] = useState({});
+  const temp0 = cles.map((k) => vals[k] && vals[k].fields && vals[k].fields.temperature).find((t) => t) || "";
+  const [temperature, setTemperature] = useState(temp0);
+  const [mesures, setMesures] = useState(() => Object.fromEntries(cles.map((k) => {
+    const f = (vals[k] && vals[k].fields) || {}, rel = (vals[k] && vals[k].releves) || {};
+    // Valeur déjà saisie sans relevés : reprise telle quelle (jamais effacée par l'assistant).
+    return [k, { faire: f.realise === "OUI" || !!f.valeur, v: f.v || tensionEssaiProposee(eq, k), type: f.typeMesure || LISTE_TYPE_MESURE_ISOLEMENT[1], unite: rel.unite || f.unite || "MΩ", t10: rel.t10 || "", t30: rel.t30 || "", t60: rel.t60 || "", t600: rel.t600 || "", valeurSaisie: f.valeur || "", piSaisi: f.pi || "", darSaisi: f.dar || "", etat: "" }];
+  })));
+  const [courante, setCourante] = useState(cles[0]);
+  const [chrono, setChrono] = useState(null); // { debut, cle }
+  const [maintenant, setMaintenant] = useState(Date.now());
+  const bips = useRef(new Set());
+  useEffect(() => {
+    if (!chrono) return undefined;
+    const id = setInterval(() => setMaintenant(Date.now()), 250);
+    return () => clearInterval(id);
+  }, [chrono]);
+  const ecoule = chrono ? Math.floor((maintenant - chrono.debut) / 1000) : 0;
+  const m = mesures[courante] || {};
+  const estPI = /^PI/.test(m.type), estStd = /^Standard/.test(m.type);
+  const dureeCible = estPI ? 600 : 60;
+  useEffect(() => {
+    if (!chrono) return;
+    RELEVES_ISOLEMENT.forEach(([c, t]) => { if (ecoule >= t && !bips.current.has(c) && (estPI || t <= 60)) { bips.current.add(c); bipReleve(); } });
+    if (ecoule >= dureeCible + 5) setChrono(null);
+  }, [ecoule]);
+  // Saisir un relevé coche « Mesure réalisée » ; une valeur relevée remplace la valeur saisie auparavant.
+  const setM = (k, patch) => setMesures((ms) => ({ ...ms, [k]: { ...ms[k], ...patch, ...(["t10", "t30", "t60", "t600"].some((c) => patch[c]) ? { faire: true } : {}) } }));
+  const calc = (x) => {
+    const r = (c) => versMegaohms(x[c], x.unite);
+    const pi = r("t600") !== null && r("t60") ? arrondiN(r("t600") / r("t60"), 2) : null;
+    // DAR = R(60 s) ÷ R(10 s), comme dans l'app ; à défaut de relevés, valeur affichée par le MIT520.
+    const dar = r("t60") !== null && r("t10") ? arrondiN(r("t60") / r("t10"), 2) : null;
+    const releve = /^PI/.test(x.type) ? (x.t600 || x.t60) : x.t60 || x.t30 || x.t10;
+    const finale = releve || x.valeurSaisie || "";
+    return { pi: pi !== null ? pi : numOf(x.piSaisi), dar: dar !== null ? dar : numOf(x.darSaisi), finale };
+  };
+  const dictee = useDictee((phrase) => {
+    const n = nombresDictes(phrase)[0];
+    if (n === undefined) return;
+    setMesures((ms) => {
+      const x = ms[courante];
+      const c = RELEVES_ISOLEMENT.map(([c2]) => c2).filter((c2) => estPI || c2 !== "t600").find((c2) => String(x[c2] || "").trim() === "");
+      return c ? { ...ms, [courante]: { ...x, [c]: n, faire: true } } : ms;
+    });
+  });
+  const fieldsPour = (k) => {
+    const x = mesures[k], c = calc(x);
+    return { realise: "OUI", typeMesure: x.type, v: x.v, valeur: c.finale || "", unite: x.unite, ...(temperature ? { temperature } : {}), ...(c.pi !== null ? { pi: String(c.pi) } : {}), ...(c.dar !== null ? { dar: String(c.dar) } : {}) };
+  };
+  function enregistrer() {
+    const patch = {};
+    // Seules les mesures cochées ET relevées sont écrites : les autres restent exactement comme elles étaient.
+    cles.filter((k) => mesures[k].faire && calc(mesures[k]).finale).forEach((k) => {
+      const x = mesures[k], f = { ...((vals[k] && vals[k].fields) || {}), ...fieldsPour(k) };
+      const ap = appreciationIsolement(f, classe);
+      patch[k] = { ...(vals[k] || { action: "", etat: "" }), fields: f, etat: x.etat || ap.etat || (vals[k] && vals[k].etat) || "Conforme", releves: { unite: x.unite, t10: x.t10, t30: x.t30, t60: x.t60, t600: x.t600 } };
+    });
+    onEnregistrer(patch);
+  }
+  const ETAPES = ["Préparation", "Mesures", "Remise en état", "Bilan"];
+  const carte = { border: "1px solid #D8DEE5", borderRadius: 10, padding: "10px 12px", background: "#FAFBFC" };
+  const Case = ({ coche, onChange, children }) => (
+    <label style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: 12.5, color: "#3E4A5C", lineHeight: 1.45, cursor: "pointer" }}>
+      <input type="checkbox" checked={!!coche} onChange={(e) => onChange(e.target.checked)} style={{ marginTop: 2, flexShrink: 0, width: 15, height: 15 }} /> <span>{children}</span>
+    </label>
+  );
+  const fmtChrono = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+  const prochain = RELEVES_ISOLEMENT.filter(([, t]) => estPI || t <= 60).find(([, t]) => t > ecoule);
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(10,15,25,0.62)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 10 }}>
+      <div className="assistant-isolement" style={{ background: "#FFFFFF", borderRadius: 12, width: "min(780px, 100%)", maxHeight: "96vh", display: "flex", flexDirection: "column", boxShadow: "0 20px 60px rgba(0,0,0,0.35)" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", borderBottom: "1px solid #E2E6EB", gap: 10 }}>
+          <div>
+            <div style={{ fontWeight: 700, color: "#1A1F26", fontSize: 14 }}>Assistant mesure d'isolement</div>
+            <div style={{ fontSize: 11.5, color: "#5B6B7D" }}>{eq.identification?.repere || "Transformateur"} · {estTransfoSec(eq) ? "sec enrobé" : "immergé"} · Megger MIT520</div>
+          </div>
+          <button onClick={onFermer} style={{ background: "none", border: "none", cursor: "pointer", color: "#5B6B7D", display: "flex" }} title="Fermer sans enregistrer"><X size={18} /></button>
+        </div>
+        <div style={{ display: "flex", padding: "0 12px", borderBottom: "1px solid #E2E6EB" }}>
+          {ETAPES.map((t, i) => (
+            <button key={i} type="button" onClick={() => setEtape(i)} style={{ flex: "1 1 0", minWidth: 0, border: "none", background: "none", cursor: "pointer", padding: "6px 2px", borderBottom: `3px solid ${i === etape ? "#0A5DA8" : i < etape ? "#9CC3E6" : "#E2E6EB"}`, color: i === etape ? "#0A5DA8" : "#5B6B7D", fontSize: 12, fontWeight: i === etape ? 700 : 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{i + 1}. {t}</button>
+          ))}
+        </div>
+        <div style={{ overflow: "auto", padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
+          {etape === 0 && (
+            <>
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+                <MiniInput label={estTransfoSec(eq) ? "Température des enroulements" : "Température huile haute"} unit="°C" value={temperature} onChange={setTemperature} />
+                <span style={{ fontSize: 11.5, color: temperature ? "#8B96A3" : "#B5730A", flex: "1 1 240px" }}>{temperature ? "Reprise pour toutes les mesures : correction à 40 °C et comparaison d'une visite à l'autre." : "Sans température, pas de correction à 40 °C : la comparaison avec la visite précédente sera faussée."}</span>
+              </div>
+              <div style={carte}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#1A1F26", marginBottom: 6 }}>Avant les mesures <span style={{ fontWeight: 500, color: "#8B96A3" }}>(repères, rien n'est obligatoire)</span></div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>{CHECKLIST_ISOLEMENT_PREPARATION.map((t, i) => <Case key={i} coche={prep[i]} onChange={(v) => setPrep({ ...prep, [i]: v })}>{t}</Case>)}</div>
+              </div>
+              <div style={{ ...carte, background: "rgba(10,93,168,0.04)" }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#0A5DA8", marginBottom: 6 }}>Fiche méthode — Megger MIT520 et transformateur {estTransfoSec(eq) ? "sec" : "immergé"}</div>
+                {[...FICHE_MIT520, ...(estTransfoSec(eq) ? FICHE_ISOLEMENT_SEC : FICHE_ISOLEMENT_HUILE)].map((l, i) => <div key={i} style={{ fontSize: 12, color: "#3E4A5C", lineHeight: 1.5 }}>• {l}</div>)}
+              </div>
+            </>
+          )}
+          {etape === 1 && (
+            <>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {cles.map((k) => {
+                  const x = mesures[k], fait = !!calc(x).finale;
+                  return <button key={k} type="button" onClick={() => { if (!chrono) setCourante(k); }} style={{ ...btnGhost(), padding: "6px 10px", background: k === courante ? "#0A5DA8" : "#fff", color: k === courante ? "#fff" : x.faire ? "#3E4A5C" : "#B0B8C1", border: `1px solid ${k === courante ? "#0A5DA8" : "#D8DEE5"}` }}>{MONTAGES_ISOLEMENT_TRANSFO[k].nom}{fait ? " ✓" : ""}</button>;
+                })}
+              </div>
+              <div style={carte}>
+                <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12.5, color: "#3E4A5C", marginBottom: 8 }}>
+                  <input type="checkbox" checked={!!m.faire} onChange={(e) => setM(courante, { faire: e.target.checked })} /> Mesure réalisée
+                </label>
+                <SchemaMontageIsolement cle={courante} eq={eq} />
+                <div style={{ fontSize: 12.5, color: "#3E4A5C", lineHeight: 1.5, marginTop: 6 }}>Montage : <b>{texteMontageIsolement(courante, eq)}</b>.</div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end", marginTop: 8 }}>
+                  <MiniSelect label="Tension d'essai (V)" options={TENSION_ISOLEMENT} value={m.v} onChange={(v) => setM(courante, { v })} />
+                  <MiniSelect label="Type de mesure" options={LISTE_TYPE_MESURE_ISOLEMENT} value={m.type} onChange={(v) => setM(courante, { type: v })} width={230} />
+                  <MiniSelect label="Unité des relevés" options={["MΩ", "GΩ"]} value={m.unite} onChange={(v) => setM(courante, { unite: v })} width={70} />
+                </div>
+                <div style={{ fontSize: 11.5, color: "#8B96A3", marginTop: 4 }}>Tension proposée pour cet enroulement : {tensionEssaiProposee(eq, courante)} V (IEEE 43, plafonnée aux 5 kV du MIT520).</div>
+              </div>
+              <div style={carte}>
+                <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 26, fontWeight: 800, color: chrono ? "#0A5DA8" : "#5B6B7D", fontVariantNumeric: "tabular-nums", minWidth: 70 }}>{fmtChrono(ecoule)}</span>
+                  {!chrono
+                    ? <button type="button" style={btnPrimary()} onClick={() => { bips.current = new Set(); setMaintenant(Date.now()); setChrono({ debut: Date.now(), cle: courante }); }}>Démarrer le chrono</button>
+                    : <button type="button" style={btnGhost("#C0392B")} onClick={() => setChrono(null)}>Arrêter</button>}
+                  {reconnaissanceVocaleDisponible() && (
+                    <button type="button" style={dictee.actif ? { ...btnGhost(BRAND.blue), background: "#C0392B", color: "#fff", border: "1px solid #C0392B" } : btnGhost(BRAND.blue)} onClick={() => (dictee.actif ? dictee.arreter() : dictee.demarrer())} title="Chaque valeur dictée remplit le relevé vide suivant">
+                      <IconeMicro taille={13} /> {dictee.actif ? "Arrêter la dictée" : "Dicter les relevés"}
+                    </button>
+                  )}
+                  <span style={{ fontSize: 12, color: "#5B6B7D", flex: "1 1 200px" }}>{chrono ? (prochain ? `Prochain relevé à ${prochain[2]} (bip)` : "Relevés terminés") : `Lancer le chrono avec l'essai sur le MIT520 (durée ${estPI ? "10 min" : "1 min"}).`}</span>
+                </div>
+                {dictee.erreur && <div style={{ fontSize: 12, color: "#C0392B", marginTop: 4 }}>{dictee.erreur}</div>}
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+                  {RELEVES_ISOLEMENT.filter(([c]) => estPI || c !== "t600").map(([c, t, l]) => (
+                    <MiniInput key={c} label={l} unit={m.unite} value={m[c]} onChange={(v) => setM(courante, { [c]: v })} validState={chrono && prochain && prochain[0] === c ? "warn" : null} />
+                  ))}
+                  {!estStd && <MiniInput label="DAR affiché (si pas de relevé à 10 s)" value={m.darSaisi} onChange={(v) => setM(courante, { darSaisi: v })} />}
+                </div>
+                {(() => {
+                  const c = calc(m), f = { valeur: c.finale, unite: m.unite, v: m.v, pi: c.pi, dar: c.dar, temperature };
+                  const ap = appreciationIsolement(f, classe), r40 = irA40(f);
+                  if (!c.finale) return <div style={{ fontSize: 11.5, color: "#8B96A3", marginTop: 8 }}>{estStd ? "Mesure standard : relever la valeur à 1 min." : "PI = R(10 min) ÷ R(1 min) et DAR = R(1 min) ÷ R(10 s), calculés dès que les relevés sont saisis (sinon, reporter le DAR affiché par le MIT520)."}</div>;
+                  return (
+                    <div style={{ fontSize: 12.5, color: "#3E4A5C", lineHeight: 1.6, marginTop: 8 }}>
+                      IR {fmtMO(versMegaohms(c.finale, m.unite))}{r40 !== null ? ` · ramené à 40 °C : ${fmtMO(r40)}` : ""}{c.dar !== null ? ` · DAR ${frN(c.dar, 2)}` : ""}{c.pi !== null ? ` · PI ${frN(c.pi, 2)}` : ""}
+                      <span style={{ marginLeft: 8, fontWeight: 700, color: ap.rang === 2 ? "#C0392B" : ap.rang === 1 ? "#B5730A" : "#0F8A5F" }}>{ap.etat}{ap.notes.length ? ` — ${ap.notes.join(", ")}` : ""}</span>
+                    </div>
+                  );
+                })()}
+              </div>
+            </>
+          )}
+          {etape === 2 && (
+            <div style={carte}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "#1A1F26", marginBottom: 6 }}>Décharge et remise en état <span style={{ fontWeight: 500, color: "#8B96A3" }}>(repères)</span></div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>{CHECKLIST_ISOLEMENT_REMISE.map((t, i) => <Case key={i} coche={fin[i]} onChange={(v) => setFin({ ...fin, [i]: v })}>{t}</Case>)}</div>
+            </div>
+          )}
+          {etape === 3 && (
+            <div style={carte}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "#1A1F26", marginBottom: 8 }}>Bilan</div>
+              {cles.filter((k) => mesures[k].faire).map((k) => {
+                const x = mesures[k], c = calc(x), f = { valeur: c.finale, unite: x.unite, v: x.v, pi: c.pi, dar: c.dar, temperature };
+                const ap = appreciationIsolement(f, classe);
+                return (
+                  <div key={k} style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", padding: "6px 0", borderBottom: "1px solid #E2E6EB" }}>
+                    <div style={{ flex: "1 1 260px", fontSize: 12.5, color: "#3E4A5C" }}>
+                      <b>{MONTAGES_ISOLEMENT_TRANSFO[k].nom}</b> — {c.finale ? `${fmtMO(versMegaohms(c.finale, x.unite))} sous ${x.v} V` : "non relevée"}{c.pi !== null ? ` · PI ${frN(c.pi, 2)}` : ""}{c.dar !== null ? ` · DAR ${frN(c.dar, 2)}` : ""}
+                      {ap.notes.length > 0 && <div style={{ fontSize: 11.5, color: "#B5730A" }}>{ap.notes.join(" · ")}</div>}
+                    </div>
+                    {c.finale ? <EtatRapide value={x.etat || ap.etat || "Conforme"} onChange={(v) => setM(k, { etat: v })} /> : <span style={{ fontSize: 11.5, color: "#8B96A3" }}>non enregistrée</span>}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 8, padding: "10px 16px", borderTop: "1px solid #E2E6EB", flexWrap: "wrap", alignItems: "center" }}>
+          <span style={{ fontSize: 11, color: "#8B96A3", flex: "1 1 300px" }}>Aide facultative : les mesures restent saisissables directement sans l'assistant.</span>
+          <div style={{ display: "flex", gap: 8, whiteSpace: "nowrap", marginLeft: "auto", flexWrap: "wrap", justifyContent: "flex-end" }}>
+            {etape > 0 && <button type="button" style={btnGhost()} onClick={() => setEtape(etape - 1)}>Précédent</button>}
+            {etape < ETAPES.length - 1 && <button type="button" style={btnGhost(BRAND.blue)} onClick={() => setEtape(etape + 1)}>Suivant</button>}
+            <button type="button" style={btnPrimary()} onClick={enregistrer}>Enregistrer dans les mesures</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+// Bandeau d'aide au-dessus de la section : assistant, plan d'essai, courbe d'absorption, alertes et comparaison.
+function AideIsolementTransfo({ eq, update, allSites = [], rapportDate = "" }) {
+  const [ouvert, setOuvert] = useState(false);
+  const [plan, setPlan] = useState(false);
+  const precedent = useMemo(() => equipementPrecedent(allSites, eq, rapportDate), [allSites, eq.lignageId, eq.id, rapportDate]);
+  const alertes = alertesIsolementTransfo(eq, precedent);
+  const courbe = genererCourbeAbsorptionIsolement(eq);
+  async function telechargerPlan() {
+    setPlan(true);
+    try { downloadBlob(await genererPlanIsolementTransfo(eq, precedent), `Plan_isolement_${morceauNomFichier(eq.identification?.repere || "transformateur")}_${todayISO()}.docx`); }
+    catch (e) { alert("Plan impossible à générer : " + (e.message || e)); }
+    finally { setPlan(false); }
+  }
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+        <button type="button" onClick={() => setOuvert(true)} style={{ ...btnGhost(BRAND.blue), padding: "5px 10px" }} title="Assistant pas à pas (facultatif) : préparation, montage MIT520, chrono et relevés, remise en état">🧭 Assistant mesure d'isolement</button>
+        <button type="button" onClick={telechargerPlan} disabled={plan} style={{ ...btnGhost(BRAND.blue), padding: "5px 10px", opacity: plan ? 0.6 : 1 }}><FileText size={13} /> {plan ? "Génération…" : "Plan de mesure (Word)"}</button>
+      </div>
+      {alertes.length > 0 && (
+        <div style={{ fontSize: 11.5, lineHeight: 1.5, marginTop: 8, padding: "8px 10px", border: "1px solid #F1D9B0", borderRadius: 8, background: "#FDF8EF" }} title="Aide au technicien — non imprimée dans le rapport">
+          {alertes.map((a, i) => <div key={i} style={{ color: "#B5730A" }}>⚠ {a}</div>)}
+        </div>
+      )}
+      {courbe && <img src={courbe} alt="Courbe d'absorption" style={{ maxWidth: "100%", height: "auto", display: "block", marginTop: 8 }} onLoad={(e) => { e.currentTarget.style.width = `${e.currentTarget.naturalWidth / SCHEMA_ECHELLE}px`; }} />}
+      {ouvert && <AssistantIsolementTransfo eq={eq} onFermer={() => setOuvert(false)} onEnregistrer={(patch) => { update({ ...eq, controles: { ...eq.controles, mesure_isolement: { ...eq.controles.mesure_isolement, ...patch } } }); setOuvert(false); }} />}
+    </div>
+  );
+}
+// ----- Plan de mesure (Word) -----
+async function genererPlanIsolementTransfo(eq, precedent) {
+  await ensureDocx();
+  const id = eq.identification || {};
+  const P = (text, o = {}) => new DOCX.Paragraph({ spacing: { after: o.apres ?? 60 }, children: [new DOCX.TextRun({ text, size: o.size || 18, bold: !!o.gras, color: o.couleur || DOCX_DARK })] });
+  const children = [];
+  children.push(new DOCX.Paragraph({ spacing: { after: 80 }, children: [new DOCX.TextRun({ text: "PLAN DE MESURE D'ISOLEMENT — TRANSFORMATEUR", bold: true, size: 30, color: DOCX_BLUE })] }));
+  children.push(P(`${id.repere || "Transformateur"} — ${estTransfoSec(eq) ? "sec enrobé" : "immergé"} — édité le ${todayISO().split("-").reverse().join("/")}`, { couleur: "5B6B7D" }));
+  children.push(P(`${[id.marque, id.puissance ? id.puissance + " kVA" : "", id.tensionPrimaire ? id.tensionPrimaire + " kV" : "", id.tensionSecondaire ? id.tensionSecondaire + " V" : ""].filter(Boolean).join(" · ") || "—"} · appareil : Megger MIT520`, { apres: 160 }));
+  children.push(docxHeading("Fiche méthode", 200, 100));
+  [...FICHE_MIT520, ...(estTransfoSec(eq) ? FICHE_ISOLEMENT_SEC : FICHE_ISOLEMENT_HUILE)].forEach((l) => children.push(P(`• ${l}`)));
+  children.push(docxHeading("Avant les mesures", 240, 100));
+  CHECKLIST_ISOLEMENT_PREPARATION.forEach((l) => children.push(P(`☐  ${l}`)));
+  children.push(P("Température : ________ °C   ·   Hygrométrie : ________ %", { apres: 120 }));
+  children.push(docxHeading("Mesures", 240, 120));
+  const L = [1500, 3300, 900, 1900, 2000];
+  const ent = (t, i) => new DOCX.TableCell({ width: { size: L[i], type: DOCX.WidthType.DXA }, margins: CELL_MARGINS_ENTETE, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_ENTETE }, children: [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: t, bold: true, size: 15, color: DOCX_WHITE })] })] });
+  const cel = (i, lignes, fond, o = {}) => new DOCX.TableCell({ width: { size: L[i], type: DOCX.WidthType.DXA }, margins: { top: 70, bottom: 70, left: 90, right: 80 }, shading: fond, children: (Array.isArray(lignes) ? lignes : [lignes]).map((x) => new DOCX.Paragraph({ spacing: { after: 30 }, children: [new DOCX.TextRun({ text: x || "", size: 15, bold: !!o.gras, color: o.couleur || DOCX_DARK })] })) });
+  const anc = precedent ? ((precedent.eq.controles && precedent.eq.controles.mesure_isolement) || {}) : {};
+  const rows = [new DOCX.TableRow({ tableHeader: true, cantSplit: true, children: ["Mesure", "Montage MIT520", "Tension", "Repères", "Relevés"].map(ent) })];
+  itemsIsolementTransfo(eq).forEach((k, n) => {
+    const fond = n % 2 === 1 ? { type: DOCX.ShadingType.CLEAR, fill: DOCX_ZEBRE } : undefined;
+    const v = tensionEssaiProposee(eq, k), fa = (anc[k] && anc[k].fields) || {};
+    const a40 = irA40(fa), aBrut = versMegaohms(fa.valeur, fa.unite);
+    const reperes = [`≥ ${frN(numOf(v) / 1000, 2)} MΩ (1 MΩ/kV)`, ...(estTransfoSec(eq) && ISOLEMENT_TYPIQUE_TRIHAL[k] ? [`typique ≈ ${ISOLEMENT_TYPIQUE_TRIHAL[k]} MΩ`] : []), ...(a40 !== null ? [`${moisAnneeVisite(precedent.date)} : ${fmtMO(a40)} à 40 °C`] : aBrut !== null ? [`${moisAnneeVisite(precedent.date)} : ${fmtMO(aBrut)} (brut)`] : []), "PI ≥ 2 · DAR ≥ 1,25"];
+    rows.push(new DOCX.TableRow({ cantSplit: true, children: [cel(0, MONTAGES_ISOLEMENT_TRANSFO[k].nom, fond, { gras: true }), cel(1, texteMontageIsolement(k, eq), fond), cel(2, `${v} V`, fond, { gras: true }), cel(3, reperes, fond), cel(4, ["10 s : ______", "30 s : ______", "1 min : ______", "10 min : ______"], fond, { couleur: "6B7785" })] }));
+  });
+  children.push(docxTable({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: L, rows }));
+  children.push(docxHeading("Décharge et remise en état", 240, 100));
+  CHECKLIST_ISOLEMENT_REMISE.forEach((l) => children.push(P(`☐  ${l}`)));
+  children.push(P("Tension proposée selon IEEE 43 (plafonnée aux 5 kV du MIT520). Correction à 40 °C : R40 = R × 0,5^((40 − T) / 10) (la résistance est divisée par 2 tous les 10 °C de hausse), règle générale. PI = R(10 min) ÷ R(1 min) ; DAR = R(1 min) ÷ R(10 s). Repères indicatifs, non réglementaires.", { couleur: "8B96A3", size: 15 }));
+  const doc = new DOCX.Document({ styles: DOCX_STYLES, sections: [{ properties: { page: PAGE_CORPS }, footers: { default: docxFooterPagination() }, children }] });
+  return DOCX.Packer.toBlob(doc);
+}
+
+function DisjoncteurRelaisPanel({ eq, update, custom, onAddCustom, onChangeCustom, onRemoveCustom, idPrefix, allSites = [], rapportDate = "" }) {
   const seuils = eq.controles.parametrage_relais_seuils;
   const circuit = eq.controles.controles_relais.circuit_mesures_commande;
   const setEssaiField = (seuilId, k, v) =>
@@ -10887,10 +12288,44 @@ function DisjoncteurRelaisPanel({ eq, update, custom, onAddCustom, onChangeCusto
     update({ ...eq, controles: { ...eq.controles, parametrage_relais_seuils: seuils.map((s) => (s.id === seuilId ? { ...s, essai: { ...s.essai, ...patch } } : s)) } });
   const setCircuit = (patch) => update({ ...eq, controles: { ...eq.controles, controles_relais: { ...eq.controles.controles_relais, circuit_mesures_commande: { ...circuit, ...patch } } } });
   const renseignes = seuils.filter((s) => s.label);
+  const [assistantId, setAssistantId] = useState(null);
+  const [courbes, setCourbes] = useState({});
+  const [ficheOuverte, setFicheOuverte] = useState(false);
+  const [planEnCours, setPlanEnCours] = useState(false);
+  const cfgEssais = configEssaisRelais(eq);
+  const ouvAuto = tempsOuvertureDisjoncteur({ ...eq, controles: { ...eq.controles, config_essais_relais: { ...cfgEssais, tempsOuverture: "" } } });
+  const setCfgEssais = (patch) => update({ ...eq, controles: { ...eq.controles, config_essais_relais: { ...cfgEssais, ...patch } } });
+  const precedent = useMemo(() => equipementPrecedent(allSites, eq, rapportDate), [allSites, eq.lignageId, eq.id, rapportDate]);
+  const fiche = ficheMethodeRelais(eq);
+  const seuilAssistant = assistantId ? seuils.find((x) => x.id === assistantId) : null;
+  async function telechargerPlan() {
+    setPlanEnCours(true);
+    try { const blob = await genererPlanEssaiRelais(eq); downloadBlob(blob, `Plan_essai_${morceauNomFichier(eq.identification?.repere || eq.type)}_${todayISO()}.docx`); }
+    catch (e) { alert("Plan d'essai impossible à générer : " + (e.message || e)); }
+    finally { setPlanEnCours(false); }
+  }
 
   return (
     <Card style={{ marginBottom: 14 }}>
-      <SectionTitle>Contrôles du relais de protection</SectionTitle>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+        <SectionTitle>Contrôles du relais de protection</SectionTitle>
+        {renseignes.length > 0 && <button type="button" onClick={telechargerPlan} disabled={planEnCours} style={{ ...btnGhost(BRAND.blue), opacity: planEnCours ? 0.6 : 1 }} title="Plan d'essai Word généré depuis le paramétrage : valeurs à injecter, temps attendus, listes de contrôle — facultatif"><FileText size={13} /> {planEnCours ? "Génération…" : "Plan d'essai (Word)"}</button>}
+      </div>
+      <div className="config-essais-relais" style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end", padding: "8px 10px", margin: "4px 0 10px", border: "1px solid #E2E6EB", borderRadius: 8, background: "#FAFBFC" }}>
+        <MiniSelect label="Prise d'essai" options={LISTE_PRISE_ESSAI} value={cfgEssais.prise} onChange={(v) => setCfgEssais({ prise: v })} width={150} />
+        <MiniSelect label="Temps mesuré sur" options={LISTE_MESURE_TEMPS_ESSAI} value={cfgEssais.mesureSur} onChange={(v) => setCfgEssais({ mesureSur: v })} width={190} />
+        {cfgEssais.mesureSur === "Contacts du disjoncteur" && <MiniInput label="Ouverture disjoncteur" unit="ms" value={cfgEssais.tempsOuverture} onChange={(v) => setCfgEssais({ tempsOuverture: v })} />}
+        <span style={{ fontSize: 11, color: cfgEssais.mesureSur === "Contacts du disjoncteur" && !cfgEssais.tempsOuverture && !ouvAuto ? "#B5730A" : "#8B96A3", lineHeight: 1.4, flex: "1 1 220px" }}>
+          {cfgEssais.mesureSur === "Contact de sortie du relais" ? "Temps du relais seul : tolérance ±5 % −20 / +40 ms." : cfgEssais.tempsOuverture ? "Temps attendu = relais + ouverture saisie (±5 % −20 / +40 ms)." : ouvAuto ? `Ouverture reprise de la mesure du disjoncteur : ${frN(ouvAuto.ms, 1)} ms — ajoutée au temps du relais.` : "Temps d'ouverture du disjoncteur inconnu : marge générique. Le mesurer ou le saisir affine la tolérance."}
+        </span>
+        <button type="button" onClick={() => setFicheOuverte(!ficheOuverte)} style={{ ...btnGhost(BRAND.blue), padding: "5px 9px" }}>{ficheOuverte ? "Masquer la fiche méthode" : `Fiche méthode${fiche.cle !== "generique" ? " — " + fiche.nom.split(" — ").pop() : ""}`}</button>
+        {ficheOuverte && (
+          <div style={{ flexBasis: "100%", fontSize: 12, color: "#3E4A5C", lineHeight: 1.5, paddingTop: 4 }}>
+            <div style={{ fontWeight: 700, color: "#0A5DA8", marginBottom: 2 }}>{fiche.nom}</div>
+            {fiche.lignes.map((l, i) => <div key={i}>• {l}</div>)}
+          </div>
+        )}
+      </div>
       {typeRelaisAutonome(eq.identification) && <div style={{ fontSize: 11.5, color: "#5B6B7D", lineHeight: 1.5, marginBottom: 8 }}>{AIDE_PRECISION_RELAIS[typeRelaisAutonome(eq.identification)]}</div>}
       {typeRelaisSiprotec(eq.identification) && <div style={{ fontSize: 11.5, color: "#5B6B7D", lineHeight: 1.5, marginBottom: 8 }}>{RELAIS_SIPROTEC[typeRelaisSiprotec(eq.identification)].precision}</div>}
       <div>
@@ -10901,12 +12336,21 @@ function DisjoncteurRelaisPanel({ eq, update, custom, onAddCustom, onChangeCusto
         )}
         {renseignes.map((s) => {
           const estCEI = s.fields.courbe && s.fields.courbe !== "Constant" && s.fields.courbe !== "";
-          const est49 = ansiFamily(s.label) === "49";
+          const est49 = estThermique49(s);
           const tempsTheorique = estCEI ? calcTempsTheoriqueCEI(s.fields.courbe, s.fields.tms, s.essai.fields.multipleInjection) : null;
           const tempsThermique = est49 ? calcTempsThermique(s.fields.constante_temps, s.essai.fields.multipleThermique || "150") : null;
-          const tol = tempsTheorique !== null ? calcToleranceCEI(tempsTheorique) : tempsThermique !== null ? calcToleranceThermique(tempsThermique) : calcToleranceEssai(s.fields.temporisation, s.fields.temporisation_unite);
+          const tol = toleranceEssaiSeuil(eq, s);
+          const derive = deriveTempsSeuil(precedent, s);
+          const courbePossible = uniteReglageSeuil(s) === "A" && !est49 && tempsRelaisAttendu(s, estCEI ? 2 : null) !== null;
+          const courbeImg = courbes[s.id] && courbePossible ? (groupeCourbeSeuil(s) ? genererCourbeFamilleRelais(eq, groupeCourbeSeuil(s)) : genererCourbeDeclenchementRelais(eq, s)) : null;
           return (
             <div key={s.id} style={{ padding: "10px 0", borderBottom: "1px solid #E2E6EB" }}>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 6 }}>
+                {ansiFamily(s.label) !== "DEC" && !sansInjectionCalculee(s) && <button type="button" onClick={() => setAssistantId(s.id)} style={{ ...btnGhost(BRAND.blue), padding: "4px 9px", fontSize: 11.5 }} title="Assistant pas à pas (facultatif) : préparation, seuil 0,95 / 1,05, temps, remise en service">🧭 Assistant{s.essai.assistant ? " ✓" : ""}</button>}
+                {courbePossible && <button type="button" onClick={() => setCourbes({ ...courbes, [s.id]: !courbes[s.id] })} style={{ ...btnGhost(), padding: "4px 9px", fontSize: 11.5 }}>{courbes[s.id] ? "Masquer la courbe" : "Courbe de déclenchement"}</button>}
+                {derive && <span style={{ fontSize: 11, color: derive.alerte ? "#B5730A" : "#5B6B7D", background: derive.alerte ? "rgba(181,115,10,0.10)" : "rgba(10,93,168,0.06)", padding: "4px 8px", borderRadius: 6 }} title="Comparaison avec la visite précédente — non imprimée">{derive.alerte ? "⚠ " : ""}{moisAnneeVisite(derive.date)} : {frN(derive.tA, 3)} s → {frN(derive.tC, 3)} s ({derive.ecart >= 0 ? "+" : ""}{frN(derive.ecart * 100, 0)} %)</span>}
+              </div>
+              {courbeImg && <img src={courbeImg} alt="Courbe de déclenchement" style={{ maxWidth: "100%", height: "auto", display: "block", marginBottom: 8 }} onLoad={(e) => { e.currentTarget.style.width = `${e.currentTarget.naturalWidth / SCHEMA_ECHELLE}px`; }} />}
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
                 <span style={{ fontSize: 12.5, color: "#3E4A5C", flex: "1 1 240px" }}>Essai de déclenchement — {s.label}{(() => { const a = avisReglageSiprotec(eq, s); return a ? <div style={{ fontSize: 11, color: a.hors ? "#B5730A" : "#8B96A3", marginTop: 3, lineHeight: 1.4 }}>{a.texte}</div> : null; })()}</span>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
@@ -10924,6 +12368,7 @@ function DisjoncteurRelaisPanel({ eq, update, custom, onAddCustom, onChangeCusto
                   {est49 && (
                     <MiniSelect label="Multiple d'injection (% seuil)" options={LISTE_MULTIPLE_THERMIQUE.map((m) => m + "%")} value={(s.essai.fields.multipleThermique || "150") + "%"} onChange={(v) => setEssaiField(s.id, "multipleThermique", v.replace("%", ""))} />
                   )}
+                  <MiniSelect label="Mode d'injection" options={LISTE_MODE_INJECTION} value={modeInjectionEssai(s)} onChange={(v) => setEssaiField(s.id, "modeInjection", v)} width={150} />
                   <MiniSelect label="Valise d'injection" options={LISTE_TYPE_VALISE} value={s.essai.fields.typeValise || "1U1I (monophasé)"} onChange={(v) => setEssaiField(s.id, "typeValise", v)} />
                   {tempsTheorique !== null && (
                     <span style={{ fontSize: 11, color: "#0A5DA8", background: "rgba(10,93,168,0.08)", padding: "4px 8px", borderRadius: 6 }} title="Temps de déclenchement théorique (formule CEI 60255) — non imprimé dans le rapport">
@@ -10941,6 +12386,33 @@ function DisjoncteurRelaisPanel({ eq, update, custom, onAddCustom, onChangeCusto
                     const unite = champReglage ? champReglage.unit : null;
                     const aide = calcInjectionAide(s.fields.reglage, unite, eq, ansiFamily(s.label), s.fields.modeDetection, estCEI ? (s.essai.fields.multipleInjection || "2") : null, s.fields.angle, s.fields.zoneMin, s.fields.zoneMax, s.fields.sens);
                     const hintStyle = { fontSize: 11, color: "#8B96A3", fontStyle: "italic" };
+                    const meth = methodeAnsi(s);
+                    if (meth && !meth.injection) return <span style={{ ...hintStyle, flexBasis: "100%" }} title="Aide au technicien — non imprimée dans le rapport">Méthode : {meth.texte}</span>;
+                    if (FAMILLES_TIERS_TENSION.includes(ansiFamily(s.label))) {
+                      const vT = valeurInjectionSeuil(eq, s, 1, modeInjectionEssai(s));
+                      return vT ? <span style={{ fontSize: 11, color: "#0A5DA8", background: "rgba(10,93,168,0.08)", padding: "4px 8px", borderRadius: 6 }} title="Aide au technicien — non imprimée dans le rapport">Aide injection (au seuil) : ≈ {vT.texte}</span> : null;
+                    }
+                    if (meth && aide === null && unite !== "A") return null; // la méthode est affichée sous l'essai
+                    if (modeInjectionEssai(s) === "Injection primaire") {
+                      // Injection primaire : le courant traverse le primaire du TC / du tore, donc on injecte directement
+                      // la valeur réglée (en A primaire), sans passer par le rapport du TC.
+                      const pillP = { fontSize: 11, color: "#0A5DA8", background: "rgba(10,93,168,0.08)", padding: "4px 8px", borderRadius: 6 };
+                      const reglageP = numOf(s.fields.reglage);
+                      if (unite !== "A" || reglageP === null) {
+                        return <span style={hintStyle}>{unite && unite !== "A" ? "Injection primaire non adaptée à cette protection (tension, fréquence, puissance…) : la tester en injection secondaire." : "Renseignez le réglage (A primaire) pour l'aide à l'injection primaire."}</span>;
+                      }
+                      const M = estCEI ? (numOf(s.essai.fields.multipleInjection) || 2) : 1;
+                      const iP = Math.round(reglageP * M * 1000) / 1000;
+                      const fr = (v) => String(Math.round(v * 100) / 100).replace(".", ",");
+                      const tore = ["50N", "51N", "50G", "51G", "67N"].includes(ansiFamily(s.label));
+                      return (
+                        <span style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }} title="Aide au technicien — non imprimée dans le rapport">
+                          <span style={pillP}>Injection primaire : ≈ {fr(iP)} A{estCEI ? ` (${M} × seuil)` : " (au seuil)"} dans le primaire {tore ? "du tore" : "du TC"}</span>
+                          <span style={pillP}>avec 5 spires : {fr(iP / 5)} A · 10 spires : {fr(iP / 10)} A</span>
+                          <span style={{ ...hintStyle, flexBasis: "100%" }}>Faire passer un fil d'essai {tore ? "dans le tore homopolaire (un seul conducteur, jamais les 3 phases ensemble)" : "dans le primaire du TC"} ; avec N spires, le courant vu est N × le courant injecté. Vérifie toute la chaîne {tore ? "tore + relais" : "TC + relais"} et le déclenchement.</span>
+                        </span>
+                      );
+                    }
                     if (aide === null) {
                       if (unite === "%" && ansiFamily(s.label) === "46") {
                         const seuilPct = numOf(s.fields.reglage);
@@ -10954,7 +12426,7 @@ function DisjoncteurRelaisPanel({ eq, update, custom, onAddCustom, onChangeCusto
                         );
                       }
                       if (unite === "%") {
-                        if (ansiFamily(s.label) === "49") {
+                        if (estThermique49(s)) {
                           return <span style={hintStyle}>Image thermique — pas d'aide à l'injection calculée ici : contrairement aux autres protections, elle se teste par une injection SOUTENUE dans le temps (pas un seuil instantané), le déclenchement dépendant de la constante de temps réglée. Se référer à la méthode du constructeur du relais.</span>;
                         }
                         return <span style={hintStyle}>Réglage en % (différentielle) — pas d'aide à l'injection calculée ici, se référer à la méthode du constructeur du relais.</span>;
@@ -11028,6 +12500,9 @@ function DisjoncteurRelaisPanel({ eq, update, custom, onAddCustom, onChangeCusto
                       </span>
                     );
                   })()}
+                  {methodeAnsi(s) && methodeAnsi(s).injection && (
+                    <div style={{ fontSize: 10.5, color: "#5B6B7D", marginTop: 2, marginBottom: 4, lineHeight: 1.45, flexBasis: "100%" }} title="Aide au technicien — non imprimée dans le rapport">Méthode : {methodeAnsi(s).texte}</div>
+                  )}
                   {["67", "67N", "32P", "32Q", "37P", "37Q", "32N"].includes(ansiFamily(s.label)) && (
                     <div style={{ fontSize: 10.5, color: "#8B96A3", marginTop: 2, marginBottom: 4, lineHeight: 1.45, flexBasis: "100%" }} title="Aide au technicien — non imprimée dans le rapport">
                       Protection directionnelle (sens réglé : {s.fields.sens || "non renseigné"}) — un simple dépassement du seuil ne suffit pas à valider l'essai, le relais compare aussi la phase du courant injecté à une tension de référence (polarisation). <b>La tension de référence à utiliser n'est pas la même selon la protection</b> : {ansiFamily(s.label) === "67" || ansiFamily(s.label) === "67N" ? "pour 67/67N, c'est une tension composée d'une AUTRE phase (ex. I1 avec Ubc, pas Va — montage en quadrature)." : ansiFamily(s.label) === "32N" ? "pour 32N, ce sont les grandeurs homopolaires U0/I0 (prises sur le circuit terre/neutre), pas une phase en particulier." : "pour cette protection de puissance, c'est la tension de la MÊME phase que le courant injecté (ex. Ia avec Va, pas une tension composée — montage direct, à la différence de 67/67N)."} Méthode : injecter au seuil {ansiFamily(s.label).startsWith("67") ? `à l'angle caractéristique réglé (${s.fields.angle || "?"}°)` : "en phase (0°)"} par rapport à cette tension de référence et vérifier le déclenchement, PUIS répéter à +180° (courant inversé) et vérifier que le relais NE déclenche PAS cette fois (restriction dans le sens opposé). La correspondance exacte entre un angle et « Amont »/« Aval » dépend du câblage du TC/TP de ce relais précis (polarité) — à confirmer avec la doc constructeur ou un essai de polarité, ce n'est pas une convention universelle.
@@ -11044,11 +12519,12 @@ function DisjoncteurRelaisPanel({ eq, update, custom, onAddCustom, onChangeCusto
                     const unite2 = champReglage2 ? champReglage2.unit : null;
                     const estCEI2 = s.fields.courbe && s.fields.courbe !== "Constant" && s.fields.courbe !== "";
                     const aide2 = calcInjectionAide(s.fields.reglage, unite2, eq, ansiFamily(s.label), s.fields.modeDetection, estCEI2 ? (s.essai.fields.multipleInjection || "2") : null, s.fields.angle, s.fields.zoneMin, s.fields.zoneMax, s.fields.sens);
-                    const i2 = (aide2 && typeof aide2 === "object") ? aide2.i : (unite2 === "A" ? aide2 : null);
+                    const primaire2 = modeInjectionEssai(s) === "Injection primaire";
+                    const i2 = primaire2 ? (unite2 === "A" && numOf(s.fields.reglage) !== null ? Math.round(numOf(s.fields.reglage) * (estCEI2 ? (numOf(s.essai.fields.multipleInjection) || 2) : 1) * 1000) / 1000 : null) : (aide2 && typeof aide2 === "object") ? aide2.i : (unite2 === "A" ? aide2 : null);
                     const u2 = (aide2 && typeof aide2 === "object") ? aide2.u : (unite2 === "V" ? aide2 : null);
                     const alertes = [];
                     if (s.essai.fields.typeValise === "3U3I (triphasé)") alertes.push("essai configuré en triphasé (3U3I), mais le Compano 100 est un appareil monophasé (1U1I) — injecter phase par phase, pas de sortie 3U3I disponible");
-                    if (typeof i2 === "number" && i2 > 110) alertes.push(`courant à injecter ≈ ${i2} A > 110 A AC (limite Compano 100, disponible seulement sur un temps court)`);
+                    if (typeof i2 === "number" && i2 > 110) alertes.push(primaire2 ? `courant primaire ≈ ${i2} A > 110 A AC : passer le fil d'essai en plusieurs spires (≈ ${Math.ceil(i2 / 100)} spires minimum)` : `courant à injecter ≈ ${i2} A > 110 A AC (limite Compano 100, disponible seulement sur un temps court)`);
                     if (typeof u2 === "number" && u2 > 150) alertes.push(`tension à injecter ≈ ${u2} V > 150 V AC (limite Compano 100)`);
                     if (!alertes.length) return null;
                     return (
@@ -11057,7 +12533,7 @@ function DisjoncteurRelaisPanel({ eq, update, custom, onAddCustom, onChangeCusto
                       </div>
                     );
                   })()}
-                  {tol && <MiniComputed label="Tolérance attendue" unit={tol.unite} value={`${tol.min} – ${tol.max}`} />}
+                  {tol && <span title={`Base : ${tol.base}`} style={{ display: "inline-flex" }}><MiniComputed label="Tolérance attendue" unit={tol.unite} value={`${tol.min} – ${tol.max}`} /></span>}
                   <AutoTextArea className="champ-action" placeholder="Action" value={s.essai.action} onChange={(v) => setEssai(s.id, { action: v })} style={{ width: actionInputWidth(s.essai.action), padding: "5px 7px", fontSize: 12 }} />
                   <EtatRapide value={s.essai.etat} onChange={(__v) => setEssai(s.id, { etat: __v })} />
                 </div>
@@ -11076,6 +12552,13 @@ function DisjoncteurRelaisPanel({ eq, update, custom, onAddCustom, onChangeCusto
         </div>
       </div>
       {custom && <CustomActionsList custom={custom} onAdd={onAddCustom} onChange={onChangeCustom} onRemove={onRemoveCustom} idPrefix={idPrefix} />}
+      {seuilAssistant && (
+        <AssistantEssaiSeuil eq={eq} seuils={seuils} s={seuilAssistant} onFermer={() => setAssistantId(null)}
+          onEnregistrer={({ essai, config }) => {
+            update({ ...eq, controles: { ...eq.controles, config_essais_relais: config, parametrage_relais_seuils: seuils.map((x) => (x.id === seuilAssistant.id ? { ...x, essai } : x)) } });
+            setAssistantId(null);
+          }} />
+      )}
     </Card>
   );
 }
@@ -11701,8 +13184,12 @@ function preconisationsDepuisConstats(constats) {
 }
 // Aperçu des remarques calculées + complément libre du technicien (fiche équipement).
 function RemarquesAutomatiques({ eq, update, contexte }) {
-  const texte = useMemo(() => { try { return genererRemarquesEquipement(eq, contexte); } catch (e) { return ""; } }, [eq, contexte.rapportDate, contexte.allEquipements, contexte.locaux]); // eslint-disable-line react-hooks/exhaustive-deps
+  const auto = useMemo(() => { try { return genererRemarquesEquipement(eq, contexte); } catch (e) { return ""; } }, [eq, contexte.rapportDate, contexte.allEquipements, contexte.locaux]); // eslint-disable-line react-hooks/exhaustive-deps
+  const modifiees = typeof eq.remarquesModifiees === "string" && eq.remarquesModifiees.trim() !== "";
+  const [edition, setEdition] = useState(false);
+  const texte = modifiees ? eq.remarquesModifiees : auto;
   const p = remarquesStructurees(texte) ? parserSectionsRemarques(texte.split("\n")) : { constats: [texte].filter(Boolean), preconisations: [], autres: [] };
+  const autoAChange = modifiees && eq.remarquesModifieesBase !== undefined && eq.remarquesModifieesBase !== auto;
   const ancienne = ancienneRemarqueEquipement(eq);
   const [voirAncienne, setVoirAncienne] = useState(false);
   const complement = complementEquipement(eq);
@@ -11713,8 +13200,27 @@ function RemarquesAutomatiques({ eq, update, contexte }) {
   };
   return (
     <div>
-      <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#5B6B7D", letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 8 }}>Remarques et préconisations — automatiques</label>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 10, marginBottom: 10 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+        <label style={{ fontSize: 11, fontWeight: 600, color: "#5B6B7D", letterSpacing: 0.5, textTransform: "uppercase" }}>Remarques et préconisations — {modifiees ? "modifiées à la main" : "automatiques"}</label>
+        <span style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {!edition && <button type="button" onClick={() => { if (!modifiees) update({ ...eq, remarquesModifiees: auto, remarquesModifieesBase: auto }); setEdition(true); }} style={{ ...btnGhost(BRAND.blue), padding: "4px 10px", fontSize: 12 }}><PenLine size={12} /> Modifier</button>}
+          {edition && <button type="button" onClick={() => { if (String(eq.remarquesModifiees || "").trim() === String(auto).trim()) { const { remarquesModifiees, remarquesModifieesBase, ...reste } = eq; update(reste); } setEdition(false); }} style={{ ...btnGhost("#0F8A5F"), padding: "4px 10px", fontSize: 12 }}>✓ Terminer</button>}
+          {modifiees && <button type="button" onClick={() => { const { remarquesModifiees, remarquesModifieesBase, ...reste } = eq; update(reste); setEdition(false); }} style={{ ...btnGhost(), padding: "4px 10px", fontSize: 12 }} title="Abandonne la modification et revient au texte calculé"><RotateCcw size={12} /> Revenir à l'automatique</button>}
+        </span>
+      </div>
+      {modifiees && (
+        <div style={{ fontSize: 11.5, borderRadius: 8, padding: "6px 10px", marginBottom: 8, background: autoAChange ? "#FDF3E3" : "#EEF4FB", color: autoAChange ? "#8A5A0A" : "#0A5DA8" }}>
+          {autoAChange
+            ? "Les contrôles ont changé depuis votre modification : le texte modifié ne se met pas à jour. Vérifiez-le, ou revenez à l'automatique."
+            : "Texte modifié à la main : c'est lui qui figure dans le rapport et la synthèse (il ne se met plus à jour automatiquement)."}
+        </div>
+      )}
+      {edition && (
+        <TextArea value={eq.remarquesModifiees || ""} onChange={(ev) => update({ ...eq, remarquesModifiees: ev.target.value, remarquesModifieesBase: eq.remarquesModifieesBase ?? auto })} rows={8}
+          style={{ width: "100%", minHeight: 180, fontSize: 14, lineHeight: 1.55, boxSizing: "border-box", marginBottom: 6 }} />
+      )}
+      {edition && <div style={{ fontSize: 11, color: "#8B96A3", marginBottom: 10 }}>Gardez les titres « Constats : » et « Préconisations : » ; une ligne par point (« • » en début de ligne). Ajoutez « — Prioritaire » en fin de ligne pour l'étiquette rouge.</div>}
+      {!edition && <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 10, marginBottom: 10 }}>
         <div style={{ background: "#F7F9FB", border: "1px solid #E2E6EB", borderRadius: 10, padding: "10px 12px" }}>
           <div style={{ fontSize: 10.5, fontWeight: 800, color: "#5A6573", letterSpacing: 0.5, marginBottom: 6 }}>CONSTATS</div>
           {p.constats.length ? p.constats.map((t, i) => puce(t, "#8B96A3", i)) : <div style={{ fontSize: 12.5, color: "#8B96A3", fontStyle: "italic" }}>Aucune remarque particulière.</div>}
@@ -11723,8 +13229,8 @@ function RemarquesAutomatiques({ eq, update, contexte }) {
           <div style={{ fontSize: 10.5, fontWeight: 800, color: "#0A5DA8", letterSpacing: 0.5, marginBottom: 6 }}>NOS PRÉCONISATIONS</div>
           {p.preconisations.length ? p.preconisations.map((t, i) => puce(t, "#0A5DA8", i)) : <div style={{ fontSize: 12.5, color: "#8B96A3", fontStyle: "italic" }}>Aucune action nécessaire.</div>}
         </div>
-      </div>
-      <div style={{ fontSize: 11, color: "#8B96A3", marginBottom: 10 }}>Calculées à partir des contrôles, des mesures et des pièces d'usure : toujours à jour, reprises telles quelles dans le rapport et la synthèse du site.</div>
+      </div>}
+      {!modifiees && <div style={{ fontSize: 11, color: "#8B96A3", marginBottom: 10 }}>Calculées à partir des contrôles, des mesures et des pièces d'usure : toujours à jour, reprises telles quelles dans le rapport et la synthèse du site. « Modifier » permet de les retoucher.</div>}
       <Field label="Complément du technicien (facultatif, repris dans le rapport)">
         <TextArea value={complement} onChange={(e) => setComplement(e.target.value)} placeholder="Information à ajouter pour le client (contexte, accès, remarque particulière…)" style={{ minHeight: 80, fontSize: 14, lineHeight: 1.5 }} />
       </Field>
@@ -11770,8 +13276,10 @@ const contexteRemarquesSite = (site) => ({ allEquipements: (site && site.equipem
 function texteRemarquesRapport(eq, contexte) {
   const rang = RANK_OF[eq.etatFinal] ?? 0;
   const auto = rang < 0 ? (eq.etatFinal === "Non présent" ? "Équipement non présent sur le site." : "La maintenance de cet équipement n'a pas pu être réalisée.") : genererRemarquesEquipement(eq, contexte);
+  // Remarques retouchées à la main : elles remplacent le texte automatique (le complément reste ajouté).
+  const texte = rang >= 0 && String(eq.remarquesModifiees || "").trim() ? String(eq.remarquesModifiees).trim() : auto;
   const comp = complementEquipement(eq).trim();
-  return comp ? `${comp}\n\n${auto}` : auto;
+  return comp ? `${comp}\n\n${texte}` : texte;
 }
 // Complément de la synthèse du site (ancienne synthèse saisie à la main reprise si elle n'était pas générée).
 function complementSynthese(site) {
@@ -12439,7 +13947,7 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
               );
             }
             if (sec.key === "parametrage_relais" && TYPES_AVEC_RELAIS.includes(eq.type)) {
-              return <ParametrageRelaisPanel key={sec.key} eq={eq} update={update} idPrefix={`${eq.id}-${sec.key}`} locaux={locaux} />;
+              return <ParametrageRelaisPanel key={sec.key} eq={eq} update={update} idPrefix={`${eq.id}-${sec.key}`} locaux={locaux} allSites={allSites} rapportDate={rapportDate} />;
             }
             if (sec.key === "controles_relais" && TYPES_AVEC_RELAIS.includes(eq.type)) {
               return (
@@ -12452,6 +13960,8 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
                   onChangeCustom={(id, patch) => changeCustomAction(sec.key, id, patch)}
                   onRemoveCustom={(id) => removeCustomAction(sec.key, id)}
                   idPrefix={`${eq.id}-${sec.key}`}
+                  allSites={allSites}
+                  rapportDate={rapportDate}
                 />
               );
             }
@@ -12770,6 +14280,7 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
                     onAddCustom={() => addCustomAction(sec.key)}
                     onChangeCustom={(id, patch) => changeCustomAction(sec.key, id, patch)}
                     onRemoveCustom={(id) => removeCustomAction(sec.key, id)}
+                    entete={<AideIsolementTransfo eq={eq} update={update} allSites={allSites} rapportDate={rapportDate} />}
                     extra={
                       <div style={{ fontSize: 11.5, color: "#0A5DA8", background: "rgba(10,93,168,0.08)", padding: "8px 12px", borderRadius: 8, marginTop: 8, lineHeight: 1.6 }}>
                         <b>Mode opératoire (CEI 60076-3 / IEEE 43)</b> — la tension d'injection est la même du début à la fin d'un essai ; le « type de mesure » indique seulement jusqu'où l'essai est poussé :<br />
@@ -18248,10 +19759,12 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
       const rows = [];
       (eq.controles.parametrage_relais_seuils || []).filter((s) => s.label).forEach((s) => {
         const estCEI2 = s.fields.courbe && s.fields.courbe !== "Constant" && s.fields.courbe !== "";
-        const est492 = ansiFamily(s.label) === "49";
+        const est492 = estThermique49(s);
         const tempsTheorique2 = estCEI2 ? calcTempsTheoriqueCEI(s.fields.courbe, s.fields.tms, s.essai.fields.multipleInjection) : null;
         const tempsThermique2 = est492 ? calcTempsThermique(s.fields.constante_temps, s.essai.fields.multipleThermique || "150") : null;
-        const tol = tempsTheorique2 !== null ? calcToleranceCEI(tempsTheorique2) : tempsThermique2 !== null ? calcToleranceThermique(tempsThermique2) : calcToleranceEssai(s.fields.temporisation, s.fields.temporisation_unite);
+        const tol = toleranceEssaiSeuil(eq, s);
+        const asst = s.essai.assistant;
+        const facA = facteursSeuil(s), uTA = uniteTempsSeuil(s);
         const uInjecte = est492 ? "%" : ((ANSI_REGLAGE_FIELDS[ansiFamily(s.label)] || ANSI_REGLAGE_FIELDS_DEFAUT).find((f) => f.key === "reglage") || {}).unit || "A";
         // Comme à l'écran : L1/L2/L3 colorées selon la tolérance calculée (formule CEI 60255 ou
         // modèle thermique), au lieu d'un simple texte gris uniforme sans distinction.
@@ -18259,8 +19772,15 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
           s.essai.fields.l1 && { text: `L1 : ${s.essai.fields.l1}`, etat: tol ? docxColorerEtat(toleranceState(s.essai.fields.l1, tol.min, tol.max), s.essai.etat) : null },
           s.essai.fields.l2 && { text: `L2 : ${s.essai.fields.l2}`, etat: tol ? docxColorerEtat(toleranceState(s.essai.fields.l2, tol.min, tol.max), s.essai.etat) : null },
           s.essai.fields.l3 && { text: `L3 : ${s.essai.fields.l3}`, etat: tol ? docxColorerEtat(toleranceState(s.essai.fields.l3, tol.min, tol.max), s.essai.etat) : null },
-          s.essai.fields.courant_injecte && { text: `Valeur injectée : ${s.essai.fields.courant_injecte} ${uInjecte}`, etat: null },
+          { text: modeInjectionEssai(s), etat: null },
+          s.essai.fields.courant_injecte && { text: `Valeur injectée : ${s.essai.fields.courant_injecte} ${uInjecte}${modeInjectionEssai(s) === "Injection primaire" && uInjecte === "A" ? " (primaire)" : ""}`, etat: null },
           tol && { text: `Tolérance attendue : ${tol.min} – ${tol.max} ${tol.unite}`, etat: null },
+          asst && (asst.seuil?.nonDeclenche || asst.seuil?.declenche) && { text: `Seuil vérifié : ${asst.seuil.nonDeclenche ? `${asst.seuil.nonDeclenche.toLowerCase()} à ${libelleMultiple(s, facA.nonDeclenche)}` : ""}${asst.seuil.nonDeclenche && asst.seuil.declenche ? ", " : ""}${asst.seuil.declenche ? `${asst.seuil.declenche.toLowerCase()} à ${libelleMultiple(s, facA.declenche)}` : ""}`, etat: asst.seuil.declenche === "Pas de déclenchement" ? "bad" : asst.seuil.nonDeclenche === "Déclenchement" ? "warning" : null },
+          ...(asst && Array.isArray(asst.points) ? asst.points.slice(1).filter((p) => [p.l1, p.l2, p.l3].some((x) => String(x || "").trim())).map((p) => {
+            const tp = toleranceEssaiSeuil(eq, s, estSeuilCEI(s) ? p.M : null);
+            const hors = tp && [p.l1, p.l2, p.l3].some((x) => toleranceState(x, tp.min, tp.max) === "bad");
+            return { text: `${libelleMultiple(s, p.M)} : ${[p.l1, p.l2, p.l3].filter((x) => String(x || "").trim()).join(" / ")} ${uTA}${tp ? ` (attendu ${tp.min} – ${tp.max})` : ""}`, etat: hors ? docxColorerEtat("bad", s.essai.etat) : tp ? "ok" : null };
+          }) : []),
         ].filter(Boolean);
         rows.push(["Essai de déclenchement — " + s.label, detail, s.essai.action, s.essai.etat]);
       });
@@ -18268,6 +19788,20 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
       rows.push(["Contrôle du circuit de mesures et commande", "", circuit.action, circuit.etat]);
       const t = docxControlTable(rows);
       if (t) elements.push(t);
+      const cfgE = configEssaisRelais(eq), ouvE = tempsOuvertureDisjoncteur(eq);
+      if ((eq.controles.parametrage_relais_seuils || []).some((s) => s.label && [s.essai.fields.l1, s.essai.fields.l2, s.essai.fields.l3].some((x) => String(x || "").trim()))) {
+        elements.push(docxNormeNote(cfgE.mesureSur === "Contact de sortie du relais"
+          ? "Temps de déclenchement mesurés sur le contact de sortie du relais (temps du relais seul)."
+          : `Temps de déclenchement mesurés sur les contacts du disjoncteur : temporisation du relais + ouverture du disjoncteur${ouvE ? ` (${frN(ouvE.ms, 0)} ms, incluse dans la tolérance)` : ""}.`));
+      }
+      // Courbes de déclenchement : une par fonction (phase, terre) dès qu'un de ses seuils a été mesuré — seuils réunis en escalier,
+      // tolérance et points mesurés (temps constant comme temps inverse).
+      Object.keys(GROUPES_COURBE_RELAIS).filter((g) => etagesCourbeRelais(eq, g).some((e) => pointsMesuresSeuil(e.s).length)).forEach((g) => {
+        const img = genererCourbeFamilleRelais(eq, g);
+        const dims = img ? dimensionsPng(img) : null;
+        const im = img ? docxImage(img, 500, dims && dims.w ? Math.round((500 * dims.h) / dims.w) : 283) : null;
+        if (im) elements.push(docxBlocInsecable([new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, spacing: { before: 160, after: 80 }, children: [im] })]));
+      });
       elements.push(docxSpacer());
       return;
     }
@@ -18645,8 +20179,8 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
           // Ne filtre que les items du motif partagé (hta_terre/entre_phases, qui ont bien un
           // champ "realise") — le jeu de barre et le transformateur gardent leur propre structure,
           // sans ce champ, donc jamais affectés par ce filtre.
-          if (!value || value.fields.realise === undefined) return true;
-          return value.fields.realise === "OUI";
+          if (!value) return true;
+          return mesureRealisee(item, value);
         })
       : sec.items;
     if (itemsAffiches.length === 0) return;
@@ -18681,6 +20215,12 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
     if (courbeAvecFichiers) { elements.push(...docxCourbeDeclenchement(eq, sec.title)); courbeIntegree = true; }
     const t = sectionEtat ? docxControlTableCompact(rows) : docxControlTable(rows); // sections « État » sur deux colonnes, les autres ligne par ligne
     if (t) elements.push(t);
+    if (sec.key === "mesure_isolement" && eq.type === "Transformateur") {
+      const img = genererCourbeAbsorptionIsolement(eq);
+      const dims = img ? dimensionsPng(img) : null;
+      const im = img ? docxImage(img, 480, dims && dims.w ? Math.round((480 * dims.h) / dims.w) : 257) : null;
+      if (im) elements.push(docxBlocInsecable([new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, spacing: { before: 160, after: 80 }, children: [im] })]));
+    }
     if (sec.key === "analyse_harmonique" && eq.type === "Batterie de compensation") elements.push(...docxAnalyseResonance(analyseResonanceBatterie(eq, equipementsDuSiteDe(eq, allSites)), eq));
     if (sec.key === "reglage_disjoncteur" && eq.type === "Disjoncteur BT") {
       const v = calcVerificationPouvoirCoupure(eq, equipementsDuSiteDe(eq, allSites), locaux);
