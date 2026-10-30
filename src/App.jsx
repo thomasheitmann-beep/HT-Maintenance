@@ -10795,6 +10795,488 @@ function avisReglageSiprotec(eq, s) {
   }
   return { texte, hors };
 }
+
+// ----- Schneider PowerLogic P5 (Easergy P5) — notice de paramétrage C13-100 & C15-400, V4.02, 11/2025 -----
+function typeRelaisP5(identification) {
+  const ref = `${(identification && identification.marqueRelais) || ""} ${(identification && identification.referenceRelais) || ""}`;
+  return /\bP5\b|powerlogic\s*p5|easergy\s*p5|\bP5[0-9]{2}\b/i.test(ref);
+}
+const RELAIS_P5 = {
+  plages: "PowerLogic P5 (notice C13-100) — plages : I>1 0,05 à 40 In ; IN>1 et IN>3 0,002 à 40 In ; VN>2 / VN>3 0,02 à 1,5 × 3Vn ; U<3 0,02 à 1,5 ; PWH Sw>1 / Sw>2 0,001 à 0,200 Sn (Sn = Pno = √3 × Un × In du TC) ; Uo mini PWH 2 à 80 % Un ; temporisations I> / Io> 0 à 4 s. En C13-100, seul le groupe 1 de chaque seuil est actif.",
+  precision: "PowerLogic P5 (notice C13-100) : temps de fonctionnement = temporisation + temps de démarrage ≤ 30 ms pour I> et Io> (120 ms réglés → 150 ms), ≤ 50 ms pour la PWH (0,35 s → 0,40 s). Temps d'élimination imposé par la NF C13-100 : < 0,5 s.",
+};
+// Temps de démarrage maximal ajouté à la temporisation (notice P5).
+function demarrageP5(s) { const f = ansiFamily(s.label); return f === "32N" ? 0.05 : ["50", "51", "50N", "51N"].includes(f) ? 0.03 : null; }
+const unHTA = (eq) => { const m = String((eq.identification && eq.identification.rapportTPProtection) || "").match(/^\s*([\d.,]+)\s*\//); return m ? parseFloat(m[1].replace(",", ".")) : null; };
+const inTCPhase = (eq) => { const tc = ((eq.controles && eq.controles.tc_dynamique) || []).find((t) => t.fields && t.fields.rapportPrimaire && t.label !== "Homopolaire (terre)"); return tc ? numOf(tc.fields.rapportPrimaire) : null; };
+const inTCTerre = (eq) => { const tc = ((eq.controles && eq.controles.tc_dynamique) || []).find((t) => t.fields && t.fields.rapportPrimaire && t.label === "Homopolaire (terre)"); return tc ? numOf(tc.fields.rapportPrimaire) : inTCPhase(eq); };
+// PWH : Pno = √3 × Un × In du TC (kW) ; seuil en % de Pno = kW ÷ Pno.
+function pnoP5(eq) { const u = unHTA(eq), i = inTCPhase(eq); return u && i ? (Math.sqrt(3) * u * i) / 1000 : null; }
+// Paramétrage type du fichier Schneider C13-100, à comparer au paramétrage relevé.
+function comparaisonP5C13100(eq, seuils) {
+  const In = inTCPhase(eq), Ino = inTCTerre(eq), Un = unHTA(eq) || (numOf(eq.identification && eq.identification.tensionPrimaire) ? numOf(eq.identification.tensionPrimaire) * 1000 : null);
+  const liste = (seuils || []).filter((s) => s.label);
+  const trouve = (re) => liste.find((s) => re.test(s.label));
+  const tempoS = (s) => (s ? tempsRelaisAttendu(s, null) : null);
+  const lignes = [
+    { nom: "I>1 — max I phase (50/51)", s: trouve(/^50-51-1\b/), reglage: In ? 2 * In : null, uR: "A", detail: "2 × In du TC", tempo: 0.12 },
+    { nom: "IN>1 — max I terre (50N/51N)", s: trouve(/^50N-51N-1\b/), reglage: Ino ? 0.12 * Ino : null, uR: "A", detail: "0,12 × Ino", tempo: 0.12 },
+    { nom: "IN>3 — Io confirmé par Vo", s: trouve(/^50N-51N-2\b/), reglage: Ino ? 0.12 * Ino : null, uR: "A", detail: "identique à IN>1", tempo: 0.12 },
+    { nom: "VN>3 — tension résiduelle (59N)", s: trouve(/^59N\b/), reglage: Un ? 0.05 * Math.sqrt(3) * Un : null, uR: "V", detail: "5 % de 3Vn", tempo: 0.06 },
+    { nom: "U<3 — présence tension (27)", s: trouve(/^27 —/), reglage: Un ? 0.3 * Un : null, uR: "V", detail: "0,3 × Un", tempo: 10 },
+    { nom: "Sw>1 — PWH aval (32N)", s: trouve(/^32N\b/), reglage: 120, uR: "kW", detail: "80 ou 40 kW en aérosouterrain ; secteur ±71°", tempo: 0.35 },
+  ];
+  return lignes.map((l) => {
+    const r = l.s ? numOf(l.s.fields.reglage) : null, t = tempoS(l.s);
+    const ecartR = r !== null && l.reglage !== null && Math.abs(r - l.reglage) / l.reglage > 0.02;
+    const ecartT = t !== null && Math.abs(t - l.tempo) > 0.005;
+    return { ...l, regle: r, tRegle: t, ecartR, ecartT, absent: !l.s };
+  });
+}
+// Temps d'élimination (temporisation + démarrage + ouverture du disjoncteur) au-delà de 0,5 s : limite NF C13-100.
+function alertesP5(eq, seuils) {
+  if (!typeRelaisP5(eq.identification)) return [];
+  const out = [], o = tempsOuvertureDisjoncteur(eq);
+  (seuils || []).filter((s) => s.label && demarrageP5(s) !== null && !estSeuilCEI(s)).forEach((s) => {
+    const t = tempsRelaisAttendu(s, null); if (t === null) return;
+    const total = t + demarrageP5(s) + (o ? o.ms / 1000 : 0);
+    if (total > 0.5) out.push(`${s.label.split(" — ")[0]} : temps d'élimination ≈ ${frN(total * 1000, 0)} ms (tempo + démarrage${o ? " + ouverture" : ""}) — au-delà des 0,5 s de la NF C13-100.`);
+  });
+  return out;
+}
+function ComparaisonP5({ eq, seuils }) {
+  const [ouvert, setOuvert] = useState(false);
+  const lignes = comparaisonP5C13100(eq, seuils);
+  const nbEcarts = lignes.filter((l) => l.ecartR || l.ecartT).length;
+  const fv = (v, u) => (v === null || v === undefined ? "—" : `${frN(v, u === "A" || u === "kW" ? 1 : 0)} ${u}`);
+  return (
+    <div style={{ marginBottom: 10, border: "1px solid #D8DEE5", borderRadius: 8, background: "rgba(10,93,168,0.04)" }} title="Aide au technicien — non imprimée dans le rapport">
+      <div onClick={() => setOuvert(!ouvert)} style={{ display: "flex", justifyContent: "space-between", padding: "8px 10px", cursor: "pointer", fontSize: 12, fontWeight: 700, color: "#0A5DA8" }}>
+        <span>Comparer au paramétrage type C13-100 (fichier Schneider P5){nbEcarts ? ` — ${nbEcarts} écart${nbEcarts > 1 ? "s" : ""}` : ""}</span><span style={{ fontWeight: 600 }}>{ouvert ? "Masquer" : "Voir"}</span>
+      </div>
+      {ouvert && (
+        <div style={{ padding: "0 10px 10px", fontSize: 11.5, color: "#3E4A5C", lineHeight: 1.5, overflowX: "auto" }}>
+          <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 480 }}>
+            <thead><tr style={{ color: "#5B6B7D", textAlign: "left" }}><th style={{ padding: "3px 6px" }}>Fonction</th><th style={{ padding: "3px 6px" }}>Type C13-100</th><th style={{ padding: "3px 6px" }}>Relevé</th></tr></thead>
+            <tbody>
+              {lignes.map((l, i) => (
+                <tr key={i} style={{ borderTop: "1px solid #E2E6EB" }}>
+                  <td style={{ padding: "3px 6px" }}>{l.nom}</td>
+                  <td style={{ padding: "3px 6px" }}>{fv(l.reglage, l.uR)} ({l.detail}) · {frN(l.tempo, 2)} s</td>
+                  <td style={{ padding: "3px 6px" }}>{l.absent ? <span style={{ color: "#8B96A3" }}>non paramétré dans l'app</span> : <><span style={{ color: l.ecartR ? "#B5730A" : "#0F8A5F", fontWeight: 700 }}>{fv(l.regle, l.uR)}</span> · <span style={{ color: l.ecartT ? "#B5730A" : "#0F8A5F", fontWeight: 700 }}>{l.tRegle === null ? "—" : `${frN(l.tRegle, 2)} s`}</span></>}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div style={{ color: "#8B96A3", marginTop: 6 }}>Valeurs par défaut du fichier Schneider : un écart est normal quand le réglage a été calculé pour l'installation — il signale surtout une valeur inattendue à confirmer. PWH : 120 kW en réseau aval souterrain, 80 ou 40 kW en aérosouterrain ; mémoire 0,2 s.</div>
+        </div>
+      )}
+    </div>
+  );
+}
+// =============================================================================================
+// IMPORT DES RÉGLAGES DEPUIS LE RAPPORT PDF DU LOGICIEL SEPAM (SFT2841, impression du fichier de réglage)
+// Lecture locale du texte du PDF (aucun envoi), puis validation ligne par ligne avant de remplir la fiche.
+// =============================================================================================
+// Lignes de texte d'un PDF avec la position horizontale de chaque morceau (pour lire les colonnes « X » des tableaux).
+async function lignesTextePdf(pdf) {
+  const lignes = [];
+  for (let p = 1; p <= Math.min(pdf.numPages, 120); p++) {
+    const page = await pdf.getPage(p);
+    const contenu = await page.getTextContent();
+    const parY = new Map();
+    contenu.items.forEach((it) => {
+      const s = it.str || "";
+      if (!s.trim()) return;
+      const y = Math.round(it.transform[5]);
+      const cle = [...parY.keys()].find((k) => Math.abs(k - y) <= 2);
+      const k = cle === undefined ? y : cle;
+      if (!parY.has(k)) parY.set(k, []);
+      parY.get(k).push({ x: it.transform[4], s: s.trim() });
+    });
+    [...parY.entries()].sort((a, b) => b[0] - a[0]).forEach(([y, items]) => {
+      items.sort((a, b) => a.x - b.x);
+      lignes.push({ page: p, y, items, texte: items.map((i) => i.s).join(" ").replace(/\s+/g, " ").trim() });
+    });
+  }
+  return lignes;
+}
+// Valeur Sepam « 786A », « 1.26kA », « 13kV », « 150ms », « 1.2s », « 10%Unp », « 53Hz » → { v, u }.
+function valeurSepam(txt) {
+  const m = String(txt || "").replace(",", ".").match(/^(-?[\d.]+)\s*(kA|A|kV|V|ms|s|mn|min|%Unp|%Un|%Vn|%Ib|%In|%|Hz\/s|Hz|kW|kvar|°)$/i);
+  if (!m) return null;
+  let v = parseFloat(m[1]), u = m[2];
+  if (/^kA$/i.test(u)) { v *= 1000; u = "A"; }
+  if (/^kV$/i.test(u)) { v *= 1000; u = "V"; }
+  return { v, u };
+}
+const RE_SECTION_SEPAM = /^(PWH|[0-9]{2}[0-9A-Z]*(?:\/[0-9A-Z]+)*)\s*:\s*(.+)$/;
+function analyserRapportSepam(lignes) {
+  const info = {};
+  const champ = (re, cle) => { const l = lignes.find((x) => re.test(x.texte)); if (l) info[cle] = l.texte.match(re)[1].trim(); };
+  champ(/Type d'application\s*:\s*(.+)$/i, "application");
+  champ(/Repère du Sepam\s*:\s*(.+)$/i, "repere");
+  champ(/Modèle de Sepam\s*:\s*(.+)$/i, "modele");
+  champ(/Choix du jeu de réglage actif\s*:\s*Jeu de réglage\s*([AB])/i, "jeu");
+  champ(/Calibre TC\s*:\s*TC\s*([15])\s*A/i, "secondaireTC");
+  champ(/Courant Nominal \(In\)\s*:\s*(\S+)/i, "In");
+  champ(/Courant résiduel\s*:\s*(.+)$/i, "residuel");
+  champ(/Courant nominal résiduel \(In0\)\s*:\s*(\S+)/i, "In0");
+  champ(/Tension primaire nominale \(Unp\)\s*:\s*(\S+)/i, "Unp");
+  champ(/Tension secondaire nominale \(Uns\)\s*:\s*(\S+)/i, "Uns");
+  if (!info.application && !info.repere) return null;
+  const jeuActif = info.jeu || "A";
+  const fonctions = [];
+  let f = null, jeuCourant = null, colonnes = null;
+  lignes.forEach((l) => {
+    const premier = l.items[0];
+    const sec = premier && premier.x < 45 ? l.texte.match(RE_SECTION_SEPAM) : null;
+    if (sec && !/^\d+\s*:\s*\/\//.test(l.texte)) {
+      f = { code: sec[1], titre: sec[2], exemplaires: {} };
+      fonctions.push(f); jeuCourant = null; colonnes = null; return;
+    }
+    if (!f) return;
+    if (/^Comportement sur/i.test(l.texte) || /^Equations Logiques/i.test(l.texte)) { f.fin = true; return; }
+    if (f.fin) return;
+    // En-tête du tableau des exemplaires : position des colonnes « En service » et « Décl. Disj. »
+    const en = l.items.find((i) => /^En$/i.test(i.s) || /^En\s*service/i.test(i.s));
+    if (en && !colonnes) {
+      const decl = l.items.find((i) => /^Décl/i.test(i.s));
+      colonnes = { seuilEnService: decl ? en.x + (decl.x - en.x) / 2 : en.x + 50, decl: decl ? decl.x : null };
+      return;
+    }
+    const jeu = l.texte.match(/^Jeu ([AB])\b/);
+    if (jeu) { jeuCourant = jeu[1]; return; }
+    const ex = l.texte.match(/^Exemplaire\s+(\d)\b/);
+    if (ex) {
+      const n = Number(ex[1]);
+      const xs = l.items.filter((i) => i.s === "X").map((i) => i.x);
+      const enService = !!(colonnes && xs.some((x) => x < colonnes.seuilEnService));
+      const declDisj = !!(colonnes && colonnes.decl && xs.some((x) => Math.abs(x - colonnes.decl) < 40));
+      // Valeur et unité parfois en deux morceaux (« 120 » « kW ») : on les recolle.
+      const bruts = l.items.slice(2).map((i) => i.s).filter((s) => s !== "X");
+      const jetons = [];
+      bruts.forEach((t) => { if (jetons.length && /^-?[\d.,]+$/.test(jetons[jetons.length - 1]) && /^(kA|A|kV|V|ms|s|mn|min|%\w*|Hz(\/s)?|kW|kvar|°)$/i.test(t)) jetons[jetons.length - 1] += t; else jetons.push(t); });
+      const valeurs = jetons.map(valeurSepam);
+      const iSeuil = valeurs.findIndex((v) => v && !["ms", "s", "mn", "min"].includes(v.u));
+      const iTempo = valeurs.findIndex((v, i) => v && ["ms", "s", "mn", "min"].includes(v.u) && i > iSeuil);
+      const mode = jetons.find((s) => /^(Composée|Simple|Somme|Entrée)/i.test(s)) || (l.texte.match(/(Somme 3I|Entrée Io|Composée|Simple)/i) || [])[1] || "";
+      // Un exemplaire peut réapparaître plus bas (paramètres avancés) : seule la première ligne donne l'état et le réglage.
+      const nouveau = !f.exemplaires[n];
+      const e = f.exemplaires[n] || (f.exemplaires[n] = { n, jeux: {} });
+      if (nouveau) Object.assign(e, { enService, declDisj, mode });
+      if (iSeuil >= 0 && !e.direct) e.direct = { seuil: valeurs[iSeuil], tempo: iTempo >= 0 ? valeurs[iTempo] : null };
+      return;
+    }
+    // Tableaux par jeu (50/51, 50N/51N…) : « 1 Temps indépendant 786A 150ms … »
+    const ligneJeu = jeuCourant && l.texte.match(/^([1-4])\s+(.+?)\s+(-?[\d.,]+\s*k?A)\s+(-?[\d.,]+\s*(?:ms|s|mn))\b/);
+    if (ligneJeu) {
+      const n = Number(ligneJeu[1]);
+      const e = f.exemplaires[n] || (f.exemplaires[n] = { n, jeux: {} });
+      e.jeux[jeuCourant] = { courbe: ligneJeu[2].trim(), seuil: valeurSepam(ligneJeu[3].replace(/\s/g, "")), tempo: valeurSepam(ligneJeu[4].replace(/\s/g, "")) };
+    }
+  });
+  return { info, jeuActif, fonctions: fonctions.filter((x) => Object.keys(x.exemplaires).length) };
+}
+// Fonction Sepam → libellé de seuil de l'app.
+function libelleSeuilSepam(code, n) {
+  if (code === "50/51") return n <= 3 ? `50-51-${n} — Max I phase (seuil ${n})` : `50-51-${n} — Max I phase (seuil ${n})`;
+  if (code === "50N/51N" || code === "50G/51G") return `50N-51N-${n} — Max I terre (seuil ${n})`;
+  const base = code === "PWH" ? "32N" : code.split("/")[0].replace(/^49RMS$/, "49");
+  const type = PARAM_SEUIL_TYPES.find((k) => ansiFamily(k) === base && !/-\d/.test(k.split(" — ")[0]));
+  const libelle = type || `${code} — fonction Sepam`;
+  return n > 1 ? `${libelle} (exemplaire ${n})` : libelle;
+}
+// Courbe Sepam → courbe de l'app (temps dépendant : la « temporisation » Sepam est le temps à 10 × Is).
+function courbeSepamVersApp(nom) {
+  const n = String(nom || "");
+  if (/indépendant/i.test(n)) return "Constant";
+  if (/\bRI\b/.test(n)) return "Inverse RI";
+  if (/EIT|extr/i.test(n)) return "Extrèment Inverse CEI";
+  if (/LTI|long/i.test(n)) return "Inverse Temps Long CEI";
+  if (/VIT|très/i.test(n)) return "Très Inverse CEI";
+  if (/SIT|inverse/i.test(n)) return "Inverse Normale CEI";
+  return "";
+}
+// Rapport analysé → propositions (identification, TC, seuils) à valider.
+function propositionsImportSepam(rapport, eq) {
+  const { info, jeuActif, fonctions } = rapport;
+  const Unp = valeurSepam(info.Unp), Uns = valeurSepam(info.Uns), In = valeurSepam(info.In), In0 = valeurSepam(info.In0);
+  const ident = [];
+  const app = String(info.application || "").split(/\s+/).pop();
+  if (app) ident.push({ cle: "referenceRelais", label: "Référence du relais", valeur: `Sepam ${app}`, actuel: eq.identification?.referenceRelais || "" });
+  if (!eq.identification?.marqueRelais) ident.push({ cle: "marqueRelais", label: "Marque du relais", valeur: "Schneider Electric", actuel: "" });
+  if (Unp && Uns) ident.push({ cle: "rapportTPProtection", label: "Rapport TP de protection", valeur: `${Unp.v}/${Uns.v}`, actuel: eq.identification?.rapportTPProtection || "" });
+  const tc = [];
+  if (In) tc.push({ cle: "phase", label: "TC de phase", valeur: { rapportPrimaire: String(In.v), secondaire: info.secondaireTC || "" }, texte: `${In.v}/${info.secondaireTC || "?"} A` });
+  const tcResiduel = /TC\s*([15])\s*A/i.exec(info.residuel || "");
+  if (In0 && tcResiduel) tc.push({ cle: "terre", label: "TC homopolaire (via adaptateur)", valeur: { rapportPrimaire: String(In0.v), secondaire: tcResiduel[1] }, texte: `${In0.v}/${tcResiduel[1]} A — ${info.residuel}` });
+  const notes = [];
+  if (In0 && !tcResiduel && info.residuel) notes.push(`Courant résiduel : ${info.residuel} (In0 = ${In0.v} A) — tore raccordé directement au Sepam : essai de la terre en injection primaire dans le tore.`);
+  const seuils = [];
+  fonctions.forEach((fn) => Object.values(fn.exemplaires).sort((a, b) => a.n - b.n).forEach((e) => {
+    const r = e.jeux[jeuActif] || e.direct;
+    if (!r || !r.seuil) return;
+    const label = libelleSeuilSepam(fn.code, e.n);
+    const fields = { etat: e.enService ? "Actif" : "" };
+    const courbe = e.jeux[jeuActif] ? courbeSepamVersApp(r.courbe) : "Constant";
+    const s = r.seuil;
+    let reglage = s.v, avert = "";
+    if (/^%Unp$|^%Un$|^%Vn$/i.test(s.u)) {
+      if (Unp) { reglage = Math.round((s.v / 100) * Unp.v); avert = `${s.v} % de Unp`; } else { avert = "Unp inconnue : réglage laissé en %"; }
+    }
+    fields.reglage = String(reglage);
+    if (courbe && ["50/51", "50N/51N"].includes(fn.code)) fields.courbe = courbe;
+    if (["50/51", "50N/51N"].includes(fn.code)) fields.type = courbe === "Constant" ? "Indépendant" : "Dépendant";
+    if (fn.code === "50N/51N") fields.modeDetection = /entrée/i.test(e.mode) ? "TC homopolaire dédié" : "Somme des 3I (calculée)";
+    if (r.tempo) {
+      if (courbe && courbe !== "Constant") {
+        const f10 = calcTempsTheoriqueCEI(courbe, 1, 10);
+        const tS = r.tempo.u === "ms" ? r.tempo.v / 1000 : r.tempo.v;
+        if (f10) { fields.tms = String(Math.round((tS / f10) * 10000) / 10000); avert = `courbe ${r.courbe} : temps à 10 × Is = ${tS} s → TMS ≈ ${fields.tms} (à vérifier)`; }
+      } else {
+        fields.temporisation = String(r.tempo.v);
+        fields.temporisation_unite = r.tempo.u === "ms" ? "ms" : "s";
+      }
+    }
+    seuils.push({ label, fields, enService: e.enService, resume: `${s.v}${s.u === "A" ? " A" : " " + s.u}${r.tempo ? ` · ${r.tempo.v} ${r.tempo.u}` : ""}${courbe && courbe !== "Constant" ? ` · ${r.courbe}` : ""}`, avert });
+  }));
+  return { ident, tc, seuils, notes, repere: info.repere, application: info.application, jeuActif };
+}
+function appliquerImportSepam(eq, prop, choix) {
+  const id = { ...eq.identification };
+  prop.ident.forEach((l) => { if (choix[`i_${l.cle}`]) id[l.cle] = l.valeur; });
+  let tcs = [...((eq.controles && eq.controles.tc_dynamique) || [])];
+  prop.tc.forEach((t) => {
+    if (!choix[`t_${t.cle}`]) return;
+    const terre = t.cle === "terre";
+    let i = tcs.findIndex((x) => (terre ? x.label === "Homopolaire (terre)" : x.label !== "Homopolaire (terre)"));
+    if (i < 0) {
+      const fonction = terre ? "Homopolaire (terre)" : "Protection";
+      const n = emptyDynamicEntry(fonction, TC_FIELDS_DYNAMIC, true); n.fields.fonction = fonction; tcs = [...tcs, n]; i = tcs.length - 1;
+    }
+    tcs[i] = { ...tcs[i], fields: { ...tcs[i].fields, ...t.valeur } };
+  });
+  let seuils = [...((eq.controles && eq.controles.parametrage_relais_seuils) || [])];
+  prop.seuils.forEach((s, k) => {
+    if (!choix[`s_${k}`]) return;
+    const i = seuils.findIndex((x) => x.label === s.label);
+    if (i >= 0) seuils[i] = { ...seuils[i], fields: { ...seuils[i].fields, ...s.fields } };
+    else { const n = emptySeuilEntry(s.label); n.fields = { ...n.fields, ...s.fields }; seuils = [...seuils, n]; }
+  });
+  const vierge = (s) => !["reglage", "temporisation", "tms", "etat", "courbe"].some((c) => String((s.fields || {})[c] || "").trim()) && !["l1", "l2", "l3"].some((c) => String(((s.essai || {}).fields || {})[c] || "").trim());
+  seuils = seuils.filter((s) => !vierge(s));
+  return { ...eq, identification: id, controles: { ...eq.controles, tc_dynamique: tcs, parametrage_relais_seuils: seuils } };
+}
+// ----- Rapport de paramètres Easergy Pro (Easergy P3 / PowerLogic P5) -----
+// Tableaux « Groupe 1 … Groupe 4 » : les valeurs sont un peu décalées en hauteur par rapport au libellé de ligne,
+// on les retrouve par colonne (abscisse de l'en-tête « Groupe N ») et par proximité verticale.
+const RE_SECTION_EASERGY = /^\d+\.\d+\.\s+(.+?)\s+(\d{2}[A-Z0-9]*(?:\/\d{2}[A-Z0-9]*)?)$/;
+function nombreEasergy(s) { const v = parseFloat(String(s || "").replace(",", ".")); return isNaN(v) ? null : v; }
+function analyserRapportEasergy(lignes) {
+  const titre = lignes.find((l) => /Rapport de paramètres\s+(P[35]\w*)/i.test(l.texte));
+  if (!titre) return null;
+  const modele = titre.texte.match(/Rapport de paramètres\s+(P[35]\w*)/i)[1];
+  const val = (re) => { const l = lignes.find((x) => re.test(x.texte)); return l ? l.texte.match(re)[1].trim() : null; };
+  const info = {
+    modele,
+    typeRelais: val(/^Type de relais\s+(\S+)/i) || modele,
+    repere: val(/^Repère de l'équipement protégé\s+(.+)$/i) || val(/^Nom personnalisé\s+(.+)$/i) || val(/^Repère du relais\s+(.+)$/i),
+    tcPrim: nombreEasergy(val(/^(?:Primaire TC|TC primaire)\s+([\d.,]+)/i)),
+    tcSec: nombreEasergy(val(/^(?:Secondaire TC phase|Secondaire TC)\s+([\d.,]+)/i)),
+    ioPrim: nombreEasergy(val(/^(?:Io1 CSH primary|Primaire TC terre Io)\s+([\d.,]+)/i)),
+    ioSec: nombreEasergy(val(/^Secondaire TC terre Io\s+([\d.,]+)/i)),
+    ioCSH: lignes.some((x) => /^Io1 CSH primary/i.test(x.texte)),
+    un: nombreEasergy(val(/^(?:Rated voltage|Tension primaire TP)\s+([\d.,]+)/i)),
+    uSec: nombreEasergy(val(/^Tension nominale sec\. TP\s+([\d.,]+)/i)),
+  };
+  // Découpage en sections « 3.6. Max courant Ph I> 50/51 »
+  const sections = [];
+  let cur = null;
+  lignes.forEach((l) => {
+    const m = l.items[0] && l.items[0].x < 80 ? l.texte.match(RE_SECTION_EASERGY) : null;
+    if (m && !/\.{4,}/.test(l.texte)) { cur = { nom: m[1].trim(), code: m[2], lignes: [] }; sections.push(cur); return; }
+    if (/^\d+\.\s+[A-ZÉ]/.test(l.texte) && l.items[0] && l.items[0].x < 80) { cur = null; return; } // nouveau chapitre
+    if (cur) cur.lignes.push(l);
+  });
+  const fonctions = sections.map((sec) => {
+    const L = sec.lignes;
+    const act = L.find((l) => /^(Activation|Enable for)\b.*\s(☑|☐)$/.test(l.texte));
+    const actif = act ? /☑$/.test(act.texte) : null;
+    const entreeIo = (L.find((l) => /^Entrée courant Io\s+\S+/.test(l.texte)) || { texte: "" }).texte.replace(/^Entrée courant Io\s+/, "");
+    const grpSel = Number(((L.find((l) => /Sélectionné\s*:\s*Groupe\s*\d/.test(l.texte)) || { texte: "" }).texte.match(/Groupe\s*(\d)/) || [])[1]) || 1;
+    // Premier tableau par groupes de la section
+    const iEnt = L.findIndex((l) => l.items.filter((i) => /^Groupe\s*\d$/.test(i.s)).length >= 2);
+    const lignesVal = {};
+    if (iEnt >= 0) {
+      const ent = L[iEnt];
+      const cols = ent.items.filter((i) => /^Groupe\s*\d$/.test(i.s)).map((i) => ({ g: Number(i.s.match(/\d/)[0]), x: i.x }));
+      const page = ent.page;
+      // Fenêtre : jusqu'au prochain en-tête de tableau ou à la fin de la section, même page ou pages suivantes
+      const suite = [];
+      for (let k = iEnt + 1; k < L.length; k++) { if (L[k].items.filter((i) => /^Groupe\s*\d$/.test(i.s)).length >= 2) break; if (/^(Réglages communs|Paramètres fonction tempo)/.test(L[k].texte)) break; suite.push(L[k]); }
+      const items = suite.flatMap((l) => l.items.map((i) => ({ ...i, y: l.y, page: l.page })));
+      const estUnite = (s) => /\[.+\]$/.test(s) && !/^Réglage|^Temporisation|^Seuil/i.test(s);
+      const labels = items.filter((i) => i.x < cols[0].x - 15 && !estUnite(i.s));
+      const colDe = (x) => cols.reduce((best, c) => (Math.abs(c.x + 12 - x) < Math.abs(best.x + 12 - x) ? c : best), cols[0]).g;
+      labels.forEach((lab) => {
+        const valeurs = items.filter((i) => i.page === lab.page && i.x >= cols[0].x - 15 && Math.abs(i.y - lab.y) <= 8);
+        if (!valeurs.length) return;
+        const unite = (lab.s.match(/\[(.+?)\]/) || [])[1] || (((items.find((i) => i.page === lab.page && i.x < cols[0].x - 15 && estUnite(i.s) && lab.y - i.y > 0 && lab.y - i.y < 20) || {}).s || "").match(/\[(.+?)\]/) || [])[1] || "";
+        const cle = lab.s.replace(/\s*\[.*\]$/, "").trim();
+        if (lignesVal[cle]) return;
+        const parGroupe = {}; valeurs.forEach((v) => { parGroupe[colDe(v.x)] = v.s; });
+        lignesVal[cle] = { unite, valeur: parGroupe[grpSel], parGroupe };
+      });
+      void page;
+    }
+    // Réglages hors tableau (« Temporisation 0.50 [s] »)
+    const kv = (re) => { const l = L.find((x) => re.test(x.texte)); return l ? l.texte.match(re) : null; };
+    const seuilKV = kv(/^Réglage seuil\s+([\d.,]+)\s+\[(.+?)\]/);
+    const tempoKV = kv(/^Temporisation\s+([\d.,]+)\s+\[(.+?)\]/);
+    return { ...sec, actif, entreeIo, grpSel, lignesVal, seuilKV, tempoKV };
+  });
+  return { info, fonctions };
+}
+function ligneEasergy(f, ...noms) { for (const n of noms) { const k = Object.keys(f.lignesVal).find((x) => x.toLowerCase().startsWith(n.toLowerCase())); if (k) return f.lignesVal[k]; } return null; }
+function courbeEasergyVersApp(famille, type) {
+  const t = String(type || "").toUpperCase(), fam = String(famille || "").toUpperCase();
+  if (!fam || fam === "DT" || t === "DT") return "Constant";
+  if (t === "RI") return "Inverse RI";
+  if (/^(EI|ER)$/.test(t)) return "Extrèment Inverse CEI";
+  if (/^LTI/.test(t)) return "Inverse Temps Long CEI";
+  if (/^VI$/.test(t)) return "Très Inverse CEI";
+  if (/^NI$/.test(t)) return "Inverse Normale CEI";
+  return "";
+}
+function propositionsImportEasergy(rapport, eq) {
+  const { info, fonctions } = rapport;
+  const ident = [];
+  ident.push({ cle: "referenceRelais", label: "Référence du relais", valeur: `${/^P5/i.test(info.typeRelais) ? "PowerLogic" : "Easergy"} ${info.typeRelais}`, actuel: eq.identification?.referenceRelais || "" });
+  if (!eq.identification?.marqueRelais) ident.push({ cle: "marqueRelais", label: "Marque du relais", valeur: "Schneider Electric", actuel: "" });
+  if (info.un && info.uSec) ident.push({ cle: "rapportTPProtection", label: "Rapport TP de protection", valeur: `${info.un}/${info.uSec}`, actuel: eq.identification?.rapportTPProtection || "" });
+  const tc = [], notes = [];
+  if (info.tcPrim) tc.push({ cle: "phase", label: "TC de phase", valeur: { rapportPrimaire: String(info.tcPrim), secondaire: info.tcSec ? String(info.tcSec) : "" }, texte: `${info.tcPrim}/${info.tcSec || "?"} A` });
+  if (info.ioPrim && info.ioSec) tc.push({ cle: "terre", label: "TC homopolaire", valeur: { rapportPrimaire: String(info.ioPrim), secondaire: String(info.ioSec) }, texte: `${info.ioPrim}/${info.ioSec} A` });
+  else if (info.ioPrim && info.ioCSH) notes.push(`Entrée Io1 : tore CSH, calibre ${info.ioPrim} A — raccordé directement au relais : essai de la terre en injection primaire dans le tore.`);
+  if (info.un && !info.uSec) notes.push(`Tension assignée ${info.un} V (pas de TP de phase déclaré) — sert à convertir les seuils de tension en volts.`);
+  const seuils = [];
+  const compteur = {};
+  fonctions.forEach((f) => {
+    const code = f.code.split("/")[0].replace(/^46BC$/, "46");
+    if (["99", "60", "79", "68F2"].includes(code)) return;
+    const defs = ANSI_REGLAGE_FIELDS[code];
+    if (!defs && !["50", "50N"].includes(code)) return;
+    const lSeuil = ligneEasergy(f, "Réglage seuil", "Seuil IN", "Seuil");
+    const lTempo = ligneEasergy(f, "Temporisation");
+    const brutSeuil = lSeuil ? { v: nombreEasergy(lSeuil.valeur), u: lSeuil.unite } : f.seuilKV ? { v: nombreEasergy(f.seuilKV[1]), u: f.seuilKV[2] } : null;
+    const brutTempo = lTempo ? { v: nombreEasergy(lTempo.valeur), u: lTempo.unite || "s" } : f.tempoKV ? { v: nombreEasergy(f.tempoKV[1]), u: f.tempoKV[2] } : null;
+    if (!brutSeuil || brutSeuil.v === null) return;
+    // Étage : nombre de « > » (I>>, Io>>>) ou chiffre explicite (I>1, IN>3)
+    const sym = (f.nom.match(/([A-Za-zφ0-9]+>+\d?)/) || [])[1] || "";
+    const etage = Number((sym.match(/>(\d)$/) || [])[1]) || (sym.match(/>/g) || []).length || 1;
+    let label;
+    if (code === "50") label = `50-51-${etage} — Max I phase (seuil ${etage})`;
+    else if (code === "50N") label = `50N-51N-${etage} — Max I terre (seuil ${etage})`;
+    else {
+      compteur[code] = (compteur[code] || 0) + 1;
+      const type = PARAM_SEUIL_TYPES.find((k) => ansiFamily(k) === code && !/-\d/.test(k.split(" — ")[0]));
+      label = (type || `${code} — ${f.nom}`) + (compteur[code] > 1 ? ` (exemplaire ${compteur[code]})` : "");
+    }
+    const estTerre = ["50N", "67N", "67NI"].includes(code);
+    const viaSomme = /3IL|somme/i.test(f.entreeIo || "");
+    const baseI = estTerre && !viaSomme ? (info.ioPrim || info.tcPrim) : info.tcPrim;
+    const u = String(brutSeuil.u || "");
+    let reglage = brutSeuil.v, avert = "";
+    if (/^xIn$|^pu$|^xIon$/i.test(u)) { if (baseI) { reglage = Math.round(brutSeuil.v * baseI * 100) / 100; avert = `${brutSeuil.v} ${u} × ${baseI} A${estTerre ? (viaSomme ? " (somme des 3 courants : base = TC de phase)" : " (base = entrée Io)") : ""}`; } }
+    else if (/^%In$/i.test(u)) { if (info.tcPrim) { reglage = Math.round((brutSeuil.v / 100) * info.tcPrim * 100) / 100; avert = `${brutSeuil.v} % de In`; } }
+    else if (/^%$/.test(u) && (defs || []).some((d) => d.key === "reglage" && d.unit === "V")) { if (info.un) { reglage = Math.round((brutSeuil.v / 100) * (info.un / Math.sqrt(3))); avert = `${brutSeuil.v} % de la tension résiduelle nominale (Un/√3 = ${Math.round(info.un / Math.sqrt(3))} V) — conversion à vérifier`; } }
+    const fields = { etat: f.actif ? "Actif" : "", reglage: String(reglage) };
+    const fam = ligneEasergy(f, "Famille de"), typ = ligneEasergy(f, "Type courbe"), k = ligneEasergy(f, "Coef k");
+    const courbe = courbeEasergyVersApp(fam && fam.valeur, typ && typ.valeur);
+    if (["50", "50N"].includes(code)) { fields.courbe = courbe || "Constant"; fields.type = fields.courbe === "Constant" ? "Indépendant" : "Dépendant"; }
+    if (code === "50N") fields.modeDetection = viaSomme ? "Somme des 3I (calculée)" : "TC homopolaire dédié";
+    if (code === "67N") { const a = ligneEasergy(f, "Angle"); if (a && nombreEasergy(a.valeur) !== null) fields.angle = String(nombreEasergy(a.valeur)); }
+    if (fields.courbe && fields.courbe !== "Constant") { if (k && nombreEasergy(k.valeur) !== null) fields.tms = String(nombreEasergy(k.valeur)); }
+    else if (brutTempo && brutTempo.v !== null) { fields.temporisation = String(brutTempo.v); fields.temporisation_unite = /^ms$/i.test(brutTempo.u) ? "ms" : "s"; }
+    seuils.push({ label, fields, enService: !!f.actif, resume: `${brutSeuil.v} ${u}${reglage !== brutSeuil.v ? ` = ${reglage}${defs && (defs.find((d) => d.key === "reglage") || {}).unit ? " " + defs.find((d) => d.key === "reglage").unit : " A"}` : ""}${brutTempo && brutTempo.v !== null && !(fields.courbe && fields.courbe !== "Constant") ? ` · ${brutTempo.v} ${brutTempo.u || "s"}` : ""}${fields.courbe && fields.courbe !== "Constant" ? ` · ${typ ? typ.valeur : ""} k = ${fields.tms || "?"}` : ""}`, avert: `${avert}${f.grpSel !== 1 ? ` · groupe ${f.grpSel}` : ""}` });
+  });
+  return { ident, tc, seuils, notes, repere: info.repere, application: info.typeRelais, jeuActif: "Groupe sélectionné" };
+}
+function BoutonImportReglagesSepam({ eq, update }) {
+  const inputRef = useRef(null);
+  const [lecture, setLecture] = useState(false);
+  const [erreur, setErreur] = useState("");
+  const [prop, setProp] = useState(null);
+  const [choix, setChoix] = useState({});
+  async function surFichier(file) {
+    if (!file) return;
+    setErreur(""); setLecture(true);
+    try {
+      const pdf = await pdfCharger(file);
+      const lignes = await lignesTextePdf(pdf);
+      const easergy = analyserRapportEasergy(lignes);
+      const sepam = easergy ? null : analyserRapportSepam(lignes);
+      if (!easergy && !sepam) throw new Error("Ce PDF n'est pas reconnu (rapport Sepam SFT2841 ou rapport de paramètres Easergy Pro P3 / P5). Pour une autre marque, utiliser « Lire le paramétrage ».");
+      const p = easergy ? { ...propositionsImportEasergy(easergy, eq), source: "Easergy" } : { ...propositionsImportSepam(sepam, eq), source: "Sepam" };
+      const c = {};
+      p.ident.forEach((l) => { c[`i_${l.cle}`] = !l.actuel || l.actuel === l.valeur; });
+      p.tc.forEach((t) => { c[`t_${t.cle}`] = true; });
+      p.seuils.forEach((s, k) => { c[`s_${k}`] = s.enService; });
+      setChoix(c); setProp(p);
+    } catch (e) {
+      setErreur(e.message || "Lecture impossible.");
+    } finally {
+      setLecture(false);
+    }
+  }
+  const coche = (k) => ({ checked: !!choix[k], onChange: (e) => setChoix({ ...choix, [k]: e.target.checked }) });
+  const ligne = { display: "flex", gap: 8, alignItems: "flex-start", fontSize: 12.5, color: "#3E4A5C", padding: "4px 0", borderBottom: "1px solid #EEF1F4" };
+  return (
+    <span style={{ display: "inline-flex", flexDirection: "column", gap: 4 }}>
+      <input ref={inputRef} type="file" accept="application/pdf,.pdf" style={{ display: "none" }} onChange={(e) => { const f = e.target.files && e.target.files[0]; e.target.value = ""; surFichier(f); }} />
+      <button type="button" onClick={() => inputRef.current && inputRef.current.click()} disabled={lecture} style={{ ...btnGhost(BRAND.blue), padding: "5px 9px", opacity: lecture ? 0.6 : 1 }} title="Rapport PDF du logiciel Sepam (SFT2841) ou rapport de paramètres Easergy Pro (P3 / P5) : seuils, TC et TP lus directement dans le PDF, à valider avant import">
+        <FileText size={13} /> {lecture ? "Lecture…" : "Importer réglages (PDF)"}
+      </button>
+      {erreur && <span style={{ fontSize: 11.5, color: "#C0392B", maxWidth: 320 }}>{erreur}</span>}
+      {prop && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(10,15,25,0.62)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 10 }}>
+          <div className="import-sepam" style={{ background: "#fff", borderRadius: 12, width: "min(720px, 100%)", maxHeight: "94vh", display: "flex", flexDirection: "column", boxShadow: "0 20px 60px rgba(0,0,0,0.35)" }}>
+            <div style={{ padding: "12px 16px", borderBottom: "1px solid #E2E6EB" }}>
+              <div style={{ fontWeight: 700, fontSize: 14, color: "#1A1F26" }}>Import des réglages {prop.source}</div>
+              <div style={{ fontSize: 11.5, color: "#5B6B7D" }}>{prop.repere || "—"} · {prop.application || ""} · {prop.source === "Sepam" ? `jeu de réglage actif ${prop.jeuActif}` : "groupe de réglage sélectionné"}</div>
+            </div>
+            <div style={{ overflow: "auto", padding: "10px 16px" }}>
+              {(prop.ident.length > 0 || prop.tc.length > 0) && <div style={{ fontSize: 11.5, fontWeight: 700, color: "#5B6B7D", textTransform: "uppercase", margin: "4px 0" }}>Identification et capteurs</div>}
+              {prop.ident.map((l) => (
+                <label key={l.cle} style={ligne}><input type="checkbox" {...coche(`i_${l.cle}`)} style={{ marginTop: 2 }} /><span style={{ flex: 1 }}>{l.label} : <b>{l.valeur}</b>{l.actuel && l.actuel !== l.valeur ? <span style={{ color: "#B5730A" }}> (actuel : {l.actuel})</span> : null}</span></label>
+              ))}
+              {prop.tc.map((t) => (
+                <label key={t.cle} style={ligne}><input type="checkbox" {...coche(`t_${t.cle}`)} style={{ marginTop: 2 }} /><span style={{ flex: 1 }}>{t.label} : <b>{t.texte}</b></span></label>
+              ))}
+              {prop.notes.map((n, i) => <div key={i} style={{ fontSize: 11.5, color: "#5B6B7D", padding: "4px 0" }}>ℹ {n}</div>)}
+              <div style={{ fontSize: 11.5, fontWeight: 700, color: "#5B6B7D", textTransform: "uppercase", margin: "10px 0 4px" }}>Seuils ({prop.source === "Sepam" ? `jeu ${prop.jeuActif}` : "groupe sélectionné"}) — cochés : en service</div>
+              {prop.seuils.map((s, k) => (
+                <label key={k} style={{ ...ligne, opacity: s.enService ? 1 : 0.7 }}>
+                  <input type="checkbox" {...coche(`s_${k}`)} style={{ marginTop: 2 }} />
+                  <span style={{ flex: 1 }}>
+                    <b>{s.label}</b> — {s.resume} <span style={{ fontSize: 11, fontWeight: 700, color: s.enService ? "#0F8A5F" : "#8B96A3" }}>{s.enService ? "en service" : "hors service"}</span>
+                    {s.avert && <div style={{ fontSize: 11, color: "#8B96A3" }}>{s.avert}</div>}
+                  </span>
+                </label>
+              ))}
+              <div style={{ fontSize: 11, color: "#8B96A3", marginTop: 8, lineHeight: 1.5 }}>Lecture directe du PDF (rien n'est envoyé). Un seuil déjà présent avec le même libellé est mis à jour ; les seuils hors service peuvent être importés en les cochant (état laissé vide).</div>
+            </div>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, padding: "10px 16px", borderTop: "1px solid #E2E6EB", flexWrap: "wrap" }}>
+              <button type="button" style={btnGhost()} onClick={() => setProp(null)}>Annuler</button>
+              <button type="button" style={btnPrimary()} onClick={() => { update(appliquerImportSepam(eq, prop, choix)); setProp(null); }}>Importer la sélection</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </span>
+  );
+}
 const AIDE_PRECISION_RELAIS = {
   statimax: "Statimax RAH 411 E : temporisation minimale de 100 ms, temps de fonctionnement du Mitop compris. Les TC 10P30 habituellement associés limitent la plage utile à 30 × Inp (30 A au secondaire).",
   wic1: "WIC1 (manuel constructeur) : temps à temps constant ±1 % ou ±10 ms ; temps inverse ±10 ms ; seuil terre ≤ 5 % ; mesure ≤ 5 % de 0 à 50 °C (≤ 7,5 % de −40 à 85 °C). Courant minimal d'alimentation : 0,9 × plus petit courant nominal du TC. Essai du seuil terre : valise triphasée ; la source d'injection sert aussi d'alimentation.",
@@ -10918,7 +11400,8 @@ function ParametrageRelaisPanel({ eq, update, idPrefix, locaux = [], allSites = 
   const setSeuilLabel = (id, label) => setSeuils(seuils.map((s) => {
     if (s.id !== id) return s;
     const fam = ansiFamily(label);
-    const zoneParDefaut = (fam === "67" || fam === "67N") && !s.fields.zoneMin && !s.fields.zoneMax ? { zoneMin: "-88", zoneMax: "88" } : {};
+    const zoneParDefaut = (fam === "67" || fam === "67N") && !s.fields.zoneMin && !s.fields.zoneMax ? { zoneMin: "-88", zoneMax: "88" }
+      : fam === "32N" && typeRelaisP5(eq.identification) && !s.fields.zoneMin && !s.fields.zoneMax ? { zoneMin: "-71", zoneMax: "71" } : {};
     return { ...s, label, fields: { ...s.fields, ...zoneParDefaut } };
   }));
   const removeSeuil = (id) => setSeuils(seuils.filter((s) => s.id !== id));
@@ -10930,7 +11413,7 @@ function ParametrageRelaisPanel({ eq, update, idPrefix, locaux = [], allSites = 
   const localEquipement = locaux.find((l) => l.id === eq.localId);
   const typeDecouplageLocal = localEquipement?.typeDecouplage || "";
   // Aides facultatives (jamais imprimées) : cohérence du paramétrage et écarts avec la visite précédente.
-  const alertesCoherence = alertesParametrageRelais(eq, seuils);
+  const alertesCoherence = [...alertesParametrageRelais(eq, seuils), ...alertesP5(eq, seuils)];
   const precedent = useMemo(() => equipementPrecedent(allSites, eq, rapportDate), [allSites, eq.lignageId, eq.id, rapportDate]);
   const changements = changementsParametrage(precedent, seuils);
 
@@ -10942,6 +11425,7 @@ function ParametrageRelaisPanel({ eq, update, idPrefix, locaux = [], allSites = 
           <BoutonLirePlaque champs={CHAMPS_LECTURE_PARAMETRAGE} valeursActuelles={{}} typeEquipement={eq.type} libelle="Lire le paramétrage"
             contexte={`Photo d'écran, de la face avant ou d'un export de paramétrage d'un relais de protection${eq.identification?.referenceRelais ? " " + eq.identification.referenceRelais : ""}. Relever chaque seuil de protection actif (max de I phase I>, I>>, terre Io>, Io>>, tension, fréquence…) dans l'ordre : fonction (choisir le libellé ANSI correspondant), réglage (en A primaires si affiché, sinon la valeur telle qu'affichée), courbe, TMS, temporisation et son unité. Ne rien inventer : laisser vide ce qui n'est pas lisible.`}
             onAppliquer={(patch) => setSeuils(appliquerLectureParametrage(seuils, patch))} compact />
+          <BoutonImportReglagesSepam eq={eq} update={update} />
           <button onClick={addSeuil} style={btnGhost(BRAND.amber)}><Plus size={13} /> Ajouter un seuil</button>
         </div>
       </div>
@@ -10952,8 +11436,10 @@ function ParametrageRelaisPanel({ eq, update, idPrefix, locaux = [], allSites = 
           {changements.map((c, i) => <div key={"p" + i} style={{ color: "#3E4A5C" }}>• {c}</div>)}
         </div>
       )}
-      {!typeRelaisAutonome(eq.identification) && !typeRelaisSiprotec(eq.identification) && <SelecteurAssistantRelais eq={eq} update={update} />}
+      {!typeRelaisAutonome(eq.identification) && !typeRelaisSiprotec(eq.identification) && !typeRelaisP5(eq.identification) && <SelecteurAssistantRelais eq={eq} update={update} />}
       {(typeRelaisAutonome(eq.identification) || eq.assistantRelaisType) && <AssistantRelaisAutonome key={typeRelaisAutonome(eq.identification) || eq.assistantRelaisType} eq={eq} update={update} type={typeRelaisAutonome(eq.identification) || eq.assistantRelaisType} />}
+      {typeRelaisP5(eq.identification) && <div style={{ fontSize: 11.5, color: "#5B6B7D", lineHeight: 1.5, marginBottom: 10, padding: "8px 10px", border: "1px solid #D8DEE5", borderRadius: 8, background: "rgba(10,93,168,0.04)" }}>{RELAIS_P5.plages}</div>}
+      {typeRelaisP5(eq.identification) && <ComparaisonP5 eq={eq} seuils={seuils} />}
       {typeRelaisSiprotec(eq.identification) && <div style={{ fontSize: 11.5, color: "#5B6B7D", lineHeight: 1.5, marginBottom: 10, padding: "8px 10px", border: "1px solid #D8DEE5", borderRadius: 8, background: "rgba(10,93,168,0.04)" }}>{RELAIS_SIPROTEC[typeRelaisSiprotec(eq.identification)].plages}{RELAIS_SIPROTEC[typeRelaisSiprotec(eq.identification)].autres && <div style={{ marginTop: 6 }}>{RELAIS_SIPROTEC[typeRelaisSiprotec(eq.identification)].autres}</div>}</div>}
       {seuils.length === 0 ? (
         <div style={{ textAlign: "center", padding: 18, color: "#8B96A3", fontSize: 12.5, border: "1px dashed #D8DEE5", borderRadius: 10 }}>
@@ -10998,6 +11484,12 @@ function ParametrageRelaisPanel({ eq, update, idPrefix, locaux = [], allSites = 
                 {estDecouplage && typeDecouplageLocal && (
                   <div style={{ fontSize: 11, color: "#8B96A3", marginTop: 8, lineHeight: 1.5 }}>{aideTypeDecouplage(typeDecouplageLocal)}</div>
                 )}
+                {ansiFamily(s.label) === "32N" && typeRelaisP5(eq.identification) && (() => {
+                  const pno = pnoP5(eq), kw = numOf(s.fields.reglage);
+                  return <div style={{ fontSize: 11.5, color: "#0A5DA8", marginTop: 6, lineHeight: 1.5 }} title="Aide au technicien — non imprimée dans le rapport">
+                    {pno ? <>P5 : Pno = √3 × {frN(unHTA(eq), 0)} V × {frN(inTCPhase(eq), 0)} A = {frN(pno, 0)} kW{kw !== null ? <> → {frN(kw, 0)} kW = <b>{frN((kw / pno) * 100, 2)} % de Pno</b></> : ""} · 120 kW = {frN(12000 / pno, 2)} % · 80 kW = {frN(8000 / pno, 2)} % · 40 kW = {frN(4000 / pno, 2)} %</> : "P5 : renseigner le rapport TP (identification) et le TC de phase pour convertir les kW en % de Pno."}
+                  </div>;
+                })()}
                 {!estDecouplage && DEFINITION_ANSI[s.label] && (
                   <div style={{ fontSize: 11, color: "#8B96A3", marginTop: 8, lineHeight: 1.5 }}>{DEFINITION_ANSI[s.label]}</div>
                 )}
@@ -11090,8 +11582,15 @@ function toleranceEssaiSeuil(eq, s, multiple) {
     return r ? { ...r, tRelais: t, base: "marge générique (temps d'ouverture du disjoncteur non renseigné)" } : null;
   }
   const o = ouv ? ouv.ms / 1000 : 0;
-  const min = Math.max(0, t * 0.95 + o - 0.02), max = t * 1.05 + o + 0.04;
   const k = unite === "ms" ? 1000 : 1, d = unite === "ms" ? 0 : 3;
+  // PowerLogic P5 à temps constant : temporisation + démarrage ≤ 30 ms (I>, Io>) ou ≤ 50 ms (PWH), d'après la notice C13-100.
+  const dem = !cei && typeRelaisP5(eq.identification) ? demarrageP5(s) : null;
+  if (dem !== null) {
+    const minP = Math.max(0, t + o - 0.01), maxP = t * 1.01 + dem + o + 0.01;
+    return { min: arrondiN(minP * k, d), max: arrondiN(maxP * k, d), unite, tRelais: t, ouvertureMs: ouv ? ouv.ms : null,
+      base: `P5 : tempo ${frN(t * k, d)} ${unite} + démarrage ≤ ${frN(dem * 1000, 0)} ms${ouv ? ` + ouverture ${frN(ouv.ms, 0)} ms (${ouv.source})` : " (relais seul)"}` };
+  }
+  const min = Math.max(0, t * 0.95 + o - 0.02), max = t * 1.05 + o + 0.04;
   return {
     min: arrondiN(min * k, d), max: arrondiN(max * k, d), unite, tRelais: t, ouvertureMs: ouv ? ouv.ms : null,
     base: surRelais ? "temps du relais seul (contact de sortie)" : `relais ${frN(t * k, d)} ${unite} + ouverture du disjoncteur ${frN(ouv.ms, 0)} ms (${ouv.source})`,
@@ -11203,6 +11702,13 @@ function pointsMesuresSeuil(s) {
 }
 // ----- Fiche méthode par famille de relais (repères usuels — toujours à vérifier sur la notice) -----
 const FICHES_METHODE_RELAIS = [
+  { cle: "p5", re: /\bP5\b|powerlogic\s*p5|easergy\s*p5/i, nom: "Schneider Electric — PowerLogic P5", lignes: [
+    "Paramétrage : logiciel Easergy Pro (fichiers .epz) ; en C13-100, seul le groupe 1 de chaque seuil est actif (pas de bascule vers le groupe 2).",
+    "Pour les essais : activer / désactiver les seuils dans le menu « Seuils protection valides » (ou dans chaque fonction), puis faire un cycle écriture / lecture.",
+    "Menu « Test relais de sortie » pour vérifier chaque sortie ; le perturbographe (4,96 s, dont 80 % avant déclenchement) permet de relire le temps de déclenchement et l'ouverture du disjoncteur.",
+    "Blocage par harmonique 2 interdit en C13-100 (I> et Io>). PWH : Sw>1 réglé en % de Pno (Pno = √3 × Un × In du TC), secteur ±71°, mémoire 0,2 s.",
+    "Mot de passe : à vérifier sur la notice / auprès de l'exploitant.",
+  ] },
   { cle: "sepam", re: /sepam/i, nom: "Schneider Electric — Sepam", lignes: [
     "Lecture / modification du paramétrage : face avant (IHM avancée) ou logiciel SFT2841 (série 20/40/80) ; Easergy pour les gammes récentes.",
     "Mot de passe de réglage : souvent 0000 en sortie d'usine — à vérifier sur la notice, l'exploitant l'a généralement changé.",
@@ -12357,6 +12863,7 @@ function DisjoncteurRelaisPanel({ eq, update, custom, onAddCustom, onChangeCusto
         )}
       </div>
       {typeRelaisAutonome(eq.identification) && <div style={{ fontSize: 11.5, color: "#5B6B7D", lineHeight: 1.5, marginBottom: 8 }}>{AIDE_PRECISION_RELAIS[typeRelaisAutonome(eq.identification)]}</div>}
+      {typeRelaisP5(eq.identification) && <div style={{ fontSize: 11.5, color: "#5B6B7D", lineHeight: 1.5, marginBottom: 8 }}>{RELAIS_P5.precision}</div>}
       {typeRelaisSiprotec(eq.identification) && <div style={{ fontSize: 11.5, color: "#5B6B7D", lineHeight: 1.5, marginBottom: 8 }}>{RELAIS_SIPROTEC[typeRelaisSiprotec(eq.identification)].precision}</div>}
       <div>
         {renseignes.length === 0 && (
@@ -12478,7 +12985,7 @@ function DisjoncteurRelaisPanel({ eq, update, custom, onAddCustom, onChangeCusto
                           <span style={{ display: "flex", gap: 6, flexWrap: "wrap" }} title="Aide au technicien — non imprimée dans le rapport">
                             <span style={pill}>L1 : U {aide.u} V / I {aide.i} A @ 0°</span>
                             <span style={pill}>L2 : U {aide.u} V / I {aide.i} A @ -120°</span>
-                            <span style={pill}>L3 : U {aide.u} V / I {aide.i} A @ -240°</span>
+                            <span style={pill}>L3 : U {aide.u} V / I {aide.i} A @ +120°</span>
                           </span>
                         );
                       }
@@ -12527,7 +13034,7 @@ function DisjoncteurRelaisPanel({ eq, update, custom, onAddCustom, onChangeCusto
                         <span style={{ display: "flex", gap: 6, flexWrap: "wrap" }} title="Aide au technicien — non imprimée dans le rapport">
                           <span style={pill}>L1 : ≈ {aide} {unite} @ 0°</span>
                           <span style={pill}>L2 : ≈ {aide} {unite} @ -120°</span>
-                          <span style={pill}>L3 : ≈ {aide} {unite} @ -240°</span>
+                          <span style={pill}>L3 : ≈ {aide} {unite} @ +120°</span>
                         </span>
                       );
                     }
