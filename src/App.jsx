@@ -4258,6 +4258,7 @@ function emptyIntervention(numeroRI) {
 // Filet de sécurité / migration : les interventions créées avant l'introduction du support
 // multi-équipements n'avaient qu'un seul objet "equipement" — on le convertit en liste à la volée,
 // sans jamais perdre les données existantes.
+const ETATS_FIN_INSTALLATION = ["Installation remise sous tension", "Installation partiellement remise sous tension", "Installation laissée hors tension / consignée"];
 function repairIntervention(iv) {
   if (!iv.equipements) {
     const ancien = iv.equipement;
@@ -4326,6 +4327,7 @@ function siteExportWarnings(site) {
   if (!site.rapport.date) w.push("La date d'intervention n'est pas renseignée");
   if (!site.rapport.intervenant) w.push("L'intervenant principal n'est pas renseigné");
   if (site.equipements.length === 0) w.push("Aucun équipement n'a été ajouté sur ce site");
+  { const a = alerteProchaineMaintenance(site.rapport.date, site.rapport.prochaineMaintenance, site.equipements.filter((e) => (RANK_OF[e.etatFinal] ?? 0) >= 2).length); if (a) w.push(a); }
   site.equipements.forEach((eq) => {
     const nomEq = `${eq.type}${eq.identification.repere ? " — " + eq.identification.repere : ""}`;
     if (eq.etatFinal !== "Conforme") return; // déjà signalé comme non conforme, pas besoin d'alerte supplémentaire
@@ -4337,8 +4339,15 @@ function siteExportWarnings(site) {
   });
   return w;
 }
-function ivExportWarnings(iv) {
+// Prochaine maintenance à plus d'un an alors qu'un équipement est défaillant : simple avertissement.
+function alerteProchaineMaintenance(dateIntervention, prochaine, nbDefaillants) {
+  if (!nbDefaillants || !/^\d{4}-\d{2}-\d{2}/.test(prochaine || "") || !/^\d{4}-\d{2}-\d{2}/.test(dateIntervention || "")) return null;
+  const mois = (new Date(prochaine.slice(0, 10)) - new Date(dateIntervention.slice(0, 10))) / (30.44 * 864e5);
+  return mois > 13 ? `Prochaine maintenance recommandée dans ${Math.round(mois / 12 * 10) / 10 > 1.9 ? Math.round(mois / 12) + " ans" : Math.round(mois) + " mois"} (${dateFrIso(prochaine)}) alors que ${nbDefaillants > 1 ? nbDefaillants + " équipements sont défaillants" : "1 équipement est défaillant"} — délai à vérifier (le texte précisera « après remise en conformité »)` : null;
+}
+function ivExportWarnings(iv, sites = []) {
   const w = [];
+  { const st = (sites || []).find((x) => x.id === iv.linkedSiteId); const a = st && alerteProchaineMaintenance(iv.date, st.rapport?.prochaineMaintenance, (iv.equipements || []).filter((e) => (RANK_OF[e.etat || "Conforme"] ?? 0) >= 2).length); if (a) w.push(a); }
   if (!iv.client) w.push("Le client n'est pas renseigné");
   if (!iv.site) w.push("Le site n'est pas renseigné");
   if (!iv.date) w.push("La date d'intervention n'est pas renseignée");
@@ -14169,7 +14178,7 @@ function genererSyntheseSite(site) {
   const prochaine = site.rapport && site.rapport.prochaineMaintenance;
   if (prochaine && /^\d{4}-\d{2}-\d{2}/.test(prochaine)) {
     const [y, m, d] = prochaine.slice(0, 10).split("-");
-    phrases.push(`La prochaine maintenance préventive est recommandée avant le ${d}/${m}/${y}.`);
+    phrases.push(`La prochaine maintenance préventive est recommandée avant le ${d}/${m}/${y}${compteur && compteur.defaillant ? ", après remise en conformité des équipements défaillants" : ""}.`);
   }
   const ctx = contexteRemarquesSite(site);
   const blocs = [...equipements]
@@ -16004,6 +16013,17 @@ function InterventionEditor({ iv, update, onBack, onDelete, onPrint, sites = [] 
         <IvField label="Description complémentaire (facultatif)">
           <TextArea value={iv.travauxRealises} onChange={(e) => set("travauxRealises", e.target.value)} placeholder="Précisions libres sur l'intervention" style={{ minHeight: 100 }} />
         </IvField>
+      </Card>
+
+      <Card style={{ marginBottom: 14 }}>
+        <SectionTitle>État de l'installation en fin d'intervention (facultatif)</SectionTitle>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+          {ETATS_FIN_INSTALLATION.map((o) => (
+            <button key={o} type="button" onClick={() => set("etatFinInstallation", iv.etatFinInstallation === o ? "" : o)}
+              style={{ border: `1.5px solid ${iv.etatFinInstallation === o ? BRAND.blue : "#D5DBE2"}`, background: iv.etatFinInstallation === o ? "#EAF2FB" : "#fff", color: "#1A1F26", borderRadius: 8, padding: "6px 10px", fontSize: 12.5, cursor: "pointer", fontWeight: iv.etatFinInstallation === o ? 700 : 500 }}>{o}</button>
+          ))}
+        </div>
+        {iv.etatFinInstallation && <TextInput value={iv.etatFinRemarque || ""} onChange={(e) => set("etatFinRemarque", e.target.value)} placeholder="Précision (ex. disjoncteur HTA laissé ouvert et consigné en attente de réparation)" />}
       </Card>
 
       <Card style={{ marginBottom: 14 }}>
@@ -21609,6 +21629,39 @@ function docxCelluleEtat(etat, largeur) {
     children: [docxPastilleEtat(etat)],
   });
 }
+// Casse homogène pour le compte rendu : « SCHNEIDER ELECTRIC » → « Schneider Electric », « TRANSFORMATEUR DE DISTRIBUTION » →
+// « Transformateur de distribution ». Les sigles courts (ABB) et les références avec chiffres (NW25H1, SM6) sont gardés tels quels.
+function casseLisible(texte, mode = "titre") {
+  const t = String(texte || "").trim();
+  if (!t || t !== t.toUpperCase() || !/[A-ZÉÈ]{5,}/.test(t)) return t;
+  const mots = t.split(/(\s+)/);
+  let premier = true;
+  return mots.map((m) => {
+    const motOutil = /^(DE|DU|DES|LA|LE|LES|ET|EN|À|A|AU|AUX|D'|L')$/.test(m);
+    if (/^\s+$/.test(m) || /\d/.test(m) || (!motOutil && m.length <= 3 && /^[A-Z]+$/.test(m))) { if (!/^\s+$/.test(m)) premier = false; return m; }
+    const bas = m.toLowerCase();
+    const r = (mode === "titre" && !motOutil) || premier ? bas.charAt(0).toUpperCase() + bas.slice(1) : bas;
+    premier = false;
+    return r;
+  }).join("");
+}
+function nomPropre(texte) {
+  const t = String(texte || "").trim();
+  return t && t === t.toLowerCase() ? t.replace(/(^|[\s\-'])(\p{L})/gu, (x, a, b) => a + b.toUpperCase()) : t;
+}
+// Constat principal + préconisation d'un équipement du compte rendu (équipement du site lié si possible, sinon sa remarque).
+function pointImportantEquipementRI(e, site) {
+  let constats = [], precos = [];
+  const src = site && e.sourceEquipementId ? (site.equipements || []).find((x) => x.id === e.sourceEquipementId) : null;
+  const texte = src ? texteRemarquesRapport(src, contexteRemarquesSite(site)) : String(e.remarque || "");
+  if (remarquesStructurees(texte)) { const p = parserSectionsRemarques(texte.split("\n")); constats = p.constats; precos = p.preconisations; }
+  else constats = String(texte).split(/\n|(?<=\.)\s+(?=[A-ZÉ])/).map((x) => x.trim().replace(/^[•\-–*]\s*/, "")).filter(Boolean);
+  constats = constats.filter((c) => !/^Aucune anomalie|remplacement effectué|remplacés lors de cette visite/i.test(c));
+  if (!constats.length) return null;
+  // Première phrase seulement, puis coupure propre si elle reste trop longue.
+  const court = (t, n) => { const x = String(t).replace(/\s+/g, " ").trim().split(/\.\s+(?=[A-ZÉÈÀ])/)[0].replace(/[.\s]+$/, ""); return x.length > n ? x.slice(0, n).replace(/\s+\S*$/, "") + "…" : x; };
+  return { constat: court(constats[0], 170), preco: precos.length ? court(String(precos[0]).replace(/\s*—\s*Prioritaire\.?$/i, ""), 120) : "", prioritaire: precos.length ? /Prioritaire/i.test(precos[0]) : false, autres: constats.length - 1 };
+}
 // Synthèse minimale en deux phrases : ce qui a été fait, puis le bilan des équipements contrôlés.
 function phraseSyntheseIntervention(iv, tousTechniciens) {
   const natures = NATURE_INTERVENTION.filter((n) => iv.nature && iv.nature[n.key]).map((n) => n.label.toLowerCase());
@@ -21693,7 +21746,7 @@ function phrasesSyntheseRI(iv, site) {
   else if (c.degrade) ph.push(`Aucune défaillance n'a été constatée, mais certains équipements présentent une dégradation qu'il convient de surveiller ou de corriger (détail dans ${renvoi}).`);
   else if (!c.nonRealise) ph.push("L'installation est en bon état général : aucune anomalie majeure n'a été relevée lors de cette intervention.");
   const prochaine = site?.rapport?.prochaineMaintenance;
-  if (prochaine && /^\d{4}-\d{2}-\d{2}/.test(prochaine)) { const [y, m, d] = prochaine.slice(0, 10).split("-"); ph.push(`La prochaine maintenance préventive est recommandée avant le ${d}/${m}/${y}.`); }
+  if (prochaine && /^\d{4}-\d{2}-\d{2}/.test(prochaine)) { const [y, m, d] = prochaine.slice(0, 10).split("-"); ph.push(`La prochaine maintenance préventive est recommandée avant le ${d}/${m}/${y}${c.defaillant ? ", après remise en conformité des équipements défaillants" : ""}.`); }
   return ph;
 }
 async function generateInterventionDocx(iv, sites = []) {
@@ -21736,8 +21789,12 @@ async function generateInterventionDocx(iv, sites = []) {
   }
   children.push(docxSpacer(140));
 
-  // 2. Équipements contrôlés et leur état
-  const liste = iv.equipements || [];
+  // 2. Équipements contrôlés et leur état — regroupés par local (ordre des locaux du site lié, sinon ordre d'apparition).
+  const siteLieRI = (sites || []).find((st) => st.id === iv.linkedSiteId) || null;
+  const ordreLocaux = [...((siteLieRI && siteLieRI.locaux) || []).map((l) => String(l.nom || "").trim()), ...(iv.equipements || []).map((e) => String(e.localisation || "").trim())];
+  const rangLocal = (e) => { const i = ordreLocaux.indexOf(String(e.localisation || "").trim()); return i < 0 ? 999 : i; };
+  const liste = (iv.equipements || []).map((e, i) => ({ e, i })).sort((a, b) => rangLocal(a.e) - rangLocal(b.e) || a.i - b.i).map((x) => x.e);
+  const nomEquipementRI = (eq) => (eq.type === "Sécurité" ? ["Sécurité", eq.reference || eq.localisation].filter(Boolean).join(" — ") : [eq.type, eq.reference].filter(Boolean).join(" — ")) || "Équipement";
   children.push(docxHeading(liste.length > 1 ? `Équipements contrôlés (${liste.length})` : "Équipement contrôlé"));
   if (!liste.length) {
     children.push(para("Aucun équipement renseigné.", { color: "666666" }));
@@ -21747,8 +21804,9 @@ async function generateInterventionDocx(iv, sites = []) {
     const texteCellule = (t, o = {}) => new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: t, size: o.size ?? 18, bold: !!o.bold, color: o.color })] });
     const entete = new DOCX.TableRow({ tableHeader: true, children: ["Équipement", "Localisation", "État"].map((t, i) => cellule(i, [texteCellule(t, { bold: true, size: 17, color: DOCX_WHITE })], true)) });
     const lignes = liste.map((eq) => {
-      const nom = [eq.type, eq.reference].filter(Boolean).join(" — ") || "Équipement";
-      const detail = [[eq.constructeur, eq.modele].filter(Boolean).join(" "), eq.numeroSerie ? "N° " + eq.numeroSerie : ""].filter(Boolean).join(" · ");
+      const nom = nomEquipementRI(eq);
+      // Fiche Sécurité : pas de marque (celle du local n'a pas de sens ici).
+      const detail = eq.type === "Sécurité" ? "" : [[casseLisible(eq.constructeur, "titre"), casseLisible(eq.modele, "phrase")].filter(Boolean).join(" "), eq.numeroSerie ? "N° " + eq.numeroSerie : ""].filter(Boolean).join(" · ");
       return new DOCX.TableRow({ cantSplit: true, children: [
         cellule(0, [texteCellule(nom, { bold: true }), ...(detail ? [texteCellule(detail, { size: 15, color: "777777" })] : [])]),
         cellule(1, [texteCellule(eq.localisation || "—", { size: 17 })]),
@@ -21759,8 +21817,29 @@ async function generateInterventionDocx(iv, sites = []) {
   }
   children.push(docxSpacer(140));
 
+  // Points importants : constat principal et préconisation des équipements défaillants puis dégradés (6 au plus).
+  {
+    const MAX_PI = 6;
+    const aTraiter = liste.map((e) => ({ e, r: RANK_OF[e.etat || "Conforme"] ?? 0 })).filter((x) => x.r >= 1).sort((a, b) => b.r - a.r);
+    const points = aTraiter.map((x) => ({ ...x, p: pointImportantEquipementRI(x.e, siteLieRI) })).filter((x) => x.p);
+    const dejaDetaille = liste.length === 1 && String(iv.anomaliesRecommandations || "").trim(); // CRI d'un seul équipement : ses remarques sont déjà imprimées plus bas
+    if (points.length && !dejaDetaille) {
+      children.push(docxHeading("Points importants"));
+      const lignesPI = points.slice(0, MAX_PI).map(({ e, r, p }) => new DOCX.Paragraph({ spacing: { before: 0, after: 90, line: 276 }, indent: { left: 300, hanging: 300 }, children: [
+        new DOCX.TextRun({ text: "●", bold: true, size: 16, color: r >= 2 ? DOCX_RED : DOCX_ORANGE }),
+        new DOCX.TextRun({ text: "\u00A0\u00A0" + nomEquipementRI(e), bold: true, size: 18, color: DOCX_DARK }),
+        new DOCX.TextRun({ text: ` (${motsEtat(e.etat)}) : `, size: 17, color: r >= 2 ? DOCX_RED : DOCX_ORANGE }),
+        new DOCX.TextRun({ text: p.constat + (p.constat.endsWith("…") ? "" : "."), size: 18, color: DOCX_DARK }),
+        ...(p.preco ? [new DOCX.TextRun({ text: "  → " + p.preco + (r >= 2 || p.prioritaire ? " (prioritaire)" : "") + ".", size: 17, italics: true, color: "4A5563" })] : []),
+      ] }));
+      children.push(...lignesPI);
+      const reste = points.length - MAX_PI + points.slice(0, MAX_PI).reduce((n, x) => n + x.p.autres, 0);
+      if (reste > 0) children.push(new DOCX.Paragraph({ spacing: { before: 40, after: 60 }, children: [new DOCX.TextRun({ text: "Autres points : voir le rapport de maintenance.", size: 16, italics: true, color: "777777" })] }));
+      children.push(docxSpacer(120));
+    }
+  }
+
   // Synthèse générale (encadré coloré comme le rapport de maintenance), juste sous le tableau des équipements.
-  const siteLieRI = (sites || []).find((st) => st.id === iv.linkedSiteId) || null;
   const phrasesRI = phrasesSyntheseRI(iv, siteLieRI);
   if (phrasesRI.length) {
     const rangRI = Math.max(0, ...(iv.equipements || []).map((e) => RANK_OF[e.etat || "Conforme"] ?? 0));
@@ -21784,6 +21863,17 @@ async function generateInterventionDocx(iv, sites = []) {
     const posee = p.identique ? (ancienne ? `${ancienne} (référence identique)` : "référence identique") : [p.marque, p.reference].filter(Boolean).join(" ") + (ancienne ? ` (équivalent, remplace ${ancienne})` : "");
     return `${nomEq} : ${p.categorie || "pièce"} — ${posee}${p.quantite ? `, quantité ${p.quantite}` : ""}${p.remarque ? ` — ${p.remarque}` : ""}.`;
   })));
+  // Remplacements enregistrés sur les fiches du site lié (quand le CRI n'a pas sa propre liste de pièces).
+  if (siteLieRI && !(iv.equipements || []).some((e) => (e.piecesRemplacees || []).length)) {
+    ajouterPuces("Pièces remplacées", liste.flatMap((e) => {
+      const src = e.sourceEquipementId ? (siteLieRI.equipements || []).find((x) => x.id === e.sourceEquipementId) : null;
+      if (!src) return [];
+      const textes = remplacementsDuRapport(src, siteLieRI.rapport?.date || iv.date).map((r) => texteRemplacementClient(r)).filter((t, i, a) => a.indexOf(t) === i);
+      return textes.map((t) => `${nomEquipementRI(e)} — ${t}.`);
+    }));
+  }
+  // État de l'installation en fin d'intervention (remise sous tension, laissée consignée…).
+  if (String(iv.etatFinInstallation || "").trim()) ajouterPuces("État de l'installation en fin d'intervention", [String(iv.etatFinInstallation).trim() + (String(iv.etatFinRemarque || "").trim() ? " — " + String(iv.etatFinRemarque).trim() : "")]);
   const anomalies = (iv.anomaliesRecommandations || "").trim();
   if (!anomalies && !phrasesRI.length) {
     ajouterPuces("Équipements nécessitant une attention", liste.filter((e) => RANK_OF[e.etat || "Conforme"] >= 1 && e.remarque && String(e.remarque).trim()).map((e) => {
@@ -21801,7 +21891,7 @@ async function generateInterventionDocx(iv, sites = []) {
     }
   }
   if (bloc.length) {
-    children.push(docxHeading("Points importants"));
+    children.push(docxHeading(phrasesRI.length ? "Travaux et état en fin d'intervention" : "Points importants"));
     children.push(...bloc);
     children.push(docxSpacer(120));
   } else if (!phrasesRI.length) {
@@ -21842,17 +21932,20 @@ async function generateInterventionDocx(iv, sites = []) {
   const sigClient = iv.validation?.signatureClient ? docxImage(iv.validation.signatureClient, 190, 75) : null;
   const sigHT = iv.validation?.signatureHT ? docxImage(iv.validation.signatureHT, 190, 75) : null;
   const bordSig = { style: DOCX.BorderStyle.SINGLE, size: 4, color: "C0C6CE" };
-  const celluleSignature = (titre, nom, image) => new DOCX.TableCell({
+  const dateSignature = dateFrIso(iv.validation?.date || iv.dateFin || iv.date);
+  const celluleSignature = (titre, nom, image, mention) => new DOCX.TableCell({
     width: { size: 4800, type: DOCX.WidthType.DXA }, margins: { top: 80, bottom: 80, left: 140, right: 140 },
     borders: { top: bordSig, bottom: bordSig, left: bordSig, right: bordSig },
     children: [
       new DOCX.Paragraph({ spacing: { after: 40 }, children: [new DOCX.TextRun({ text: titre, bold: true, size: 17, color: "555555" }), new DOCX.TextRun({ text: nom ? " — " + nom : "", size: 18, color: DOCX_DARK })] }),
+      ...(mention ? [new DOCX.Paragraph({ spacing: { after: 20 }, children: [new DOCX.TextRun({ text: mention, italics: true, size: 15, color: "777777" })] })] : []),
       image ? new DOCX.Paragraph({ children: [image] }) : new DOCX.Paragraph({ spacing: { before: 520, after: 30 }, children: [new DOCX.TextRun({ text: "Signature :", size: 15, color: "999999" })] }),
+      ...(dateSignature ? [new DOCX.Paragraph({ spacing: { before: 20 }, children: [new DOCX.TextRun({ text: "Le " + dateSignature, size: 15, color: "777777" })] })] : []),
     ],
   });
   children.push(docxTable({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: [4800, 4800], rows: [new DOCX.TableRow({ cantSplit: true, children: [
-    celluleSignature("Client", iv.validation?.nomClient, sigClient),
-    celluleSignature("Technicien HT Maintenance", iv.validation?.technicienHT || iv.technicien, sigHT),
+    celluleSignature("Client", nomPropre(iv.validation?.nomClient), sigClient, "Lu et approuvé"),
+    celluleSignature("Technicien HT Maintenance", nomPropre(iv.validation?.technicienHT || iv.technicien), sigHT),
   ]})] }));
 
   const doc = new DOCX.Document({ styles: DOCX_STYLES, features: { updateFields: true }, sections: [{ properties: { page: PAGE_CORPS }, footers: { default: docxFooterPagination() }, children }] });
@@ -23531,7 +23624,7 @@ function AppPrincipale({ currentUser, onLogout }) {
     else setPrintSite(site);
   }
   function requestPrintIv(iv) {
-    const warnings = ivExportWarnings(iv);
+    const warnings = ivExportWarnings(iv, sites);
     if (warnings.length) setExportConfirm({ kind: "iv", data: iv, warnings });
     else setPrintIv(iv);
   }
