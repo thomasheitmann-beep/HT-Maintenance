@@ -2566,7 +2566,7 @@ function buildOnduleurSchema({ normalMono = false, secoursMono = false, utilisat
         C("alim_electroniques_redresseur", "Alimentations électroniques"),
         C("logique_marche_redresseur", "Logique de marche"),
         C("auto_alim_redresseur", "Auto-alim électroniques"),
-        C("controle_isolement", "Contrôle du contrôleur d'isolement"),
+        { ...C("controle_isolement", "Contrôle du contrôleur d'isolement", [F("riso", "Résistance d'isolement affichée", "kΩ"), F("seuil", "Seuil d'alarme réglé", "kΩ")]), champsFacultatifs: true },
       ]},
       { key: "etat_onduleur", title: "État de l'onduleur", items: [
         C("essai_alarme_onduleur", "Essai alarme / défaut"),
@@ -2703,7 +2703,7 @@ function buildRedresseurSchema({ reseauMono = false, reseau2Mono = false, double
         C("alim_electroniques_redresseur", "Alimentations électroniques"),
         C("logique_marche_redresseur", "Logique de marche"),
         C("auto_alim_redresseur", "Auto-alim électroniques"),
-        C("controle_isolement", "Contrôle du contrôleur d'isolement"),
+        { ...C("controle_isolement", "Contrôle du contrôleur d'isolement", [F("riso", "Résistance d'isolement affichée", "kΩ"), F("seuil", "Seuil d'alarme réglé", "kΩ")]), champsFacultatifs: true },
       ]},
       { key: "report_alarme", title: "Type et état report alarme", items: [
         C("relais_contacts_secs", "Relais contacts secs"),
@@ -6483,7 +6483,7 @@ const ETATS_SANS_MESURE = ["Non réalisé", "Non présent"];
 // puis les cases vides des grilles par phase (L1/L2/L3). Les puissances par phase ne sont pas exigées
 // quand le total est relevé ; un contrôle « Non réalisé / Non présent » n'attend plus rien.
 function champsManquantsControle(item, value) {
-  if (item && item.optionnel && !controleRenseigne(item, value)) return []; // contrôle facultatif non utilisé
+  if (item && (item.optionnel || item.champsFacultatifs) && !controleRenseigne(item, value)) return []; // contrôle ou champs facultatifs non utilisés
   if (!controleAvecMesures(item) || !value || ETATS_SANS_MESURE.includes(value.etat)) return [];
   if (!mesureRealisee(item, value)) return []; // mesure optionnelle non réalisée
 
@@ -8972,18 +8972,25 @@ function analyseOnduleur(eq, allSites, rapportDate) {
   let charge = null;
   try { const tc = calcTauxCharge(eq); if (tc) charge = moyenne([tc.t1, tc.t2, tc.t3].filter((x) => x !== null && x !== undefined)); } catch (e) { /* facultatif */ }
   if (charge !== null && !isFinite(charge)) charge = null;
+  // Redresseur chargeur : charge d'après la sortie continue (P = U × I ÷ kW nominaux).
+  const mc = c.mesures_continu || {};
+  const uDC = numOf(mc.tension_continue?.fields?.v), iDC = numOf(mc.courant_charge?.fields?.a), kwNom = numOf(id.puissanceKW);
+  const pDC = uDC && iDC !== null ? (uDC * iDC) / 1000 : null;
+  if (eq.type === "Redresseur chargeur" && pDC !== null && kwNom) charge = (pDC / kwNom) * 100;
 
-  // 1-4. ThdI d'entrée (réseau 1) selon le type de redresseur
-  const thdiE = nums(c.mesures_reseau_normal?.thdi_normal?.fields);
+  // 1-4. ThdI d'entrée (réseau 1, et alimentation 2 d'un redresseur) selon le type de redresseur
+  for (const [secK, itK, quoi] of [["mesures_reseau_normal", "thdi_normal", "d'entrée"], ["mesures_reseau_secours", "thdi_secours", "de l'alimentation 2"]]) {
+  const thdiE = nums(c[secK]?.[itK]?.fields);
   if (thdiE.length) {
     const t = Math.max(...thdiE), type = id.typeRedresseur, plage = PLAGES_THDI_REDRESSEUR[type];
-    if (!plage) out.push({ section: "mesures_reseau_normal", niveau: 0, texte: `ThdI d'entrée ${v2(t)} % — type de redresseur non renseigné, valeur non interprétée (repères à pleine charge : thyristors 6 impulsions 25–35 %, 6 impulsions + filtre ou 12 impulsions 8–12 %, IGBT à absorption sinusoïdale < 5 %).` });
-    else if (t <= plage[1]) out.push({ section: "mesures_reseau_normal", niveau: 0, texte: `ThdI d'entrée ${v2(t)} % — normal pour un redresseur « ${type} » (repère ${plage[0]}–${plage[1]} % à pleine charge).` });
-    else if (charge !== null && charge < 40) out.push({ section: "mesures_reseau_normal", niveau: 0, texte: `ThdI d'entrée ${v2(t)} %, au-dessus du repère d'un redresseur « ${type} » (${plage[0]}–${plage[1]} %), mais la charge n'est que d'environ ${Math.round(charge)} % : à faible charge, le ThdI exprimé en % augmente sans hausse du courant harmonique.` });
+    if (!plage) out.push({ section: secK, niveau: 0, texte: `ThdI ${quoi} ${v2(t)} % — type de redresseur non renseigné, valeur non interprétée (repères à pleine charge : thyristors 6 impulsions 25–35 %, 6 impulsions + filtre ou 12 impulsions 8–12 %, IGBT à absorption sinusoïdale < 5 %).` });
+    else if (t <= plage[1]) out.push({ section: secK, niveau: 0, texte: `ThdI ${quoi} ${v2(t)} % — normal pour un redresseur « ${type} » (repère ${plage[0]}–${plage[1]} % à pleine charge).` });
+    else if (charge !== null && charge < 40) out.push({ section: secK, niveau: 0, texte: `ThdI ${quoi} ${v2(t)} %, au-dessus du repère d'un redresseur « ${type} » (${plage[0]}–${plage[1]} %), mais la charge n'est que d'environ ${Math.round(charge)} % : à faible charge, le ThdI exprimé en % augmente sans hausse du courant harmonique.` });
     else if (t > plage[1] * 1.5) {
-      const phrase = `Le ThdI d'entrée du redresseur (${v2(t)} %) est nettement supérieur au repère d'un redresseur « ${type} » (${plage[0]}–${plage[1]} % à pleine charge)${charge !== null ? `, pour une charge d'environ ${Math.round(charge)} %` : ""} : filtre d'entrée ou étage d'absorption sinusoïdale à contrôler. Sur groupe électrogène, un ThdI élevé déforme la tension.`;
-      out.push({ section: "mesures_reseau_normal", niveau: 1, texte: phrase, constat: { phrase, rang: 1, categorie: "thdi_entree", sujet: "redresseur d'entrée" } });
-    } else out.push({ section: "mesures_reseau_normal", niveau: 0, texte: `ThdI d'entrée ${v2(t)} %, légèrement au-dessus du repère d'un redresseur « ${type} » (${plage[0]}–${plage[1]} %) : à comparer à la prochaine visite.` });
+      const phrase = `Le ThdI ${quoi} du redresseur (${v2(t)} %) est nettement supérieur au repère d'un redresseur « ${type} » (${plage[0]}–${plage[1]} % à pleine charge)${charge !== null ? `, pour une charge d'environ ${Math.round(charge)} %` : ""} : filtre d'entrée ou étage d'absorption sinusoïdale à contrôler. Sur groupe électrogène, un ThdI élevé déforme la tension.`;
+      out.push({ section: secK, niveau: 1, texte: phrase, constat: { phrase, rang: 1, categorie: "thdi_entree", sujet: `redresseur (ThdI ${quoi})` } });
+    } else out.push({ section: secK, niveau: 0, texte: `ThdI ${quoi} ${v2(t)} %, légèrement au-dessus du repère d'un redresseur « ${type} » (${plage[0]}–${plage[1]} %) : à comparer à la prochaine visite.` });
+  }
   }
 
   // 5. Sortie : ThdI lié aux charges, courant de neutre
@@ -9016,6 +9023,60 @@ function analyseOnduleur(eq, allSites, rapportDate) {
     }
   } catch (e) { /* facultatif */ }
 
+  // Redresseur chargeur : charge, ondulation résiduelle, tension continue, rendement, courant de recharge
+  if (eq.type === "Redresseur chargeur") {
+    if (pDC !== null && kwNom) {
+      const pct = (pDC / kwNom) * 100;
+      if (pct > 100) {
+        const phrase = `Puissance continue débitée ${v2(pDC, 2)} kW (${v2(uDC, 1)} V × ${v2(iDC, 1)} A) pour ${v2(kwNom, 2)} kW nominaux (${Math.round(pct)} %) : redresseur en surcharge.`;
+        out.push({ section: "mesures_continu", niveau: 2, texte: phrase, constat: { phrase, rang: 2, categorie: "surcharge_kw", sujet: "redresseur" } });
+      } else out.push({ section: "mesures_continu", niveau: pct >= 90 ? 1 : 0, texte: `Taux de charge du redresseur : ${v2(pDC, 2)} kW débités (${v2(uDC, 1)} V × ${v2(iDC, 1)} A) sur ${v2(kwNom, 2)} kW nominaux, soit ${Math.round(pct)} %${pct >= 90 ? " : marge faible." : "."}` });
+    }
+    const ond = numOf(mc.ondulation_residuelle?.fields?.pct);
+    if (ond !== null) {
+      if (ond > 1) {
+        const phrase = `Ondulation résiduelle de la sortie continue ${v2(ond, 2)} % (repère constructeur usuel ≈ 1 % batterie raccordée, 2 % sans batterie) : condensateurs de filtrage à contrôler — l'ondulation use la batterie et peut perturber les équipements alimentés (relais, automates).`;
+        out.push({ section: "mesures_continu", niveau: ond > 2 ? 1 : 0, texte: phrase, ...(ond > 2 ? { constat: { phrase, rang: 1, categorie: "ondulation_batterie", sujet: "sortie continue" } } : {}) });
+      } else out.push({ section: "mesures_continu", niveau: 0, texte: `Ondulation résiduelle ${v2(ond, 2)} % : dans le repère usuel (≈ 1 % batterie raccordée).` });
+    }
+    const uNom = numOf(id.tensionSortieContinue), vFl = numOf(c.mesures_batterie_ups?.tension_floating?.fields?.v);
+    if (uDC && uNom) { const e = ((uDC - uNom) / uNom) * 100; if (Math.abs(e) > 2) out.push({ section: "mesures_continu", niveau: 1, texte: `Tension continue ${v2(uDC, 1)} V pour ${v2(uNom, 1)} V nominaux (${e > 0 ? "+" : ""}${v2(e)} %) : réglage du redresseur à vérifier (tension nominale, mode floating / charge en cours).` }); }
+    if (uDC && vFl && Math.abs(uDC - vFl) / uDC > 0.01) out.push({ section: "mesures_continu", niveau: 1, texte: `Écart de ${v2(Math.abs(uDC - vFl), 2)} V (${v2((Math.abs(uDC - vFl) / uDC) * 100, 1)} %) entre la sortie du redresseur (${v2(uDC, 1)} V) et les bornes de la batterie (${v2(vFl, 1)} V) : chute de tension dans les câbles ou serrage / protection batterie à contrôler.` });
+    const pE = nums(c.mesures_reseau_normal?.puissance_fp_normal?.fields, ["p1", "p2", "p3"]);
+    if (pE.length && pDC) {
+      const PE = pE.reduce((x, y) => x + y, 0) + nums(c.mesures_reseau_secours?.puissance_fp_secours?.fields, ["p1", "p2", "p3"]).reduce((x, y) => x + y, 0);
+      const rdt = PE > 0 ? (pDC / PE) * 100 : null;
+      if (rdt !== null && rdt <= 100) out.push({ section: "mesures_continu", niveau: rdt < 85 ? 1 : 0, texte: `Rendement du redresseur ≈ ${Math.round(rdt)} % (${v2(pDC, 2)} kW continus pour ${v2(PE, 2)} kW absorbés)${rdt < 85 ? " : faible — pertes, ventilation ou vieillissement à surveiller (valeur indicative, mesures à relever en même temps)." : "."}` });
+      else if (rdt !== null) out.push({ section: "mesures_continu", niveau: 1, texte: `Puissance continue (${v2(pDC, 2)} kW) supérieure à la puissance absorbée (${v2(PE, 2)} kW) : relevés à vérifier (mesures non simultanées ou unité).` });
+    }
+    const cap = numOf(c.batterie_id?.batterie_caracteristiques?.fields?.capacite);
+    const rech = (c.branches_dynamique || []).filter((b) => b.label).map((b) => ({ nom: b.label, i: numOf(b.fields?.recharge) })).filter((b) => b.i !== null && b.i > 0);
+    if (cap && rech.length) {
+      const hors = rech.map((b) => ({ ...b, c: b.i / cap })).filter((b) => b.c > 0.25 || b.c < 0.05);
+      out.push({ section: "mesures_batterie_ups", niveau: hors.length ? 1 : 0, texte: `Courant de recharge par branche : ${rech.map((b) => `${b.nom} ${v2(b.i, 1)} A (${v2(b.i / cap, 2)} C)`).join(" · ")} — repère usuel 0,1 à 0,25 C10 pour le plomb, à vérifier sur la notice${hors.length ? ` : ${listeFr(hors.map((b) => b.nom))} hors repère (${hors.some((b) => b.c > 0.25) ? "trop fort : échauffement" : ""}${hors.some((b) => b.c > 0.25) && hors.some((b) => b.c < 0.05) ? " / " : ""}${hors.some((b) => b.c < 0.05) ? "trop faible : recharge lente après coupure" : ""}).` : "."}` });
+    }
+  }
+  // 7. Contrôleur d'isolement et symétrie des pôles par rapport à la terre (réseau continu isolé)
+  {
+    const ci = c.redresseur_chargeur?.controle_isolement?.fields || {};
+    const riso = numOf(ci.riso), seuilIso = numOf(ci.seuil);
+    if (riso !== null && seuilIso) {
+      if (riso <= seuilIso) {
+        const phrase = `Résistance d'isolement du réseau continu ${v2(riso, 0)} kΩ, inférieure ou égale au seuil d'alarme réglé (${v2(seuilIso, 0)} kΩ) : défaut d'isolement à rechercher.`;
+        out.push({ section: "redresseur_chargeur", niveau: 2, texte: phrase, constat: { phrase, rang: 2, categorie: "isolement_continu", sujet: "réseau continu" } });
+      } else out.push({ section: "redresseur_chargeur", niveau: riso < 2 * seuilIso ? 1 : 0, texte: `Résistance d'isolement du réseau continu ${v2(riso, 0)} kΩ pour un seuil d'alarme de ${v2(seuilIso, 0)} kΩ${riso < 2 * seuilIso ? " : moins de deux fois le seuil, à surveiller." : "."}` });
+    }
+    const pP = numOf(c.mesures_batterie_ups?.pole_plus_terre?.fields?.v), pM = numOf(c.mesures_batterie_ups?.pole_moins_terre?.fields?.v);
+    const uRef = numOf(c.mesures_batterie_ups?.tension_floating?.fields?.v) ?? uDC;
+    if (pP !== null && pM !== null && uRef) {
+      const aP = Math.abs(pP), aM = Math.abs(pM), bas = Math.min(aP, aM);
+      if (bas >= 1 && bas < 0.3 * uRef && Math.max(aP, aM) > 0.6 * uRef) {
+        const cote = aP < aM ? "+" : "−";
+        const phrase = `Pôles déséquilibrés par rapport à la terre (« + » ${v2(aP, 0)} V, « − » ${v2(aM, 0)} V pour ${v2(uRef, 0)} V, normalement ≈ ${v2(uRef / 2, 0)} V chacun) : défaut d'isolement partiel probable côté pôle « ${cote} », à rechercher avant qu'il ne devienne franc.`;
+        out.push({ section: "mesures_batterie_ups", niveau: 1, texte: phrase, constat: { phrase, rang: 1, categorie: "isolement_continu", sujet: `pôle ${cote}` } });
+      }
+    }
+  }
   // 8-9. Batterie : température du local, durée de vie corrigée, floating corrigé
   const bat = c.batterie_id?.batterie_caracteristiques?.fields || {};
   const plomb = bat.technologie !== "Cd-Ni";
@@ -14087,6 +14148,7 @@ const RECO_PAR_CATEGORIE = {
   batterie_capacite: () => "Remplacer la batterie (capacité mesurée inférieure à 80 % de la référence).",
   temperature_batterie: () => "Abaisser la température du local batterie (ventilation, climatisation) et anticiper le remplacement des blocs.",
   batterie_branche: (s) => `Contrôler la ou les branches concernées (${s}) : mesure bloc par bloc, résistance interne et serrage des connexions.`,
+  isolement_continu: () => "Rechercher le défaut d'isolement sur le réseau continu (départs, batterie, équipements alimentés) avec le contrôleur ou un localisateur de défaut.",
   ondulation_batterie: () => "Faire contrôler les condensateurs de filtrage du redresseur / chargeur.",
   fusible_rechange: () => "Mettre à disposition des fusibles de rechange identiques aux fusibles installés (calibre et modèle).",
   isolement: (s) => `Rechercher la cause de la baisse d'isolement et refaire la mesure (${s}).`,
@@ -14115,7 +14177,7 @@ const RECO_PAR_CATEGORIE = {
   etat_degrade: (s) => `Surveiller à la prochaine visite : ${s}.`,
 };
 const MAX_PRECONISATIONS = 5;
-const ORDRE_RECO = ["capacite_modules", "module", "redondance_modules", "surcharge_condensateurs", "resonance", "self_accord", "fusible_calibre", "fusible_ib", "fusible", "fusible_rechange", "surcharge_kw", "batterie_capacite", "batterie_branche", "thdi_entree", "neutre_harmoniques", "temperature_batterie", "ondulation_batterie", "serrage", "contact", "isolement", "enroulements", "huile", "mise_terre", "protection", "disjoncteur", "batterie", "gradin", "cosphi", "usure", "proprete", "ventilation", "thermique", "mesure", "etat_defaillant", "etat_degrade"];
+const ORDRE_RECO = ["capacite_modules", "module", "redondance_modules", "surcharge_condensateurs", "resonance", "self_accord", "fusible_calibre", "fusible_ib", "fusible", "fusible_rechange", "surcharge_kw", "batterie_capacite", "batterie_branche", "thdi_entree", "neutre_harmoniques", "temperature_batterie", "ondulation_batterie", "isolement_continu", "serrage", "contact", "isolement", "enroulements", "huile", "mise_terre", "protection", "disjoncteur", "batterie", "gradin", "cosphi", "usure", "proprete", "ventilation", "thermique", "mesure", "etat_defaillant", "etat_degrade"];
 // Préconisations dédoublonnées, regroupées par famille, les plus urgentes en premier.
 function preconisationsDepuisConstats(constats) {
   const groupes = {};
@@ -15351,6 +15413,24 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
                       <Plus size={13} /> Ajouter un TC homopolaire
                     </button>
                   </div>
+                </React.Fragment>
+              );
+            }
+            if (TYPES_AVEC_BRANCHES_UPS.includes(eq.type) && ["mesures_continu", "redresseur_chargeur"].includes(sec.key)) {
+              return (
+                <React.Fragment key={sec.key}>
+                  <SectionBlock
+                    title={sec.title}
+                    items={sec.items}
+                    values={eq.controles[sec.key]}
+                    onChangeItem={(itemKey, v) => setControleItem(sec.key, itemKey, v)}
+                    idPrefix={`${eq.id}-${sec.key}`}
+                    custom={eq.controles[sec.key + "__custom"] || []}
+                    onAddCustom={() => addCustomAction(sec.key)}
+                    onChangeCustom={(id, patch) => changeCustomAction(sec.key, id, patch)}
+                    onRemoveCustom={(id) => removeCustomAction(sec.key, id)}
+                  />
+                  <NotesAnalyseOnduleur eq={eq} allSites={allSites} rapportDate={rapportDate} section={sec.key} />
                 </React.Fragment>
               );
             }
@@ -21389,6 +21469,7 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
       const im = img ? docxImage(img, 480, dims && dims.w ? Math.round((480 * dims.h) / dims.w) : 257) : null;
       if (im) elements.push(docxBlocInsecable([new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, spacing: { before: 160, after: 80 }, children: [im] })]));
     }
+    if (TYPES_AVEC_BRANCHES_UPS.includes(eq.type) && ["mesures_continu", "redresseur_chargeur"].includes(sec.key)) elements.push(...docxNotesOnduleur(eq, allSites, rapportDate, sec.key));
     if (sec.key === "analyse_harmonique" && eq.type === "Batterie de compensation") elements.push(...docxAnalyseResonance(analyseResonanceBatterie(eq, equipementsDuSiteDe(eq, allSites)), eq));
     if (sec.key === "reglage_disjoncteur" && eq.type === "Disjoncteur BT") {
       const v = calcVerificationPouvoirCoupure(eq, equipementsDuSiteDe(eq, allSites), locaux);
