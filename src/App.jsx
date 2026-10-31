@@ -1803,7 +1803,9 @@ function champsTriphase(unit, label, decimals, mode, withDesequilibre) {
     const vals = [numOf(f.l1), numOf(f.l2), numOf(f.l3)].filter((v) => v !== null);
     if (!vals.length) return "";
     const r = mode === "max" ? Math.max(...vals) : vals.reduce((a, b) => a + b, 0) / vals.length;
-    return Math.round(r * Math.pow(10, decimals)) / Math.pow(10, decimals);
+    // Petites valeurs (ΔV de 0,2 V, courant de quelques dixièmes…) : plus de décimales, sinon la moyenne s'arrondit à 0.
+    const d = Math.abs(r) < 1 ? Math.max(decimals, 2) : Math.abs(r) < 10 ? Math.max(decimals, 1) : decimals;
+    return Math.round(r * Math.pow(10, d)) / Math.pow(10, d);
   };
   const fields = [
     F("l1", "L1", unit), F("l2", "L2", unit), F("l3", "L3", unit),
@@ -2975,8 +2977,12 @@ function versMegaohms(valeur, unite) {
 // défaut.
 const ISOLEMENT_TYPIQUE_TRIHAL = { hta_terre: 250, bt_terre: 50, hta_bt: 250 };
 const ISOLEMENT_TYPIQUE_LABEL = { hta_terre: "MT/masse", bt_terre: "BT/masse", hta_bt: "MT/BT" };
-function isolementFields(itemType, classeIsolation, avecRealise) {
-  const valeurTypique = ISOLEMENT_TYPIQUE_TRIHAL[itemType];
+function isolementFields(itemType, classeIsolation, avecRealise, transfoSec = false) {
+  // Valeurs typiques Trihal : transformateur SEC enrobé uniquement (pas pour un transformateur à huile).
+  const valeurTypique = transfoSec ? ISOLEMENT_TYPIQUE_TRIHAL[itemType] : undefined;
+  const estTransfo = ["hta_terre", "bt_terre", "hta_bt"].includes(itemType);
+  const pourQui = estTransfo ? " pour les transformateurs" : "";
+  const libTemp = estTransfo ? "Température de l'enroulement" : "Température";
   const labelTypique = ISOLEMENT_TYPIQUE_LABEL[itemType];
   // Seuil PI par classe d'isolation — IEEE 43-2013, Table 3 : classe A = 1,5, classes B/F/H = 2,0.
   // Utilise la classe réellement renseignée sur l'équipement (champ "Classe d'isolation (sec)",
@@ -2994,7 +3000,7 @@ function isolementFields(itemType, classeIsolation, avecRealise) {
       compute: () => `${labelTypique} ≈ ${valeurTypique} MΩ — un écart net à la baisse peut simplement indiquer un appareil humide plutôt qu'un défaut.`,
     }] : []),
     F("valeur", "Valeur"), F("unite", "Unité", null, UNITE_ISOLEMENT),
-    F("temperature", "Température de l'enroulement", "°C"),
+    F("temperature", libTemp, "°C"),
     // IR corrigé à 40 °C — contrairement au PI/DAR (des ratios entre deux mesures prises à la même
     // température, donc insensibles à celle-ci), la résistance d'isolement BRUTE dépend fortement
     // de la température : elle double environ tous les 10 °C de baisse (ou est divisée par 2 tous
@@ -3010,7 +3016,7 @@ function isolementFields(itemType, classeIsolation, avecRealise) {
         const temp = numOf(f.temperature);
         if (mesureMO === null || temp === null) return "";
         const corrige = Math.round(mesureMO * Math.pow(0.5, (40 - temp) / 10) * 1000) / 1000; // R40 = R × 0,5^((40 − T)/10) : à 20 °C, R40 = R ÷ 4
-        return `${corrige} MΩ à 40 °C (mesuré ${mesureMO} MΩ à ${temp} °C) — règle générale (facteur ×2 par tranche de 10 °C d'écart), repère indicatif à comparer à l'historique de l'équipement, pas une formule réglementaire unique pour les transformateurs.`;
+        return `${corrige} MΩ à 40 °C (mesuré ${mesureMO} MΩ à ${temp} °C) — règle générale (facteur ×2 par tranche de 10 °C d'écart), repère indicatif à comparer à l'historique de l'équipement, pas une formule réglementaire unique${pourQui}.`;
       },
     },
     // Seuil indicatif — règle largement citée (guide IEEE sur les machines tournantes, pratique
@@ -3025,8 +3031,8 @@ function isolementFields(itemType, classeIsolation, avecRealise) {
         if (vInjection === null || mesureMO === null) return "";
         const seuilMO = vInjection / 1000; // 1 MΩ par kV de tension d'essai
         const comparaisonTrihal = valeurTypique ? ` À titre de comparaison, valeur typique ${labelTypique} ≈ ${valeurTypique} MΩ — un écart net à la baisse peut simplement indiquer un appareil humide plutôt qu'un défaut.` : "";
-        if (mesureMO < seuilMO) return `⚠ ${mesureMO} MΩ mesurés, en dessous du repère indicatif de ${Math.round(seuilMO * 100) / 100} MΩ (règle 1 MΩ/kV pour ${vInjection} V d'essai) — isolement à surveiller. Repère indicatif, pas de seuil réglementaire unique pour les transformateurs.${comparaisonTrihal}`;
-        return `✓ ${mesureMO} MΩ mesurés, au-dessus du repère indicatif de ${Math.round(seuilMO * 100) / 100} MΩ (règle 1 MΩ/kV pour ${vInjection} V d'essai). Repère indicatif, pas de seuil réglementaire unique pour les transformateurs.${comparaisonTrihal}`;
+        if (mesureMO < seuilMO) return `⚠ ${mesureMO} MΩ mesurés, en dessous du repère indicatif de ${Math.round(seuilMO * 100) / 100} MΩ (règle 1 MΩ/kV pour ${vInjection} V d'essai) — isolement à surveiller. Repère indicatif, pas de seuil réglementaire unique${pourQui}.${comparaisonTrihal}`;
+        return `✓ ${mesureMO} MΩ mesurés, au-dessus du repère indicatif de ${Math.round(seuilMO * 100) / 100} MΩ (règle 1 MΩ/kV pour ${vInjection} V d'essai). Repère indicatif, pas de seuil réglementaire unique${pourQui}.${comparaisonTrihal}`;
       },
     },
     F("pi", "PI (10/1min)"),
@@ -3148,13 +3154,13 @@ function buildTransformateurSchema({ sec = false, classeIsolation = null, deuxSe
         ] : []),
       ]},
       { key: "mesure_isolement", title: "Mesure d'isolement (optionnelle)", items: [
-        C("hta_terre", "HTA - Terre (BT shuntée à la terre)", isolementFields("hta_terre", classeIsolation, true)),
-        C("bt_terre", "BT" + (deuxSecondaires ? "1" : "") + " - Terre (HTA shuntée à la terre)", isolementFields("bt_terre", classeIsolation, true)),
-        C("hta_bt", "HTA - BT" + (deuxSecondaires ? "1" : "") + " (enroulements court-circuités entre eux)", isolementFields("hta_bt", classeIsolation, true)),
+        C("hta_terre", "HTA - Terre (BT shuntée à la terre)", isolementFields("hta_terre", classeIsolation, true, sec)),
+        C("bt_terre", "BT" + (deuxSecondaires ? "1" : "") + " - Terre (HTA shuntée à la terre)", isolementFields("bt_terre", classeIsolation, true, sec)),
+        C("hta_bt", "HTA - BT" + (deuxSecondaires ? "1" : "") + " (enroulements court-circuités entre eux)", isolementFields("hta_bt", classeIsolation, true, sec)),
         ...(deuxSecondaires ? [
-          C("bt2_terre", "BT2 - Terre (HTA et BT1 shuntées à la terre)", isolementFields("bt_terre", classeIsolation, true)),
-          C("hta_bt2", "HTA - BT2 (enroulements court-circuités entre eux)", isolementFields("hta_bt", classeIsolation, true)),
-          C("bt_bt2", "BT1 - BT2 (entre les deux enroulements secondaires)", isolementFields("hta_bt", classeIsolation, true)),
+          C("bt2_terre", "BT2 - Terre (HTA et BT1 shuntées à la terre)", isolementFields("bt_terre", classeIsolation, true, sec)),
+          C("hta_bt2", "HTA - BT2 (enroulements court-circuités entre eux)", isolementFields("hta_bt", classeIsolation, true, sec)),
+          C("bt_bt2", "BT1 - BT2 (entre les deux enroulements secondaires)", isolementFields("hta_bt", classeIsolation, true, sec)),
         ] : []),
       ]},
     ],
@@ -6676,7 +6682,164 @@ function verificationsControlesSite(site) {
     (eq.controles?.gradins_dynamique || []).forEach((g) => {
       if (["Dégradé", "Défaillant"].includes(g.etat) && !String(g.action || "").trim()) out.push({ eqId: eq.id, secKey: "gradins", type: "action", texte: `${nomEq} — ${g.label || "Gradin"} : « ${g.etat} » sans action renseignée` });
     });
+    try { out.push(...verificationsCoherenceEquipement(eq, site)); } catch (e) { /* contrôle de cohérence : jamais bloquant */ }
   });
+  // Même numéro de série sur deux équipements (copier-coller d'une fiche à l'autre).
+  const parSerie = {};
+  (site.equipements || []).forEach((eq) => { const n = String(eq.identification?.numeroSerie || "").trim().toUpperCase(); if (n && n.length >= 4 && !/^(N\/?A|INCONNU|-+|0+)$/.test(n)) (parSerie[n] = parSerie[n] || []).push(eq); });
+  Object.entries(parSerie).filter(([, l]) => l.length > 1).forEach(([n, l]) => out.push({ eqId: l[1].id, secKey: "identification", type: "coherence", texte: `${l.map((e) => `${e.type}${nomEquipementSite(e, site) ? " " + nomEquipementSite(e, site) : ""}`).join(" et ")} — même numéro de série « ${n} » (copie d'une fiche à l'autre ?)` }));
+  return out;
+}
+
+// ===== Contrôles de cohérence avant génération (unité, champ, réglages) — signalés, jamais bloquants =====
+const fmtV = (x) => String(Math.round(x * 1000) / 1000).replace(".", ",");
+// Mesure hors tolérance qui y entrerait multipliée ou divisée par 10, 100 ou 1 000 : erreur d'unité ou de virgule probable.
+function facteurUniteSuspect(v, min, max) {
+  if (v === null || (min === null && max === null)) return null;
+  const dans = (x) => (min === null || x >= min - 1e-9) && (max === null || x <= max + 1e-9);
+  if (dans(v)) return null;
+  for (const f of [1000, 100, 10]) { if (dans(v * f)) return { f, v2: v * f }; if (dans(v / f)) return { f: 1 / f, v2: v / f }; }
+  return null;
+}
+function verificationsCoherenceEquipement(eq, site) {
+  const out = [];
+  const nomEq = `${eq.type}${nomEquipementSite(eq, site) ? " " + nomEquipementSite(eq, site) : ""}`;
+  const push = (secKey, texte) => out.push({ eqId: eq.id, secKey, type: "coherence", texte: `${nomEq} — ${texte}` });
+  let schema; try { schema = getSchema(eq); } catch (e) { return out; }
+  (schema.sections || []).forEach((sec) => {
+    const vals = (eq.controles && eq.controles[sec.key]) || {};
+    if (typeof vals !== "object" || Array.isArray(vals)) return;
+    (sec.items || []).forEach((it) => {
+      const v = vals[it.key]; if (!v || !v.fields) return;
+      if (["Non réalisé", "Non présent"].includes(v.etat)) return;
+      const f = v.fields;
+      const tolMinF = (it.fields || []).find((x) => x.key === "tol_min" && x.compute), tolMaxF = (it.fields || []).find((x) => x.key === "tol_max" && x.compute);
+      let horsTol = false;
+      if (tolMinF || tolMaxF) {
+        const ref = tolMinF || tolMaxF;
+        const cles = [ref.unitFrom, ...(ref.phaseKeys || ["l1", "l2", "l3"])].filter(Boolean);
+        const min = tolMinF ? numOf(tolMinF.compute(f)) : null, max = tolMaxF ? numOf(tolMaxF.compute(f)) : null;
+        const uTol = (tolMaxF && tolMaxF.unit) || (tolMinF && tolMinF.unit) || "";
+        cles.forEach((k) => {
+          const def = (it.fields || []).find((x) => x.key === k);
+          const brut = numOf(f[k]); if (brut === null || (min === null && max === null)) return;
+          const val = def && def.unit && uTol && def.unit !== uTol && unitFamilyFor(def.unit) === unitFamilyFor(uTol) ? numOf(depuisUniteBase(f[k], def.unit, uTol)) : brut;
+          if (val === null) return;
+          if (toleranceState(val, min, max) === "bad") horsTol = true;
+          const sus = k === "synchronisme" ? null : facteurUniteSuspect(val, min, max); // synchronisme : contrôle dédié ci-dessous
+          if (sus) push(sec.key, `${it.label} : ${def ? def.label : k.toUpperCase()} = ${fmtV(val)} ${uTol} pour une plage attendue de ${min !== null ? fmtV(min) + " – " : "≤ "}${fmtV(max)} ${uTol} — erreur d'unité ou de virgule ? (${fmtV(sus.v2)} ${uTol} serait dans la plage)`);
+        });
+      }
+      // Mesure principale vide alors que l'état est « Conforme » (cas non couverts par « à compléter » : autres champs remplis).
+      const clesMesure = (it.fields || []).filter((d) => !d.hidden && !d.compute && !d.options && d.unit && /^(declenchement|declenchement_treg|declenchement_t0|valeur|v)$/.test(d.key));
+      if ((v.etat || "") === "Conforme" && clesMesure.length && clesMesure.every((d) => String(f[d.key] ?? "").trim() === "") && !["l1", "l2", "l3"].some((k) => String(f[k] ?? "").trim() !== "") && !controleACompleter(it, v) && !(it.fields || []).some((d) => d.key === "realise"))
+        push(sec.key, `${it.label} : état « Conforme » sans valeur mesurée (${clesMesure.map((d) => d.label).join(", ")}) — saisir la mesure ou passer en « Non réalisé »`);
+      if (horsTol && v.etat === "Conforme") push(sec.key, `${it.label} : état « Conforme » alors qu'une mesure est hors de la plage attendue (le rapport la signale comme anomalie) — corriger la mesure ou l'état`);
+      if (["temps_ouverture", "temps_fermeture"].includes(it.key) && numOf(f.synchronisme) !== null && numOf(f.synchronisme) > 15 && !["l1", "l2", "l3"].some((k) => numOf(f[k]) !== null))
+        push(sec.key, `${it.label} : ${fmtV(numOf(f.synchronisme))} ms saisis dans « Synchronisme » sans temps L1 / L2 / L3 — le temps de manœuvre se saisit en L1 / L2 / L3, le synchronisme est l'écart entre pôles (≤ 3,3 ms)`);
+    });
+  });
+  // Relais de protection
+  if (TYPES_AVEC_RELAIS.includes(eq.type)) {
+    const seuils = (eq.controles && eq.controles.parametrage_relais_seuils) || [];
+    seuils.filter((x) => !String(x.label || "").trim() && ["reglage", "temporisation"].some((k) => String((x.fields || {})[k] || "").trim())).forEach(() => push("parametrage_relais", "seuil sans fonction de protection choisie (non imprimé dans le rapport)"));
+    alertesParametrageRelais(eq, seuils).forEach((a) => push("parametrage_relais", a));
+    seuils.filter((x) => x.label && x.essai && ansiFamily(x.label) !== "DEC").forEach((x) => {
+      if (["Non réalisé", "Non présent"].includes(x.essai.etat)) return;
+      const ls = [x.essai.fields.l1, x.essai.fields.l2, x.essai.fields.l3].map(numOf).filter((y) => y !== null);
+      if (!ls.length) { out.push({ eqId: eq.id, secKey: "controles_relais", type: "vide", texte: `${nomEq} — Essai ${x.label.split(" — ")[0]} : aucun temps mesuré (imprimé « Non réalisé »)` }); return; }
+      const tol = toleranceEssaiSeuil(eq, x); if (!tol) return;
+      const sus = ls.map((y) => facteurUniteSuspect(y, tol.min, tol.max)).find(Boolean);
+      if ((x.essai.etat || "Conforme") === "Conforme" && ls.some((y) => toleranceState(y, tol.min, tol.max) === "bad")) push("controles_relais", `Essai ${x.label.split(" — ")[0]} : état « Conforme » alors qu'un temps est hors de la plage attendue (${fmtV(tol.min)} – ${fmtV(tol.max)} ${tol.unite})`);
+      if (sus && ls.every((y) => toleranceState(y, tol.min, tol.max) === "bad")) push("controles_relais", `Essai ${x.label.split(" — ")[0]} : temps ${ls.map(fmtV).join(" / ")} ${tol.unite} pour ${fmtV(tol.min)} – ${fmtV(tol.max)} ${tol.unite} attendus — erreur d'unité ou de virgule ? (${fmtV(sus.v2)} ${tol.unite} serait dans la plage)`);
+    });
+  }
+  // Relais déclaré présent mais ni marque ni seuil paramétré.
+  if (eq.identification?.presenceRelais === "Oui") {
+    const seuils = (eq.controles?.parametrage_relais_seuils || []).filter((x) => String(x.label || "").trim() && ["reglage", "temporisation"].some((k) => String((x.fields || {})[k] ?? "").trim() !== ""));
+    if (!String(eq.identification.marqueRelais || "").trim() && !String(eq.identification.referenceRelais || "").trim() && !seuils.length)
+      push("identification", "« Présence d'un relais de protection : Oui » sans marque, sans référence et sans aucun seuil paramétré — corriger en « Non » ou compléter le relais");
+  }
+  // Isolement : indice (PI / DAR) saisi sans la résistance mesurée en MΩ.
+  {
+    const iso = eq.controles?.mesure_isolement || {};
+    Object.entries(iso).forEach(([k, v]) => {
+      if (!v || !v.fields || k.endsWith("__custom") || v.fields.realise === "NON") return;
+      const f = v.fields;
+      const indices = ["pi", "dar"].filter((x) => numOf(f[x]) !== null);
+      const aR = numOf(f.valeur) !== null || ["t10", "t30", "t60", "t600"].some((t) => numOf(f[t]) !== null);
+      if (indices.length && !aR) {
+        const it = (getSchema(eq).sections || []).find((x) => x.key === "mesure_isolement")?.items?.find((x) => x.key === k);
+        push("mesure_isolement", `${it ? it.label : k} : ${indices.map((x) => x.toUpperCase()).join(" / ")} saisi sans valeur de résistance d'isolement (MΩ) — le rapport n'indique pas le niveau d'isolement`);
+      }
+    });
+  }
+  // Batterie de compensation : mesures avec / sans compensation identiques, ou « 0 gradin en service » pendant la mesure avec compensation.
+  if (eq.type === "Batterie de compensation") {
+    if (mesuresCompensationIdentiques(eq)) push("mesures_aval", "mesures sans compensation strictement identiques aux mesures avec compensation (recopie ?) — l'effet de la batterie et l'amplification harmonique ne sont pas évaluables");
+    const gs = String(eq.controles?.mesures_amont?.gradins_en_service?.fields?.valeur ?? "").trim();
+    const amontRempli = ["tensions_amont", "courants_amont", "puissances_amont"].some((k) => Object.values(eq.controles?.mesures_amont?.[k]?.fields || {}).some((x) => numOf(x) !== null));
+    if (gs === "0" && amontRempli) push("mesures_amont", "« Gradins en service lors de la mesure : 0 » dans les mesures AVEC compensation — la batterie n'était pas en service, vérifier le nombre de gradins enclenchés");
+    const nbG = numOf(eq.identification?.nombreGradins), releves = (eq.controles?.gradins_dynamique || []).filter((g) => g.label).length;
+    if (nbG && releves && releves < nbG) push("gradins", `${releves} gradin${releves > 1 ? "s" : ""} relevé${releves > 1 ? "s" : ""} sur ${nbG} déclarés — puissance et analyse de résonance partielles dans le rapport`);
+  }
+  // Batterie (onduleur, redresseur) : tension par élément comparée aux plages usuelles — repères génériques, la notice du fabricant fait foi.
+  const mb = eq.controles?.mesures_batterie_ups;
+  if (mb && typeof mb === "object") {
+    const th = (() => { try { return calcTensionsBatterieTheoriques(eq); } catch (e) { return null; } })();
+    const cdni = eq.controles?.batterie_id?.batterie_caracteristiques?.fields?.technologie === "Cd-Ni";
+    const PLAGES = cdni
+      ? { tension_floating: [1.38, 1.45, "floating"], tension_charge: [1.38, 1.55, "charge"], tension_charge_forte: [1.45, 1.70, "charge forte"], tension_egalisation: [1.45, 1.70, "égalisation"], tension_repos: [1.25, 1.40, "repos"] }
+      : { tension_floating: [2.20, 2.30, "floating"], tension_charge: [2.23, 2.45, "charge"], tension_charge_forte: [2.35, 2.45, "charge forte"], tension_egalisation: [2.30, 2.50, "égalisation"], tension_repos: [2.05, 2.20, "repos"] };
+    const vOf = (k) => { const it = mb[k]; return it && !["Non réalisé", "Non présent"].includes(it.etat) ? numOf(it.fields?.v) : null; };
+    if (th && th.nbElementsTotal > 0) {
+      Object.entries(PLAGES).forEach(([k, [mn, mx, lib]]) => {
+        const v = vOf(k); if (v === null || v <= 0) return;
+        const parElt = v / th.nbElementsTotal;
+        if (parElt < mn || parElt > mx) push("mesures_batterie_ups", `tension de ${lib} ${fmtV(v)} V, soit ${fmtV(Math.round(parElt * 1000) / 1000)} V par élément (${fmtV(th.nbElementsTotal)} éléments) pour une plage usuelle de ${fmtV(mn)} – ${fmtV(mx)} V/élt${cdni ? " (Cd-Ni)" : " (plomb étanche)"} — valeur ou nombre de blocs à vérifier, à confirmer sur la notice`);
+      });
+    }
+    // Pôle à 0 V par rapport à la terre pendant que l'autre est à pleine tension : polarité reliée à la terre ou défaut d'isolement franc.
+    const pPlus = vOf("pole_plus_terre"), pMoins = vOf("pole_moins_terre");
+    const ref = vOf("tension_floating") ?? numOf(eq.controles?.mesures_continu?.tension_continue?.fields?.v) ?? (th ? th.nominale : null);
+    if (pPlus !== null && pMoins !== null && ref) {
+      const [zero, plein, nomZero] = Math.abs(pMoins) < 1 && Math.abs(pPlus) > 0.8 * ref ? ["−", "+", true] : Math.abs(pPlus) < 1 && Math.abs(pMoins) > 0.8 * ref ? ["+", "−", true] : [null, null, false];
+      if (nomZero) push("mesures_batterie_ups", `pôle « ${zero} » à ${fmtV(zero === "−" ? pMoins : pPlus)} V / terre et pôle « ${plein} » à ${fmtV(zero === "−" ? pPlus : pMoins)} V : soit la polarité ${zero} est volontairement reliée à la terre (schéma à vérifier), soit il y a un défaut d'isolement franc sur ce pôle — à confirmer avant édition`);
+    }
+  }
+  // Sortie (onduleur, inverseur…) : P relevé ne peut pas dépasser S = U × I.
+  if (eq.controles?.mesures_utilisation && eq.type !== "Bilan de puissance") {
+    const fp = eq.controles.mesures_utilisation.puissance_fp_utilisation?.fields || {};
+    const somme = (pre) => { const v = [1, 2, 3].map((i) => numOf(fp[pre + i])).filter((x) => x !== null); return v.length ? v.reduce((a, b) => a + b, 0) : null; };
+    const P = somme("p"), S = somme("s");
+    // S = Σ V_phase × I_phase (tensions simples), à défaut √3 × U composée × I moyen.
+    const mu = eq.controles.mesures_utilisation;
+    const vs = mu.tension_simple_utilisation?.fields || {}, ic = mu.courant_utilisation?.fields || {}, uc = mu.tension_utilisation?.fields || {};
+    const sCalc = (() => {
+      const paires = ["l1", "l2", "l3"].map((k) => [numOf(vs[k]), numOf(ic[k])]).filter(([u, i]) => u !== null && i !== null);
+      if (paires.length) return paires.reduce((acc, [u, i]) => acc + u * i, 0) / 1000;
+      const us = ["l1", "l2", "l3"].map((k) => numOf(uc[k])).filter((x) => x !== null), is = ["l1", "l2", "l3"].map((k) => numOf(ic[k])).filter((x) => x !== null);
+      return us.length && is.length ? Math.sqrt(3) * (us.reduce((x, y) => x + y, 0) / us.length) * (is.reduce((x, y) => x + y, 0) / is.length) / 1000 : null;
+    })();
+    if (P && sCalc && P > sCalc * 1.05) push("mesures_utilisation", `puissance active relevée (${fmtV(P)} kW) supérieure à U × I (${fmtV(Math.round(sCalc * 100) / 100)} kVA) — impossible physiquement : vérifier l'unité (W / kW) ou les relevés`);
+    else if (P && S && P > S * 1.02) push("mesures_utilisation", `puissance active relevée (${fmtV(P)} kW) supérieure à la puissance apparente relevée (${fmtV(S)} kVA) — vérifier les relevés`);
+  }
+  // Bilan de puissance : cohérence des puissances et du rattachement
+  if (eq.type === "Bilan de puissance") {
+    const fp = eq.controles?.mesures_utilisation?.puissance_fp_utilisation?.fields || {};
+    const somme = (pre) => { const v = [1, 2, 3].map((i) => numOf(fp[pre + i])).filter((x) => x !== null); return v.length ? v.reduce((a, b) => a + b, 0) : null; };
+    const P = somme("p"), S = somme("s");
+    const fe = eq.controles?.bilan_energie?.mesure_energie?.fields || {};
+    const a = numOf(fe.kwh_t0), b = numOf(fe.kwh_t1), d = numOf(fe.duree);
+    const pMoy = a !== null && b !== null && d ? (b - a) / (d / 60) : null;
+    if (P && pMoy && Math.abs(pMoy - P) / P > 0.3) push("bilan_energie", `puissance moyenne déduite du relevé d'énergie (${fmtV(pMoy)} kW) très différente de la puissance mesurée (${fmtV(P)} kW) — vérifier la durée et les relevés kWh`);
+    const sCalc = calcPuissanceApparente(eq, "mesures_utilisation", "utilisation");
+    if (S && sCalc && Math.abs(sCalc - S) / S > 0.2) push("mesures_utilisation", `puissance apparente relevée (${fmtV(S)} kVA) très différente de celle calculée avec U et I (${fmtV(sCalc)} kVA) — vérifier les relevés`);
+    const eqs = (site && site.equipements) || [];
+    const tr = eqs.find((x) => x.id === eq.identification?.transfo_id), dj = eqs.find((x) => x.id === eq.identification?.disj_id);
+    const amont = String(dj?.identification?.transformateurAssocie || "").trim();
+    if (tr && dj && amont && amont !== String(tr.identification?.repere || "").trim()) push("identification", `rattaché au transformateur ${tr.identification?.repere || "?"} et au disjoncteur ${dj.identification?.repere || "?"}, mais ce disjoncteur indique ${amont} en amont`);
+  }
   return out;
 }
 // ----- Briques de saisie partagées (grille par phase, cellules, pastilles) — même rendu que les contrôles -----
@@ -8242,7 +8405,9 @@ function PuissanceBatterieCarte({ eq }) {
   const th = { background: "#26364A", color: "#fff", padding: "5px 8px", fontSize: 11, fontWeight: 700, textAlign: "center" };
   const td = { padding: "6px 8px", borderBottom: "1px solid #E2E6EB", fontSize: 12, textAlign: "center" };
   const noms = pb.mono ? ["Phase"] : ["L1", "L2", "L3"];
-  const ecartQn = pb.qn && pb.total !== null ? Math.round(((pb.total - pb.qn) / pb.qn) * 1000) / 10 : null;
+  const nbDeclE = numOf(eq.identification?.nombreGradins);
+  const partielE = (nbDeclE && pb.parGradin.length < nbDeclE) || (pb.qn && pb.declareTotal !== null && pb.declareTotal < pb.qn * 0.95);
+  const ecartQn = !partielE && pb.qn && pb.total !== null ? Math.round(((pb.total - pb.qn) / pb.qn) * 1000) / 10 : null;
   return (
     <div style={{ marginTop: 12, border: "1px solid #D8DEE5", borderRadius: 10, padding: 12, background: "#F7F8FA" }}>
       <div style={{ fontSize: 11, fontWeight: 700, color: "#5B6B7D", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 8 }}>Puissance de la batterie (somme des gradins)</div>
@@ -8267,7 +8432,7 @@ function PuissanceBatterieCarte({ eq }) {
       </div>
       <div style={{ fontSize: 11, color: "#5B6B7D", marginTop: 6, lineHeight: 1.45 }}>
         Puissance totale {LIBELLE_SOURCE_PUISSANCE[pb.source] || ""}{!pb.complet ? " — certains gradins sans puissance connue" : ""}.
-        {pb.qn ? ` Qn déclaré : ${pb.qn} kVAR${ecartQn !== null && pb.source !== "declare" ? ` (écart ${ecartQn > 0 ? "+" : ""}${String(ecartQn).replace(".", ",")} %)` : ""}.` : ""}
+        {partielE ? ` ${pb.parGradin.length} gradin(s) relevé(s)${nbDeclE ? " sur " + nbDeclE : ""} : puissance partielle, non comparée au Qn (${pb.qn || "—"} kVAR).` : pb.qn ? ` Qn déclaré : ${pb.qn} kVAR${ecartQn !== null && pb.source !== "declare" ? ` (écart ${ecartQn > 0 ? "+" : ""}${String(ecartQn).replace(".", ",")} %)` : ""}.` : ""}
         {!pb.mono && !pb.phases ? " Puissance par phase : disponible quand les courants des 3 phases de chaque gradin sont relevés." : ""}
         {pb.parGradin.some((p) => p.source === "estime") ? " * estimé d'après les phases mesurées (moyenne × 3)." : ""}
       </div>
@@ -8564,6 +8729,11 @@ function calcCapaciteFiltre(eq) {
   if (c1 === null && c2 === null && c3 === null) return null;
   return { c1, c2, c3 };
 }
+// Base du taux de charge : sur un bilan de puissance c'est le disjoncteur rattaché, ailleurs (inverseur, onduleur) le calibre de l'appareil lui-même.
+function libelleBaseTauxCharge(eq) {
+  if (!numOf(eq.identification?.calibreDisjoncteur)) return "S mesuré ÷ puissance nominale";
+  return eq.type === "Bilan de puissance" ? "I mesuré ÷ calibre du disjoncteur" : "I mesuré ÷ calibre de l'appareil";
+}
 function calcTauxCharge(eq) {
   const calibre = numOf(eq.identification?.calibreDisjoncteur);
   if (calibre) {
@@ -8628,6 +8798,8 @@ function calcPuissanceApparente(eq, sectionKey, suffix) {
   }
   const simple = sec[`tension_simple_${suffix}`]?.fields;
   if (simple && numOf(simple.l1) !== null) {
+    // Triphasé sans tension composée saisie : 3 × V simple moyenne × I (équivaut à √3 × U × I).
+    if (numOf(simple.l2) !== null || numOf(simple.l3) !== null) return Math.round(((3 * moyenneDepuisChamps(simple) * i) / 1000) * 100) / 100;
     return Math.round(((numOf(simple.l1) * i) / 1000) * 100) / 100;
   }
   return null;
@@ -8990,7 +9162,7 @@ function texteVerificationFusibleTransfo(v) {
   let texte = `Contrôle calibre fusible / ${libelleTransfo(v)} (${v.norme}) : Ib (courant de base primaire, ${v.sn} kVA sous ${v.u} kV) = ${v.ib} A — repère de bon sens In ≥ 1,4 × Ib = ${v.seuilMin} A.`;
   if (v.inFusible !== null) texte += ` Calibre installé : ${v.inFusible} A.`;
   if (v.ibTropEleve) texte += " ⚠ Ib > 45 A : au-delà de ce seuil, la protection par fusible n'est normalement plus valable en NF C13-100 pour un poste à un seul transformateur — un disjoncteur HTA est requis à la place.";
-  if (v.sousCalibre) texte += ` ⚠ Calibre installé inférieur au seuil recommandé (risque de fusion intempestive à l'enclenchement) — prévoir le remplacement des fusibles installés et de rechange par un calibre adapté, d'au moins ${v.seuilMin} A, à confirmer d'après les préconisations du constructeur de la cellule.`;
+  if (v.sousCalibre) texte += ` ⚠ Calibre installé inférieur au seuil recommandé (risque de fusion intempestive à l'enclenchement) — prévoir le remplacement des fusibles installés et de rechange par un calibre adapté, d'au moins ${v.seuilMin} A${calibreFusibleNormalise(v.seuilMin) ? ` (calibre normalisé ${calibreFusibleNormalise(v.seuilMin)} A)` : ""}, à confirmer d'après les préconisations du constructeur de la cellule.`;
   if (v.norme === "NF C13-200") texte += " Norme NF C13-200 : pas de plafond fixe à 45 A — le calibre exact doit suivre les préconisations du constructeur de la cellule (repère indicatif : jusqu'à environ 1600 kVA avec des fusibles FN 63 A).";
   if (v.norme === "DIN") texte += " Fusibles DIN : calibres plus élevés disponibles (80/100/125 A) — étude et accord du constructeur de la cellule nécessaires pour valider ce calibre.";
   if (!v.ibTropEleve && !v.sousCalibre && v.inFusible !== null && v.norme === "NF C13-100") texte += " Cohérent avec la règle générale.";
@@ -9335,6 +9507,7 @@ function calcResonanceHarmonique(eq, allEquipements) {
 //  • surcharge des condensateurs : I mesuré / I théorique > 1,3 (NF EN 60831-1).
 // Le rang 3 n'est pas retenu : en triphasé sans neutre il ne circule pas dans la batterie.
 const RANGS_RESONANCE = [5, 7, 11, 13];
+function nomEtapeResonance(e) { return e.complet ? "la batterie complète" : `${e.n} gradin${e.n > 1 ? "s enclenchés" : " enclenché"}`; }
 function analyseResonanceBatterie(eq, allEquipements) {
   if (!eq || eq.type !== "Batterie de compensation") return null;
   const base = calcResonanceHarmonique(eq, allEquipements || []);
@@ -9362,6 +9535,10 @@ function analyseResonanceBatterie(eq, allEquipements) {
     x.ih = ih; x.uh = uh;
     return x;
   });
+  // Relevés « hors service » et « en service » strictement identiques (souvent une recopie) : l'amplification n'est pas évaluable.
+  const pairesHSES = harmoniques.flatMap((x) => [[x.ihHS, x.ihES], [x.uhHS, x.uhES]]).filter(([a, b]) => a !== null && b !== null);
+  const mesuresIdentiques = pairesHSES.length >= 2 && pairesHSES.every(([a, b]) => a === b);
+  if (mesuresIdentiques) harmoniques.forEach((x) => { x.ampli = null; x.ampliSur = null; x.niveauAmpli = null; x.identique = true; });
   const aMesures = harmoniques.some((x) => x.ihHS !== null || x.uhHS !== null || x.ihES !== null || x.uhES !== null);
   const tA = eq.controles?.mesures_amont?.tensions_amont?.fields || {};
   const cA = eq.controles?.mesures_amont?.courants_amont?.fields || {};
@@ -9386,9 +9563,14 @@ function analyseResonanceBatterie(eq, allEquipements) {
   const filtrage = nbSelf === 0 ? "non" : nbSelf === accords.length ? "total" : "partiel";
   // Étapes d'enclenchement (Q cumulé), seulement pertinentes sans self (ou pour les gradins non filtrés)
   let etapes = [];
+  // Gradins relevés moins nombreux que la batterie (Q cumulé < Qn) : une dernière étape « batterie complète » au Qn déclaré.
+  const qsReleves = gradins.map((g) => numOf(g.fields?.q)).filter((q) => q !== null && q > 0);
+  const sommeQReleves = qsReleves.reduce((x, y) => x + y, 0);
+  const gradinsPartiels = !!(qsReleves.length && qn && sommeQReleves < qn * 0.95);
+  const nbGradinsDeclares = numOf(eq.identification?.nombreGradins);
   if (!base.manque && filtrage !== "total") {
-    const qs = gradins.map((g) => numOf(g.fields?.q)).filter((q) => q !== null && q > 0);
-    const liste = qs.length ? qs : (qn ? [qn] : []);
+    const qs = qsReleves;
+    const liste = qs.length ? (gradinsPartiels ? [...qs, qn - sommeQReleves] : qs) : (qn ? [qn] : []);
     const configs = base.configurations && base.configurations.length ? base.configurations : [{ label: base.transfoLabel, scc: base.scc, normale: true }];
     etapes = configs.flatMap((cfg) => { let cumul = 0; return liste.map((q, i) => {
       cumul += q;
@@ -9409,7 +9591,7 @@ function analyseResonanceBatterie(eq, allEquipements) {
         niveau = amp !== null ? amp : pres === "present" ? 1 : 0;
         verdict = amp === 2 ? `Amplification du rang ${proche.h} mesurée` : pres === "present" || amp === 1 ? `Vigilance : rang ${proche.h} présent et assez proche` : `Vigilance : assez proche du rang ${proche.h}`;
       }
-      return { n: i + 1, q: arrondi(cumul, 1), h0: arrondi(h0), rangProche: proche.h, ecartPct: Math.round(proche.ecart * 100), presence: pres, niveau, verdict, config: cfg.label, configNormale: !!cfg.normale, sccConfig: cfg.scc };
+      return { n: i + 1, complet: gradinsPartiels && i === liste.length - 1, q: arrondi(cumul, 1), h0: arrondi(h0), rangProche: proche.h, ecartPct: Math.round(proche.ecart * 100), presence: pres, niveau, verdict, config: cfg.label, configNormale: !!cfg.normale, sccConfig: cfg.scc };
     }); });
   }
   const multiConfigs = !!(base.configurations && base.configurations.length > 1);
@@ -9435,7 +9617,7 @@ function analyseResonanceBatterie(eq, allEquipements) {
   const pire = etapes.filter((e) => e.niveau >= 1).sort((a, b) => b.niveau - a.niveau || a.ecartPct - b.ecartPct)[0];
   if (pire) {
     const v = (x) => String(x).replace(".", ",");
-    const conc = etapes.filter((e) => e.niveau >= 1 && e.rangProche === pire.rangProche).map((e) => `${e.n} gradin${e.n > 1 ? "s enclenchés" : " enclenché"} (Q = ${v(e.q)} kVAR, h₀ = ${v(e.h0)}${avecConfig(e)})`);
+    const conc = etapes.filter((e) => e.niveau >= 1 && e.rangProche === pire.rangProche).map((e) => `${nomEtapeResonance(e)} (Q = ${v(e.q)} kVAR, h₀ = ${v(e.h0)}${avecConfig(e)})`);
     const pres = presence(pire.rangProche);
     constats.push({ rang: pire.niveau, categorie: "resonance", sujet: `rang ${pire.rangProche}`,
       phrase: `Le rang de résonance de la batterie avec ${multiConfigs ? "les transformateurs" : "le transformateur"} est proche du rang harmonique ${pire.rangProche} avec ${listeFr(conc)}` +
@@ -9449,7 +9631,7 @@ function analyseResonanceBatterie(eq, allEquipements) {
     const n = Math.max(...liste.map((e) => e.niveau));
     const pres = presence(h);
     constats.push({ rang: n, categorie: "resonance", sujet: `rang ${h}`,
-      phrase: `Le rang de résonance est aussi proche du rang harmonique ${h} avec ${listeFr(liste.map((e) => `${e.n} gradin${e.n > 1 ? "s enclenchés" : " enclenché"} (h₀ = ${String(e.h0).replace(".", ",")}${avecConfig(e)})`))}` +
+      phrase: `Le rang de résonance est aussi proche du rang harmonique ${h} avec ${listeFr(liste.map((e) => `${nomEtapeResonance(e)} (h₀ = ${String(e.h0).replace(".", ",")}${avecConfig(e)})`))}` +
         (pres === "present" ? `, rang présent sur le réseau (${mesureTexte(h)}).` : pres === null ? ` : à confirmer par une mesure des harmoniques.` : `.`) });
   });
   // Amplification mesurée sur un rang non déjà couvert par le calcul (ex. batterie à selfs mal accordées ou dégradées).
@@ -9468,7 +9650,11 @@ function analyseResonanceBatterie(eq, allEquipements) {
   const noteParallele = multiConfigs
     ? `Transformateurs en parallèle : Scc ≈ Σ Sn/Ucc (${base.detail}). Le rang de résonance est calculé pour chaque configuration d'exploitation — tous les transformateurs en service, puis un seul en service (maintenance, couplage ouvert) — car la configuration la plus défavorable n'est pas forcément la configuration normale. L'impédance du réseau HTA amont, négligée ici, abaisse légèrement le rang réel, d'autant plus que les transformateurs en parallèle sont nombreux.`
     : null;
-  return { base, filtrage, accords, etapes, harmoniques, aMesures, thdu, thdi, surcharges, constats, niveau, conclusion, freqReseau, multiConfigs, noteParallele };
+  const notePartielle = gradinsPartiels
+    ? `${qsReleves.length} gradin${qsReleves.length > 1 ? "s" : ""} relevé${qsReleves.length > 1 ? "s" : ""}${nbGradinsDeclares ? ` sur ${nbGradinsDeclares}` : ""} (${String(Math.round(sommeQReleves * 10) / 10).replace(".", ",")} kVAR sur ${String(qn).replace(".", ",")} kVAR déclarés) : la dernière ligne « Tous (Qn) » est calculée avec le Qn de la batterie complète, les étapes intermédiaires des gradins non relevés ne sont pas connues.`
+    : null;
+  const noteIdentiques = mesuresIdentiques ? "Relevés harmoniques batterie hors service et en service strictement identiques : l'amplification à l'enclenchement n'est pas évaluable — refaire la mesure batterie hors service puis en service." : null;
+  return { base, filtrage, accords, etapes, harmoniques, aMesures, thdu, thdi, surcharges, constats, niveau, conclusion, freqReseau, multiConfigs, noteParallele, notePartielle, noteIdentiques, mesuresIdentiques };
 }
 function ResonanceHarmoniqueCalculee({ eq, allEquipements }) {
   const a = analyseResonanceBatterie(eq, allEquipements);
@@ -9495,7 +9681,7 @@ function ResonanceHarmoniqueCalculee({ eq, allEquipements }) {
         <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 8 }}>
           <thead><tr>{a.multiConfigs && <th style={th}>Transformateurs en service</th>}<th style={th}>Gradins enclenchés</th><th style={th}>Q cumulé</th><th style={th}>h₀ = √(Scc/Q)</th><th style={th}>Rang proche (écart)</th><th style={th}>Verdict</th></tr></thead>
           <tbody>{a.etapes.map((e, i) => (
-            <tr key={i}>{a.multiConfigs && <td style={{ ...td, fontWeight: e.n === 1 ? 700 : 400, color: e.n === 1 ? "#1A1F26" : "#B0B8C1" }}>{e.n === 1 ? `${e.config} (Scc ≈ ${e.sccConfig} kVA)` : "〃"}</td>}<td style={td}>{e.n}</td><td style={td}>{e.q} kVAR</td><td style={td}>{e.h0}</td><td style={td}>{e.rangProche} ({e.ecartPct} %)</td><td style={td}>{pastille(e.niveau, e.verdict)}</td></tr>
+            <tr key={i}>{a.multiConfigs && <td style={{ ...td, fontWeight: e.n === 1 ? 700 : 400, color: e.n === 1 ? "#1A1F26" : "#B0B8C1" }}>{e.n === 1 ? `${e.config} (Scc ≈ ${e.sccConfig} kVA)` : "〃"}</td>}<td style={td}>{e.complet ? "Tous (Qn)" : e.n}</td><td style={td}>{e.q} kVAR</td><td style={td}>{e.h0}</td><td style={td}>{e.rangProche} ({e.ecartPct} %)</td><td style={td}>{pastille(e.niveau, e.verdict)}</td></tr>
           ))}</tbody>
         </table>
       )}
@@ -9557,7 +9743,7 @@ function ComparaisonEnergieCalculee({ eq }) {
 function TauxChargeCalcule({ eq }) {
   const t = calcTauxCharge(eq);
   if (!t) return null;
-  const base = numOf(eq.identification?.calibreDisjoncteur) ? "I mesuré ÷ calibre du disjoncteur" : "S mesuré ÷ puissance nominale";
+  const base = libelleBaseTauxCharge(eq);
   const phases = [["L1", t.t1], ["L2", t.t2], ["L3", t.t3]];
   // Échelle du graphique : 100% de haut correspond à un taux de charge de 120%, pour laisser de la
   // marge visuelle au-dessus de la pleine charge plutôt que de saturer la barre pile à 100%.
@@ -11859,6 +12045,17 @@ function alertesParametrageRelais(eq, seuils) {
   });
   actifs.filter((s) => /actif/i.test(s.fields.etat || "") && ansiFamily(s.label) !== "DEC" && uniteReglageSeuil(s) && numOf(s.fields.reglage) === null).forEach((s) => out.push(`${s.label.split(" — ")[0]} : actif mais sans réglage.`));
   actifs.filter((s) => estSeuilCEI(s) && numOf(s.fields.tms) === null).forEach((s) => out.push(`${s.label.split(" — ")[0]} : courbe ${s.fields.courbe} sans TMS — temps théorique incalculable.`));
+  const Un = unHTA(eq);
+  if (Un) actifs.forEach((s) => {
+    const f = ansiFamily(s.label), r = numOf(s.fields.reglage), n = s.label.split(" — ")[0];
+    if (r === null) return;
+    if (f === "59" && r < 0.98 * Un) out.push(`${n} (maximum de tension) réglé à ${frN(r, 0)} V, sous la tension nominale (${frN(Un, 0)} V) : déclencherait en service normal.`);
+    if (f === "27" && r > Un) out.push(`${n} (minimum de tension) réglé à ${frN(r, 0)} V, au-dessus de la tension nominale (${frN(Un, 0)} V) : déclencherait en service normal.`);
+  });
+  actifs.filter((s) => ["67", "67N", "32N", "32P", "32Q", "37P", "37Q"].includes(ansiFamily(s.label))).forEach((s) => {
+    const a = numOf(s.fields.zoneMin), b = numOf(s.fields.zoneMax);
+    if (a !== null && b !== null && a >= b) out.push(`${s.label.split(" — ")[0]} : borne basse de zone (${frN(a, 0)}°) ≥ borne haute (${frN(b, 0)}°) — la borne basse est normalement négative (ex. −88° / +88°).`);
+  });
   return out;
 }
 // ----- Lecture du paramétrage depuis une photo d'écran ou un export (même service que la lecture de plaque) -----
@@ -13465,7 +13662,7 @@ function analyserAnomaliesEquipement(eq, contexte) {
     if (tolRapport && fRapport) {
       [["L1", "l1"], ["L2", "l2"], ["L3", "l3"]].forEach(([nom, key]) => {
         if (toleranceState(fRapport[key], tolRapport.min, tolRapport.max) === "bad") {
-          transfoMesures.push({ nom, mesure: fRapport[key], unite: "", attendu: `${tolRapport.min}–${tolRapport.max} (±0,5 % selon la CEI 60076-1)` });
+          transfoMesures.push({ nom, mesure: fRapport[key], unite: "", attendu: `${tolRapport.min}–${tolRapport.max}, ±0,5 % selon la CEI 60076-1` });
         }
       });
     }
@@ -13640,24 +13837,69 @@ function analyserAnomaliesEquipement(eq, contexte) {
     const bilan = bilanRedondanceModules(eq);
     if (bilan && bilan.rang > 0) ajouter(bilan.texte, bilan.rang, bilan.rang >= 2 ? "capacite_modules" : "redondance_modules", "redondance");
   }
+  // Batterie de compensation : cos φ mesuré batterie en service sous la consigne du régulateur.
+  if (eq.type === "Batterie de compensation") {
+    const fAm = eq.controles?.mesures_amont?.puissances_amont?.fields || {};
+    const pA = totalPuissance(fAm, "p"), sA = totalPuissance(fAm, "s");
+    const consigne = numOf(eq.controles?.securite_automatismes?.reglage_cosphi?.fields?.cosphi);
+    const brutG = String(eq.controles?.mesures_amont?.gradins_en_service?.fields?.valeur || "").trim();
+    const listeG = brutG.split(/[,;\s]+/).filter(Boolean);
+    const nbG = !brutG ? null : listeG.length > 1 ? listeG.length : numOf(brutG); // « 1, 2, 3 » = 3 gradins ; « 2 » = 2
+    if (pA && sA && consigne && pA / sA < consigne - 0.01) {
+      const cos = Math.round((pA / sA) * 1000) / 1000;
+      ajouter(`Batterie en service, le cos φ mesuré (${String(cos).replace(".", ",")}) reste sous la consigne du régulateur (${String(consigne).replace(".", ",")})${nbG !== null ? ` avec ${nbG} gradin${nbG > 1 ? "s" : ""} enclenché${nbG > 1 ? "s" : ""}` : ""} : la compensation ne suffit pas à atteindre l'objectif au moment de la mesure.`, 1, "cosphi", "compensation");
+    }
+  }
   // Interrupteur fusible HTA : calibre installé comparé au transformateur associé (nécessite les équipements du site et les locaux).
   if (eq.type === "Interrupteur Fusible HTA" && contexte && contexte.allEquipements) {
     const vf = calcVerificationFusibleTransfo(eq, contexte.allEquipements, contexte.locaux);
     if (vf && vf.sousCalibre) {
+      // Le constat « Fusibles … : dégradé. » sans autre détail vient de ce calibre : il est retiré au profit de l'explication.
+      for (let k = constats.length - 1; k >= 0; k--) if (/^Fusibles (installés|de rechange) : (dégradé|défaillant)\.$/.test(constats[k].phrase)) constats.splice(k, 1);
       constats.push({ phrase: `Le calibre des fusibles installés (${vf.inFusible} A) est inférieur au repère recommandé pour le ${libelleTransfo(vf)} : Ib = ${vf.ib} A (${vf.sn} kVA sous ${vf.u} kV), soit In ≥ 1,4 × Ib = ${vf.seuilMin} A (${vf.norme}), avec un risque de fusion intempestive à l'enclenchement.`, rang: 1, categorie: "fusible_calibre", sujet: "calibre des fusibles", seuilMin: vf.seuilMin });
     }
     if (vf && vf.ibTropEleve) {
       constats.push({ phrase: `Le courant de base primaire du ${libelleTransfo(vf)} (Ib = ${vf.ib} A) dépasse 45 A : au-delà de ce seuil, la protection par fusible n'est normalement plus valable en NF C13-100 pour un poste à un seul transformateur.`, rang: 1, categorie: "fusible_ib", sujet: "protection par fusibles" });
     }
   }
+  // Fusibles de rechange différents des fusibles installés (calibre ou modèle) : en cas de fusion, on remplacerait par autre chose.
+  Object.keys(eq.controles || {}).forEach((sk) => {
+    const sec = eq.controles[sk];
+    if (!sec || typeof sec !== "object" || !sec.fusibles_installes || !sec.fusibles_rechange) return;
+    const fi = sec.fusibles_installes.fields || {}, fr2 = sec.fusibles_rechange.fields || {};
+    if (["Non présent", "Non réalisé"].includes(sec.fusibles_rechange.etat)) return;
+    const inI = numOf(fi.in), inR = numOf(fr2.in);
+    const mod = (f) => [f.fabricant, f.modele].map((x) => String(x || "").trim()).filter(Boolean).join(" ");
+    const mI = mod(fi), mR = mod(fr2);
+    const calibreDiff = inI !== null && inR !== null && inI !== inR;
+    const modeleDiff = String(fi.modele || "").trim() && String(fr2.modele || "").trim() && String(fi.modele).trim().toLowerCase() !== String(fr2.modele).trim().toLowerCase();
+    if (!calibreDiff && !modeleDiff) return;
+    const desc = (m, i) => [m, i !== null ? `${String(i).replace(".", ",")} A` : ""].filter(Boolean).join(", ");
+    ajouter(`Les fusibles de rechange (${desc(mR, inR)}) ne correspondent pas aux fusibles installés (${desc(mI, inI)})${calibreDiff ? " : en cas de fusion, le remplacement se ferait avec un calibre différent" : " : modèle différent, à vérifier (dimensions, percuteur, caractéristiques)"}.`, calibreDiff ? 1 : 0, "fusible_rechange", "fusibles de rechange");
+  });
+  // Même phrase produite deux fois (deux lots identiques, deux items équivalents…) : on ne la garde qu'une fois, au meilleur rang.
+  const vues = new Map();
+  for (let k = 0; k < constats.length; k++) {
+    const cle = String(constats[k].phrase || "").trim().toLowerCase();
+    if (!cle) continue;
+    if (vues.has(cle)) { const j = vues.get(cle); if ((constats[k].rang ?? 9) < (constats[j].rang ?? 9)) constats[j].rang = constats[k].rang; constats.splice(k, 1); k--; }
+    else vues.set(cle, k);
+  }
   return constats;
 }
+// Plus petit calibre normalisé de fusible HTA au moins égal au seuil (In ≥ 1,4 × Ib).
+function calibreFusibleNormalise(seuilMin) {
+  const v = numOf(seuilMin); if (v === null) return null;
+  const c = LISTE_IN_FUSIBLE.map(Number).filter((x) => x >= v - 1e-9).sort((a, b) => a - b)[0];
+  return c === undefined ? null : String(c).replace(".", ",");
+}
 const RECO_PAR_CATEGORIE = {
-  fusible_calibre: (s, g) => `Remplacer les fusibles (en service et de rechange) par un calibre adapté au transformateur${g && g.seuilMin ? ` (au moins ${g.seuilMin} A)` : ""}.`,
+  fusible_calibre: (s, g) => { const n = g && g.seuilMin ? calibreFusibleNormalise(g.seuilMin) : null; return `Remplacer les fusibles (en service et de rechange) par un calibre adapté au transformateur${g && g.seuilMin ? (n ? ` : calibre normalisé ${n} A (au moins ${String(g.seuilMin).replace(".", ",")} A)` : ` (au moins ${g.seuilMin} A)`) : ""}, à confirmer d'après les préconisations du constructeur de la cellule.`; },
   fusible_ib: () => "Étudier le remplacement de la protection par fusibles par un disjoncteur HTA (Ib > 45 A).",
   fusible: (s) => `Remplacer les fusibles concernés par jeu complet de trois (${s}).`,
   serrage: (s) => `Resserrer les connexions au couple préconisé (${s}).`,
   contact: (s) => `Nettoyer les contacts et refaire la mesure ; remplacer si l'écart persiste (${s}).`,
+  fusible_rechange: () => "Mettre à disposition des fusibles de rechange identiques aux fusibles installés (calibre et modèle).",
   isolement: (s) => `Rechercher la cause de la baisse d'isolement et refaire la mesure (${s}).`,
   enroulements: (s) => `Faire contrôler les enroulements et le changeur de prises (${s}).`,
   huile: (s) => `Réaliser une analyse complémentaire de l'huile (${s}).`,
@@ -13668,6 +13910,7 @@ const RECO_PAR_CATEGORIE = {
     ? `Remplacer l'ensemble des batteries${g.finDeVie ? " (durée de vie atteinte" + (g.nbBlocs ? `, ${g.nbBlocs} bloc${g.nbBlocs > 1 ? "s" : ""} défectueux)` : ")") : g.nbBlocs ? ` (${g.nbBlocs} bloc${g.nbBlocs > 1 ? "s" : ""} défectueux)` : ""}.`
     : `Remplacer ${g && g.nbBlocs > 1 ? "les blocs défectueux" : "le bloc défectueux"} (${s})${g && g.finDeVie ? " ; prévoir ensuite le remplacement de l'ensemble des batteries (durée de vie atteinte)" : ""}.`,
   gradin: (s) => `Contrôler les condensateurs et contacteurs des gradins hors tolérance (${s}).`,
+  cosphi: () => "Vérifier le régulateur (consigne, seuil C/K, temporisations) et la disponibilité de tous les gradins ; refaire la mesure à charge représentative.",
   module: (s) => `Remplacer ou réparer les modules de puissance concernés (${s}).`,
   redondance_modules: () => "Rétablir la redondance : remettre en service les modules en défaut ou ajouter un module.",
   capacite_modules: () => "Remettre en service ou ajouter des modules : la puissance disponible ne couvre plus la charge.",
@@ -13683,7 +13926,7 @@ const RECO_PAR_CATEGORIE = {
   etat_degrade: (s) => `Surveiller à la prochaine visite : ${s}.`,
 };
 const MAX_PRECONISATIONS = 5;
-const ORDRE_RECO = ["capacite_modules", "module", "redondance_modules", "surcharge_condensateurs", "resonance", "self_accord", "fusible_calibre", "fusible_ib", "fusible", "serrage", "contact", "isolement", "enroulements", "huile", "mise_terre", "protection", "disjoncteur", "batterie", "gradin", "usure", "proprete", "ventilation", "thermique", "mesure", "etat_defaillant", "etat_degrade"];
+const ORDRE_RECO = ["capacite_modules", "module", "redondance_modules", "surcharge_condensateurs", "resonance", "self_accord", "fusible_calibre", "fusible_ib", "fusible", "fusible_rechange", "serrage", "contact", "isolement", "enroulements", "huile", "mise_terre", "protection", "disjoncteur", "batterie", "gradin", "cosphi", "usure", "proprete", "ventilation", "thermique", "mesure", "etat_defaillant", "etat_degrade"];
 // Préconisations dédoublonnées, regroupées par famille, les plus urgentes en premier.
 function preconisationsDepuisConstats(constats) {
   const groupes = {};
@@ -13696,7 +13939,7 @@ function preconisationsDepuisConstats(constats) {
     if (c.modeBatterie) { groupes[cle].mode = c.modeBatterie; groupes[cle].nbBlocs = c.nbBlocs; }
   });
   // Calibre inadapté : le remplacement « par des fusibles de caractéristiques identiques » serait contradictoire — la préconisation de calibre le remplace.
-  if (groupes.fusible_calibre) delete groupes.fusible;
+  if (groupes.fusible_calibre) { delete groupes.fusible; delete groupes.fusible_rechange; }
   delete groupes.corrige; // défauts corrigés lors de la visite : aucune préconisation
   // Batteries : blocs défectueux ET fin de vie → une seule préconisation de remplacement, jamais les deux.
   if (groupes.batterie) {
@@ -13718,7 +13961,7 @@ function preconisationsDepuisConstats(constats) {
     .sort((a, b) => (groupes[b].rang - groupes[a].rang) || (ORDRE_RECO.indexOf(a) - ORDRE_RECO.indexOf(b)))
     .map((cle) => {
       const g = groupes[cle];
-      const sujets = listeFr([...new Set(g.sujets)].map((x) => (cle === "usure" ? x : String(x).charAt(0).toLowerCase() + String(x).slice(1))));
+      const sujets = listeFr([...new Set(g.sujets)].map((x) => (cle === "usure" || /^[A-ZÉ0-9]{2}/.test(String(x)) ? x : String(x).charAt(0).toLowerCase() + String(x).slice(1))));
       const t = String(RECO_PAR_CATEGORIE[cle](sujets, g)).trim().replace(/[.\s]+$/, "");
       return finPhrase(g.rang >= 2 ? `${t} — Prioritaire` : t);
     });
@@ -13843,7 +14086,7 @@ function etatFonctionnementSite(site) { return fonctionnementManuel(site) ? site
 function genererRemarquesEquipement(eq, contexte) {
   const constats = analyserAnomaliesEquipement(eq, contexte);
   // Pièces d'usure remplacées lors de cette maintenance : reprises dans les constats.
-  const rempl = contexte && "rapportDate" in contexte ? remplacementsDuRapport(eq, contexte.rapportDate).filter((r) => !(constats.remplacementsCites && constats.remplacementsCites.has(r.id))).map((r) => finPhrase(texteRemplacementClient(r))) : [];
+  const rempl = contexte && "rapportDate" in contexte ? remplacementsDuRapport(eq, contexte.rapportDate).filter((r) => !(constats.remplacementsCites && constats.remplacementsCites.has(r.id))).map((r) => finPhrase(texteRemplacementClient(r))).filter((t, i, arr) => arr.indexOf(t) === i) : []; // deux lots de ventilateurs remplacés → une seule phrase
   if (!constats.length && rempl.length) return `Constats :\n• Aucune anomalie relevée : contrôles conformes.\n${rempl.map((x) => "• " + x).join("\n")}`;
   if (!constats.length) return "Aucune anomalie relevée : contrôles conformes.";
   const tries = [...constats].sort((a, b) => b.rang - a.rang);
@@ -13935,7 +14178,7 @@ function genererSyntheseSite(site) {
     .filter(({ e, texte }) => remarquesStructurees(texte) || complementEquipement(e).trim() || (RANK_OF[e.etatFinal] ?? 0) !== 0)
     .sort((a, b) => (RANK_OF[b.e.etatFinal] ?? 0) - (RANK_OF[a.e.etatFinal] ?? 0))
     .map(({ e, texte }) => {
-      const titre = `${e.type}${e.identification.repere ? " (" + e.identification.repere + ")" : ""}`;
+      const titre = `${e.type}${nomEquipementSite(e, site) ? " (" + nomEquipementSite(e, site) + ")" : ""}`;
       // Pas de ligne vide à l'intérieur d'un bloc : une ligne vide sépare deux équipements.
       if (remarquesStructurees(texte)) return `${titre}\n${texte.trim().replace(/\n\s*\n/g, "\n")}`;
       const lignes = texte.trim().split("\n").map((l) => l.trim().replace(/^[•\-–*]\s*/, "")).filter(Boolean);
@@ -17301,8 +17544,23 @@ function CalendarView({ sites, interventions, onOpenSite, onOpenIntervention, on
 // chargement si "docx" était importée en haut du fichier. Une fois l'app réellement
 // déployée (Vercel, etc.), ce chargement dynamique résout normalement le vrai paquet npm.
 let DOCX = null;
+// Nombre décimal écrit à la française dans les documents Word : « 84.068 » → « 84,068 ». Les références (« 3022513.40 »),
+// versions (« V4.02 ») et suites à plusieurs points (« 1.2.3 ») ne sont pas touchées.
+function virguleDecimale(t) {
+  return String(t).replace(/(^|[^\w.,/])(\d{1,6})\.(\d+)(?![\w./])/g, "$1$2,$3");
+}
 async function ensureDocx() {
-  if (!DOCX) DOCX = await import("docx");
+  if (!DOCX) {
+    const mod = await import("docx");
+    class TextRunFr extends mod.TextRun {
+      constructor(o) {
+        if (typeof o === "string") super(virguleDecimale(o));
+        else if (o && typeof o.text === "string") super({ ...o, text: virguleDecimale(o.text) });
+        else super(o);
+      }
+    }
+    DOCX = { ...mod, TextRun: TextRunFr };
+  }
   return DOCX;
 }
 
@@ -17320,7 +17578,8 @@ const CELL_MARGINS_ENTETE = { top: 70, bottom: 70, left: 130, right: 120 };
 // Fond sombre #1A1F26, bleu #0A5DA8, ambre #FFC107, gris argent #C0C6CE ; barre bleue verticale devant les titres, cartes à filet de couleur,
 // mot-symbole « HT MAINTENANCE » à barre bleue, bande ambre en pied de couverture. Police Calibri (présente dans Word) en capitales espacées pour les titres.
 const A4_LARGEUR = 11906, A4_HAUTEUR = 16838;
-const DOCX_STYLES = { default: { document: { run: { font: "Calibri", color: DOCX_DARK } } } };
+// Arial : présente sur Windows, Mac, iPhone et iPad (Calibri manquait sur iPhone / Pages, remplacée par une police à empattements).
+const DOCX_STYLES = { default: { document: { run: { font: "Arial", color: DOCX_DARK } } } };
 // Une seule section et des marges normales pour tout le document : Pages ne gère pas des marges différentes d'une section à l'autre, ni les sauts de page
 // par propriété de paragraphe, ni les hauteurs de ligne / de rangée « exactes » — on s'en tient donc aux éléments que Word, LibreOffice et Pages respectent tous.
 const PAGE_CORPS = { size: { width: A4_LARGEUR, height: A4_HAUTEUR }, margin: { top: 900, bottom: 1000, left: 1153, right: 1153, header: 400, footer: 450 } };
@@ -17441,15 +17700,17 @@ function docxCarteRemarques({ titre = "", lien = "", etat = "", constats = [], p
     ] })],
   });
 }
-function docxRemarquesEquipement(texte, etat) {
+function docxRemarquesEquipement(texte, etat, avant = []) {
   const titre = docxHeading("Remarques et préconisations", 360, 140);
   const lignes = String(texte).split("\n").map((l) => l.trim()).filter(Boolean);
-  if (!remarquesStructurees(texte)) {
+  const carte = !remarquesStructurees(texte)
     // Texte libre : chaque ligne devient un constat (lisible en liste, même sans titres « Constats » / « Préconisations »).
-    return [titre, docxCarteRemarques({ etat, constats: lignes.map((l) => l.replace(/^[•\-–*]\s*/, "")) }), docxSpacer(120)];
-  }
-  const p = parserSectionsRemarques(lignes);
-  return [titre, docxCarteRemarques({ etat, constats: p.constats, preconisations: p.preconisations, autres: p.autres }), docxSpacer(120)];
+    ? docxCarteRemarques({ etat, constats: lignes.map((l) => l.replace(/^[•\-–*]\s*/, "")) })
+    : (() => { const p = parserSectionsRemarques(lignes); return docxCarteRemarques({ etat, constats: p.constats, preconisations: p.preconisations, autres: p.autres }); })();
+  // Pages / iPhone ignorent « garder avec le suivant » : encart d'état, titre et carte courte sont mis dans une seule ligne
+  // de tableau insécable, sinon le titre reste seul en bas de page et son contenu part sur la page suivante.
+  if (lignes.join(" ").length < 900) return [docxBlocInsecable([...avant, titre, carte, new DOCX.Paragraph({ spacing: { before: 0, after: 0 }, children: [] })]), docxSpacer(120)];
+  return [...avant, titre, carte, docxSpacer(120)];
 }
 // Synthèse du site, lisible par le client : encart « synthèse générale » en grands caractères (barre et fond de la couleur de l'état global), puis tableau détaillé
 // Équipement | Constats | Préconisations dont chaque ligne est colorée selon l'état de l'équipement — rouge : prioritaire, orange : à planifier, vert : conforme —
@@ -17481,7 +17742,7 @@ function docxSyntheseSiteStructuree(texte, site) {
   const p = parserSyntheseSite(texte);
   const out = [];
   const equipements = (site && site.equipements) || [];
-  const titreDe = (e) => `${e.type}${e.identification && e.identification.repere ? " (" + e.identification.repere + ")" : ""}`;
+  const titreDe = (e) => `${e.type}${nomEquipementSite(e, site) ? " (" + nomEquipementSite(e, site) + ")" : ""}`;
   const equipementDuTitre = (titre) => equipements.find((e) => titreDe(e) === titre) || equipements.find((e) => titre && titre.startsWith(e.type) && e.identification && e.identification.repere && titre.includes(e.identification.repere));
   // Synthèse recalculée à partir des équipements actuels du site : le texte enregistré peut dater
   // d'avant l'ajout d'un équipement ou le changement d'un état (ex. « 1 équipement… conforme » alors
@@ -17564,13 +17825,14 @@ function docxAnalyseResonance(a, eq) {
   if (a.etapes.length) {
     if (a.multiConfigs) {
       out.push(tableau(["Transformateurs en service", "Gradins", "Q cumulé", "h₀", "Rang proche (écart)", "Verdict"], [2300, 800, 1200, 900, 1500, 2900],
-        a.etapes.map((e) => ({ niveau: e.niveau, cellules: [e.n === 1 ? `${e.config} (Scc ≈ ${e.sccConfig} kVA)` : "〃", String(e.n), `${fr(e.q)} kVAR`, fr(e.h0), `${e.rangProche} (${e.ecartPct} %)`, e.verdict] }))));
+        a.etapes.map((e) => ({ niveau: e.niveau, cellules: [e.n === 1 ? `${e.config} (Scc ≈ ${e.sccConfig} kVA)` : "〃", e.complet ? "Tous (Qn)" : String(e.n), `${fr(e.q)} kVAR`, fr(e.h0), `${e.rangProche} (${e.ecartPct} %)`, e.verdict] }))));
     } else {
       out.push(tableau(["Gradins enclenchés", "Q cumulé", "h₀ = √(Scc/Q)", "Rang proche (écart)", "Verdict"], [1500, 1400, 1500, 1700, 3500],
-        a.etapes.map((e) => ({ niveau: e.niveau, cellules: [String(e.n), `${fr(e.q)} kVAR`, fr(e.h0), `${e.rangProche} (${e.ecartPct} %)`, e.verdict] }))));
+        a.etapes.map((e) => ({ niveau: e.niveau, cellules: [e.complet ? "Tous (Qn)" : String(e.n), `${fr(e.q)} kVAR`, fr(e.h0), `${e.rangProche} (${e.ecartPct} %)`, e.verdict] }))));
     }
     out.push(docxSpacer(80));
     if (a.noteParallele) { out.push(docxNormeNote(a.noteParallele)); out.push(docxSpacer(80)); }
+    if (a.notePartielle) { out.push(docxNormeNote("⚠ " + a.notePartielle)); out.push(docxSpacer(80)); }
   }
   if (a.aMesures) {
     const pc = (v) => (v !== null ? `${fr(v)} %` : "—");
@@ -17579,10 +17841,11 @@ function docxAnalyseResonance(a, eq) {
         const niveau = x.niveauAmpli !== null ? x.niveauAmpli : x.presence === "present" ? 1 : 0;
         const verdict = x.ampli !== null
           ? `${x.niveauAmpli === 2 ? "Résonance confirmée" : x.niveauAmpli === 1 ? "Amplification modérée" : "Pas d'amplification"} (× ${fr(x.ampli)} sur ${x.ampliSur})`
-          : x.presence === "present" ? "Présent sur le réseau" : "Faible";
+          : x.identique ? "Non évaluable (relevés identiques)" : x.presence === "present" ? "Présent sur le réseau" : "Faible";
         return { niveau, cellules: [String(x.rang), pc(x.ihHS), pc(x.uhHS), pc(x.ihES), pc(x.uhES), verdict] };
       })));
     out.push(docxSpacer(80));
+    if (a.noteIdentiques) { out.push(docxNormeNote("⚠ " + a.noteIdentiques)); out.push(docxSpacer(80)); }
   }
   const surch = a.surcharges.filter((x) => x.niveau > 0);
   if (surch.length) {
@@ -17618,13 +17881,18 @@ function docxNormeNote(texte) {
   const alerte = typeof texte === "string" && texte.trim().startsWith("⚠");
   const accent = alerte ? "B5730A" : "0A5DA8";
   const fond = alerte ? "FDF3E3" : "EEF2F6";
+  // Mise en page fixe et petite ligne vide de réserve en fin de note : l'aperçu iPhone / Pages sous-estime parfois la hauteur
+  // d'une cellule de plusieurs lignes et rognait la fin de la phrase.
   return docxTable({
-    width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: [TABLE_WIDTH],
-    rows: [new DOCX.TableRow({ children: [new DOCX.TableCell({
+    width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: [TABLE_WIDTH], layout: DOCX.TableLayoutType.FIXED,
+    rows: [new DOCX.TableRow({ cantSplit: true, children: [new DOCX.TableCell({
       width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, shading: { type: DOCX.ShadingType.CLEAR, fill: fond },
       borders: { top: docxAucuneBordure(), bottom: docxAucuneBordure(), right: docxAucuneBordure(), left: { style: DOCX.BorderStyle.SINGLE, size: 36, color: accent } },
-      margins: { top: 110, bottom: 110, left: 220, right: 160 },
-      children: [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: texte, size: 16, color: DOCX_DARK })] })],
+      margins: { top: 110, bottom: 30, left: 220, right: 160 },
+      children: [
+        new DOCX.Paragraph({ spacing: { after: 0 }, children: [new DOCX.TextRun({ text: texte, size: 16, color: DOCX_DARK })] }),
+        new DOCX.Paragraph({ spacing: { before: 0, after: 0 }, children: [new DOCX.TextRun({ text: "", size: 16 })] }),
+      ],
     })] })],
   });
 }
@@ -17785,7 +18053,7 @@ function docxControlRow(label, detail, action, etat, isAlternate, garderAvecSuit
 // Colonnes fixes Fonction / Gr. / État / Courbe / Réglage / TMS / Temporisation ; les réglages propres
 // à certaines fonctions (angle, sens, zone, seuils 49, cycles 79…) s'affichent sous le nom de la fonction.
 function docxTableauSeuilsRelais(seuils) {
-  const liste = (seuils || []).filter((s) => s && (s.label || Object.values(s.fields || {}).some((v) => v !== "" && v !== null && v !== undefined)));
+  const liste = (seuils || []).filter((s) => s && String(s.label || "").trim()); // un seuil sans fonction choisie n'est pas imprimé (signalé avant la génération)
   if (!liste.length) return null;
   const L = [3150, 520, 900, 1550, 1250, 830, 1400];
   const marges = { top: 70, bottom: 70, left: 90, right: 80 };
@@ -17866,7 +18134,7 @@ function docxControlRowsDense(label, detail, action, etat, isAlternate, garderAv
   // la grille Libellé | Valeur est faite de paragraphes à taquets de tabulation, deux couples par ligne quand ils tiennent.
   const TAB = (pos) => ({ type: DOCX.TabStopType.LEFT, position: pos });
   const tab = () => (DOCX.Tab ? new DOCX.TextRun({ children: [new DOCX.Tab()] }) : new DOCX.TextRun({ text: "\t" }));
-  const largeurCle = (t) => String(t || "").length * 72; // estimation (Calibri 7,5 pt)
+  const largeurCle = (t) => String(t || "").length * 80; // estimation (Arial 7,5 pt)
   const runCle = (t) => new DOCX.TextRun({ text: t, size: 15, color: "6B7785" });
   const runsVal = (p) => p.runs || [new DOCX.TextRun({ text: p.val, size: 16, bold: true, color: couleurEtat(p.etat) })];
   // Colonnes adaptées au plus long libellé du contrôle (grille identique pour toutes ses lignes) — largeur utile de la cellule ≈ 7350.
@@ -17993,7 +18261,14 @@ function docxPastilleEtat(etat, { taille = 15, garder = false } = {}) {
     new DOCX.TextRun({ text: String(etat || "—").toUpperCase() + "\u00A0\u00A0", bold: true, size: taille, color: texte, characterSpacing: 10, shading: ombre }),
   ] });
 }
+// Saisie brute « ,93 » ou « -.5 » : on rétablit le zéro avant la virgule pour l'impression.
+function normNombreSaisi(v) {
+  if (v === null || v === undefined) return v;
+  const t = String(v).trim();
+  return /^[-+]?[.,]\d+$/.test(t) ? t.replace(/^([-+]?)([.,])/, "$10$2") : v;
+}
 function docxValCell(text, state, garder = false) {
+  text = normNombreSaisi(text);
   const t = text === null || text === undefined || text === "" ? "—" : String(text);
   const c = state && DOCX_ETAT_COULEURS[state];
   return new DOCX.TableCell({
@@ -18006,7 +18281,13 @@ function docxValCell(text, state, garder = false) {
 // réutilisé par toutes les sections de mesures par phase (Onduleur, Batterie de compensation…).
 // Monophasé : une seule colonne de valeur (pas de L2 / L3 vides) + une colonne « Calcul / seuil »
 // seulement si une ligne a une information différente de sa mesure (seuil THD, valeur calculée…).
+function ligneMesureVide(r) {
+  const vide = (v) => v === "" || v === null || v === undefined || String(v).trim() === "" || String(v).trim() === "—";
+  return [r[1], r[2], r[3], r[4]].every(vide);
+}
 function docxBuildMesuresTableMono(rows) {
+  rows = rows.filter((r) => !ligneMesureVide(r));
+  if (!rows.length) return null;
   const vide = (v) => v === "" || v === null || v === undefined;
   const memes = (a, b) => String(a).trim() === String(b).trim() || (numOf(a) !== null && numOf(a) === numOf(b));
   const lignes = rows.map((r) => {
@@ -18022,6 +18303,7 @@ function docxBuildMesuresTableMono(rows) {
     children: [new DOCX.Paragraph({ keepNext: true, alignment: DOCX.AlignmentType.CENTER, children: [new DOCX.TextRun({ text, size: 17, bold: true, color: DOCX_WHITE })] })],
   });
   const valeur = (text, state, width, garder, bleu = false) => {
+    text = normNombreSaisi(text);
     const t = vide(text) ? "—" : String(text);
     const c = state && DOCX_ETAT_COULEURS[state];
     return new DOCX.TableCell({
@@ -18038,7 +18320,8 @@ function docxBuildMesuresTableMono(rows) {
   ] }); });
   return docxTable({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: L, rows: [entete, ...corps] });
 }
-function docxBuildMesuresTable(rows, headers, enteteDerniere = "Moyenne des valeurs", mono = false) {
+function docxBuildMesuresTable(rows, headers, enteteDerniere = "Synthèse", mono = false) {
+  rows = (rows || []).filter((r) => !ligneMesureVide(r));
   if (!rows.length) return null;
   if (mono) return docxBuildMesuresTableMono(rows);
   const h = headers || ["L1", "L2", "L3"];
@@ -18051,9 +18334,32 @@ function docxBuildMesuresTable(rows, headers, enteteDerniere = "Moyenne des vale
   const body = rows.map((r, idx) => { const garder = garderLigne(idx); const etats = r[5] || [null, null, null]; return new DOCX.TableRow({ cantSplit: true, children: [
     new DOCX.TableCell({ width: { size: 2800, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, verticalAlign: DOCX.VerticalAlign.CENTER, shading: idx % 2 === 1 ? { type: DOCX.ShadingType.CLEAR, fill: DOCX_ZEBRE } : undefined, children: [new DOCX.Paragraph({ keepNext: garder, children: [new DOCX.TextRun({ text: r[0], size: 17, bold: true, color: "4A5563" })] })] }),
     docxValCell(r[1], etats[0], garder), docxValCell(r[2], etats[1], garder), docxValCell(r[3], etats[2], garder),
-    new DOCX.TableCell({ width: { size: 2000, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, children: [new DOCX.Paragraph({ keepNext: garder, children: [new DOCX.TextRun({ text: (r[4] === "" || r[4] === null || r[4] === undefined) ? "—" : String(r[4]), size: 16, color: "0A5DA8", bold: true })] })] }),
+    new DOCX.TableCell({ width: { size: 2000, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, children: [new DOCX.Paragraph({ keepNext: garder, children: [new DOCX.TextRun({ text: (r[4] === "" || r[4] === null || r[4] === undefined) ? "—" : String(normNombreSaisi(r[4])), size: 16, color: "0A5DA8", bold: true })] })] }),
   ]}); });
   return docxTable({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: [2800, 1600, 1600, 1600, 2000], rows: [header, ...body] });
+}
+// Section de mesures sans aucune valeur saisie : une phrase plutôt qu'un titre seul ou un tableau de tirets.
+function docxAucuneMesure() {
+  return new DOCX.Paragraph({ spacing: { before: 20, after: 60 }, children: [new DOCX.TextRun({ text: "Aucune mesure relevée.", italics: true, size: 17, color: "8B96A3" })] });
+}
+// Mesures « avec » et « sans » compensation strictement identiques (au moins deux valeurs numériques comparées).
+function mesuresCompensationIdentiques(eq) {
+  const am = eq.controles?.mesures_amont || {}, av = eq.controles?.mesures_aval || {};
+  let n = 0;
+  for (const k of Object.keys(am)) {
+    if (k.endsWith("__custom") || !am[k] || !am[k].fields) continue;
+    const k2 = k.replace(/_amont$/, "_aval");
+    const f1 = am[k].fields, f2 = (av[k2] && av[k2].fields) || null;
+    if (!f2) continue;
+    for (const c of Object.keys(f1)) {
+      if (c.endsWith("Unite")) continue;
+      const a = numOf(f1[c]), b = numOf(f2[c]);
+      if (a === null && b === null) continue;
+      if (a !== b) return false;
+      n++;
+    }
+  }
+  return n >= 2;
 }
 function moyenneOf(...vals) {
   const nums = vals.map(numOf).filter((v) => v !== null);
@@ -18076,13 +18382,16 @@ function docxTableauMesures(items, controlesSection, mono = false) {
     const computeField = (k) => { const fd = (item.fields || []).find((x) => x.key === k && x.compute); return fd ? fd.compute(fBrut) : ""; };
     let matched = false;
     if (f.p1 !== undefined || f.s1 !== undefined) {
-      rows.push([`P relevé (${libU("p1", "kW")})`, f.p1, f.p2, f.p3, moyenneOf(f.p1, f.p2, f.p3)]);
-      rows.push([`S relevé (${libU("s1", "kVA")})`, f.s1, f.s2, f.s3, moyenneOf(f.s1, f.s2, f.s3)]);
+      // Puissances : la synthèse utile est le total des phases ; cos φ / FP : la moyenne.
+      const totalTxt = (...v) => { const n = v.map(numOf).filter((x) => x !== null); return n.length > 1 ? "total " + Math.round(n.reduce((a, b) => a + b, 0) * 100) / 100 : ""; };
+      const moyTxt = (...v) => { const n = v.map(numOf).filter((x) => x !== null); return n.length > 1 ? "moy. " + moyenneOf(...v) : ""; };
+      rows.push([`P relevé (${libU("p1", "kW")})`, f.p1, f.p2, f.p3, totalTxt(f.p1, f.p2, f.p3)]);
+      rows.push([`S relevé (${libU("s1", "kVA")})`, f.s1, f.s2, f.s3, totalTxt(f.s1, f.s2, f.s3)]);
       if ((item.fields || []).some((x) => x.key === "q1")) {
-        rows.push(["Q calculé (kVAR)", computeField("q1"), computeField("q2"), computeField("q3"), moyenneOf(computeField("q1"), computeField("q2"), computeField("q3"))]); // Q calculé depuis les valeurs de base (kW / kVA)
+        rows.push(["Q calculé (kVAR)", computeField("q1"), computeField("q2"), computeField("q3"), totalTxt(computeField("q1"), computeField("q2"), computeField("q3"))]); // Q calculé depuis les valeurs de base (kW / kVA)
       }
       if (f.cosphi1 !== undefined) {
-        rows.push(["Cos φ (calculé)", computeField("cosphi1"), computeField("cosphi2"), computeField("cosphi3"), moyenneOf(computeField("cosphi1"), computeField("cosphi2"), computeField("cosphi3"))]);
+        rows.push(["Cos φ (calculé)", computeField("cosphi1"), computeField("cosphi2"), computeField("cosphi3"), moyTxt(computeField("cosphi1"), computeField("cosphi2"), computeField("cosphi3"))]);
       }
       matched = true;
     }
@@ -18091,7 +18400,7 @@ function docxTableauMesures(items, controlesSection, mono = false) {
     // dans la colonne moyenne.
     if (f.fp1 !== undefined) {
       const estFondamental = (item.fields || []).some((x) => x.key === "fp1" && /fondamental/i.test(x.label || ""));
-      rows.push([estFondamental ? "Cos φ fondamental" : "FP", f.fp1, f.fp2, f.fp3, moyenneOf(f.fp1, f.fp2, f.fp3)]);
+      { const n = [f.fp1, f.fp2, f.fp3].map(numOf).filter((x) => x !== null); rows.push([estFondamental ? "Cos φ fondamental" : "FP", f.fp1, f.fp2, f.fp3, n.length > 1 ? "moy. " + moyenneOf(f.fp1, f.fp2, f.fp3) : ""]); }
       matched = true;
     }
     if (f.nature1 !== undefined) {
@@ -18100,14 +18409,39 @@ function docxTableauMesures(items, controlesSection, mono = false) {
     }
     if (matched) return;
     if (f.l1 !== undefined && f.l2 !== undefined && f.l3 !== undefined) {
-      let calc = "";
-      (item.fields || []).forEach((ff) => {
-        if (!ff.compute || ff.hidden) return;
+      if (["l1", "l2", "l3"].every((k) => String(f[k] ?? "").trim() === "")) return; // rien de mesuré : pas de ligne « — — — (seuil …) »
+      // Synthèse explicite : « moy. 236 V · déséquilibre 0,85 % (max 2 %) », « max 1,7 % (seuil 8 %) ».
+      // Pas de déséquilibre sur un écart (ΔV) ni sur une tension de contrôle-commande : ça n'a pas de sens.
+      const sansDeseq = /^ΔV|Tension CS/i.test(item.label || "");
+      const morceaux = [];
+      const valeurDe = (ff) => {
         const brut = ff.compute(fBrut);
         const u = ff.unitFrom && ff.unit ? (fBrut[ff.unitFrom + "Unite"] || ff.unit) : ff.unit;
         const v = ff.unitFrom && ff.unit ? depuisUniteBase(brut, ff.unit, u) : brut;
-        if (v !== "" && v !== null && v !== undefined) calc += (calc ? "  ·  " : "") + `${v}${u ? " " + u : ""}`;
+        return v === "" || v === null || v === undefined ? null : { v, u: u ? String(u).replace(/\s*\(.*$/, "") : "" };
+      };
+      const champsCalc = (item.fields || []).filter((ff) => ff.compute && !ff.hidden);
+      const tolMin = champsCalc.find((ff) => ff.key === "tol_min"), tolMax = champsCalc.find((ff) => ff.key === "tol_max");
+      const seuilDeseq = tolMax && tolMax.unitFrom === "desequilibre";
+      champsCalc.forEach((ff) => {
+        if (ff.key === "tol_min" || ff.key === "tol_max") return;
+        if (ff.key === "desequilibre" && sansDeseq) return;
+        const x = valeurDe(ff);
+        if (!x) return;
+        const txt = `${x.v}${x.u ? " " + x.u : ""}`;
+        if (ff.key === "moyenne") morceaux.push("moy. " + txt);
+        else if (ff.key === "max") morceaux.push("max " + txt);
+        else if (ff.key === "desequilibre") {
+          const s2 = seuilDeseq ? valeurDe(tolMax) : null;
+          morceaux.push("déséquilibre " + txt + (s2 ? ` (max ${s2.v} %)` : ""));
+        } else morceaux.push(txt);
       });
+      if (tolMax && !seuilDeseq) {
+        const a = tolMin ? valeurDe(tolMin) : null, b = valeurDe(tolMax);
+        if (a && b) morceaux.push(`tolérance ${a.v} – ${b.v}${b.u ? " " + b.u : ""}`);
+        else if (b) morceaux.push(`(seuil ${b.v}${b.u ? " " + b.u : ""})`);
+      }
+      const calc = morceaux.join("  ·  ").replace(/  ·  \(seuil/, " (seuil");
       const etats = [champTolStatus(item, fBrut, "l1", value.etat), champTolStatus(item, fBrut, "l2", value.etat), champTolStatus(item, fBrut, "l3", value.etat)];
       const uL = uniteLigne("l1");
       rows.push([uL && unitFamilyFor(uL) ? `${item.label} (${uL})` : item.label, f.l1, f.l2, f.l3, calc, etats]);
@@ -18147,7 +18481,22 @@ function docxPhaseTable(rows, headers, colors) {
   return docxTable({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: [3600, 2000, 2000, 2000], rows: [header, ...body] });
 }
 // Table de synthèse : le nom de chaque équipement est un lien cliquable vers sa page dans le document.
-function docxSyntheseRow(label, etat, bookmarkId, alterne = false) {
+// Pastille secondaire « À planifier » : équipement conforme mais avec une préconisation (son état reste affiché au-dessus).
+function docxPastilleAPlanifier() {
+  const ombre = { type: DOCX.ShadingType.CLEAR, fill: "EAF2FB", color: "auto" };
+  return new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, spacing: { before: 40, after: 0 }, children: [
+    new DOCX.TextRun({ text: "\u00A0\u00A0◆\u00A0", bold: true, size: 13, color: "0A5DA8", shading: ombre }),
+    new DOCX.TextRun({ text: "À PLANIFIER\u00A0\u00A0", bold: true, size: 13, color: "0A5DA8", characterSpacing: 10, shading: ombre }),
+  ] });
+}
+function equipementConformeAvecPreconisation(eq, site) {
+  if ((RANK_OF[eq.etatFinal] ?? -1) !== 0) return false;
+  try {
+    const t = texteRemarquesRapport(eq, contexteRemarquesSite(site));
+    return remarquesStructurees(t) && parserSectionsRemarques(t.split("\n")).preconisations.length > 0;
+  } catch (e) { return false; }
+}
+function docxSyntheseRow(label, etat, bookmarkId, alterne = false, aPlanifier = false) {
   const linkRun = new DOCX.TextRun({ text: label, size: 18, color: DOCX_BLUE, underline: {} });
   const margeGenereuse = { top: 150, bottom: 150, left: 160, right: 140 };
   const fond = alterne ? { type: DOCX.ShadingType.CLEAR, fill: DOCX_ZEBRE } : undefined;
@@ -18156,7 +18505,7 @@ function docxSyntheseRow(label, etat, bookmarkId, alterne = false) {
       bookmarkId ? new DOCX.InternalHyperlink({ anchor: bookmarkId, children: [linkRun] }) : new DOCX.TextRun({ text: label, size: 18, color: DOCX_DARK }),
     ] })] }),
     etat
-      ? new DOCX.TableCell({ width: { size: 2000, type: DOCX.WidthType.DXA }, margins: margeGenereuse, verticalAlign: DOCX.VerticalAlign.CENTER, shading: fond, children: [docxPastilleEtat(etat)] })
+      ? new DOCX.TableCell({ width: { size: 2000, type: DOCX.WidthType.DXA }, margins: margeGenereuse, verticalAlign: DOCX.VerticalAlign.CENTER, shading: fond, children: [docxPastilleEtat(etat), ...(aPlanifier ? [docxPastilleAPlanifier()] : [])] })
       : new DOCX.TableCell({ width: { size: 2000, type: DOCX.WidthType.DXA }, margins: margeGenereuse, shading: fond, children: [new DOCX.Paragraph("")] }),
   ]});
 }
@@ -18165,10 +18514,18 @@ function docxSyntheseRow(label, etat, bookmarkId, alterne = false) {
 function equipementsTries(equipements) {
   return [...(equipements || [])].sort((a, b) => (a.ordre ?? 0) - (b.ordre ?? 0));
 }
+// Nom affiché d'un équipement : repère sans espaces parasites ; à défaut (fiche Sécurité…), le nom du local.
+function nomEquipementSite(eq, site) {
+  const rep = String((eq.identification && eq.identification.repere) || "").trim();
+  // Repère identique au type (« Batterie de compensation — Batterie de compensation ») : on prend le local à la place.
+  if (rep && rep.toLowerCase() !== String(eq.type || "").trim().toLowerCase()) return rep;
+  const local = ((site && site.locaux) || []).find((l) => l.id === eq.localId);
+  return local && local.nom ? String(local.nom).trim() : "";
+}
 function docxSyntheseTable(site) {
   if (site.equipements.length === 0) return null;
   return docxTable({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: [7600, 2000], rows: equipementsTries(site.equipements).map((eq, i) =>
-    docxSyntheseRow(eq.type + (eq.identification.repere ? " — " + eq.identification.repere : ""), eq.etatFinal, docxBookmarkId(eq), i % 2 === 1)
+    docxSyntheseRow(eq.type + (nomEquipementSite(eq, site) ? " — " + nomEquipementSite(eq, site) : ""), eq.etatFinal, docxBookmarkId(eq), i % 2 === 1, equipementConformeAvecPreconisation(eq, site))
   )});
 }
 // Word n'accepte que lettres/chiffres/underscore dans un nom de repère (bookmark), 40 caractères max.
@@ -19158,7 +19515,7 @@ function docxBlocTauxCharge(eq, allSites) {
   if (!tc && histo.length < 2) return [];
   const elements = [docxHeading("Taux de charge", 520, 160)];
   if (tc) {
-    const base = numOf(eq.identification?.calibreDisjoncteur) ? "I mesuré ÷ calibre du disjoncteur" : "S mesuré ÷ puissance nominale";
+    const base = libelleBaseTauxCharge(eq);
     elements.push(new DOCX.Paragraph({ keepNext: true, spacing: { before: 0, after: 40 }, children: [
       new DOCX.TextRun({ text: `Taux de charge calculé — L1 : ${tc.t1 ?? "—"}% · L2 : ${tc.t2 ?? "—"}% · L3 : ${tc.t3 ?? "—"}%`, bold: true, size: 17, color: DOCX_DARK }),
       new DOCX.TextRun({ text: `   (${base})`, size: 15, color: "8B96A3", italics: true }),
@@ -20219,11 +20576,11 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
   eq = repairEquipementControles(eq);
   const schema = schemaFiltreeParNiveau(getSchema(eq), eq.niveauMaintenance);
   if (!schema) {
-    return [docxEquipHeader((eq.type || "Équipement") + (eq.identification.repere ? " — " + eq.identification.repere : ""), docxBookmarkId(eq), eq.etatFinal), docxSpacer(40),
+    return [docxEquipHeader((eq.type || "Équipement") + (nomEquipementSite(eq, { locaux }) ? " — " + nomEquipementSite(eq, { locaux }) : ""), docxBookmarkId(eq), eq.etatFinal), docxSpacer(40),
       new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: "Type d'équipement non reconnu — données non affichées.", italics: true, color: "C0392B", size: 18 })] }), docxSpacer()];
   }
   const localNom = (locaux || []).find((l) => l.id === eq.localId);
-  const elements = [docxEquipHeader(eq.type + (eq.identification.repere ? " — " + eq.identification.repere : ""), docxBookmarkId(eq), eq.etatFinal), docxSpacer(40)];
+  const elements = [docxEquipHeader(eq.type + (nomEquipementSite(eq, { locaux }) ? " — " + nomEquipementSite(eq, { locaux }) : ""), docxBookmarkId(eq), eq.etatFinal), docxSpacer(40)];
   // Le local est une ligne du tableau d'identification, juste sous le nom / repère. Un équipement sans
   // tableau d'identification (ex. « Sécurité ») garde l'ancienne mention discrète au-dessus.
   const libelleLocal = nomLocalEquipement(eq, locaux);
@@ -20327,7 +20684,10 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
             return { text: `${libelleMultiple(s, p.M)} : ${[p.l1, p.l2, p.l3].filter((x) => String(x || "").trim()).join(" / ")} ${uTA}${tp ? ` (attendu ${tp.min} – ${tp.max})` : ""}`, etat: hors ? docxColorerEtat("bad", s.essai.etat) : tp ? "ok" : null };
           }) : []),
         ].filter(Boolean);
-        rows.push(["Essai de déclenchement — " + s.label, detail, s.essai.action, s.essai.etat]);
+        // Essai sans aucun temps mesuré : imprimé « Non réalisé » plutôt que « Conforme » (état par défaut de la fiche).
+        const sansMesureEssai = ![s.essai.fields.l1, s.essai.fields.l2, s.essai.fields.l3].some((x) => String(x || "").trim()) && !(asst && Array.isArray(asst.points) && asst.points.some((p) => [p.l1, p.l2, p.l3].some((x) => String(x || "").trim())));
+        const etatEssaiImprime = sansMesureEssai && (!s.essai.etat || s.essai.etat === "Conforme") ? "Non réalisé" : s.essai.etat;
+        rows.push(["Essai de déclenchement — " + s.label, sansMesureEssai ? detail.filter((d) => !/^Tolérance attendue/.test(d.text)) : detail, s.essai.action, etatEssaiImprime]);
       });
       const circuit = eq.controles.controles_relais.circuit_mesures_commande;
       rows.push(["Contrôle du circuit de mesures et commande", "", circuit.action, circuit.etat]);
@@ -20403,7 +20763,16 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
           // Repli sans dessin possible : l'intitulé de la branche reste affiché.
           bloc.push(new DOCX.Paragraph({ spacing: { before: 140, after: 40 }, children: [new DOCX.TextRun({ text: `${groupe.label}${moyenneB !== null ? ` — Moyenne (ensemble des branches) : ${fr(moyenneB)} V` : ""}`, bold: true, size: 17, color: DOCX_DARK })] }));
         }
-        if (evalues.length) {
+        if (evalues.length && plusieursBranches) {
+          // Plusieurs branches : une phrase propre à la branche ; la référence commune est donnée une seule fois en synthèse, après la dernière.
+          const valsB = evalues.map((e) => numOf(e.fields.tension)).filter((v) => v !== null);
+          const moyBranche = valsB.length ? valsB.reduce((a, b) => a + b, 0) / valsB.length : null;
+          const compte = defaillants.length === 0 ? `${evalues.length} élément(s) — tous conformes` : `${evalues.length} élément(s) — ${defaillants.length} hors tolérance (détail ci-dessous)`;
+          bloc.push(new DOCX.Paragraph({ spacing: { after: defaillants.length ? 60 : 160 }, children: [
+            new DOCX.TextRun({ text: `${groupe.label} : ${moyBranche !== null ? `moyenne ${fr(moyBranche)} V  ·  ` : ""}`, size: 16, color: "666666" }),
+            new DOCX.TextRun({ text: compte + ".", bold: defaillants.length > 0, size: 17, color: defaillants.length ? "C0392B" : DOCX_DARK }),
+          ] }));
+        } else if (evalues.length) {
           const legende = moyenneB !== null ? `Moyenne ${plusieursBranches ? "de l'ensemble des branches " : ""}${fr(moyenneB)} V  ·  tolérance −${tb} % / +${th} % (${fr(moyenneB * (1 - tb / 100))} – ${fr(moyenneB * (1 + th / 100))} V)  ·  ` : "";
           const compte = defaillants.length === 0
             ? `${evalues.length} élément(s) contrôlé(s) — tous conformes à la tolérance déclarée.`
@@ -20425,6 +20794,14 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
         }
       });
       if (!groupes.length) elements.push(docxHeading(sec.title));
+      if (plusieursBranches && toutesValeurs.length) {
+        const nbHors = entries.filter((e) => e.fields.tension && elementBatterieStatus(e.fields.tension, moyenneB, cfg.toleranceBasse, cfg.toleranceHaute) === "bad").length;
+        elements.push(new DOCX.Paragraph({ spacing: { before: 60, after: 160 }, children: [
+          new DOCX.TextRun({ text: "Synthèse toutes branches : ", bold: true, size: 17, color: DOCX_DARK }),
+          new DOCX.TextRun({ text: `${moyenneB !== null ? `moyenne ${fr(moyenneB)} V  ·  tolérance −${tb} % / +${th} % (${fr(moyenneB * (1 - tb / 100))} – ${fr(moyenneB * (1 + th / 100))} V)  ·  ` : ""}`, size: 16, color: "666666" }),
+          new DOCX.TextRun({ text: nbHors ? `${toutesValeurs.length} élément(s) contrôlé(s), ${nbHors} hors tolérance.` : `${toutesValeurs.length} élément(s) contrôlé(s), tous conformes.`, bold: nbHors > 0, size: 17, color: nbHors ? "C0392B" : DOCX_DARK }),
+        ] }));
+      }
       if (cfg.avecResistance) elements.push(docxNormeNote("Résistance interne par élément : IEEE 1188 (VRLA) / IEEE 450 — indicateur complémentaire à la tension, souvent plus précoce pour détecter une dégradation."));
       elements.push(docxSpacer());
       return;
@@ -20440,6 +20817,7 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
         const c3 = gradinCapacite(g.fields.i3, g.fields.u, freqReseau, mono);
         const pg = gradinPuissances(g, mono);
         const [q1, q2, q3] = [pg.phases[0], pg.phases[1] ?? null, pg.phases[2] ?? null];
+        const debutGradin = elements.length; // titre, résumé, tableau et self du gradin regroupés ensuite dans un bloc insécable
 
         elements.push(new DOCX.Paragraph({
           spacing: { before: 100, after: 6 },
@@ -20458,6 +20836,8 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
           const mesMono = [g.fields.i1 && `I mesuré : ${g.fields.i1} A`, c1 !== null && `C : ${c1} µF`, q1 !== null && `Q calculé : ${q1} kVAR`].filter(Boolean).join("   ·   ");
           const horsTol = iTheo !== null && toleranceState(g.fields.i1, Math.round(iTheo * 0.9 * 100) / 100, Math.round(iTheo * 1.1 * 100) / 100) === "bad";
           if (mesMono) elements.push(new DOCX.Paragraph({ spacing: { after: 6 }, children: [new DOCX.TextRun({ text: mesMono, size: 16, color: horsTol ? DOCX_ORANGE : "333333", bold: horsTol })] }));
+        } else if (![g.fields.i1, g.fields.i2, g.fields.i3].some((v) => numOf(v) !== null)) {
+          elements.push(new DOCX.Paragraph({ spacing: { after: 6 }, children: [new DOCX.TextRun({ text: "Courants non mesurés.", italics: true, size: 16, color: "8B96A3" })] }));
         } else elements.push(docxPhaseTable([
           ["I (A)", g.fields.i1, g.fields.i2, g.fields.i3],
           ["C (µF, ×3 triangle)", c1, c2, c3],
@@ -20468,6 +20848,7 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
 
         const extra = [g.fields.selfMA && `Self : ${g.fields.selfMA} mH`, g.fields.selfFrequence && `Fréquence d'accord : ${g.fields.selfFrequence} Hz`, g.action && `Action : ${g.action}`].filter(Boolean).join("   ·   ");
         if (extra) elements.push(new DOCX.Paragraph({ spacing: { before: 6, after: 4 }, children: [new DOCX.TextRun({ text: extra, size: 15, color: "666666" })] }));
+        { const blocG = elements.splice(debutGradin); elements.push(docxBlocInsecable([...blocG, new DOCX.Paragraph({ spacing: { before: 0, after: 0 }, children: [] })])); }
         elements.push(docxSpacer(60));
 
         { const galerie = docxPhotosCoteACote(g.photos, 160, 180); if (galerie) elements.push(galerie); }
@@ -20489,9 +20870,19 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
           ];
           elements.push(new DOCX.Paragraph({ keepNext: true, spacing: { before: 120, after: 80 }, children: [new DOCX.TextRun({ text: "Puissance de la batterie", bold: true, size: 20, color: DOCX_BLUE })] }));
           elements.push(docxTable({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: L, rows: lignes }));
-          const ecartQn = pb.qn && pb.total !== null && pb.source !== "declare" ? Math.round(((pb.total - pb.qn) / pb.qn) * 1000) / 10 : null;
+          // Gradins relevés moins nombreux que la batterie : la somme n'est pas comparable au Qn.
+          const nbDecl = numOf(eq.identification?.nombreGradins);
+          const partielQ = (nbDecl && pb.parGradin.length < nbDecl) || (pb.qn && pb.declareTotal !== null && pb.declareTotal < pb.qn * 0.95);
+          const ecartQn = !partielQ && pb.qn && pb.total !== null && pb.source !== "declare" ? Math.round(((pb.total - pb.qn) / pb.qn) * 1000) / 10 : null;
+          // Selfs anti-harmoniques : la puissance fournie dépasse celle des condensateurs seuls d'environ 1/(1 − p).
+          const pSelfs = (eq.controles.gradins_dynamique || []).map((g) => numOf(g.fields?.selfFrequence)).filter((f) => f && f > freqReseau).map((f) => (freqReseau / f) ** 2);
+          const pMoy = pSelfs.length ? pSelfs.reduce((x, y) => x + y, 0) / pSelfs.length : null;
+          const noteSelfs = pMoy && ecartQn !== null && ecartQn > 0 && ecartQn <= 25
+            ? `Avec selfs anti-harmoniques (p ≈ ${String(Math.round(pMoy * 1000) / 10).replace(".", ",")} %), la puissance réactive fournie dépasse normalement celle des condensateurs seuls d'environ +${String(Math.round((1 / (1 - pMoy) - 1) * 1000) / 10).replace(".", ",")} %, à quoi s'ajoute l'effet de la tension réelle (Q varie comme U²) : un écart positif de cet ordre est normal.` : "";
           const note = [`Puissance totale ${LIBELLE_SOURCE_PUISSANCE[pb.source] || ""}${!pb.complet ? ", certains gradins sans puissance connue" : ""}.`,
-            pb.qn ? `Qn déclaré : ${String(pb.qn).replace(".", ",")} kVAR${ecartQn !== null ? ` (écart ${ecartQn > 0 ? "+" : ""}${String(ecartQn).replace(".", ",")} %)` : ""}.` : "",
+            partielQ ? `${pb.parGradin.length} gradin${pb.parGradin.length > 1 ? "s" : ""} relevé${pb.parGradin.length > 1 ? "s" : ""}${nbDecl ? ` sur ${nbDecl}` : ""} : puissance partielle, non comparée au Qn déclaré (${String(pb.qn || "—").replace(".", ",")} kVAR).`
+              : pb.qn ? `Qn déclaré : ${String(pb.qn).replace(".", ",")} kVAR${ecartQn !== null ? ` (écart ${ecartQn > 0 ? "+" : ""}${String(ecartQn).replace(".", ",")} %)` : ""}.` : "",
+            noteSelfs,
             pb.parGradin.some((p) => p.source === "estime") ? "* estimé d'après les phases mesurées (moyenne × 3)." : "",
             !pb.mono ? "Q par phase = U/√3 × I ; capacité par élément C = I / (√3 · U · ω), couplage triangle (valeur « 3 × C » des plaques)." : ""].filter(Boolean).join(" ");
           elements.push(new DOCX.Paragraph({ spacing: { before: 60, after: 0 }, children: [new DOCX.TextRun({ text: note, size: 15, italics: true, color: "6B7785" })] }));
@@ -20532,19 +20923,25 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
           if (parts.length) rows.push([item.label, "", "", "", parts.map((p) => p.includes(" : ") ? p.split(" : ").slice(1).join(" : ") : p).join("  ·  ")]);
         }
       });
-      const t = docxBuildMesuresTable(rows, null, undefined, estBatterieMono(eq));
+      // Seule la ligne « Gradins en service » renseignée (ou rien) : pas de tableau de tirets.
+      const lignesUtiles = rows.filter((r) => !ligneMesureVide(r) && !/^(Gradins en service|Fréquence)/i.test(String(r[0])));
+      const lignesPuissanceUtiles = lignesPuissance.filter((r) => !ligneMesureVide(r));
+      if (!lignesUtiles.length && !lignesPuissanceUtiles.length) { elements.push(docxAucuneMesure()); elements.push(docxSpacer()); return; }
+      const t = docxBuildMesuresTable(rows.map((r) => (/^(Tension|THdV|Courant|ThdI)/.test(String(r[0])) && [r[1], r[2], r[3]].filter((v) => numOf(v) !== null).length > 1 && r[4] !== "" ? [...r.slice(0, 4), "moy. " + r[4], ...r.slice(5)] : r)), null, undefined, estBatterieMono(eq));
       if (t) elements.push(t);
       if (lignesPuissance.length) {
         if (t) elements.push(docxSpacer(80));
         elements.push(docxBuildMesuresTable(lignesPuissance, null, "Total", estBatterieMono(eq)));
       }
+      // Mesures sans compensation identiques à celles avec compensation (recopie) : on le signale au lieu de laisser croire à deux relevés.
+      if (sec.key === "mesures_aval" && mesuresCompensationIdentiques(eq)) { elements.push(docxSpacer(60)); elements.push(docxNormeNote("⚠ Valeurs identiques à celles relevées batterie en service : l'effet de la compensation (baisse du courant, du cos φ…) n'est pas mesuré.")); }
       elements.push(docxSpacer());
       return;
     }
     if ((sec.key === "mesures_reseau_normal" || sec.key === "mesures_reseau_secours") && TYPES_AVEC_BRANCHES_UPS.includes(eq.type)) {
       elements.push(docxHeading(sec.title));
       const tM = docxTableauMesures(sec.items, eq.controles[sec.key], eq.controles?.regimes_reseaux?.[sec.key === "mesures_reseau_normal" ? "normal" : "secours"] === "Monophasé");
-      if (tM) elements.push(tM);
+      if (tM) elements.push(tM); else elements.push(docxAucuneMesure());
       const suffixRes = sec.key === "mesures_reseau_normal" ? "normal" : "secours";
       const monoRes = eq.controles?.regimes_reseaux?.[suffixRes] === "Monophasé";
       const s = calcPuissanceApparente(eq, sec.key, suffixRes);
@@ -20566,14 +20963,14 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
     if ((sec.key === "mesures_source1" || sec.key === "mesures_source2") && eq.type === "Inverseur de source") {
       elements.push(docxHeading(sec.title));
       const tS = docxTableauMesures(sec.items, eq.controles[sec.key], eq.controles?.regimes_reseaux?.[sec.key === "mesures_source1" ? "source1" : "source2"] === "Monophasé");
-      if (tS) elements.push(tS);
+      if (tS) elements.push(tS); else elements.push(docxAucuneMesure());
       elements.push(docxSpacer());
       return;
     }
     if (sec.key === "mesures_utilisation" && TYPES_AVEC_MESURES_UTILISATION.includes(eq.type)) {
       elements.push(docxHeading(sec.title));
       const tU = docxTableauMesures(sec.items, eq.controles[sec.key], eq.controles?.regimes_reseaux?.utilisation === "Monophasé");
-      if (tU) elements.push(tU);
+      if (tU) elements.push(tU); else elements.push(docxAucuneMesure());
       const monoUtil = eq.controles?.regimes_reseaux?.utilisation === "Monophasé";
       const sUtil = calcPuissanceApparente(eq, sec.key, "utilisation");
       const pUtil = calcPuissanceActive(eq, sec.key, "utilisation", monoUtil);
@@ -20617,7 +21014,7 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
     if (sec.key === "mesures_onduleur_item" && TYPES_AVEC_BRANCHES_UPS.includes(eq.type)) {
       elements.push(docxHeading(sec.title));
       const tO = docxTableauMesures(sec.items, eq.controles[sec.key], eq.controles?.regimes_reseaux?.onduleur === "Monophasé");
-      if (tO) elements.push(tO);
+      if (tO) elements.push(tO); else elements.push(docxAucuneMesure());
       const capaF = calcCapaciteFiltre(eq);
       if (capaF) {
         const partsF = [capaF.c1 !== null && `L1 : ${capaF.c1} µF`, capaF.c2 !== null && `L2 : ${capaF.c2} µF`, capaF.c3 !== null && `L3 : ${capaF.c3} µF`].filter(Boolean);
@@ -20718,7 +21115,7 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
       elements.push(docxSpacer());
       return;
     }
-    const itemsAffiches = sec.key === "mesure_isolement"
+    const itemsAffichesBruts = sec.key === "mesure_isolement"
       ? sec.items.filter((item) => {
           const value = eq.controles[sec.key][item.key];
           // Ne filtre que les items du motif partagé (hta_terre/entre_phases, qui ont bien un
@@ -20728,14 +21125,29 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
           return mesureRealisee(item, value);
         })
       : sec.items;
-    if (itemsAffiches.length === 0) return;
+    // Rubrique sans valeur, sans action et sans état (« Position dans le réseau », harmoniques non relevées…) : non imprimée.
+    const itemVide = (item) => {
+      const value = eq.controles[sec.key][item.key] || { action: "", etat: "", fields: {} };
+      const parts = printFieldParts(item, value) || [];
+      return !parts.some((p) => String((p && p.text) ?? p ?? "").trim()) && !String(value.action || "").trim() && !value.etat;
+    };
+    const itemsAffiches = itemsAffichesBruts.filter((item) => !itemVide(item));
+    const autresLignes = (eq.controles[sec.key + "__custom"] || []).length || (sec.key === "electriques" && equipementAvecTC(eq) && (eq.controles.tc_dynamique || []).some((tc) => tc.label));
+    const sectionAvecComplement = ["courbe_declenchement", "analyse_harmonique", "reglage_disjoncteur", "electriques", "bilan_energie", "mesure_isolement"].includes(sec.key); // texte ou calcul ajouté sous le tableau
+    if (itemsAffiches.length === 0 && !autresLignes && !sectionAvecComplement) return;
     const courbeAvecFichiers = sec.key === "courbe_declenchement" && eq.type === "Disjoncteur BT"
       && ((eq.courbeFiles || []).length > 0 || (eq.courbeDeclenchementAuto !== false && !!parametresCourbeDeclenchement(eq)));
     if (sec.key === "courbe_declenchement" && courbeDeclenchementSansContenu(eq)) return;
     const sectionEtat = /^(Type et )?[ÉE]tat\b/i.test(sec.title || ""); // « État de l'installation », « État du by-pass / synoptique », « Type et état report alarme »… : liste d'états, imprimée en version compacte
-    if (!courbeAvecFichiers) elements.push(sectionEtat ? docxHeading(sec.title, 400, 120) : docxHeading(sec.title));
-    if (sec.key === "mesure_isolement" && sec.items.some((it) => it.key === "pi" || it.fields?.some((f) => f.key === "pi"))) {
-      elements.push(docxNormeNote("CEI 60076-3 / IEEE 43. Tension d'injection identique du début à la fin de l'essai — le type de mesure indique jusqu'où il est poussé : Standard (lecture instantanée), PI = R(10 min)/R(1 min), DAR = R(60 s)/R(10 s). L'enroulement non testé doit être court-circuité (shunté) et relié à la terre."));
+    const noteNorme = sec.key === "mesure_isolement" && sec.items.some((it) => it.key === "pi" || it.fields?.some((f) => f.key === "pi"))
+      ? (eq.type === "Transformateur"
+        ? "CEI 60076-3 / IEEE 43. Tension d'injection identique du début à la fin de l'essai — le type de mesure indique jusqu'où il est poussé : Standard (lecture instantanée), PI = R(10 min)/R(1 min), DAR = R(60 s)/R(10 s). L'enroulement non testé doit être court-circuité (shunté) et relié à la terre."
+        : "IEEE 43 / pratique courante. Tension d'injection identique du début à la fin de l'essai — le type de mesure indique jusqu'où il est poussé : Standard (lecture instantanée), PI = R(10 min)/R(1 min), DAR = R(60 s)/R(10 s). Les phases non mesurées sont reliées à la terre pendant l'essai.")
+      : null;
+    if (!courbeAvecFichiers && noteNorme) elements.push(docxBlocInsecable([docxHeading(sec.title), docxNormeNote(noteNorme)]));
+    else if (!courbeAvecFichiers) elements.push(sectionEtat ? docxHeading(sec.title, 400, 120) : docxHeading(sec.title));
+    if (noteNorme) {
+      // note déjà placée avec le titre, dans le même bloc insécable
     } else if (["resistance_contact_chambres", "resistances_contacts", "resistance_jonctions"].some((k) => sec.items.some((it) => it.key === k))) {
       elements.push(docxNormeNote("CEI 62271-100. Mesure fiable et comparable d'une visite à l'autre uniquement avec un courant d'essai DC suffisant (100 A minimum usuel)."));
     } else if (sec.items.some((it) => it.key === "continuite_masses" || it.key === "continuite_masses_jdb")) {
@@ -20788,8 +21200,7 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
   });
   // Encart « Synthèse de l'état » : liseré et fond à la couleur de l'état final de l'équipement.
   elements.push(docxSpacer(120));
-  elements.push(...docxEncartEtat("Synthèse de l'état — à l'issue de la maintenance", eq.etatFinal));
-  elements.push(...docxRemarquesEquipement(texteRemarquesRapport(eq, { allEquipements: equipementsDuSiteDe(eq, allSites), locaux, rapportDate }), eq.etatFinal));
+  elements.push(...docxRemarquesEquipement(texteRemarquesRapport(eq, { allEquipements: equipementsDuSiteDe(eq, allSites), locaux, rapportDate }), eq.etatFinal, docxEncartEtat("Synthèse de l'état — à l'issue de la maintenance", eq.etatFinal)));
   { const galerie = docxPhotosCoteACote(eq.photos, 200, 220); if (galerie) { elements.push(docxSpacer(160)); elements.push(galerie); } }
 
   // Courbe de déclenchement (Disjoncteur BT) : normalement insérée dans sa propre section (voir la boucle
@@ -20948,7 +21359,7 @@ async function generateAnnexePhotosDocx(site) {
     const photos = collectPhotosEquipement(eq);
     if (!photos.length) return;
     total += photos.length;
-    children.push(docxEquipHeader(eq.type + (eq.identification.repere ? " — " + eq.identification.repere : ""), null, eq.etatFinal));
+    children.push(docxEquipHeader(eq.type + (nomEquipementSite(eq, site) ? " — " + nomEquipementSite(eq, site) : ""), null, eq.etatFinal));
     photos.forEach((p) => {
       const { w, h } = dimensionsAdaptees(p, 260, 320);
       const img = docxImage(p.dataUrl, w, h);
@@ -21074,7 +21485,7 @@ async function generateSiteDocx(site, allSites) {
     { date: site.rapport.date, heureArrivee: site.rapport.heureArrivee, heureFin: site.rapport.heureFin },
     ...(site.rapport.journeesSupplementaires || []),
   ].filter((j) => j.date);
-  const journeesTexte = toutesJournees.map((j) => `${j.date}${j.heureArrivee || j.heureFin ? ` (${j.heureArrivee || "?"} – ${j.heureFin || "?"})` : ""}`).join(" · ");
+  const journeesTexte = toutesJournees.map((j) => `${dateFrIso(j.date)}${plageHoraireTexte(j.heureArrivee, j.heureFin)}`).join(" · ");
   const formatContact = (c) => c ? [
     [c.prenom, c.nom].filter(Boolean).join(" "),
     c.email,
@@ -21095,11 +21506,11 @@ async function generateSiteDocx(site, allSites) {
     ...(site.adresse ? [["Adresse du site", site.adresse]] : []),
     ...(contactClientTexte ? [["Contact client", contactClientTexte]] : []),
     ...(contactSiteTexte ? [["Contact site", contactSiteTexte]] : []),
-    ["Date(s) d'intervention", journeesTexte || site.rapport.date],
+    ["Date(s) d'intervention", journeesTexte || dateFrIso(site.rapport.date)],
     ["Intervenant(s)", tousIntervenants],
     ...(nbIntervenantsRapport ? [["Nombre d'intervenants", nbIntervenantsRapport]] : []),
     ...(checklistCochee.length ? [["Préambule — avant intervention", checklistCochee.join(" · ")]] : []),
-    ["Nombre d'équipements", String(site.equipements.length)], ["Prochaine maintenance recommandée avant", site.rapport.prochaineMaintenance],
+    ["Nombre d'équipements", String(site.equipements.length)], ["Prochaine maintenance recommandée avant", dateFrIso(site.rapport.prochaineMaintenance)],
     ["Environnement", [site.rapport.environnementEtat, site.rapport.environnementRemarque].filter(Boolean).join(" — ")],
     ["Fonctionnement de l'installation", [etatFonctionnementSite(site), site.rapport.fonctionnementRemarque].filter(Boolean).join(" — ")],
   ];
@@ -21172,6 +21583,14 @@ async function generateSiteDocx(site, allSites) {
 // Document court remis au client à la fin de l'intervention : ce n'est PAS le rapport de maintenance détaillé du site (qui reste le
 // document de référence), mais le compte rendu d'intervention — synthèse de
 // l'intervention, équipements contrôlés et leur état, points importants, conclusion et signatures.
+// Heures d'intervention : une heure manquante n'est plus imprimée « ? ».
+function plageHoraireTexte(debut, fin) {
+  const a = String(debut || "").trim(), b = String(fin || "").trim();
+  if (a && b) return ` (${a} – ${b})`;
+  if (a) return ` (à partir de ${a})`;
+  if (b) return ` (jusqu'à ${b})`;
+  return "";
+}
 function dateFrIso(iso) {
   const m = String(iso || "").match(/^(\d{4})-(\d{2})-(\d{2})/);
   return m ? `${m[3]}/${m[2]}/${m[1]}` : String(iso || "");
@@ -21286,7 +21705,7 @@ async function generateInterventionDocx(iv, sites = []) {
 
   const tousTechniciens = [iv.technicien, ...(iv.techniciensSupplementaires || [])].filter(Boolean).join(", ");
   const toutesJournees = [{ date: iv.date, heureDebut: iv.heureDebut, heureFin: iv.heureFin }, ...(iv.journeesSupplementaires || [])].filter((j) => j.date);
-  const journeesTexte = toutesJournees.map((j) => `${dateFrIso(j.date)}${j.heureDebut || j.heureFin ? ` (${j.heureDebut || "?"} – ${j.heureFin || "?"})` : ""}`).join(" · ");
+  const journeesTexte = toutesJournees.map((j) => `${dateFrIso(j.date)}${plageHoraireTexte(j.heureDebut, j.heureFin)}`).join(" · ");
   const natureText = NATURE_INTERVENTION.filter((n) => iv.nature && iv.nature[n.key]).map((n) => n.label).join(", ");
   const para = (texte, opts = {}) => new DOCX.Paragraph({ spacing: { after: opts.after ?? 80 }, children: [new DOCX.TextRun({ text: texte, size: opts.size ?? 18, bold: !!opts.bold, color: opts.color })] });
 
@@ -23571,10 +23990,10 @@ function AppPrincipale({ currentUser, onLogout }) {
             <div style={{ fontSize: 15, fontWeight: 700, color: "#1A1F26", marginBottom: 4 }}>Avant de générer le rapport</div>
             <div style={{ fontSize: 12, color: "#8B96A3", marginBottom: 12 }}>Le rapport Word peut quand même être généré. Touchez un point pour aller le corriger.</div>
             <div style={{ overflowY: "auto", flex: "1 1 auto", marginBottom: 14 }}>
-              {[["general", "Informations générales"], ["vide", "Mesures manquantes"], ["action", "État dégradé ou défaillant sans action"], ["phase", "Écarts anormaux entre phases (saisie à vérifier)"]].map(([type, titreGroupe]) => {
+              {[["general", "Informations générales"], ["coherence", "Valeurs à vérifier (unité, champ, réglage)"], ["vide", "Mesures manquantes"], ["action", "État dégradé ou défaillant sans action"], ["phase", "Écarts anormaux entre phases (saisie à vérifier)"]].map(([type, titreGroupe]) => {
                 const liste = exportConfirm.warnings.filter((w) => (typeof w === "string" ? "general" : w.type) === type);
                 if (!liste.length) return null;
-                const couleur = type === "phase" || type === "action" ? "#B5730A" : type === "vide" ? "#5B6B7D" : "#3E4A5C";
+                 const couleur = type === "phase" || type === "action" || type === "coherence" ? "#B5730A" : type === "vide" ? "#5B6B7D" : "#3E4A5C";
                 return (
                   <div key={type} style={{ marginBottom: 12 }}>
                     <div style={{ fontSize: 11, fontWeight: 800, color: couleur, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>{titreGroupe} ({liste.length})</div>
