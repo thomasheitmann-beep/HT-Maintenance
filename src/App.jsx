@@ -22516,6 +22516,37 @@ function normaliserSites(parsed) {
 // Si un écran plante (donnée inattendue, bug), on affiche un message clair au lieu d'une page blanche.
 // Les données ne sont jamais perdues : elles sont sur le serveur et dans la copie locale de l'appareil
 // (IndexedDB), que l'on peut télécharger directement depuis ce message, même si l'app ne s'affiche plus.
+// ===== Propriété du logiciel : mention © et conditions d'utilisation acceptées une fois par compte et par appareil =====
+const VERSION_CONDITIONS = "1";
+const TEXTE_CONDITIONS_UTILISATION = [
+  "Cette application (code, calculs, modèles de rapports, textes et interface) est la propriété exclusive de HT Maintenance — Thomas Heitmann. Elle est protégée par le droit d'auteur (Code de la propriété intellectuelle, articles L111-1 et L112-2).",
+  "L'accès est strictement personnel et réservé aux comptes autorisés par HT Maintenance. Les identifiants ne doivent pas être communiqués à un tiers.",
+  "Sont interdits, sauf accord écrit de HT Maintenance : la copie, la reproduction ou l'extraction de tout ou partie de l'application ou de son code, son adaptation, sa décompilation, sa diffusion ou sa mise à disposition d'un tiers, et son utilisation pour un autre compte que HT Maintenance.",
+  "Les données saisies (sites, clients, rapports) restent confidentielles et ne doivent être utilisées que dans le cadre des missions réalisées pour HT Maintenance.",
+  "L'accès peut être retiré à tout moment. Toute utilisation non autorisée peut donner lieu à des poursuites.",
+];
+const MENTION_COPYRIGHT = `© ${new Date().getFullYear()} HT Maintenance — Logiciel propriétaire, reproduction et utilisation hors des comptes autorisés interdites.`;
+try { console.info("%c" + MENTION_COPYRIGHT, "color:#0A5DA8;font-weight:bold"); } catch (e) { /* facultatif */ }
+const cleConditions = (user) => `ht-conditions-v${VERSION_CONDITIONS}:${String((user && user.email) || "").toLowerCase()}`;
+function conditionsAcceptees(user) { try { return !!localStorage.getItem(cleConditions(user)); } catch (e) { return true; } }
+function ConditionsUtilisation({ user, forcer = false, onFermer }) {
+  const [vu, setVu] = useState(() => conditionsAcceptees(user));
+  if (!forcer && (vu || !user)) return null;
+  const accepter = () => { try { localStorage.setItem(cleConditions(user), new Date().toISOString()); } catch (e) { /* stockage indisponible */ } setVu(true); if (onFermer) onFermer(); };
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(10,14,20,0.55)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+      <div style={{ background: "#fff", borderRadius: 12, maxWidth: 560, width: "100%", maxHeight: "88vh", overflowY: "auto", padding: 22, borderLeft: `5px solid ${BRAND.blue}`, boxShadow: "0 12px 40px rgba(0,0,0,0.25)" }}>
+        <div style={{ fontSize: 16, fontWeight: 800, color: "#1A1F26", marginBottom: 10 }}>Conditions d'utilisation</div>
+        {TEXTE_CONDITIONS_UTILISATION.map((t, i) => <p key={i} style={{ fontSize: 13, lineHeight: 1.55, color: "#3E4A5C", margin: "0 0 10px" }}>{t}</p>)}
+        <div style={{ fontSize: 11.5, color: "#8B96A3", margin: "12px 0 16px" }}>{MENTION_COPYRIGHT}</div>
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+          {forcer && vu ? <button onClick={onFermer} style={{ background: "#fff", border: "1px solid #D8DEE5", borderRadius: 8, padding: "9px 16px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Fermer</button>
+            : <button onClick={accepter} style={{ background: BRAND.blue, color: "#fff", border: "none", borderRadius: 8, padding: "9px 16px", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>J'ai lu et j'accepte</button>}
+        </div>
+      </div>
+    </div>
+  );
+}
 const COMPTES_ADMIN = ["thomas.heitmann@orange.fr"];
 const estAdmin = (user) => !!user && COMPTES_ADMIN.includes(String(user.email || "").toLowerCase());
 async function telechargerCopieLocaleSecours() {
@@ -23009,6 +23040,7 @@ function AppPrincipale({ currentUser, onLogout }) {
   // Demande au navigateur de ne pas purger la copie locale quand l'appareil manque de place.
   useEffect(() => { try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) { /* facultatif */ } }, []);
 
+  const [conditionsOuvertes, setConditionsOuvertes] = useState(false);
   const [view, setView] = useState("sites"); // "sites" | "interventions" | "calendrier" | "rapports"
   const [interventions, setInterventions] = useState([]);
   const ivRefForPoll = useRef([]);
@@ -24047,7 +24079,13 @@ function AppPrincipale({ currentUser, onLogout }) {
             )
           )}
           </FiletSecurite>
+          <div style={{ textAlign: "center", fontSize: 10.5, color: "#9AA4AF", padding: "22px 12px 8px", lineHeight: 1.5 }}>
+            {MENTION_COPYRIGHT}{" "}
+            <button onClick={() => setConditionsOuvertes(true)} style={{ background: "none", border: "none", padding: 0, color: "#6B7785", textDecoration: "underline", fontSize: 10.5, cursor: "pointer" }}>Conditions d'utilisation</button>
+          </div>
         </div>
+        <ConditionsUtilisation user={currentUser} />
+        {conditionsOuvertes && <ConditionsUtilisation user={currentUser} forcer onFermer={() => setConditionsOuvertes(false)} />}
         {/* Navigation au pouce sur téléphone */}
         <nav className="nav-mobile" aria-label="Navigation principale">
           {[["sites", "Interventions", Building2], ["interventions", "CRI", ClipboardList], ["calendrier", "Calendrier", Clock], ["rapports", "Rapports", FileText], ["scanner", "Scanner", QrCode]].map(([k, libelle, Icone]) => {
