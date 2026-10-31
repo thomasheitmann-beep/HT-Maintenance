@@ -1623,6 +1623,15 @@ const TYPES_AVEC_GRADINS = ["Batterie de compensation"];
 // par élément, avec classification automatique (Normal / À surveiller / Critique) par rapport à
 // la moyenne mesurée — reprend le principe du fichier Excel (comparaison à la tension de floating).
 const TYPES_AVEC_BRANCHES_UPS = ["Onduleur", "Redresseur chargeur"];
+// Redresseur d'entrée : ThdI usuel à pleine charge (repères constructeurs courants, indicatifs).
+const PLAGES_THDI_REDRESSEUR = {
+  "Thyristors 6 impulsions (sans filtre)": [25, 35],
+  "Thyristors 6 impulsions + filtre": [8, 12],
+  "Thyristors 12 impulsions": [8, 12],
+  "Thyristors 12 impulsions + filtre": [3, 6],
+  "IGBT — absorption sinusoïdale (PFC)": [1, 5],
+};
+const LISTE_TYPE_REDRESSEUR = Object.keys(PLAGES_THDI_REDRESSEUR);
 // Pièces d'usure (batteries, ventilateurs...) : concerne aussi l'Onduleur simplifié, mais SANS la
 // courbe de décharge / suivi par élément propre à TYPES_AVEC_BRANCHES_UPS.
 const TYPES_AVEC_PIECES_USURE = [...TYPES_AVEC_BRANCHES_UPS, "Onduleur simplifié", "Inverseur de source"];
@@ -2531,6 +2540,7 @@ function buildOnduleurSchema({ normalMono = false, secoursMono = false, utilisat
       { key: "puissanceKVA", label: "Puissance (kVA)", numeric: true }, { key: "puissanceKW", label: "Puissance (kW)", numeric: true },
       { key: "tensionEntreeSortie", label: "Tension entrée / sortie", options: LISTE_TENSION_ENTREE_SORTIE },
       { key: "regimeSortie", label: "Régime de sortie", options: LISTE_REGIME_SORTIE_UPS },
+      { key: "typeRedresseur", label: "Type de redresseur (interprétation du ThdI d'entrée)", options: LISTE_TYPE_REDRESSEUR },
       { key: "anneeMiseEnService", label: "Année de mise en service", numeric: true },
     ],
     sections: [
@@ -2606,7 +2616,7 @@ function buildOnduleurSchema({ normalMono = false, secoursMono = false, utilisat
         C("thdv_utilisation", "Taux de distorsion tension", champsSeuilThdv(utilisationMono ? champsMono("%", "THdV") : champsTriphase("%", "THdV", 1, "max"))),
         C("courant_utilisation", "Courant", tensionCourantItem(utilisationMono, "A", "Courant")),
         ...(utilisationMono ? [] : [C("courant_neutre_utilisation", "Courant dans le neutre", [F("in", "IN", "A")])]),
-        C("thdi_utilisation", "Taux de distorsion courant", champsSeuilThdi(utilisationMono ? champsMono("%", "ThdI") : champsTriphase("%", "ThdI", 1, "moyenne"))),
+        C("thdi_utilisation", "Taux de distorsion courant", utilisationMono ? champsMono("%", "ThdI") : champsTriphase("%", "ThdI", 1, "moyenne")), // sortie : dépend des charges, pas de seuil
         C("puissance_fp_utilisation", "Puissance (P, S relevés — Q calculé) et cos φ fondamental", cosPhiFondamentalItem(utilisationMono)),
         C("dv_sortie_secours", "ΔV sortie / secours", utilisationMono ? champsMono("V", "ΔV") : champsTriphase("V", "ΔV", 1, "moyenne")),
         C("regime_neutre_utilisation", "Régime de neutre", [F("valeur", "Valeur", null, LISTE_REGIME_NEUTRE)]),
@@ -2626,6 +2636,7 @@ function buildOnduleurSchema({ normalMono = false, secoursMono = false, utilisat
         C("tension_egalisation", "Tension d'égalisation", [F("v", "Valeur", "V")]),
         C("pole_plus_terre", "Pôle \"+\" batterie / terre", [F("v", "Valeur", "V")]),
         C("pole_moins_terre", "Pôle \"-\" batterie / terre", [F("v", "Valeur", "V")]),
+        { ...C("ondulation_batterie", "Ondulation alternative aux bornes batterie (facultatif)", [F("mv", "Valeur efficace", "mV")]), optionnel: true },
       ]},
       { key: "defauts_apparence", title: "Défauts d'apparence", items: [
         C("bornes_sulfatees", "Bornes sulfatées"),
@@ -2637,6 +2648,9 @@ function buildOnduleurSchema({ normalMono = false, secoursMono = false, utilisat
         C("decharge_puissance_constante", "Décharge à puissance constante", [F("tension", "Tension de décharge", "V")]),
         C("temperature_decharge", "Température batterie lors de la décharge", [F("temp", "Valeur", "°C")]),
         C("duree_decharge", "Durée de la décharge batterie", [F("duree", "Valeur", "min")]),
+        { ...C("charge_essai", "Charge pendant l'essai (facultatif)", [F("pct", "Taux de charge", "%"), F("kw", "Puissance débitée", "kW")]), optionnel: true },
+        { ...C("autonomie_reference", "Autonomie de référence à charge équivalente (constructeur / mise en service — facultatif)", [F("minutes", "Autonomie", "min")]), optionnel: true },
+        { ...C("tension_arret", "Tension d'arrêt en fin de décharge (facultatif)", [F("v", "Valeur", "V")]), optionnel: true },
       ]},
       { key: "releve_tensions", title: "Relevé des tensions batterie", items: [] },
       { key: "thermographie_ups", title: "Thermographie", items: [
@@ -2663,6 +2677,7 @@ function buildRedresseurSchema({ reseauMono = false, reseau2Mono = false, double
       { key: "puissanceKVA", label: "Puissance (kVA)", numeric: true }, { key: "puissanceKW", label: "Puissance (kW)", numeric: true },
       { key: "tensionEntree", label: "Tension d'entrée (V)" }, { key: "tensionSortieContinue", label: "Tension de sortie continue (V)" },
       { key: "configuration", label: "Configuration", options: LISTE_CONFIG_REDRESSEUR },
+      { key: "typeRedresseur", label: "Type de redresseur (interprétation du ThdI d'entrée)", options: LISTE_TYPE_REDRESSEUR },
       { key: "anneeMiseEnService", label: "Année de mise en service", numeric: true },
     ],
     sections: [
@@ -2731,6 +2746,7 @@ function buildRedresseurSchema({ reseauMono = false, reseau2Mono = false, double
         C("tension_egalisation", "Tension d'égalisation", [F("v", "Valeur", "V")]),
         C("pole_plus_terre", "Pôle \"+\" batterie / terre", [F("v", "Valeur", "V")]),
         C("pole_moins_terre", "Pôle \"-\" batterie / terre", [F("v", "Valeur", "V")]),
+        { ...C("ondulation_batterie", "Ondulation alternative aux bornes batterie (facultatif)", [F("mv", "Valeur efficace", "mV")]), optionnel: true },
       ]},
       { key: "defauts_apparence", title: "Défauts d'apparence", items: [
         C("bornes_sulfatees", "Bornes sulfatées"),
@@ -2742,6 +2758,9 @@ function buildRedresseurSchema({ reseauMono = false, reseau2Mono = false, double
         C("decharge_puissance_constante", "Décharge à puissance constante", [F("tension", "Tension de décharge", "V")]),
         C("temperature_decharge", "Température batterie lors de la décharge", [F("temp", "Valeur", "°C")]),
         C("duree_decharge", "Durée de la décharge batterie", [F("duree", "Valeur", "min")]),
+        { ...C("charge_essai", "Charge pendant l'essai (facultatif)", [F("pct", "Taux de charge", "%"), F("kw", "Puissance débitée", "kW")]), optionnel: true },
+        { ...C("autonomie_reference", "Autonomie de référence à charge équivalente (constructeur / mise en service — facultatif)", [F("minutes", "Autonomie", "min")]), optionnel: true },
+        { ...C("tension_arret", "Tension d'arrêt en fin de décharge (facultatif)", [F("v", "Valeur", "V")]), optionnel: true },
       ]},
       { key: "releve_tensions", title: "Relevé des tensions batterie", items: [] },
       { key: "thermographie_ups", title: "Thermographie", items: [
@@ -2822,7 +2841,7 @@ function buildInverseurSchema({ source1Mono = false, source2Mono = false, utilis
         C("thdv_utilisation", "Taux de distorsion tension", champsSeuilThdv(utilisationMono ? champsMono("%", "THdV") : champsTriphase("%", "THdV", 1, "max"))),
         C("courant_utilisation", "Courant", tensionCourantItem(utilisationMono, "A", "Courant")),
         ...(utilisationMono ? [] : [C("courant_neutre_utilisation", "Courant dans le neutre", [F("in", "IN", "A")])]),
-        C("thdi_utilisation", "Taux de distorsion courant", champsSeuilThdi(utilisationMono ? champsMono("%", "ThdI") : champsTriphase("%", "ThdI", 1, "moyenne"))),
+        C("thdi_utilisation", "Taux de distorsion courant", utilisationMono ? champsMono("%", "ThdI") : champsTriphase("%", "ThdI", 1, "moyenne")), // sortie : dépend des charges, pas de seuil
         C("puissance_fp_utilisation", "Puissance (P, S relevés — Q calculé) et cos φ fondamental", cosPhiFondamentalItem(utilisationMono)),
         C("regime_neutre_utilisation", "Régime de neutre", [F("valeur", "Valeur", null, LISTE_REGIME_NEUTRE)]),
         C("tension_terre_neutre_utilisation", "Tension terre / neutre", [F("v", "Valeur", "V")]),
@@ -6464,6 +6483,7 @@ const ETATS_SANS_MESURE = ["Non réalisé", "Non présent"];
 // puis les cases vides des grilles par phase (L1/L2/L3). Les puissances par phase ne sont pas exigées
 // quand le total est relevé ; un contrôle « Non réalisé / Non présent » n'attend plus rien.
 function champsManquantsControle(item, value) {
+  if (item && item.optionnel && !controleRenseigne(item, value)) return []; // contrôle facultatif non utilisé
   if (!controleAvecMesures(item) || !value || ETATS_SANS_MESURE.includes(value.etat)) return [];
   if (!mesureRealisee(item, value)) return []; // mesure optionnelle non réalisée
 
@@ -6741,7 +6761,7 @@ function verificationsCoherenceEquipement(eq, site) {
       }
       // Mesure principale vide alors que l'état est « Conforme » (cas non couverts par « à compléter » : autres champs remplis).
       const clesMesure = (it.fields || []).filter((d) => !d.hidden && !d.compute && !d.options && d.unit && /^(declenchement|declenchement_treg|declenchement_t0|valeur|v)$/.test(d.key));
-      if ((v.etat || "") === "Conforme" && clesMesure.length && clesMesure.every((d) => String(f[d.key] ?? "").trim() === "") && !["l1", "l2", "l3"].some((k) => String(f[k] ?? "").trim() !== "") && !controleACompleter(it, v) && !(it.fields || []).some((d) => d.key === "realise"))
+      if (!it.optionnel && (v.etat || "") === "Conforme" && clesMesure.length && clesMesure.every((d) => String(f[d.key] ?? "").trim() === "") && !["l1", "l2", "l3"].some((k) => String(f[k] ?? "").trim() !== "") && !controleACompleter(it, v) && !(it.fields || []).some((d) => d.key === "realise"))
         push(sec.key, `${it.label} : état « Conforme » sans valeur mesurée (${clesMesure.map((d) => d.label).join(", ")}) — saisir la mesure ou passer en « Non réalisé »`);
       if (horsTol && v.etat === "Conforme") push(sec.key, `${it.label} : état « Conforme » alors qu'une mesure est hors de la plage attendue (le rapport la signale comme anomalie) — corriger la mesure ou l'état`);
       if (["temps_ouverture", "temps_fermeture"].includes(it.key) && numOf(f.synchronisme) !== null && numOf(f.synchronisme) > 15 && !["l1", "l2", "l3"].some((k) => numOf(f[k]) !== null))
@@ -6801,6 +6821,9 @@ function verificationsCoherenceEquipement(eq, site) {
       ? { tension_floating: [1.38, 1.45, "floating"], tension_charge: [1.38, 1.55, "charge"], tension_charge_forte: [1.45, 1.70, "charge forte"], tension_egalisation: [1.45, 1.70, "égalisation"], tension_repos: [1.25, 1.40, "repos"] }
       : { tension_floating: [2.20, 2.30, "floating"], tension_charge: [2.23, 2.45, "charge"], tension_charge_forte: [2.35, 2.45, "charge forte"], tension_egalisation: [2.30, 2.50, "égalisation"], tension_repos: [2.05, 2.20, "repos"] };
     const vOf = (k) => { const it = mb[k]; return it && !["Non réalisé", "Non présent"].includes(it.etat) ? numOf(it.fields?.v) : null; };
+    // Floating plomb : compensation en température ≈ −3 mV/°C/élt autour de 20 °C.
+    const tLocal = numOf(eq.controles?.environnement_ups?.temperature_ups?.fields?.valeur);
+    if (!cdni && tLocal !== null) { const d = -0.003 * (tLocal - 20); PLAGES.tension_floating = [Math.round((2.20 + d) * 1000) / 1000, Math.round((2.30 + d) * 1000) / 1000, `floating (à ${Math.round(tLocal)} °C)`]; }
     if (th && th.nbElementsTotal > 0) {
       Object.entries(PLAGES).forEach(([k, [mn, mx, lib]]) => {
         const v = vOf(k); if (v === null || v <= 0) return;
@@ -8935,13 +8958,161 @@ function calcPiecesUsure(eq) {
   ventilos.forEach((v, i) => { if (v.annee) lignes.push({ type: libelleVentilateur(v, i, ventilos.length), client: "Ventilateur" + (ventilos.length > 1 ? ` ${i + 1}` : ""), famille: "Ventilateurs", cle: v.ancien ? "ventilation" : `ventilation:${v.id}`, annee: anneeRemplacement(v.annee, Math.round(numOf(v.duree) ?? DUREE_VIE_VENTILATEUR)) }); });
   return lignes;
 }
+// ===== Analyse onduleur / redresseur : ThdI d'entrée selon le redresseur, sortie, charge en kW, filtre, batterie =====
+// Chaque ligne : { section, niveau (0 info, 1 à surveiller, 2 important), texte, constat? } — les constats (sans historique)
+// sont repris dans les remarques ; les comparaisons avec la visite précédente restent des notes « à surveiller ».
+function analyseOnduleur(eq, allSites, rapportDate) {
+  const out = [];
+  if (!eq || !TYPES_AVEC_BRANCHES_UPS.includes(eq.type)) return out;
+  const c = eq.controles || {}, id = eq.identification || {};
+  const v2 = (x, d = 1) => String(Math.round(x * Math.pow(10, d)) / Math.pow(10, d)).replace(".", ",");
+  const nums = (f, keys = ["l1", "l2", "l3"]) => keys.map((k) => numOf((f || {})[k])).filter((x) => x !== null);
+  const moyenne = (a) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : null);
+  // Taux de charge : I / calibre ou S / puissance nominale (même calcul que l'écran)
+  let charge = null;
+  try { const tc = calcTauxCharge(eq); if (tc) charge = moyenne([tc.t1, tc.t2, tc.t3].filter((x) => x !== null && x !== undefined)); } catch (e) { /* facultatif */ }
+  if (charge !== null && !isFinite(charge)) charge = null;
+
+  // 1-4. ThdI d'entrée (réseau 1) selon le type de redresseur
+  const thdiE = nums(c.mesures_reseau_normal?.thdi_normal?.fields);
+  if (thdiE.length) {
+    const t = Math.max(...thdiE), type = id.typeRedresseur, plage = PLAGES_THDI_REDRESSEUR[type];
+    if (!plage) out.push({ section: "mesures_reseau_normal", niveau: 0, texte: `ThdI d'entrée ${v2(t)} % — type de redresseur non renseigné, valeur non interprétée (repères à pleine charge : thyristors 6 impulsions 25–35 %, 6 impulsions + filtre ou 12 impulsions 8–12 %, IGBT à absorption sinusoïdale < 5 %).` });
+    else if (t <= plage[1]) out.push({ section: "mesures_reseau_normal", niveau: 0, texte: `ThdI d'entrée ${v2(t)} % — normal pour un redresseur « ${type} » (repère ${plage[0]}–${plage[1]} % à pleine charge).` });
+    else if (charge !== null && charge < 40) out.push({ section: "mesures_reseau_normal", niveau: 0, texte: `ThdI d'entrée ${v2(t)} %, au-dessus du repère d'un redresseur « ${type} » (${plage[0]}–${plage[1]} %), mais la charge n'est que d'environ ${Math.round(charge)} % : à faible charge, le ThdI exprimé en % augmente sans hausse du courant harmonique.` });
+    else if (t > plage[1] * 1.5) {
+      const phrase = `Le ThdI d'entrée du redresseur (${v2(t)} %) est nettement supérieur au repère d'un redresseur « ${type} » (${plage[0]}–${plage[1]} % à pleine charge)${charge !== null ? `, pour une charge d'environ ${Math.round(charge)} %` : ""} : filtre d'entrée ou étage d'absorption sinusoïdale à contrôler. Sur groupe électrogène, un ThdI élevé déforme la tension.`;
+      out.push({ section: "mesures_reseau_normal", niveau: 1, texte: phrase, constat: { phrase, rang: 1, categorie: "thdi_entree", sujet: "redresseur d'entrée" } });
+    } else out.push({ section: "mesures_reseau_normal", niveau: 0, texte: `ThdI d'entrée ${v2(t)} %, légèrement au-dessus du repère d'un redresseur « ${type} » (${plage[0]}–${plage[1]} %) : à comparer à la prochaine visite.` });
+  }
+
+  // 5. Sortie : ThdI lié aux charges, courant de neutre
+  const mu = c.mesures_utilisation || {};
+  const thdiS = nums(mu.thdi_utilisation?.fields);
+  if (thdiS.length && Math.max(...thdiS) >= 15) out.push({ section: "mesures_utilisation", niveau: 0, texte: `ThdI de sortie ${v2(Math.max(...thdiS))} % : il dépend des charges alimentées (alimentations à découpage, variateurs…), pas d'un défaut de l'onduleur.` });
+  const iN = numOf(mu.courant_neutre_utilisation?.fields?.in), iPh = nums(mu.courant_utilisation?.fields);
+  if (iN !== null && iPh.length >= 2 && iN > Math.max(...iPh)) {
+    const phrase = `Le courant dans le neutre en sortie (${v2(iN)} A) dépasse le courant de phase le plus élevé (${v2(Math.max(...iPh))} A) : harmoniques de rang 3 dus aux charges, la section du neutre et son échauffement sont à vérifier.`;
+    out.push({ section: "mesures_utilisation", niveau: 1, texte: phrase, constat: { phrase, rang: 1, categorie: "neutre_harmoniques", sujet: "neutre de sortie" } });
+  }
+  // 6. Charge en kW
+  const pS = nums(mu.puissance_fp_utilisation?.fields, ["p1", "p2", "p3"]), kwN = numOf(id.puissanceKW);
+  if (pS.length && kwN) {
+    const P = pS.reduce((x, y) => x + y, 0), pct = (P / kwN) * 100;
+    if (pct > 100) {
+      const phrase = `Puissance active de sortie ${v2(P, 2)} kW pour ${v2(kwN, 2)} kW nominaux (${Math.round(pct)} %) : onduleur en surcharge en puissance active, ce que la puissance apparente seule ne montre pas.`;
+      out.push({ section: "mesures_utilisation", niveau: 2, texte: phrase, constat: { phrase, rang: 2, categorie: "surcharge_kw", sujet: "puissance active de sortie" } });
+    } else if (pct >= 90) out.push({ section: "mesures_utilisation", niveau: 1, texte: `Puissance active de sortie ${v2(P, 2)} kW, soit ${Math.round(pct)} % des ${v2(kwN, 2)} kW nominaux : marge faible avant surcharge.` });
+    else out.push({ section: "mesures_utilisation", niveau: 0, texte: `Charge en puissance active : ${v2(P, 2)} kW sur ${v2(kwN, 2)} kW nominaux (${Math.round(pct)} %).` });
+  }
+  // 7. Condensateurs de filtre de sortie : comparaison avec la visite précédente
+  const prec = allSites ? equipementPrecedent(allSites, eq, rapportDate) : null;
+  try {
+    const cf = calcCapaciteFiltre(eq), cfP = prec ? calcCapaciteFiltre(prec.eq) : null;
+    const m1 = cf ? moyenne([cf.c1, cf.c2, cf.c3].filter((x) => x !== null)) : null, m0 = cfP ? moyenne([cfP.c1, cfP.c2, cfP.c3].filter((x) => x !== null)) : null;
+    if (m1 && m0) {
+      const ecart = ((m1 - m0) / m0) * 100;
+      out.push({ section: "mesures_onduleur_item", niveau: ecart < -10 ? 1 : 0, texte: `Capacité des condensateurs de filtre : ${v2(m1, 1)} µF contre ${v2(m0, 1)} µF en ${moisAnneeVisite(prec.date)} (${ecart > 0 ? "+" : ""}${v2(ecart)} %)${ecart < -10 ? " : baisse de plus de 10 %, vieillissement des condensateurs à surveiller." : "."}` });
+    }
+  } catch (e) { /* facultatif */ }
+
+  // 8-9. Batterie : température du local, durée de vie corrigée, floating corrigé
+  const bat = c.batterie_id?.batterie_caracteristiques?.fields || {};
+  const plomb = bat.technologie !== "Cd-Ni";
+  const T = numOf(c.environnement_ups?.temperature_ups?.fields?.valeur);
+  const annee = numOf(bat.anneeMiseEnService), duree = numOf(String(bat.dureeVie || "").match(/\d+/)?.[0]);
+  const anneeRef = Number(String(rapportDate || todayISO()).slice(0, 4));
+  if (T !== null && plomb && T > 22) {
+    const facteur = Math.pow(2, (T - 20) / 10);
+    const corr = duree ? duree / facteur : null;
+    const echeance = annee && corr ? Math.floor(annee + corr) : null;
+    const depasseeNormale = annee && duree && anneeRef >= annee + duree;
+    const texte = `Température du local ${v2(T, 0)} °C : la durée de vie d'une batterie au plomb est divisée environ par 2 tous les 10 °C au-dessus de 20 °C${corr ? ` — durée probable ≈ ${v2(corr, 1)} ans au lieu de ${duree}${echeance ? `, soit un remplacement vers ${echeance}` : ""}` : ""}.`;
+    if (echeance && !depasseeNormale && anneeRef >= echeance) {
+      const phrase = `Batterie de ${annee} dans un local à ${v2(T, 0)} °C : compte tenu de la température, sa durée de vie probable (≈ ${v2(corr, 1)} ans au lieu de ${duree}) est atteinte.`;
+      out.push({ section: "mesures_batterie_ups", niveau: 1, texte, constat: { phrase, rang: 1, categorie: "temperature_batterie", sujet: "batterie" } });
+    } else if (T >= 30) out.push({ section: "mesures_batterie_ups", niveau: 1, texte, constat: { phrase: `Température du local batterie élevée (${v2(T, 0)} °C) : durée de vie de la batterie fortement réduite (≈ divisée par ${v2(facteur, 1)}).`, rang: 1, categorie: "temperature_batterie", sujet: "local batterie" } });
+    else out.push({ section: "mesures_batterie_ups", niveau: 0, texte });
+  }
+  let th = null; try { th = calcTensionsBatterieTheoriques(eq); } catch (e) { /* facultatif */ }
+  const vF = numOf(c.mesures_batterie_ups?.tension_floating?.fields?.v);
+  if (plomb && th && th.nbElementsTotal > 0 && vF) {
+    const Tc = T ?? 20, attendu = 2.27 - 0.003 * (Tc - 20), parElt = vF / th.nbElementsTotal;
+    const ok = Math.abs(parElt - attendu) <= 0.03;
+    out.push({ section: "mesures_batterie_ups", niveau: ok ? 0 : 1, texte: `Floating : ${v2(parElt, 3)} V par élément — repère ≈ ${v2(attendu, 2)} V/élt à ${v2(Tc, 0)} °C (≈ ${v2(attendu * th.nbElementsTotal, 1)} V pour ${v2(th.nbElementsTotal, 0)} éléments, compensation ≈ −3 mV/°C/élt, à confirmer sur la notice)${ok ? "." : " : réglage du chargeur à vérifier."}` });
+  }
+  // 14. Ondulation alternative aux bornes de la batterie
+  const mv = numOf(c.mesures_batterie_ups?.ondulation_batterie?.fields?.mv);
+  if (mv !== null && vF) {
+    const pct = (mv / 1000 / vF) * 100;
+    if (pct > 0.5) {
+      const phrase = `Ondulation alternative élevée aux bornes de la batterie (${v2(mv, 0)} mV, soit ${v2(pct, 2)} % de la tension de floating) : échauffement et vieillissement accéléré des blocs, condensateurs de filtrage du redresseur à contrôler.`;
+      out.push({ section: "mesures_batterie_ups", niveau: 1, texte: phrase, constat: { phrase, rang: 1, categorie: "ondulation_batterie", sujet: "ondulation batterie" } });
+    } else out.push({ section: "mesures_batterie_ups", niveau: 0, texte: `Ondulation aux bornes de la batterie : ${v2(mv, 0)} mV (${v2(pct, 2)} % du floating, repère usuel ≤ 0,5 %).` });
+  }
+  // 12. Courant de floating par branche
+  const br = (c.branches_dynamique || []).filter((b) => b.label).map((b) => ({ nom: b.label, i: numOf(b.fields?.residuel) })).filter((b) => b.i !== null);
+  if (br.length >= 2) {
+    const tri = br.map((b) => b.i).sort((a, b) => a - b), med = tri[Math.floor((tri.length - 1) / 2)];
+    const haut = br.filter((b) => med > 0 && b.i > 2 * med && b.i - med > 0.2);
+    if (haut.length) {
+      const phrase = `Courant de floating anormalement élevé sur ${listeFr(haut.map((b) => `${citer(b.nom)} (${v2(b.i, 2)} A)`))}, contre ≈ ${v2(med, 2)} A sur les autres branches : bloc en court-circuit interne ou début d'emballement thermique possible.`;
+      out.push({ section: "mesures_batterie_ups", niveau: 1, texte: phrase, constat: { phrase, rang: 1, categorie: "batterie_branche", sujet: listeFr(haut.map((b) => b.nom)) } });
+    }
+  }
+  // 13. Résistance interne : comparaison bloc par bloc avec la visite précédente
+  if (prec) {
+    const avant = new Map((prec.eq.controles?.elements_dynamique || []).map((e) => [e.label, numOf(e.fields?.resistance)]));
+    const hausses = (c.elements_dynamique || []).map((e) => { const r = numOf(e.fields?.resistance), r0 = avant.get(e.label); return r !== null && r0 ? { nom: e.label, pct: ((r - r0) / r0) * 100 } : null; }).filter(Boolean);
+    if (hausses.length) {
+      const a50 = hausses.filter((h) => h.pct >= 50), a25 = hausses.filter((h) => h.pct >= 25 && h.pct < 50);
+      out.push({ section: "mesures_batterie_ups", niveau: a50.length || a25.length ? 1 : 0, texte: `Résistance interne comparée à ${moisAnneeVisite(prec.date)} (${hausses.length} blocs) : ${a50.length ? `${a50.length} bloc(s) à +50 % ou plus (remplacement à envisager : ${a50.slice(0, 6).map((h) => h.nom).join(", ")}${a50.length > 6 ? "…" : ""})` : "aucun bloc à +50 %"}${a25.length ? `, ${a25.length} bloc(s) entre +25 et +50 % (à surveiller)` : ""}.` });
+    }
+  }
+  // 10-11. Essai d'autonomie : état de santé et autonomie à la charge du jour
+  const ed = c.essai_decharge || {};
+  const dMes = numOf(ed.duree_decharge?.fields?.duree), dRef = numOf(ed.autonomie_reference?.fields?.minutes);
+  if (dMes && dRef) {
+    const soh = (dMes / dRef) * 100;
+    if (soh < 80) {
+      const phrase = `Essai d'autonomie : ${v2(dMes, 0)} min pour ${v2(dRef, 0)} min de référence à charge équivalente, soit un état de santé d'environ ${Math.round(soh)} % — sous le seuil de remplacement de 80 % (IEEE 1188 / IEEE 450).`;
+      out.push({ section: "essai_decharge", niveau: 2, texte: phrase, constat: { phrase, rang: 2, categorie: "batterie_capacite", sujet: "batterie" } });
+    } else out.push({ section: "essai_decharge", niveau: soh < 90 ? 1 : 0, texte: `État de santé de la batterie ≈ ${Math.round(Math.min(soh, 150))} % (${v2(dMes, 0)} min mesurées pour ${v2(dRef, 0)} min de référence)${soh < 90 ? " : à surveiller, seuil de remplacement à 80 %." : "."}` });
+  }
+  const pctEssai = numOf(ed.charge_essai?.fields?.pct) ?? (numOf(ed.charge_essai?.fields?.kw) && kwN ? (numOf(ed.charge_essai.fields.kw) / kwN) * 100 : null);
+  if (dMes && pctEssai && charge !== null && charge >= 5) {
+    const est = Math.min(dMes * Math.pow(pctEssai / charge, 1.15), dMes * 4);
+    out.push({ section: "essai_decharge", niveau: 0, texte: `Autonomie estimée à la charge relevée ce jour (≈ ${Math.round(charge)} %) : ≈ ${v2(est, 0)} min (ordre de grandeur, d'après l'essai réalisé à ${Math.round(pctEssai)} % de charge).` });
+  }
+  return out;
+}
+function NotesAnalyseOnduleur({ eq, allSites, rapportDate, section }) {
+  const lignes = useMemo(() => { try { return analyseOnduleur(eq, allSites, rapportDate).filter((l) => l.section === section); } catch (e) { return []; } }, [eq, allSites, rapportDate, section]);
+  if (!lignes.length) return null;
+  return (
+    <Card style={{ marginBottom: 14 }}>
+      {lignes.map((l, i) => (
+        <div key={i} style={{ display: "flex", gap: 8, fontSize: 12.5, lineHeight: 1.5, color: "#3E4A5C", marginBottom: i < lignes.length - 1 ? 8 : 0 }}>
+          <span style={{ color: l.niveau >= 2 ? "#C0392B" : l.niveau === 1 ? "#B5730A" : "#0A5DA8", fontWeight: 800 }}>{l.niveau >= 1 ? "⚠" : "ℹ"}</span>
+          <span>{l.texte}</span>
+        </div>
+      ))}
+    </Card>
+  );
+}
+function docxNotesOnduleur(eq, allSites, rapportDate, section) {
+  let lignes = [];
+  try { lignes = analyseOnduleur(eq, allSites, rapportDate).filter((l) => l.section === section); } catch (e) { return []; }
+  return lignes.flatMap((l) => [docxNormeNote((l.niveau >= 1 ? "⚠ " : "") + l.texte), docxSpacer(40)]);
+}
 function AutonomieCalculee({ eq }) {
   const a = calcAutonomieTheorique(eq);
   if (a === null) return null;
   return (
     <Card style={{ marginBottom: 14 }}>
       <div style={{ fontSize: 12.5, color: "#5B6B7D" }}>
-        Autonomie avec la charge mesurée (calculée à partir de la puissance de décharge et des caractéristiques batterie) : <b style={{ color: "#1A1F26" }}>{a} min</b>
+        Autonomie théorique (capacité nominale × tension ÷ puissance de décharge) : <b style={{ color: "#1A1F26" }}>{a} min</b>
+        <div style={{ fontSize: 11.5, color: "#8B96A3", marginTop: 4 }}>Valeur optimiste pour une décharge rapide d'onduleur (capacité réelle plus faible aux forts courants) — préférer l'autonomie de référence constructeur pour juger l'état de santé.</div>
       </div>
     </Card>
   );
@@ -13871,6 +14042,8 @@ function analyserAnomaliesEquipement(eq, contexte) {
       constats.push({ phrase: `Le courant de base primaire du ${libelleTransfo(vf)} (Ib = ${vf.ib} A) dépasse 45 A : au-delà de ce seuil, la protection par fusible n'est normalement plus valable en NF C13-100 pour un poste à un seul transformateur.`, rang: 1, categorie: "fusible_ib", sujet: "protection par fusibles" });
     }
   }
+  // Onduleur / redresseur : ThdI d'entrée selon le redresseur, neutre de sortie, surcharge en kW, batterie (température, état de santé, branches, ondulation).
+  try { analyseOnduleur(eq, null, contexte && contexte.rapportDate).filter((l) => l.constat).forEach((l) => ajouter(l.constat.phrase, l.constat.rang, l.constat.categorie, l.constat.sujet)); } catch (e) { /* analyse facultative */ }
   // Fusibles de rechange différents des fusibles installés (calibre ou modèle) : en cas de fusion, on remplacerait par autre chose.
   Object.keys(eq.controles || {}).forEach((sk) => {
     const sec = eq.controles[sk];
@@ -13908,6 +14081,13 @@ const RECO_PAR_CATEGORIE = {
   fusible: (s) => `Remplacer les fusibles concernés par jeu complet de trois (${s}).`,
   serrage: (s) => `Resserrer les connexions au couple préconisé (${s}).`,
   contact: (s) => `Nettoyer les contacts et refaire la mesure ; remplacer si l'écart persiste (${s}).`,
+  thdi_entree: () => "Faire contrôler le filtre d'entrée et l'étage redresseur (condensateurs, selfs, carte d'absorption sinusoïdale) par le constructeur.",
+  neutre_harmoniques: () => "Vérifier la section du conducteur neutre en sortie (harmoniques de rang 3) et son échauffement par thermographie.",
+  surcharge_kw: () => "Réduire ou répartir la charge de sortie, ou redimensionner l'onduleur (puissance active supérieure à la puissance nominale).",
+  batterie_capacite: () => "Remplacer la batterie (capacité mesurée inférieure à 80 % de la référence).",
+  temperature_batterie: () => "Abaisser la température du local batterie (ventilation, climatisation) et anticiper le remplacement des blocs.",
+  batterie_branche: (s) => `Contrôler la ou les branches concernées (${s}) : mesure bloc par bloc, résistance interne et serrage des connexions.`,
+  ondulation_batterie: () => "Faire contrôler les condensateurs de filtrage du redresseur / chargeur.",
   fusible_rechange: () => "Mettre à disposition des fusibles de rechange identiques aux fusibles installés (calibre et modèle).",
   isolement: (s) => `Rechercher la cause de la baisse d'isolement et refaire la mesure (${s}).`,
   enroulements: (s) => `Faire contrôler les enroulements et le changeur de prises (${s}).`,
@@ -13935,7 +14115,7 @@ const RECO_PAR_CATEGORIE = {
   etat_degrade: (s) => `Surveiller à la prochaine visite : ${s}.`,
 };
 const MAX_PRECONISATIONS = 5;
-const ORDRE_RECO = ["capacite_modules", "module", "redondance_modules", "surcharge_condensateurs", "resonance", "self_accord", "fusible_calibre", "fusible_ib", "fusible", "fusible_rechange", "serrage", "contact", "isolement", "enroulements", "huile", "mise_terre", "protection", "disjoncteur", "batterie", "gradin", "cosphi", "usure", "proprete", "ventilation", "thermique", "mesure", "etat_defaillant", "etat_degrade"];
+const ORDRE_RECO = ["capacite_modules", "module", "redondance_modules", "surcharge_condensateurs", "resonance", "self_accord", "fusible_calibre", "fusible_ib", "fusible", "fusible_rechange", "surcharge_kw", "batterie_capacite", "batterie_branche", "thdi_entree", "neutre_harmoniques", "temperature_batterie", "ondulation_batterie", "serrage", "contact", "isolement", "enroulements", "huile", "mise_terre", "protection", "disjoncteur", "batterie", "gradin", "cosphi", "usure", "proprete", "ventilation", "thermique", "mesure", "etat_defaillant", "etat_degrade"];
 // Préconisations dédoublonnées, regroupées par famille, les plus urgentes en premier.
 function preconisationsDepuisConstats(constats) {
   const groupes = {};
@@ -14845,6 +15025,7 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
                     onRemoveCustom={(id) => removeCustomAction(sec.key, id)}
                   />
                   <PuissanceApparenteCalculee eq={eq} sectionKey={sec.key} suffix={sec.key === "mesures_reseau_normal" ? "normal" : "secours"} mono={sec.key === "mesures_reseau_normal" ? eq.controles?.regimes_reseaux?.normal === "Monophasé" : eq.controles?.regimes_reseaux?.secours === "Monophasé"} />
+                  <NotesAnalyseOnduleur eq={eq} allSites={allSites} rapportDate={rapportDate} section={sec.key} />
                   {eq.type === "Redresseur chargeur" && (sec.key === "mesures_reseau_normal" || sec.key === "mesures_reseau_secours") && (() => {
                     const cle = sec.key === "mesures_reseau_normal" ? "photos_reseau_entree" : "photos_reseau_entree2";
                     return (
@@ -14903,6 +15084,7 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
                   />
                   <PuissanceApparenteCalculee eq={eq} sectionKey={sec.key} suffix="utilisation" mono={eq.controles?.regimes_reseaux?.utilisation === "Monophasé"} />
                   <TauxChargeCalcule eq={eq} />
+                  <NotesAnalyseOnduleur eq={eq} allSites={allSites} rapportDate={rapportDate} section={sec.key} />
                   <HistoriqueTauxCharge eq={eq} allSites={allSites} />
                   <Card style={{ marginBottom: 14 }}>
                     <SectionTitle>Photo par phase (tension + courant)</SectionTitle>
@@ -14938,6 +15120,7 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
                     onRemoveCustom={(id) => removeCustomAction(sec.key, id)}
                   />
                   <CapaciteFiltreCalculee eq={eq} />
+                  <NotesAnalyseOnduleur eq={eq} allSites={allSites} rapportDate={rapportDate} section={sec.key} />
                 </React.Fragment>
               );
             }
@@ -14957,6 +15140,7 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
                   />
                   <TensionsBatterieTheoriques eq={eq} />
                   <CourantSortieRedresseurCalcule eq={eq} />
+                  <NotesAnalyseOnduleur eq={eq} allSites={allSites} rapportDate={rapportDate} section={sec.key} />
                 </React.Fragment>
               );
             }
@@ -14976,6 +15160,7 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
                   />
                   <CourantDechargeBranches eq={eq} update={update} />
                   <AutonomieCalculee eq={eq} />
+                  <NotesAnalyseOnduleur eq={eq} allSites={allSites} rapportDate={rapportDate} section={sec.key} />
                   <Card style={{ marginBottom: 14 }}>
                     <SectionTitle>Courbe de décharge batterie</SectionTitle>
                     <CourbeDechargeDonnees eq={eq} update={update} />
@@ -20971,6 +21156,7 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
         if (pCalc !== null) elements.push(new DOCX.Paragraph({ spacing: { before: 0, after: 40 }, children: [new DOCX.TextRun({ text: `Puissance active calculée (P = S × FP) : ${pCalc} kW`, bold: true, size: 17, color: DOCX_DARK })] }));
         else elements.push(docxSpacer(40));
       } else elements.push(docxSpacer(40));
+      elements.push(...docxNotesOnduleur(eq, allSites, rapportDate, sec.key));
       if (eq.type === "Redresseur chargeur") {
         const tablePhotosE = sec.key === "mesures_reseau_normal"
           ? docxPhotosParPhase(redresseurDoubleAlim(eq) ? "Alimentation 1" : "Réseau d'entrée", eq.controles.photos_reseau_entree)
@@ -21002,6 +21188,7 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
           elements.push(new DOCX.Paragraph({ spacing: { before: 0, after: 20 }, children: [new DOCX.TextRun({ text: `Puissance active calculée (P = S × FP) : ${pUtil} kW`, bold: true, size: 17, color: DOCX_DARK })] }));
         }
       }
+      elements.push(...docxNotesOnduleur(eq, allSites, rapportDate, sec.key));
       // Le taux de charge et son historique sont imprimés plus haut, sous l'échéancier des pièces d'usure (voir docxBlocTauxCharge).
       const tablePhotosU = docxPhotosParPhase("Utilisation", eq.controles.photos_utilisation);
       if (tablePhotosU) { elements.push(docxSpacer(20)); elements.push(tablePhotosU); }
@@ -21010,10 +21197,10 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
     }
     if (sec.key === "mesures_batterie_ups" && TYPES_AVEC_BRANCHES_UPS.includes(eq.type)) {
       elements.push(docxHeading(sec.title));
-      const rows5 = sec.items.map((item) => {
+      const rows5 = sec.items.filter((item) => !(item.optionnel && !controleRenseigne(item, eq.controles[sec.key][item.key]))).map((item) => {
         const value = eq.controles[sec.key][item.key] || { action: "", etat: "", fields: {} };
         const parts = printFieldParts(item, value);
-        return [item.label, parts, value.action, value.etat];
+        return [String(item.label).replace(/\s*\((?:[^()]*—\s*)?facultatif\)/i, "").replace(/\s*\(constructeur \/ mise en service\)/i, ""), parts, value.action, value.etat];
       });
       const t5 = docxControlTable(rows5);
       if (t5) elements.push(t5);
@@ -21029,6 +21216,7 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
       const iSortie = calcCourantSortieRedresseur(eq);
       if (iSortie !== null) elements.push(new DOCX.Paragraph({ spacing: { before: 20, after: 60 }, children: [new DOCX.TextRun({ text: `Courant de sortie redresseur (calculé) : ${iSortie} A`, bold: true, size: 17, color: DOCX_DARK })] }));
       else if (!th) elements.push(docxSpacer());
+      { const notesB = docxNotesOnduleur(eq, allSites, rapportDate, sec.key); if (notesB.length) elements.push(docxSpacer(40), ...notesB); }
       return;
     }
     if (sec.key === "mesures_onduleur_item" && TYPES_AVEC_BRANCHES_UPS.includes(eq.type)) {
@@ -21040,15 +21228,16 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
         const partsF = [capaF.c1 !== null && `L1 : ${capaF.c1} µF`, capaF.c2 !== null && `L2 : ${capaF.c2} µF`, capaF.c3 !== null && `L3 : ${capaF.c3} µF`].filter(Boolean);
         elements.push(new DOCX.Paragraph({ spacing: { before: 40, after: 40 }, children: [new DOCX.TextRun({ text: `Capacité des condensateurs de filtre (calculée) : ${partsF.join("  ·  ")}`, bold: true, size: 17, color: DOCX_DARK })] }));
       }
+      elements.push(...docxNotesOnduleur(eq, allSites, rapportDate, sec.key));
       elements.push(docxSpacer());
       return;
     }
     if (sec.key === "essai_decharge" && TYPES_AVEC_BRANCHES_UPS.includes(eq.type)) {
       elements.push(docxHeading(sec.title));
-      const rows6 = sec.items.map((item) => {
+      const rows6 = sec.items.filter((item) => !(item.optionnel && !controleRenseigne(item, eq.controles[sec.key][item.key]))).map((item) => {
         const value = eq.controles[sec.key][item.key] || { action: "", etat: "", fields: {} };
         const parts = printFieldParts(item, value);
-        return [item.label, parts, value.action, value.etat];
+        return [String(item.label).replace(/\s*\((?:[^()]*—\s*)?facultatif\)/i, "").replace(/\s*\(constructeur \/ mise en service\)/i, ""), parts, value.action, value.etat];
       });
       const t6 = docxControlTable(rows6);
       if (t6) elements.push(t6);
@@ -21063,8 +21252,9 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
         elements.push(new DOCX.Paragraph({ keepNext: true, spacing: { after: 40 }, children: [new DOCX.TextRun({ text: `Total : ${totalI} A${puissanceD !== null ? `  ·  Puissance de décharge (calculée) : ${puissanceD} kW` : ""}`, bold: true, size: 17, color: DOCX_DARK })] }));
       }
       const a = calcAutonomieTheorique(eq);
-      if (a !== null) elements.push(new DOCX.Paragraph({ spacing: { before: 40, after: 60 }, children: [new DOCX.TextRun({ text: `Autonomie avec la charge mesurée (calculée) : ${a} min`, bold: true, size: 17, color: DOCX_DARK })] }));
+      if (a !== null) elements.push(new DOCX.Paragraph({ spacing: { before: 40, after: 60 }, children: [new DOCX.TextRun({ text: `Autonomie théorique (capacité nominale, optimiste pour une décharge rapide) : ${a} min`, bold: true, size: 17, color: DOCX_DARK })] }));
       else elements.push(docxSpacer());
+      { const notesD = docxNotesOnduleur(eq, allSites, rapportDate, sec.key); if (notesD.length) elements.push(...notesD); }
       // La courbe de décharge s'affiche ici, juste sous l'essai de décharge, avec son propre titre
       // (comme à l'écran), et non plus à la fin de l'équipement.
       const courbeD = docxCourbeDecharge(eq);
@@ -21149,6 +21339,7 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
     const itemVide = (item) => {
       const value = eq.controles[sec.key][item.key] || { action: "", etat: "", fields: {} };
       const parts = printFieldParts(item, value) || [];
+      if (item.optionnel && !controleRenseigne(item, value) && !String(value.action || "").trim()) return true; // facultatif non utilisé : non imprimé
       return !parts.some((p) => String((p && p.text) ?? p ?? "").trim()) && !String(value.action || "").trim() && !value.etat;
     };
     const itemsAffiches = itemsAffichesBruts.filter((item) => !itemVide(item));
