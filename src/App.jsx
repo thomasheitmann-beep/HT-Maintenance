@@ -1525,12 +1525,16 @@ const SECURITE_CELLULE = [
 // SM6, UniSec...), plutôt que d'inventer des références.
 const MARQUE_MODELE_ORGANE = {};
 const LISTE_MODELE_ORGANE_OPTIONS = optionsParChamp("marque", MARQUE_MODELE_ORGANE, null);
+// Organe : la marque est celle de l'appareil (non ressaisie) ; « modele » contient la désignation constructeur (MX, YO, MCH…).
 const ORGANES_FIELDS = [
-  { key: "marque", label: "Marque", options: LISTE_MARQUE_CELLULE_HTA },
-  { key: "modele", label: "Modèle", options: LISTE_MODELE_ORGANE_OPTIONS },
-  { key: "reference", label: "Référence" }, { key: "tension", label: "Tension", options: LISTE_TENSION_ORGANES }, { key: "type", label: "Type", options: LISTE_TYPE_ORGANES },
+  { key: "modele", label: "Désignation (MX, YO, MCH…)" },
+  { key: "reference", label: "Référence" }, { key: "tension", label: "Tension (V)", options: LISTE_TENSION_ORGANES }, { key: "type", label: "Courant", options: LISTE_TYPE_ORGANES },
+  { key: "consommation", label: "Consommation (facultatif)", unit: "VA" },
 ];
-const LISTE_TYPE_ORGANE_DYNAMIQUE = ["Bobine à manque", "Bobine Mitop", "Déclencheur voltmétrique", "Moteur", "Bobine de fermeture", "Bobine d'ouverture", "Bouton poussoir", "Contact auxiliaire"];
+// Contacts (auxiliaires, signalisation, position) : ni tension ni consommation à saisir.
+const estOrganeContact = (label) => /contact/i.test(String(label || ""));
+const champsOrgane = (fields, label) => (estOrganeContact(label) ? ORGANES_FIELDS.filter((f) => f.key === "modele" || f.key === "reference") : ORGANES_FIELDS);
+const LISTE_TYPE_ORGANE_DYNAMIQUE = ["Bobine à manque", "Bobine Mitop", "Déclencheur voltmétrique", "Moteur", "Bobine de fermeture", "Bobine d'ouverture", "Bouton poussoir", "Contact auxiliaire", "Retardateur de bobine à manque", "Contact prêt à fermer", "Réarmement à distance", "Contact de signalisation de défaut", "Contacts de position (châssis)"];
 const LISTE_TC_FONCTION = ["Protection", "Mesure", "Protection / Mesure", "Homopolaire (terre)"];
 const LISTE_TC_SECONDAIRE = ["1", "5"];
 // Caractéristiques standards des TC/TP/tores — liste + saisie libre, pour préremplir rapidement
@@ -1617,7 +1621,137 @@ function equipementAvecTC(eq) {
   if (eq.type === "Comptage HTA" || eq.type === "Contacteur HTA") return eq.identification?.presenceTC === "Oui"; // généralement absent d'origine sur ces équipements
   return true;
 }
+// Cellules HTA : caractéristiques assignées et année (âge, obsolescence, cohérence fusibles / transformateur).
+const CHAMPS_CELLULE_HTA = [
+  { key: "tensionAssignee", label: "Tension assignée (kV)", options: ["7,2", "12", "17,5", "24", "36"] },
+  { key: "courantAssigne", label: "Courant assigné (A)", options: ["200", "400", "630", "800", "1250"] },
+  { key: "anneeMiseEnService", label: "Année de mise en service", numeric: true },
+];
+const LISTE_SELFS_BATTERIE = ["Non", "Oui — p ≈ 7 % (189 Hz)", "Oui — p ≈ 14 % (134 Hz)", "Oui — p ≈ 5,7 % (210 Hz)", "Oui — autre accord"];
+const FREQ_SELFS_BATTERIE = { "Oui — p ≈ 7 % (189 Hz)": 189, "Oui — p ≈ 14 % (134 Hz)": 134, "Oui — p ≈ 5,7 % (210 Hz)": 210 };
 const TYPES_AVEC_ORGANES_DYNAMIQUE = ["Interrupteur HTA", "Interrupteur Fusible HTA", "Disjoncteur HTA", "Disjoncteur BT", "Interrupteur BT"];
+// ===== Catalogue des organes de manœuvre par gamme (désignations de fonction constructeur, jamais de références de pièces) =====
+// fiable : désignations relevées dans la documentation de la gamme ; sinon « à confirmer sur la plaque / la notice ».
+const ORG = (code, libelle, type, essai = null) => ({ code, libelle, type, essai });
+const TENSIONS_BT_SCHNEIDER = [["24-30", "VCC"], ["48-60", "VCC/VCA"], ["100-130", "VCC/VCA"], ["200-250", "VCC/VCA"], ["277", "VCA"], ["380-480", "VCA"]];
+const TENSIONS_BT_GENERIQUES = [["24", "VCC"], ["48", "VCC"], ["110", "VCC/VCA"], ["220-240", "VCC/VCA"], ["380-415", "VCA"]];
+const TENSIONS_HTA = [["24", "VCC"], ["48", "VCC"], ["110", "VCC"], ["125", "VCC"], ["220", "VCC/VCA"], ["230", "VCA"]];
+const ORGANES_GENERIQUES_BT = [ORG("", "Bobine d'ouverture (émission de tension)", "Bobine d'ouverture", "ouverture"), ORG("", "Bobine à minimum de tension", "Bobine à manque", "manque"), ORG("", "Bobine de fermeture", "Bobine de fermeture", "fermeture"), ORG("", "Motorisation / moteur de réarmement", "Moteur", "moteur"), ORG("", "Contacts auxiliaires", "Contact auxiliaire"), ORG("", "Contact de signalisation de défaut", "Contact de signalisation de défaut")];
+const ORGANES_GENERIQUES_HTA = [ORG("", "Déclencheur à émission de tension (ouverture)", "Bobine d'ouverture", "ouverture"), ORG("", "Déclencheur à manque de tension", "Bobine à manque", "manque"), ORG("", "Électro-aimant de fermeture", "Bobine de fermeture", "fermeture"), ORG("", "Motorisation / moteur de réarmement", "Moteur", "moteur"), ORG("Mitop", "Déclencheur à faible énergie (relais autoalimenté)", "Bobine Mitop"), ORG("", "Contacts auxiliaires", "Contact auxiliaire")];
+const CATALOGUE_ORGANES = [
+  { id: "mtz", titre: "Masterpact MTZ", marque: /schneider|merlin/i, modele: /mtz/i, fiable: true, tensions: TENSIONS_BT_SCHNEIDER, organes: [
+    ORG("MX", "Bobine d'ouverture (version diagnostic)", "Bobine d'ouverture", "ouverture"), ORG("XF", "Bobine de fermeture (version diagnostic)", "Bobine de fermeture", "fermeture"), ORG("MN", "Bobine à manque de tension (version diagnostic)", "Bobine à manque", "manque"), ORG("MNR", "Retardateur de MN", "Retardateur de bobine à manque"),
+    ORG("MCH", "Moteur de réarmement", "Moteur", "moteur"), ORG("PF", "Contact prêt à fermer", "Contact prêt à fermer"), ORG("BPFE", "Bouton poussoir de fermeture électrique", "Bouton poussoir"), ORG("Res", "Réarmement à distance", "Réarmement à distance"),
+    ORG("OF", "Contacts auxiliaires de position", "Contact auxiliaire"), ORG("SDE", "Contact signal défaut électrique", "Contact de signalisation de défaut"), ORG("CE / CD / CT", "Contacts de position du châssis", "Contacts de position (châssis)")] },
+  { id: "masterpact", titre: "Masterpact NT / NW / M", marque: /schneider|merlin/i, modele: /masterpact|\bN[TW]\s?\d|\bM\s?\d{2}\b/i, fiable: true, tensions: TENSIONS_BT_SCHNEIDER, organes: [
+    ORG("MX", "Bobine d'ouverture", "Bobine d'ouverture", "ouverture"), ORG("XF", "Bobine de fermeture", "Bobine de fermeture", "fermeture"), ORG("MN", "Bobine à manque de tension", "Bobine à manque", "manque"), ORG("MNR", "Retardateur de MN", "Retardateur de bobine à manque"),
+    ORG("MCH", "Moteur de réarmement", "Moteur", "moteur"), ORG("PF", "Contact prêt à fermer", "Contact prêt à fermer"), ORG("BPFE", "Bouton poussoir de fermeture électrique", "Bouton poussoir"), ORG("Res", "Réarmement à distance", "Réarmement à distance"),
+    ORG("OF", "Contacts auxiliaires de position", "Contact auxiliaire"), ORG("SDE", "Contact signal défaut électrique", "Contact de signalisation de défaut"), ORG("CE / CD / CT", "Contacts de position du châssis", "Contacts de position (châssis)")] },
+  { id: "ns_gros", titre: "Compact NS 630b à 3200", marque: /schneider|merlin/i, modele: /NS\s?(630b|800|1000|1250|1600|2000|2500|3200)/i, fiable: true, tensions: TENSIONS_BT_SCHNEIDER, organes: [
+    ORG("MX", "Bobine d'ouverture", "Bobine d'ouverture", "ouverture"), ORG("XF", "Bobine de fermeture", "Bobine de fermeture", "fermeture"), ORG("MN", "Bobine à manque de tension", "Bobine à manque", "manque"), ORG("MCH", "Moteur de réarmement", "Moteur", "moteur"),
+    ORG("OF", "Contacts auxiliaires de position", "Contact auxiliaire"), ORG("SD", "Contact signal de déclenchement", "Contact de signalisation de défaut"), ORG("SDE", "Contact signal défaut électrique", "Contact de signalisation de défaut")] },
+  { id: "nsx", titre: "Compact NSX / NS 100 à 630", marque: /schneider|merlin/i, modele: /NSX|NS\s?(80|100|160|250|400|630)(?!b)/i, fiable: true, tensions: TENSIONS_BT_SCHNEIDER, organes: [
+    ORG("MX", "Déclencheur voltmétrique à émission", "Bobine d'ouverture", "ouverture"), ORG("MN", "Déclencheur voltmétrique à manque de tension", "Bobine à manque", "manque"), ORG("MT", "Commande motorisée (télécommande)", "Moteur", "moteur"),
+    ORG("OF", "Contact auxiliaire ouvert / fermé", "Contact auxiliaire"), ORG("SD", "Contact signal de déclenchement", "Contact de signalisation de défaut"), ORG("SDE", "Contact signal défaut électrique", "Contact de signalisation de défaut")] },
+  { id: "emax", titre: "ABB Emax / Emax 2", marque: /abb/i, modele: /emax|\bE[1-6](\.2)?\b/i, fiable: true, tensions: TENSIONS_BT_GENERIQUES, organes: [
+    ORG("YO", "Bobine d'ouverture", "Bobine d'ouverture", "ouverture"), ORG("YO2", "Deuxième bobine d'ouverture", "Bobine d'ouverture"), ORG("YC", "Bobine de fermeture", "Bobine de fermeture", "fermeture"), ORG("YU", "Bobine à minimum de tension", "Bobine à manque", "manque"),
+    ORG("D", "Retardateur de YU", "Retardateur de bobine à manque"), ORG("M", "Moteur de réarmement des ressorts", "Moteur", "moteur"), ORG("YR", "Réarmement à distance", "Réarmement à distance"), ORG("Q", "Contacts auxiliaires", "Contact auxiliaire"), ORG("S75", "Contacts de position du châssis", "Contacts de position (châssis)")] },
+  { id: "tmax", titre: "ABB Tmax / Isomax", marque: /abb/i, modele: /tmax|isomax|\bXT\d|\bT[1-8]\b/i, fiable: true, tensions: TENSIONS_BT_GENERIQUES, organes: [
+    ORG("SOR", "Déclencheur à émission", "Bobine d'ouverture", "ouverture"), ORG("UVR", "Déclencheur à minimum de tension", "Bobine à manque", "manque"), ORG("MOE", "Commande motorisée", "Moteur", "moteur"), ORG("AUX", "Contacts auxiliaires", "Contact auxiliaire")] },
+  { id: "3wl", titre: "Siemens 3WL / 3WA", marque: /siemens/i, modele: /3W[LA]/i, fiable: false, tensions: TENSIONS_BT_GENERIQUES, organes: [
+    ORG("F1", "Déclencheur à émission", "Bobine d'ouverture", "ouverture"), ORG("F2", "Deuxième déclencheur à émission", "Bobine d'ouverture"), ORG("F3", "Déclencheur à minimum de tension", "Bobine à manque", "manque"), ORG("Y1", "Électro-aimant de fermeture", "Bobine de fermeture", "fermeture"), ORG("M", "Moteur de réarmement", "Moteur", "moteur"), ORG("", "Contacts auxiliaires", "Contact auxiliaire")] },
+  { id: "3va", titre: "Siemens 3VA", marque: /siemens/i, modele: /3VA/i, fiable: false, tensions: TENSIONS_BT_GENERIQUES, organes: [
+    ORG("ST", "Déclencheur à émission", "Bobine d'ouverture", "ouverture"), ORG("UVR", "Déclencheur à minimum de tension", "Bobine à manque", "manque"), ORG("MO", "Commande motorisée", "Moteur", "moteur"), ORG("", "Contacts auxiliaires", "Contact auxiliaire")] },
+  { id: "terasaki", titre: "Terasaki TemPower", marque: /terasaki/i, modele: /.*/, fiable: true, tensions: TENSIONS_BT_GENERIQUES, organes: [
+    ORG("SHT", "Déclencheur à émission", "Bobine d'ouverture", "ouverture"), ORG("UVT", "Déclencheur à minimum de tension", "Bobine à manque", "manque"), ORG("CC", "Bobine de fermeture", "Bobine de fermeture", "fermeture"), ORG("MD", "Moteur de réarmement", "Moteur", "moteur"), ORG("", "Contacts auxiliaires", "Contact auxiliaire")] },
+  { id: "bt_generique", titre: "Disjoncteur BT (désignations génériques)", bt: true, marque: /.*/, modele: /.*/, fiable: false, tensions: TENSIONS_BT_GENERIQUES, organes: ORGANES_GENERIQUES_BT },
+  // HTA
+  { id: "abb_hta", titre: "ABB UniSec / UniGear (VD4, HD4)", hta: true, marque: /abb/i, modele: /.*/, fiable: false, tensions: TENSIONS_HTA, organes: [
+    ORG("MO1", "Bobine d'ouverture", "Bobine d'ouverture", "ouverture"), ORG("MO2", "Deuxième bobine d'ouverture", "Bobine d'ouverture"), ORG("MC", "Bobine de fermeture", "Bobine de fermeture", "fermeture"), ORG("MU", "Bobine à minimum de tension", "Bobine à manque", "manque"), ORG("MS", "Motoréducteur de réarmement", "Moteur", "moteur"), ORG("", "Contacts auxiliaires", "Contact auxiliaire")] },
+  { id: "siemens_hta", titre: "Siemens 8DJH / SIMOSEC / NXAIR", hta: true, marque: /siemens/i, modele: /.*/, fiable: false, tensions: TENSIONS_HTA, organes: [
+    ORG("Y1", "Déclencheur à émission", "Bobine d'ouverture", "ouverture"), ORG("Y7", "Déclencheur à minimum de tension", "Bobine à manque", "manque"), ORG("Y6", "Déclencheur à faible énergie (relais autoalimenté)", "Bobine Mitop"), ORG("M1", "Moteur", "Moteur", "moteur"), ORG("", "Contacts auxiliaires", "Contact auxiliaire")] },
+  { id: "schneider_hta", titre: "Schneider / Merlin Gerin SM6, RM6, Premset, Fluokit…", hta: true, marque: /schneider|merlin|alstom|areva/i, modele: /.*/, fiable: false, tensions: TENSIONS_HTA, organes: ORGANES_GENERIQUES_HTA },
+  { id: "hta_generique", titre: "Cellule HTA (désignations génériques)", hta: true, marque: /.*/, modele: /.*/, fiable: false, tensions: TENSIONS_HTA, organes: ORGANES_GENERIQUES_HTA },
+];
+function gammeOrganes(eq) {
+  if (!eq || !TYPES_AVEC_ORGANES_DYNAMIQUE.includes(eq.type)) return null;
+  const id = eq.identification || {};
+  const marque = String(id.marque || "");
+  const texte = [id.modele, id.typeDisjoncteur, id.typeCellule].filter(Boolean).join(" ");
+  const bt = /BT$/.test(eq.type);
+  return CATALOGUE_ORGANES.find((g) => (bt ? !g.hta : (g.hta === true)) && g.marque.test(marque) && g.modele.test(texte)) || null;
+}
+// Code d'organe de la gamme pour un essai (ouverture, manque, fermeture, moteur) — ex. « YO » sur un Emax.
+function codeOrganeEssai(eq, essai) {
+  const g = gammeOrganes(eq);
+  const o = g && g.organes.find((x) => x.essai === essai && x.code);
+  return o ? o.code : null;
+}
+function OrganesGammePanel({ eq, update }) {
+  const g = gammeOrganes(eq);
+  const [ouvert, setOuvert] = useState(false);
+  const [coches, setCoches] = useState({});
+  const [tensions, setTensions] = useState({}); // tension choisie par organe (moteur et bobines peuvent différer)
+  if (!g) return null;
+  const avecTension = (o) => /bobine|moteur|mitop|réarmement|retardateur/i.test(o.type);
+  const cocher = (i, v) => {
+    setCoches({ ...coches, [i]: v });
+    // La dernière tension choisie est proposée par défaut sur l'organe suivant ; elle reste modifiable.
+    if (v && !tensions[i] && avecTension(g.organes[i])) { const derniere = Object.values(tensions).filter(Boolean).pop(); if (derniere) setTensions({ ...tensions, [i]: derniere }); }
+  };
+  const existants = new Set((eq.controles.organes_dynamique || []).map((o) => `${o.label}|${(o.fields || {}).modele || ""}`));
+  const ajouter = () => {
+    const nouveaux = g.organes.map((o, i) => ({ o, i })).filter(({ i }) => coches[i]).map(({ o, i }) => {
+      const tSel = g.tensions.find((t) => t.join(" ") === tensions[i]);
+      const e = emptyDynamicEntry(o.type, ORGANES_FIELDS, false);
+      e.fields = { ...e.fields, marque: eq.identification?.marque || "", modele: o.code || "", ...(tSel && avecTension(o) ? { tension: tSel[0], type: tSel[1] } : {}) };
+      return e;
+    });
+    const gardes = (eq.controles.organes_dynamique || []).filter((o) => o.label || Object.entries(o.fields || {}).some(([k, v]) => !k.endsWith("Unite") && String(v || "").trim()));
+    update({ ...eq, controles: { ...eq.controles, organes_dynamique: [...gardes, ...nouveaux] } });
+    setCoches({}); setTensions({}); setOuvert(false);
+  };
+  return (
+    <Card style={{ marginBottom: 10 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+        <div style={{ fontSize: 12.5, color: "#3E4A5C" }}>Organes de la gamme <b>{g.titre}</b>{!g.fiable && <span style={{ color: "#8B96A3", fontSize: 11.5 }}> — désignations à confirmer sur la plaque ou la notice</span>}</div>
+        <button type="button" onClick={() => setOuvert(!ouvert)} style={btnGhost(BRAND.blue)}>{ouvert ? "Fermer" : "Choisir les organes présents"}</button>
+      </div>
+      {ouvert && (
+        <div style={{ marginTop: 10 }}>
+          {g.organes.map((o, i) => {
+            const deja = existants.has(`${o.type}|${o.code}`);
+            return (
+              <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", padding: "4px 0" }}>
+                <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, color: deja ? "#9AA4AF" : "#1A1F26", cursor: "pointer", flex: "1 1 220px" }}>
+                  <input type="checkbox" disabled={deja} checked={!!coches[i]} onChange={(e) => cocher(i, e.target.checked)} />
+                  {o.code && <b style={{ minWidth: 44 }}>{o.code}</b>}<span>{o.libelle}{deja ? " (déjà dans la liste)" : ""}</span>
+                </label>
+                {coches[i] && avecTension(o) && (
+                  <select value={tensions[i] || ""} onChange={(e) => setTensions({ ...tensions, [i]: e.target.value })} style={{ fontSize: 12, padding: "4px 6px", borderRadius: 6, border: "1px solid #D5DBE2" }}>
+                    <option value="">Tension…</option>
+                    {g.tensions.map((t) => <option key={t.join(" ")} value={t.join(" ")}>{t[0]} V {t[1] === "VCC" ? "CC" : t[1] === "VCA" ? "CA" : "CA/CC"}</option>)}
+                  </select>
+                )}
+              </div>
+            );
+          })}
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+            <span style={{ fontSize: 11.5, color: "#8B96A3", flex: "1 1 200px" }}>Une tension par organe : moteur et bobines peuvent être alimentés différemment.</span>
+            <button type="button" disabled={!Object.values(coches).some(Boolean)} onClick={ajouter} style={{ ...btnGhost(BRAND.amber), opacity: Object.values(coches).some(Boolean) ? 1 : 0.5 }}>Ajouter les organes cochés</button>
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+}
+// Ligne lisible d'un organe dans le rapport : « MX · 200-250 V CA/CC · Schneider Electric · Réf. … »
+function texteOrganeRapport(o) {
+  const f = o.fields || {};
+  const typeCourant = { VCC: "CC", VCA: "CA", "VCC/VCA": "CA/CC" }[f.type] || f.type || "";
+  return [f.modele, f.tension ? `${f.tension} V${typeCourant ? " " + typeCourant : ""}` : typeCourant, f.consommation ? `${f.consommation} VA` : "", f.reference ? `Réf. ${f.reference}` : ""].filter(Boolean).join(" · ");
+}
+
 const TYPES_AVEC_GRADINS = ["Batterie de compensation"];
 // Onduleur : branches de batterie (dynamique, comme les gradins) et relevé détaillé des tensions
 // par élément, avec classification automatique (Normal / À surveiller / Critique) par rapport à
@@ -2541,6 +2675,7 @@ function buildOnduleurSchema({ normalMono = false, secoursMono = false, utilisat
       { key: "tensionEntreeSortie", label: "Tension entrée / sortie", options: LISTE_TENSION_ENTREE_SORTIE },
       { key: "regimeSortie", label: "Régime de sortie", options: LISTE_REGIME_SORTIE_UPS },
       { key: "typeRedresseur", label: "Type de redresseur (interprétation du ThdI d'entrée)", options: LISTE_TYPE_REDRESSEUR },
+      { key: "autonomieAnnoncee", label: "Autonomie annoncée à pleine charge (min)", numeric: true },
       { key: "anneeMiseEnService", label: "Année de mise en service", numeric: true },
     ],
     sections: [
@@ -2674,7 +2809,7 @@ function buildRedresseurSchema({ reseauMono = false, reseau2Mono = false, double
     identification: [
       { key: "repere", label: "Repère / Nom de l'équipement" },
       { key: "marque", label: "Marque", options: LISTE_MARQUE_REDRESSEUR }, { key: "modele", label: "Modèle", options: LISTE_MODELE_REDRESSEUR_OPTIONS },
-      { key: "puissanceKVA", label: "Puissance (kVA)", numeric: true }, { key: "puissanceKW", label: "Puissance (kW)", numeric: true },
+      { key: "courantNominalSortie", label: "Courant nominal de sortie (A)", numeric: true }, { key: "puissanceKW", label: "Puissance (kW)", numeric: true },
       { key: "tensionEntree", label: "Tension d'entrée (V)" }, { key: "tensionSortieContinue", label: "Tension de sortie continue (V)" },
       { key: "configuration", label: "Configuration", options: LISTE_CONFIG_REDRESSEUR },
       { key: "typeRedresseur", label: "Type de redresseur (interprétation du ThdI d'entrée)", options: LISTE_TYPE_REDRESSEUR },
@@ -2776,7 +2911,7 @@ function buildInverseurSchema({ source1Mono = false, source2Mono = false, utilis
   return {
     identification: [
       { key: "repere", label: "Repère / Nom de l'équipement" },
-      { key: "marque", label: "Marque", options: LISTE_MARQUE_INVERSEUR }, { key: "materiel", label: "Matériel", options: LISTE_MATERIEL_INVERSEUR_OPTIONS },
+      { key: "marque", label: "Marque", options: LISTE_MARQUE_INVERSEUR }, { key: "materiel", label: "Modèle", options: LISTE_MATERIEL_INVERSEUR_OPTIONS },
       { key: "puissanceKVA", label: "Puissance (kVA)", numeric: true }, { key: "calibreDisjoncteur", label: "Calibre (A)", numeric: true },
       { key: "anneeMiseEnService", label: "Année de mise en service", numeric: true },
     ],
@@ -3102,13 +3237,14 @@ function buildTransformateurSchema({ sec = false, classeIsolation = null, deuxSe
     identification: [
       { key: "repere", label: "Repère / Nom de l'équipement" },
       { key: "typeIsolation", label: "Type d'isolation", options: LISTE_TYPE_ISOLATION_TDY },
-      { key: "typeTransformateur", label: "Type de transformateur", options: LISTE_TYPE_TRANSFORMATEUR }, { key: "numeroSerie", label: "Numéro de série" },
+      { key: "numeroSerie", label: "Numéro de série" },
       { key: "marque", label: "Marque", options: LISTE_MARQUE_TDY }, { key: "anneeMiseEnService", label: "Année de mise en service" },
       { key: "puissance", label: "Puissance (KVA)", numeric: true }, { key: "tensionPrimaire", label: "Tension primaire (KV)", numeric: true },
       { key: "couplage", label: "Couplage", options: LISTE_COUPLAGE_TDY }, { key: "tensionSecondaire", label: "Tension secondaire (V)", numeric: true },
       { key: "deuxEnroulementsSecondaires", label: "Deux enroulements secondaires", options: ["Non", "Oui"] },
       ...(deuxSecondaires ? [{ key: "tensionSecondaire2", label: "Tension secondaire 2 (V)", numeric: true }] : []),
       { key: "ucc", label: "Ucc (%)", numeric: true },
+      { key: "typeTransformateur", label: "Type de transformateur (facultatif — distribution par défaut)", options: LISTE_TYPE_TRANSFORMATEUR },
       ...(!sec ? [{ key: "typeRefroidissement", label: "Type de refroidissement", options: LISTE_REFROIDISSEMENT_TRANSFO }] : []),
       ...(sec ? [{ key: "classeIsolation", label: "Classe d'isolation (sec)", options: ["F", "H"] }] : []),
     ],
@@ -3190,7 +3326,7 @@ function buildInterrupteurHTASchema({ avecRelais = false } = {}) {
   return {
     identification: [
       { key: "repere", label: "Repère / Nom de l'équipement" }, { key: "marque", label: "Marque", options: LISTE_MARQUE_CELLULE_HTA }, { key: "modele", label: "Modèle", options: LISTE_MODELE_CELLULE_HTA_OPTIONS },
-      { key: "typeCellule", label: "Type de cellule", options: typeCelluleParGamme("Interrupteur HTA") }, { key: "numeroSerie", label: "Numéro de série" },
+      { key: "typeCellule", label: "Type de cellule", options: typeCelluleParGamme("Interrupteur HTA") }, { key: "numeroSerie", label: "Numéro de série" }, ...CHAMPS_CELLULE_HTA,
       { key: "presenceRelais", label: "Présence d'un relais de protection", options: ["Non", "Oui"] },
       ...(avecRelais ? [
         { key: "marqueRelais", label: "Marque du relais de protection", options: LISTE_MARQUE_RELAIS_HTA }, { key: "referenceRelais", label: "Référence du relais", options: LISTE_REFERENCE_RELAIS_HTA_OPTIONS }, { key: "numeroSerieRelais", label: "Numéro de série (relais)" },
@@ -3226,7 +3362,7 @@ function buildInterrupteurFusibleHTASchema({ avecRelais = false } = {}) {
   return {
     identification: [
       { key: "repere", label: "Repère / Nom de l'équipement" }, { key: "marque", label: "Marque", options: LISTE_MARQUE_CELLULE_HTA }, { key: "modele", label: "Modèle", options: LISTE_MODELE_CELLULE_HTA_OPTIONS },
-      { key: "typeCellule", label: "Type de cellule", options: typeCelluleParGamme("Interrupteur Fusible HTA") }, { key: "numeroSerie", label: "Numéro de série" },
+      { key: "typeCellule", label: "Type de cellule", options: typeCelluleParGamme("Interrupteur Fusible HTA") }, { key: "numeroSerie", label: "Numéro de série" }, ...CHAMPS_CELLULE_HTA,
       { key: "presenceRelais", label: "Présence d'un relais de protection", options: ["Non", "Oui"] },
       ...(avecRelais ? [
         { key: "marqueRelais", label: "Marque du relais de protection", options: LISTE_MARQUE_RELAIS_HTA }, { key: "referenceRelais", label: "Référence du relais", options: LISTE_REFERENCE_RELAIS_HTA_OPTIONS }, { key: "numeroSerieRelais", label: "Numéro de série (relais)" },
@@ -3265,7 +3401,7 @@ function buildInterrupteurFusibleHTASchema({ avecRelais = false } = {}) {
 const SCHEMAS = {
   "Interrupteur HTA": buildInterrupteurHTASchema({}),
   "Comptage HTA": {
-    identification: [{ key: "repere", label: "Repère / Nom de l'équipement" }, { key: "marque", label: "Marque", options: LISTE_MARQUE_CELLULE_HTA }, { key: "modele", label: "Modèle", options: LISTE_MODELE_CELLULE_HTA_OPTIONS }, { key: "typeCellule", label: "Type de cellule", options: typeCelluleParGamme("Comptage HTA") }, { key: "numeroSerie", label: "Numéro de série" }],
+    identification: [{ key: "repere", label: "Repère / Nom de l'équipement" }, { key: "marque", label: "Marque", options: LISTE_MARQUE_CELLULE_HTA }, { key: "modele", label: "Modèle", options: LISTE_MODELE_CELLULE_HTA_OPTIONS }, { key: "typeCellule", label: "Type de cellule", options: typeCelluleParGamme("Comptage HTA") }, { key: "numeroSerie", label: "Numéro de série" }, ...CHAMPS_CELLULE_HTA],
     sections: [
       { key: "mecaniques", title: "Contrôles mécaniques", items: MECA_CELLULE },
       { key: "electriques", title: "Contrôles électriques", items: [
@@ -3290,7 +3426,7 @@ const SCHEMAS = {
       { key: "repere", label: "Repère / Nom de l'équipement" }, 
       { key: "marque", label: "Marque", options: LISTE_MARQUE_CELLULE_HTA },
       { key: "modele", label: "Modèle", options: LISTE_MODELE_CELLULE_HTA_OPTIONS },
-      { key: "typeCellule", label: "Type de cellule", options: typeCelluleParGamme("Disjoncteur HTA") }, { key: "numeroSerie", label: "Numéro de série" },
+      { key: "typeCellule", label: "Type de cellule", options: typeCelluleParGamme("Disjoncteur HTA") }, { key: "numeroSerie", label: "Numéro de série" }, ...CHAMPS_CELLULE_HTA,
       { key: "referenceDisjoncteur", label: "Référence du disjoncteur", options: LISTE_REF_DISJONCTEUR }, { key: "numeroSerieDisjoncteur", label: "Numéro de série (disjoncteur)" },
       { key: "marqueRelais", label: "Marque du relais de protection", options: LISTE_MARQUE_RELAIS_HTA }, { key: "referenceRelais", label: "Référence du relais", options: LISTE_REFERENCE_RELAIS_HTA_OPTIONS }, { key: "numeroSerieRelais", label: "Numéro de série (relais)" },
       { key: "rapportTPProtection", label: "Rapport TP de protection", options: LISTE_RAPPORT_TP },
@@ -3320,7 +3456,7 @@ const SCHEMAS = {
       { key: "repere", label: "Repère / Nom de l'équipement" }, 
       { key: "marque", label: "Marque", options: LISTE_MARQUE_CELLULE_HTA },
       { key: "modele", label: "Modèle", options: LISTE_MODELE_CELLULE_HTA_OPTIONS },
-      { key: "typeCellule", label: "Type de cellule", options: LISTE_TYPE_CELLULE_CONTACTEUR_OPTIONS }, { key: "numeroSerie", label: "Numéro de série" },
+      { key: "typeCellule", label: "Type de cellule", options: LISTE_TYPE_CELLULE_CONTACTEUR_OPTIONS }, { key: "numeroSerie", label: "Numéro de série" }, ...CHAMPS_CELLULE_HTA,
       { key: "referenceContacteur", label: "Référence du contacteur", options: LISTE_REF_DISJONCTEUR }, { key: "numeroSerieContacteur", label: "Numéro de série (contacteur)" },
       { key: "marqueRelais", label: "Marque du relais de protection", options: LISTE_MARQUE_RELAIS_HTA }, { key: "referenceRelais", label: "Référence du relais", options: LISTE_REFERENCE_RELAIS_HTA_OPTIONS }, { key: "numeroSerieRelais", label: "Numéro de série (relais)" },
       { key: "rapportTPProtection", label: "Rapport TP de protection", options: LISTE_RAPPORT_TP },
@@ -3358,8 +3494,9 @@ const SCHEMAS = {
       { key: "transfoUccManuel", label: "Ucc du transformateur (%) — saisie manuelle", numeric: true },
       { key: "typeDisjoncteur", label: "Type disjoncteur", options: LISTE_TYPE_DISJONCTEUR_BT_OPTIONS },
       { key: "niveauPerformance", label: "Niveau de performance (pouvoir de coupure)", options: LISTE_NIVEAU_PERFORMANCE_BT_OPTIONS }, { key: "numeroSerieDisjoncteur", label: "Numéro de série" },
-      { key: "marqueRelais", label: "Marque de l'unité de déclenchement", options: LISTE_MARQUE_RELAIS_BT }, { key: "referenceRelais", label: "Référence de l'unité de déclenchement", options: LISTE_REFERENCE_RELAIS_BT_OPTIONS }, { key: "numeroSerieRelais", label: "Numéro de série (relais)" },
+      { key: "marqueRelais", label: "Marque de l'unité de déclenchement", options: LISTE_MARQUE_RELAIS_BT }, { key: "referenceRelais", label: "Référence de l'unité de déclenchement", options: LISTE_REFERENCE_RELAIS_BT_OPTIONS },
       { key: "intensiteNominale", label: "Intensité nominale (A)", numeric: true }, { key: "debrochable", label: "Débrochable", options: OUI_NON_LIST },
+      { key: "anneeMiseEnService", label: "Année de mise en service", numeric: true },
     ],
     sections: [
       { key: "mecaniques", title: "Contrôles mécaniques", items: [
@@ -3381,16 +3518,37 @@ const SCHEMAS = {
         C("bouton_test_rearmement", "Test du bouton test / réarmement"),
       ]},
       { key: "organes", title: "Organes internes", items: [] },
+      { key: "manoeuvre_electrique", title: "Essais des organes de manœuvre électriques", items: [
+        C("essai_mx", "Ouverture électrique (bobine MX)"),
+        C("essai_mn", "Déclenchement à manque de tension (bobine MN)"),
+        C("essai_xf", "Fermeture électrique (bobine XF)"),
+        { ...C("essai_moteur", "Moteur de réarmement (MCH)", [F("temps", "Temps de réarmement", "s")]), champsFacultatifs: true },
+      ]},
+      { key: "debrochage", title: "Châssis débrochable", items: [
+        C("embrochage", "Manœuvre d'embrochage / débrochage"),
+        C("verrouillage_position", "Verrouillage en position (embroché / test / débroché)"),
+        C("contacts_chassis", "Contacts de position du châssis (CE / CT / CD)"),
+        C("pinces_embrochage", "État et graissage des pinces d'embrochage"),
+        C("cadenassage", "Cadenassage en position débrochée"),
+      ]},
+      { key: "mesure_isolement", title: "Mesure d'isolement (optionnelle)", items: [
+        C("phases_masse", "Phases - Masse (disjoncteur fermé)", isolementFields("bt_phases_masse", null, true)),
+        C("entre_phases", "Entre phases (disjoncteur fermé)", isolementFields("bt_entre_phases", null, true)),
+        C("amont_aval", "Entre bornes amont et aval (disjoncteur ouvert)", isolementFields("bt_amont_aval", null, true)),
+      ]},
       { key: "reglage_disjoncteur", title: "Réglage du disjoncteur", items: [
         S("surcharge_longue", "Surcharge longue", [F("inominal", "I nominal", "A"), F("k1", "K1"), F("k2", "K2"), F("ineutre", "Ineutre", "A"), F("tr_mode", "tr", null, LISTE_TR_MODE), F("tr", "tr", "s"), F("tr_classe", "à (x Ir)", null, LISTE_TR_CLASSE)]),
         S("cc_temporise", "Court-circuit temporisé", [F("im_fonction_de", "Im fonction de", null, ["Ir", "In"]), F("k", "K"), F("tsd", "tsd", "ms"), F("i2t", "I²t", null, ["ON", "OFF"])]),
         S("instantane", "Instantané", [F("ii", "Ii", "kA")]),
         S("pouvoir_coupure", "Pouvoir de coupure", [F("icu", "Icu", "kA")]),
+        S("protection_terre", "Protection terre (G)", [F("ig", "Ig", "A"), F("tg", "tg", "ms")]),
+        S("differentiel", "Différentiel (Vigi)", [F("idn", "IΔn", "A"), F("dt", "Δt", "ms")]),
       ]},
       { key: "tests_disjoncteur", title: "Tests du disjoncteur", items: [
         C("test_surcharge_longue", "Surcharge longue", [F("test_a", "Test à", "x Ir"), F("tr_max", "Tr max attendu", "s"), F("declenchement", "Déclenchement", "s")]),
         C("test_cc_temporise", "Court-circuit temporisé", [F("test_a", "Test à", "x Im"), F("i2t_essai", "I²t pendant l'essai", null, ["OFF", "ON"]), F("declenchement_t0", "Déclenchement à T=0", "ms"), F("declenchement_treg", "Déclenchement à T réglé", "ms")]),
         C("test_instantane", "Instantané", [F("valise_str", "Valise STR", "mA"), F("declenchement", "Déclenchement", "ms")]),
+        { ...C("test_terre", "Protection terre / différentiel", [F("courant", "Courant injecté", "A"), F("declenchement", "Déclenchement", "ms")]), optionnel: true },
       ]},
       { key: "courbe_declenchement", title: "Courbe de déclenchement", items: [
         S("courbe", "Courbe de déclenchement", [F("reference", "Référence / fichier joint")]),
@@ -3405,6 +3563,7 @@ const SCHEMAS = {
       { key: "nomTGBT", label: "Nom du TGBT" }, { key: "utilisation", label: "Utilisation" },
       { key: "typeDisjoncteur", label: "Type", options: LISTE_TYPE_DISJONCTEUR_BT_OPTIONS }, { key: "numeroSerieDisjoncteur", label: "Numéro de série" },
       { key: "intensiteNominale", label: "Intensité nominale (A)", numeric: true }, { key: "debrochable", label: "Débrochable", options: OUI_NON_LIST },
+      { key: "anneeMiseEnService", label: "Année de mise en service", numeric: true },
     ],
     sections: [
       { key: "mecaniques", title: "Contrôles mécaniques", items: [
@@ -3489,7 +3648,9 @@ const SCHEMAS = {
   "Batterie de compensation": {
     identification: [
       { key: "repere", label: "Repère / Nom de l'équipement" },
-      { key: "marque", label: "Marque", options: LISTE_MARQUE_BATTERIE }, { key: "typeCompensation", label: "Type de compensation", options: LISTE_TYPE_COMPENSATION },
+      { key: "marque", label: "Marque", options: LISTE_MARQUE_BATTERIE },
+      { key: "tensionCondensateurs", label: "Tension assignée des condensateurs (V)", options: ["400", "415", "440", "460", "480", "525"] },
+      { key: "selfsBatterie", label: "Selfs anti-harmoniques", options: LISTE_SELFS_BATTERIE },
       { key: "qn", label: "Qn (kVAR)", numeric: true }, { key: "triphase", label: "Régime", options: ["Triphasé", "Monophasé"] },
       { key: "nombreGradins", label: "Nombre total de gradins", numeric: true }, { key: "anneeMiseEnService", label: "Année de mise en service", numeric: true },
       { key: "transformateurAssocie", label: "Transformateur associé (repère, pour le calcul de résonance)" },
@@ -3776,6 +3937,17 @@ function getOnduleurRegimes(eq) {
   };
 }
 function getSchema(eq) {
+  if (eq.type === "Disjoncteur BT") {
+    const base = SCHEMAS["Disjoncteur BT"];
+    const debrochable = String(eq.identification?.debrochable || "").toUpperCase() === "OUI";
+    // Essais des organes : désignation de la gamme (MX, YO, SHT…) quand elle est connue.
+    const ESSAIS = { essai_mx: ["ouverture", "Ouverture électrique", "bobine MX"], essai_mn: ["manque", "Déclenchement à manque de tension", "bobine MN"], essai_xf: ["fermeture", "Fermeture électrique", "bobine XF"], essai_moteur: ["moteur", "Moteur de réarmement", "MCH"] };
+    let gamme = null; try { gamme = gammeOrganes(eq); } catch (e) { /* facultatif */ }
+    const sections = base.sections.filter((sec) => debrochable || sec.key !== "debrochage").map((sec) => sec.key !== "manoeuvre_electrique" ? sec : {
+      ...sec, items: sec.items.map((it) => { const d = ESSAIS[it.key]; if (!d) return it; const code = gamme ? codeOrganeEssai(eq, d[0]) : null; return { ...it, label: code ? `${d[1]} (${code})` : gamme ? `${d[1]}` : `${d[1]} (${d[2]})` }; }),
+    });
+    return { ...base, sections };
+  }
   if (eq.type === "Onduleur") {
     const schema = buildOnduleurSchema(getOnduleurRegimes(eq));
     let out = schema;
@@ -6809,6 +6981,9 @@ function verificationsCoherenceEquipement(eq, site) {
     const gs = String(eq.controles?.mesures_amont?.gradins_en_service?.fields?.valeur ?? "").trim();
     const amontRempli = ["tensions_amont", "courants_amont", "puissances_amont"].some((k) => Object.values(eq.controles?.mesures_amont?.[k]?.fields || {}).some((x) => numOf(x) !== null));
     if (gs === "0" && amontRempli) push("mesures_amont", "« Gradins en service lors de la mesure : 0 » dans les mesures AVEC compensation — la batterie n'était pas en service, vérifier le nombre de gradins enclenchés");
+    // Batterie à selfs : la tension aux bornes des condensateurs monte d'environ 1/(1 − p) — condensateurs 400 / 415 V à vérifier.
+    const uCond = numOf(eq.identification?.tensionCondensateurs), fS = FREQ_SELFS_BATTERIE[eq.identification?.selfsBatterie];
+    if (uCond && uCond <= 415 && /^Oui/.test(String(eq.identification?.selfsBatterie || ""))) push("identification", `batterie à selfs anti-harmoniques avec des condensateurs de ${uCond} V : leur tension de service dépasse celle du réseau d'environ ${fS ? Math.round((1 / (1 - (50 / fS) ** 2) - 1) * 100) : 7} % (accord des selfs) — tension assignée à vérifier (440 à 480 V habituellement)`);
     const nbG = numOf(eq.identification?.nombreGradins), releves = (eq.controles?.gradins_dynamique || []).filter((g) => g.label).length;
     if (nbG && releves && releves < nbG) push("gradins", `${releves} gradin${releves > 1 ? "s" : ""} relevé${releves > 1 ? "s" : ""} sur ${nbG} déclarés — puissance et analyse de résonance partielles dans le rapport`);
   }
@@ -6855,6 +7030,11 @@ function verificationsCoherenceEquipement(eq, site) {
     })();
     if (P && sCalc && P > sCalc * 1.05) push("mesures_utilisation", `puissance active relevée (${fmtV(P)} kW) supérieure à U × I (${fmtV(Math.round(sCalc * 100) / 100)} kVA) — impossible physiquement : vérifier l'unité (W / kW) ou les relevés`);
     else if (P && S && P > S * 1.02) push("mesures_utilisation", `puissance active relevée (${fmtV(P)} kW) supérieure à la puissance apparente relevée (${fmtV(S)} kVA) — vérifier les relevés`);
+  }
+  // Disjoncteur BT d'arrivée : Ir comparé au courant nominal du transformateur
+  if (eq.type === "Disjoncteur BT") {
+    const vIr = (() => { try { return calcVerificationIrTransfo(eq, (site && site.equipements) || []); } catch (e) { return null; } })();
+    if (vIr && vIr.etat !== "ok") push("reglage_disjoncteur", `Ir = ${vIr.ir} A pour In transformateur ≈ ${vIr.inTr} A (${Math.round(vIr.rapport * 100)} %) — ${vIr.etat === "haut" ? "transformateur non protégé en surcharge" : "risque de déclenchement intempestif"} : réglage ou saisie à vérifier`);
   }
   // Bilan de puissance : cohérence des puissances et du rattachement
   if (eq.type === "Bilan de puissance") {
@@ -8665,10 +8845,10 @@ function DynamicListPanel({ title, entries, onChange, typeOptions, fieldDefs, wi
                   <div style={{ flex: "1 1 200px" }}>
                     <Combo value={e.label} onChange={(v) => setEntry(e.id, { label: v })} options={options} listId={`${idPrefix}-${e.id}`} placeholder="Type (ou saisie libre)" />
                   </div>
-                  {aDesChampsPlaque(typeof fieldDefs === "function" ? fieldDefs(e.fields) : fieldDefs) && (
+                  {aDesChampsPlaque(typeof fieldDefs === "function" ? fieldDefs(e.fields, e.label) : fieldDefs) && (
                     <BoutonLirePlaque compact libelle="Plaque" typeEquipement={`${title} — ${e.label || ""}`}
                       contexte={contextePlaqueComposant(`${title} ${e.label || ""}`)}
-                      champs={champsPlaqueDepuisDefs(typeof fieldDefs === "function" ? fieldDefs(e.fields) : fieldDefs, e.fields)}
+                      champs={champsPlaqueDepuisDefs(typeof fieldDefs === "function" ? fieldDefs(e.fields, e.label) : fieldDefs, e.fields)}
                       valeursActuelles={e.fields} onAppliquer={(patch) => setEntry(e.id, { fields: { ...e.fields, ...patch } })} />
                   )}
                   {entries.length > 1 && (
@@ -8678,11 +8858,11 @@ function DynamicListPanel({ title, entries, onChange, typeOptions, fieldDefs, wi
                   )}
                 </div>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                  {(typeof fieldDefs === "function" ? fieldDefs(e.fields) : fieldDefs).map((f) =>
+                  {(typeof fieldDefs === "function" ? fieldDefs(e.fields, e.label) : fieldDefs).map((f) =>
                     f.options ? (
                       <MiniCombo key={f.key} label={f.label} options={typeof f.options === "function" ? f.options(e.fields) || [] : f.options} value={e.fields[f.key]} onChange={(v) => setField(e.id, f.key, v)} listId={`${idPrefix}-${e.id}-${f.key}`} unit={f.unit} />
                     ) : (
-                      <MiniInput key={f.key} label={f.label} unit={f.unit} value={e.fields[f.key]} onChange={(v) => setField(e.id, f.key, v)} />
+                      <MiniInput key={f.key} label={f.label} unit={f.unit} type={f.unit || f.numeric ? "number" : "text"} width={f.unit || f.numeric ? undefined : 120} value={e.fields[f.key]} onChange={(v) => setField(e.id, f.key, v)} />
                     )
                   )}
                   {withActionEtat && (
@@ -8976,7 +9156,9 @@ function analyseOnduleur(eq, allSites, rapportDate) {
   const mc = c.mesures_continu || {};
   const uDC = numOf(mc.tension_continue?.fields?.v), iDC = numOf(mc.courant_charge?.fields?.a), kwNom = numOf(id.puissanceKW);
   const pDC = uDC && iDC !== null ? (uDC * iDC) / 1000 : null;
-  if (eq.type === "Redresseur chargeur" && pDC !== null && kwNom) charge = (pDC / kwNom) * 100;
+  const inSortie = numOf(id.courantNominalSortie);
+  if (eq.type === "Redresseur chargeur" && iDC !== null && inSortie) charge = (iDC / inSortie) * 100;
+  else if (eq.type === "Redresseur chargeur" && pDC !== null && kwNom) charge = (pDC / kwNom) * 100;
 
   // 1-4. ThdI d'entrée (réseau 1, et alimentation 2 d'un redresseur) selon le type de redresseur
   for (const [secK, itK, quoi] of [["mesures_reseau_normal", "thdi_normal", "d'entrée"], ["mesures_reseau_secours", "thdi_secours", "de l'alimentation 2"]]) {
@@ -9025,7 +9207,13 @@ function analyseOnduleur(eq, allSites, rapportDate) {
 
   // Redresseur chargeur : charge, ondulation résiduelle, tension continue, rendement, courant de recharge
   if (eq.type === "Redresseur chargeur") {
-    if (pDC !== null && kwNom) {
+    if (iDC !== null && inSortie) {
+      const pct = (iDC / inSortie) * 100;
+      if (pct > 100) {
+        const phrase = `Courant de sortie ${v2(iDC, 1)} A pour ${v2(inSortie, 1)} A nominaux (${Math.round(pct)} %) : redresseur en surcharge.`;
+        out.push({ section: "mesures_continu", niveau: 2, texte: phrase, constat: { phrase, rang: 2, categorie: "surcharge_kw", sujet: "redresseur" } });
+      } else out.push({ section: "mesures_continu", niveau: pct >= 90 ? 1 : 0, texte: `Taux de charge du redresseur : ${v2(iDC, 1)} A sur ${v2(inSortie, 1)} A nominaux, soit ${Math.round(pct)} %${pct >= 90 ? " : marge faible." : "."}` });
+    } else if (pDC !== null && kwNom) {
       const pct = (pDC / kwNom) * 100;
       if (pct > 100) {
         const phrase = `Puissance continue débitée ${v2(pDC, 2)} kW (${v2(uDC, 1)} V × ${v2(iDC, 1)} A) pour ${v2(kwNom, 2)} kW nominaux (${Math.round(pct)} %) : redresseur en surcharge.`;
@@ -9132,13 +9320,18 @@ function analyseOnduleur(eq, allSites, rapportDate) {
   }
   // 10-11. Essai d'autonomie : état de santé et autonomie à la charge du jour
   const ed = c.essai_decharge || {};
-  const dMes = numOf(ed.duree_decharge?.fields?.duree), dRef = numOf(ed.autonomie_reference?.fields?.minutes);
+  const dMes = numOf(ed.duree_decharge?.fields?.duree);
+  const pctEssai0 = numOf(ed.charge_essai?.fields?.pct) ?? (numOf(ed.charge_essai?.fields?.kw) && kwN ? (numOf(ed.charge_essai.fields.kw) / kwN) * 100 : null);
+  const annoncee = numOf(id.autonomieAnnoncee);
+  let dRef = numOf(ed.autonomie_reference?.fields?.minutes), refEstimee = false;
+  // Sans référence saisie : autonomie annoncée à pleine charge, ramenée à la charge de l'essai (ordre de grandeur).
+  if (!dRef && annoncee && pctEssai0 && pctEssai0 > 5) { dRef = annoncee * Math.pow(100 / pctEssai0, 1.15); refEstimee = true; }
   if (dMes && dRef) {
     const soh = (dMes / dRef) * 100;
     if (soh < 80) {
-      const phrase = `Essai d'autonomie : ${v2(dMes, 0)} min pour ${v2(dRef, 0)} min de référence à charge équivalente, soit un état de santé d'environ ${Math.round(soh)} % — sous le seuil de remplacement de 80 % (IEEE 1188 / IEEE 450).`;
+      const phrase = `Essai d'autonomie : ${v2(dMes, 0)} min pour ${v2(dRef, 0)} min ${refEstimee ? `attendues (d'après l'autonomie annoncée de ${v2(annoncee, 0)} min à pleine charge)` : "de référence à charge équivalente"}, soit un état de santé d'environ ${Math.round(soh)} % — sous le seuil de remplacement de 80 % (IEEE 1188 / IEEE 450).`;
       out.push({ section: "essai_decharge", niveau: 2, texte: phrase, constat: { phrase, rang: 2, categorie: "batterie_capacite", sujet: "batterie" } });
-    } else out.push({ section: "essai_decharge", niveau: soh < 90 ? 1 : 0, texte: `État de santé de la batterie ≈ ${Math.round(Math.min(soh, 150))} % (${v2(dMes, 0)} min mesurées pour ${v2(dRef, 0)} min de référence)${soh < 90 ? " : à surveiller, seuil de remplacement à 80 %." : "."}` });
+    } else out.push({ section: "essai_decharge", niveau: soh < 90 ? 1 : 0, texte: `État de santé de la batterie ≈ ${Math.round(Math.min(soh, 150))} % (${v2(dMes, 0)} min mesurées pour ${v2(dRef, 0)} min ${refEstimee ? `attendues d'après l'autonomie annoncée de ${v2(annoncee, 0)} min à pleine charge` : "de référence"})${soh < 90 ? " : à surveiller, seuil de remplacement à 80 %." : "."}` });
   }
   const pctEssai = numOf(ed.charge_essai?.fields?.pct) ?? (numOf(ed.charge_essai?.fields?.kw) && kwN ? (numOf(ed.charge_essai.fields.kw) / kwN) * 100 : null);
   if (dMes && pctEssai && charge !== null && charge >= 5) {
@@ -9503,6 +9696,36 @@ function calcVerificationPouvoirCoupure(eq, allEquipements, locaux) {
   const iccKa = Math.round(((i2n * 100) / ucc / 1000) * 100) / 100;
   return { ...base, sn, u2, ucc, i2n: Math.round(i2n), iccKa, insuffisant: icu !== null && icu < iccKa, ...tenueEnsemble(ensemble, iccKa) };
 }
+// Réglage long retard d'un disjoncteur d'arrivée comparé au courant nominal du transformateur amont :
+// Ir = In × K1 × K2 ≈ In transfo attendu (protection du transformateur en surcharge sans déclenchement intempestif).
+function estDisjoncteurArrivee(eq) { return /arriv|g[ée]n[ée]ral|principal|t[êe]te|\bTR\s*\d|transfo/i.test(String(eq.identification?.utilisation || "") + " " + String(eq.identification?.repere || "")); }
+function calcVerificationIrTransfo(eq, allEquipements) {
+  if (eq.type !== "Disjoncteur BT" || transfoParalleleActif(eq)) return null;
+  const tr = donneesTransformateurAssocie(eq, allEquipements);
+  if (!tr || tr.deuxSecondaires || tr.sn === null || !tr.u2) return null;
+  const sl = eq.controles?.reglage_disjoncteur?.surcharge_longue?.fields || {};
+  const inom = numOf(sl.inominal) ?? numOf(eq.identification?.intensiteNominale), k1 = numOf(sl.k1), k2 = numOf(sl.k2);
+  if (!inom || k1 === null) return null;
+  const ir = inom * k1 * (k2 ?? 1);
+  const inTr = (tr.sn * 1000) / (Math.sqrt(3) * tr.u2);
+  const rapport = ir / inTr;
+  const arrivee = estDisjoncteurArrivee(eq);
+  if (!arrivee && rapport < 0.5) return null; // départ : réglage sans rapport avec le transformateur
+  const etat = rapport > 1.1 ? "haut" : arrivee && rapport < 0.8 ? "bas" : "ok";
+  return { ir: Math.round(ir), inTr: Math.round(inTr), rapport, etat, transfoRepere: tr.repere, sn: tr.sn, u2: tr.u2, arrivee };
+}
+function texteVerificationIrTransfo(v) {
+  const base = `Réglage long retard Ir = ${v.ir} A comparé au courant nominal du transformateur${v.transfoRepere ? " « " + v.transfoRepere + " »" : ""} (${v.sn} kVA sous ${v.u2} V) : In ≈ ${v.inTr} A (Ir = ${Math.round(v.rapport * 100)} % de In)`;
+  if (v.etat === "haut") return `⚠ ${base} — Ir supérieur à In transformateur : le transformateur n'est pas protégé en surcharge par ce disjoncteur. Réglage à revoir (Ir ≈ In du transformateur), sauf ventilation forcée ou surcharge admise par le constructeur.`;
+  if (v.etat === "bas") return `⚠ ${base} — Ir nettement inférieur à In transformateur : risque de déclenchement intempestif à forte charge et puissance du transformateur sous-utilisée. Réglage à vérifier.`;
+  return `${base} — cohérent.`;
+}
+function VerificationIrTransfo({ eq, allEquipements }) {
+  const v = calcVerificationIrTransfo(eq, allEquipements);
+  if (!v) return null;
+  const alerte = v.etat !== "ok";
+  return <div style={{ background: alerte ? "#FDF3E3" : "#EEF2F6", borderRadius: 8, padding: "10px 12px", fontSize: 12, color: alerte ? "#8A5A0A" : "#0A5DA8", margin: "8px 0", lineHeight: 1.5 }}>{texteVerificationIrTransfo(v)}</div>;
+}
 const REFERENCE_NORME_POUVOIR_COUPURE = {
   "NF C 15-100": " NF C 15-100 (article 434) : le pouvoir de coupure d'un dispositif de protection ne doit pas être inférieur au courant de court-circuit présumé à l'endroit où il est installé.",
   "NF EN 61439": " NF EN 61439 : l'ensemble doit supporter le courant de court-circuit présumé à son point d'installation (tenue assignée Icw / Icc) — le pouvoir de coupure de ses appareils de protection ne doit pas lui être inférieur.",
@@ -9795,8 +10018,9 @@ function analyseResonanceBatterie(eq, allEquipements) {
     return [hs && `batterie hors service : ${hs}`, es && `en service : ${es}`].filter(Boolean).join(" ; ");
   };
   // Selfs anti-harmoniques (fréquence saisie, sinon calculée depuis L en mH)
+  const fSelfsBatterie = FREQ_SELFS_BATTERIE[eq.identification?.selfsBatterie] ?? null;
   const accords = gradins.map((g) => {
-    const f = numOf(g.fields?.selfFrequence) ?? gradinFrequenceAccordTheorique(g.fields?.q, g.fields?.u, g.fields?.selfMA);
+    const f = numOf(g.fields?.selfFrequence) ?? gradinFrequenceAccordTheorique(g.fields?.q, g.fields?.u, g.fields?.selfMA) ?? fSelfsBatterie;
     const rang = f ? arrondi(f / freqReseau) : null;
     return { nom: g.label || "Gradin", frequence: f ? arrondi(f, 1) : null, rang, p: rang ? arrondi(100 / (rang * rang), 1) : null, niveau: rang === null ? null : rang >= 4.5 ? 1 : 0 };
   });
@@ -13550,8 +13774,8 @@ function BRKReglagePanel({ eq, update, custom, onAddCustom, onChangeCustom, onRe
   const reglage = eq.controles.reglage_disjoncteur;
   const tests = eq.controles.tests_disjoncteur;
   // Les états des essais suivent les limites (constructeur si connu) ; un état choisi à la main est respecté jusqu'à la saisie suivante.
-  const setR = (itemKey, fieldKey, v) => update(appliquerEtatsAutoDisjoncteur({ ...eq, controles: { ...eq.controles, reglage_disjoncteur: { ...reglage, [itemKey]: { ...reglage[itemKey], fields: { ...reglage[itemKey].fields, [fieldKey]: v } } } } }));
-  const setT = (itemKey, fieldKey, v) => update(appliquerEtatsAutoDisjoncteur({ ...eq, controles: { ...eq.controles, tests_disjoncteur: { ...tests, [itemKey]: { ...tests[itemKey], etatManuel: false, fields: { ...tests[itemKey].fields, [fieldKey]: v } } } } }));
+  const setR = (itemKey, fieldKey, v) => update(appliquerEtatsAutoDisjoncteur({ ...eq, controles: { ...eq.controles, reglage_disjoncteur: { ...reglage, [itemKey]: { ...reglage[itemKey], fields: { ...((reglage[itemKey] || {}).fields || {}), [fieldKey]: v } } } } }));
+  const setT = (itemKey, fieldKey, v) => update(appliquerEtatsAutoDisjoncteur({ ...eq, controles: { ...eq.controles, tests_disjoncteur: { ...tests, [itemKey]: { ...tests[itemKey], etatManuel: false, fields: { ...((tests[itemKey] || {}).fields || {}), [fieldKey]: v } } } } }));
   const setTEtat = (itemKey, etat) => update(appliquerEtatsAutoDisjoncteur({ ...eq, controles: { ...eq.controles, tests_disjoncteur: { ...tests, [itemKey]: { ...tests[itemKey], etat, etatAuto: false, etatManuel: etat !== etatsAutoEssaisDisjoncteur(eq)[itemKey] } } } }));
   const BadgeAuto = ({ k }) => (tests[k] && tests[k].etatAuto ? <span title="État déterminé d'après la mesure et les limites (constructeur si le déclencheur est connu) ; modifiable à la main" style={{ fontSize: 10, fontWeight: 700, color: "#0A5DA8", background: "rgba(10,93,168,0.10)", borderRadius: 4, padding: "2px 5px" }}>auto</span> : null);
 
@@ -13612,6 +13836,16 @@ function BRKReglagePanel({ eq, update, custom, onAddCustom, onChangeCustom, onRe
             <MiniInputUnit label="Ii" value={inst.ii} unit={inst.iiUnite || "kA"} baseUnit="kA" onValueChange={(v) => setR("instantane", "ii", v)} onUnitChange={(u) => setR("instantane", "iiUnite", u)} />
             {seuilInst && <div style={{ flex: "1 1 100%", fontSize: 11.5, color: "#5B6B7D", lineHeight: 1.5 }}>{seuilInst.texte} Valeur de la documentation constructeur, à confirmer sur l'appareil.</div>}
             {reglagesETU && <div style={{ flex: "1 1 100%", fontSize: 11.5, color: "#5B6B7D", lineHeight: 1.5 }}>{reglagesETU.marque} {reglagesETU.nom} — plages de réglage de la notice {reglagesETU.source} : {reglagesETU.texte} La notice ne donne pas de tolérances chiffrées : limites génériques de l'app.</div>}
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "8px 0", borderBottom: "1px solid #E2E6EB" }}>
+            <span style={{ fontSize: 12.5, color: "#3E4A5C", flex: "1 1 160px" }}>Protection terre (G) <span style={{ color: "#8B96A3", fontSize: 11 }}>— facultatif</span></span>
+            <MiniInput label="Ig" unit="A" value={(reglage.protection_terre || {}).fields?.ig} onChange={(v) => setR("protection_terre", "ig", v)} />
+            <MiniInput label="tg" unit="ms" value={(reglage.protection_terre || {}).fields?.tg} onChange={(v) => setR("protection_terre", "tg", v)} />
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "8px 0", borderBottom: "1px solid #E2E6EB" }}>
+            <span style={{ fontSize: 12.5, color: "#3E4A5C", flex: "1 1 160px" }}>Différentiel (Vigi) <span style={{ color: "#8B96A3", fontSize: 11 }}>— facultatif</span></span>
+            <MiniInput label="IΔn" unit="A" value={(reglage.differentiel || {}).fields?.idn} onChange={(v) => setR("differentiel", "idn", v)} />
+            <MiniInput label="Δt" unit="ms" value={(reglage.differentiel || {}).fields?.dt} onChange={(v) => setR("differentiel", "dt", v)} />
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "8px 0" }}>
             <span style={{ fontSize: 12.5, color: "#3E4A5C", flex: "1 1 160px" }}>Pouvoir de coupure</span>
@@ -13682,6 +13916,15 @@ function BRKReglagePanel({ eq, update, custom, onAddCustom, onChangeCustom, onRe
             <EtatRapide value={tests.test_instantane.etat} onChange={(__v) => setTEtat("test_instantane", __v)} />
             <BadgeAuto k="test_instantane" />
           </div>
+          {(((reglage.protection_terre || {}).fields || {}).ig || ((reglage.differentiel || {}).fields || {}).idn || ((tests.test_terre || {}).fields || {}).declenchement) ? (
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "8px 0", borderTop: "1px solid #E2E6EB" }}>
+              <span style={{ fontSize: 12.5, color: "#3E4A5C", flex: "1 1 160px" }}>Protection terre / différentiel</span>
+              <MiniInput label="Courant injecté" unit="A" value={(tests.test_terre || {}).fields?.courant} onChange={(v) => setT("test_terre", "courant", v)} />
+              {(() => { const t = numOf(((reglage.protection_terre || {}).fields || {}).tg) ?? numOf(((reglage.differentiel || {}).fields || {}).dt); return t !== null ? <MiniComputed label="Tempo réglée" unit="ms" value={t} /> : null; })()}
+              <MiniInput label="Déclenchement" unit="ms" value={(tests.test_terre || {}).fields?.declenchement} onChange={(v) => setT("test_terre", "declenchement", v)} />
+              <EtatRapide value={(tests.test_terre || {}).etat} onChange={(__v) => setTEtat("test_terre", __v)} />
+            </div>
+          ) : null}
         </div>
         {custom && <CustomActionsList custom={custom} onAdd={onAddCustom} onChange={onChangeCustom} onRemove={onRemoveCustom} idPrefix={idPrefix} />}
       </Card>
@@ -14105,6 +14348,14 @@ function analyserAnomaliesEquipement(eq, contexte) {
   }
   // Onduleur / redresseur : ThdI d'entrée selon le redresseur, neutre de sortie, surcharge en kW, batterie (température, état de santé, branches, ondulation).
   try { analyseOnduleur(eq, null, contexte && contexte.rapportDate).filter((l) => l.constat).forEach((l) => ajouter(l.constat.phrase, l.constat.rang, l.constat.categorie, l.constat.sujet)); } catch (e) { /* analyse facultative */ }
+  // Disjoncteur BT d'arrivée : réglage Ir incohérent avec le transformateur amont
+  if (eq.type === "Disjoncteur BT" && contexte && contexte.allEquipements) {
+    try {
+      const vIr = calcVerificationIrTransfo(eq, contexte.allEquipements);
+      if (vIr && vIr.etat === "haut") ajouter(`Le réglage long retard du disjoncteur (Ir = ${vIr.ir} A) dépasse le courant nominal du transformateur${vIr.transfoRepere ? " « " + vIr.transfoRepere + " »" : ""} (In ≈ ${vIr.inTr} A) : le transformateur n'est pas protégé en surcharge.`, 1, "reglage_ir", "réglage long retard");
+      else if (vIr && vIr.etat === "bas") ajouter(`Le réglage long retard du disjoncteur (Ir = ${vIr.ir} A) est nettement inférieur au courant nominal du transformateur (In ≈ ${vIr.inTr} A) : risque de déclenchement intempestif à forte charge.`, 0, "reglage_ir", "réglage long retard");
+    } catch (e) { /* facultatif */ }
+  }
   // Fusibles de rechange différents des fusibles installés (calibre ou modèle) : en cas de fusion, on remplacerait par autre chose.
   Object.keys(eq.controles || {}).forEach((sk) => {
     const sec = eq.controles[sk];
@@ -14148,6 +14399,7 @@ const RECO_PAR_CATEGORIE = {
   batterie_capacite: () => "Remplacer la batterie (capacité mesurée inférieure à 80 % de la référence).",
   temperature_batterie: () => "Abaisser la température du local batterie (ventilation, climatisation) et anticiper le remplacement des blocs.",
   batterie_branche: (s) => `Contrôler la ou les branches concernées (${s}) : mesure bloc par bloc, résistance interne et serrage des connexions.`,
+  reglage_ir: () => "Revoir le réglage long retard (Ir) pour l'adapter au courant nominal du transformateur, en accord avec l'exploitant.",
   isolement_continu: () => "Rechercher le défaut d'isolement sur le réseau continu (départs, batterie, équipements alimentés) avec le contrôleur ou un localisateur de défaut.",
   ondulation_batterie: () => "Faire contrôler les condensateurs de filtrage du redresseur / chargeur.",
   fusible_rechange: () => "Mettre à disposition des fusibles de rechange identiques aux fusibles installés (calibre et modèle).",
@@ -14177,7 +14429,7 @@ const RECO_PAR_CATEGORIE = {
   etat_degrade: (s) => `Surveiller à la prochaine visite : ${s}.`,
 };
 const MAX_PRECONISATIONS = 5;
-const ORDRE_RECO = ["capacite_modules", "module", "redondance_modules", "surcharge_condensateurs", "resonance", "self_accord", "fusible_calibre", "fusible_ib", "fusible", "fusible_rechange", "surcharge_kw", "batterie_capacite", "batterie_branche", "thdi_entree", "neutre_harmoniques", "temperature_batterie", "ondulation_batterie", "isolement_continu", "serrage", "contact", "isolement", "enroulements", "huile", "mise_terre", "protection", "disjoncteur", "batterie", "gradin", "cosphi", "usure", "proprete", "ventilation", "thermique", "mesure", "etat_defaillant", "etat_degrade"];
+const ORDRE_RECO = ["capacite_modules", "module", "redondance_modules", "surcharge_condensateurs", "resonance", "self_accord", "fusible_calibre", "fusible_ib", "fusible", "fusible_rechange", "surcharge_kw", "batterie_capacite", "batterie_branche", "thdi_entree", "neutre_harmoniques", "temperature_batterie", "ondulation_batterie", "isolement_continu", "reglage_ir", "serrage", "contact", "isolement", "enroulements", "huile", "mise_terre", "protection", "disjoncteur", "batterie", "gradin", "cosphi", "usure", "proprete", "ventilation", "thermique", "mesure", "etat_defaillant", "etat_degrade"];
 // Préconisations dédoublonnées, regroupées par famille, les plus urgentes en premier.
 function preconisationsDepuisConstats(constats) {
   const groupes = {};
@@ -14442,7 +14694,17 @@ function genererSyntheseSite(site) {
 const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, removable = true, onDuplicate, locaux = [], allEquipements = [], allSites = [], caracteristiquesLibrary = {}, apprendreCaracteristique, remplacementsEnAttente = [], rapportDate = "", prochaineMaintenance = "" }) {
   const [open, setOpen] = useState(true);
   const schema = schemaFiltreeParNiveau(getSchema(eq), eq.niveauMaintenance);
-  const setIdentification = (k, v) => update(repairEquipementControles({ ...eq, identification: { ...eq.identification, [k]: v } }));
+  const setIdentification = (k, v) => {
+    const id2 = { ...eq.identification, [k]: v };
+    // Disjoncteur BT : le type (MASTERPACT, EMAX…) se déduit du modèle choisi quand il n'est pas encore renseigné.
+    if (eq.type === "Disjoncteur BT" && k === "modele" && v && !String(id2.typeDisjoncteur || "").trim()) {
+      const norm = (x) => String(x).toLowerCase().replace(/³/g, "3");
+      const types = (MARQUE_TYPE_DISJONCTEUR_BT[id2.marque] || [...new Set(Object.values(MARQUE_TYPE_DISJONCTEUR_BT).flat())]).slice().sort((a, b) => b.length - a.length);
+      const t = types.find((x) => norm(v).includes(norm(x)));
+      if (t) id2.typeDisjoncteur = t;
+    }
+    update(repairEquipementControles({ ...eq, identification: id2 }));
+  };
   const setControleItem = (sectionKey, itemKey, v) =>
     update({ ...eq, controles: { ...eq.controles, [sectionKey]: { ...eq.controles[sectionKey], [itemKey]: v } } });
   const addCustomAction = (sectionKey) =>
@@ -15017,6 +15279,7 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
                   />
                   <TransfosParalleles eq={eq} update={update} allEquipements={allEquipements} />
                   <VerificationPouvoirCoupure eq={eq} allEquipements={allEquipements} locaux={locaux} />
+                  <VerificationIrTransfo eq={eq} allEquipements={allEquipements} />
                 </React.Fragment>
               );
             }
@@ -15366,16 +15629,18 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
             }
             if (sec.key === "organes" && TYPES_AVEC_ORGANES_DYNAMIQUE.includes(eq.type)) {
               return (
+                <React.Fragment key={sec.key}>
+                <OrganesGammePanel eq={eq} update={update} />
                 <DynamicListPanel
-                  key={sec.key}
                   title="Organes internes"
                   entries={eq.controles.organes_dynamique || []}
                   onChange={(entries) => update({ ...eq, controles: { ...eq.controles, organes_dynamique: entries } })}
                   typeOptions={LISTE_TYPE_ORGANE_DYNAMIQUE}
-                  fieldDefs={ORGANES_FIELDS}
+                  fieldDefs={champsOrgane}
                   withActionEtat={false}
                   idPrefix={`${eq.id}-organes`}
                 />
+                </React.Fragment>
               );
             }
             if (sec.key === "electriques" && equipementAvecTC(eq)) {
@@ -18098,6 +18363,7 @@ function docxAnalyseResonance(a, eq) {
   const donnees = [
     !b.manque && (b.multi ? `Scc ≈ ${b.scc} kVA (${b.transfoLabel})` : `Scc ≈ ${b.scc} kVA (${b.transfoLabel} : Sn = ${b.snAffiche} kVA, Ucc = ${fr(b.uccAffiche)} %)`),
     eq.identification?.qn && `Qn batterie : ${eq.identification.qn} kVAR`,
+    eq.identification?.tensionCondensateurs && `Condensateurs ${eq.identification.tensionCondensateurs} V`,
     `Selfs anti-harmoniques : ${a.filtrage === "total" ? "oui" : a.filtrage === "partiel" ? "sur une partie des gradins" : "non"}`,
     a.thdu !== null && `THDu max : ${fr(a.thdu)} %`, a.thdi !== null && `THDi max : ${fr(a.thdi)} %`,
   ].filter(Boolean).join("   ·   ");
@@ -21160,7 +21426,8 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
           const partielQ = (nbDecl && pb.parGradin.length < nbDecl) || (pb.qn && pb.declareTotal !== null && pb.declareTotal < pb.qn * 0.95);
           const ecartQn = !partielQ && pb.qn && pb.total !== null && pb.source !== "declare" ? Math.round(((pb.total - pb.qn) / pb.qn) * 1000) / 10 : null;
           // Selfs anti-harmoniques : la puissance fournie dépasse celle des condensateurs seuls d'environ 1/(1 − p).
-          const pSelfs = (eq.controles.gradins_dynamique || []).map((g) => numOf(g.fields?.selfFrequence)).filter((f) => f && f > freqReseau).map((f) => (freqReseau / f) ** 2);
+          const fSelfsB = FREQ_SELFS_BATTERIE[eq.identification?.selfsBatterie] ?? null;
+          const pSelfs = (eq.controles.gradins_dynamique || []).map((g) => numOf(g.fields?.selfFrequence) ?? fSelfsB).filter((f) => f && f > freqReseau).map((f) => (freqReseau / f) ** 2);
           const pMoy = pSelfs.length ? pSelfs.reduce((x, y) => x + y, 0) / pSelfs.length : null;
           const noteSelfs = pMoy && ecartQn !== null && ecartQn > 0 && ecartQn <= 25
             ? `Avec selfs anti-harmoniques (p ≈ ${String(Math.round(pMoy * 1000) / 10).replace(".", ",")} %), la puissance réactive fournie dépasse normalement celle des condensateurs seuls d'environ +${String(Math.round((1 / (1 - pMoy) - 1) * 1000) / 10).replace(".", ",")} %, à quoi s'ajoute l'effet de la tension réelle (Q varie comme U²) : un écart positif de cet ordre est normal.` : "";
@@ -21397,8 +21664,7 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
     if (sec.key === "organes" && TYPES_AVEC_ORGANES_DYNAMIQUE.includes(eq.type)) {
       elements.push(docxHeading(sec.title));
       const rows = (eq.controles.organes_dynamique || []).filter((o) => o.label).map((o) => {
-        const parts = ORGANES_FIELDS.map((f) => o.fields[f.key] && `${f.label} : ${o.fields[f.key]}`).filter(Boolean).join(" · ");
-        return [o.label, parts, "", ""];
+        return [o.label, texteOrganeRapport(o), "", ""];
       });
       const t = docxControlTable(rows);
       if (t) elements.push(t);
@@ -21474,6 +21740,8 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
     if (sec.key === "reglage_disjoncteur" && eq.type === "Disjoncteur BT") {
       const v = calcVerificationPouvoirCoupure(eq, equipementsDuSiteDe(eq, allSites), locaux);
       if (v && !v.manque) elements.push(docxNormeNote(texteVerificationPouvoirCoupure(v)));
+      const vIr = calcVerificationIrTransfo(eq, equipementsDuSiteDe(eq, allSites));
+      if (vIr) { elements.push(docxSpacer(40)); elements.push(docxNormeNote(texteVerificationIrTransfo(vIr))); }
     }
     if (sec.key === "electriques" && eq.type === "Jeu de barre / Gaine à barre") {
       const v = calcVerificationJeuDeBarre(eq, equipementsDuSiteDe(eq, allSites), locaux);
