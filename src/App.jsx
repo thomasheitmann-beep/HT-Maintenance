@@ -14776,6 +14776,7 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", rowGap: 8, cursor: "pointer" }} onClick={() => setOpen((o) => !o)}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0, flex: "1 1 auto" }}>
           <ChevronDown size={15} color="#8B96A3" style={{ flexShrink: 0, transform: open ? "rotate(0deg)" : "rotate(-90deg)", transition: "transform .15s" }} />
+          <SymboleEquipement type={eq.type} taille={24} />
           <span style={{ fontSize: 14, fontWeight: 700, color: "#1A1F26", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>
             {titleField ? eq.identification[titleField.key] || eq.type : eq.type}
             {titleField && subtitleField && eq.identification[subtitleField.key] && (
@@ -16167,7 +16168,7 @@ function SiteDetail({ site, allSites, update, onBack, onDelete, onPrint, onPrint
                 border: active ? "1px solid #FFC10755" : "1px solid #D8DEE5", background: active ? "rgba(245,166,35,0.12)" : "transparent",
                 color: active ? "#FFC107" : "#5B6B7D", fontSize: 12.5, fontWeight: 600, cursor: "pointer",
               }}>
-                <Icon size={13} />
+                {t.key !== "rapport" && t.type ? <SymboleEquipement type={t.type} taille={16} couleur={active ? "#C98A00" : "#5B6B7D"} /> : <Icon size={13} />}
                 <span style={{ maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.label}</span>
                 {t.key !== "rapport" && t.progression && t.progression.total > 0 && (
                   <span title={`Mesures renseignées : ${t.progression.fait} / ${t.progression.total}`} style={{ fontSize: 10.5, fontWeight: 700, padding: "1px 6px", borderRadius: 999,
@@ -16215,6 +16216,7 @@ function SiteDetail({ site, allSites, update, onBack, onDelete, onPrint, onPrint
                         onChange={() => setReprendreSelection((sel) => sel.includes(eq.id) ? sel.filter((id) => id !== eq.id) : [...sel, eq.id])}
                         style={{ marginTop: 2, accentColor: "#0F8A5F", cursor: "pointer" }}
                       />
+                      <SymboleEquipement type={eq.type} taille={20} couleur="#3E4A5C" />
                       <div>
                         <div style={{ fontWeight: 700 }}>{eq.type}{eq.identification.repere ? " — " + eq.identification.repere : ""}</div>
                         <div style={{ fontSize: 10.5, color: "#8B96A3" }}>{s.client ? s.client + " · " : ""}{s.rapport?.date || "date inconnue"}</div>
@@ -16240,9 +16242,9 @@ function SiteDetail({ site, allSites, update, onBack, onDelete, onPrint, onPrint
             {addMenuOpenHTA && remainingHTA.length > 0 && (
               <div style={{ position: "absolute", right: 0, top: "110%", background: "#F7F8FA", border: "1px solid #D8DEE5", borderRadius: 10, overflow: "hidden", zIndex: 50, minWidth: 200, boxShadow: "0 12px 30px rgba(0,0,0,0.4)" }}>
                 {remainingHTA.map((t) => (
-                  <div key={t} onClick={() => addEquipmentType(t)} style={{ padding: "9px 14px", fontSize: 12.5, color: "#3E4A5C", cursor: "pointer" }}
+                  <div key={t} onClick={() => addEquipmentType(t)} style={{ padding: "8px 14px", fontSize: 12.5, color: "#3E4A5C", cursor: "pointer", display: "flex", alignItems: "center", gap: 10 }}
                     onMouseEnter={(e) => (e.currentTarget.style.background = "#E2E6EB")} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
-                    {t}
+                    <SymboleEquipement type={t} taille={20} couleur="#3E4A5C" />{t}
                   </div>
                 ))}
               </div>
@@ -16256,9 +16258,9 @@ function SiteDetail({ site, allSites, update, onBack, onDelete, onPrint, onPrint
             {addMenuOpenConv && remainingConv.length > 0 && (
               <div style={{ position: "absolute", right: 0, top: "110%", background: "#F7F8FA", border: "1px solid #D8DEE5", borderRadius: 10, overflow: "hidden", zIndex: 50, minWidth: 200, boxShadow: "0 12px 30px rgba(0,0,0,0.4)" }}>
                 {remainingConv.map((t) => (
-                  <div key={t} onClick={() => addEquipmentType(t)} style={{ padding: "9px 14px", fontSize: 12.5, color: "#3E4A5C", cursor: "pointer" }}
+                  <div key={t} onClick={() => addEquipmentType(t)} style={{ padding: "8px 14px", fontSize: 12.5, color: "#3E4A5C", cursor: "pointer", display: "flex", alignItems: "center", gap: 10 }}
                     onMouseEnter={(e) => (e.currentTarget.style.background = "#E2E6EB")} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
-                    {t}
+                    <SymboleEquipement type={t} taille={20} couleur="#3E4A5C" />{t}
                   </div>
                 ))}
               </div>
@@ -19089,18 +19091,67 @@ function docxSyntheseTable(site) {
 let bookmarkIdCounter = 0;
 function nextBookmarkNumericId() { return ++bookmarkIdCounter; }
 function docxBookmarkId(eq) { return "equip_" + eq.id.replace(/[^a-zA-Z0-9_]/g, "_").slice(0, 32); }
-function docxEquipHeader(name, bookmarkId, etat) {
+// Symbole électrique de l'équipement (inspiré CEI 60617), dessiné au trait blanc pour le bandeau de titre du rapport.
+const CACHE_SYMBOLES = {};
+function symboleEquipementPng(type, couleur = "#FFFFFF") {
+  const cle = `${type}|${couleur}`;
+  if (cle in CACHE_SYMBOLES) return CACHE_SYMBOLES[cle];
+  let url = null;
+  try {
+    const S = 120, c = document.createElement("canvas"); c.width = S; c.height = S;
+    const g = c.getContext("2d");
+    g.strokeStyle = couleur; g.fillStyle = couleur; g.lineWidth = 8; g.lineCap = "round"; g.lineJoin = "round";
+    const L = (x1, y1, x2, y2) => { g.beginPath(); g.moveTo(x1, y1); g.lineTo(x2, y2); g.stroke(); };
+    const O = (x, y, r, plein = false) => { g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); plein ? g.fill() : g.stroke(); };
+    const T = (t, x, y, taille = 30) => { g.font = `bold ${taille}px Arial, sans-serif`; g.textAlign = "center"; g.textBaseline = "middle"; g.fillText(t, x, y); };
+    const contact = (yHaut = 38, yPivot = 82, yBas = 112) => { L(60, 6, 60, yHaut); L(60, yPivot, 36, yHaut + 6); L(60, yPivot, 60, yBas); };
+    const t = String(type || "");
+    if (/^Transformateur/.test(t)) { L(60, 4, 60, 20); O(60, 42, 22); O(60, 78, 22); L(60, 100, 60, 116); }
+    else if (t === "Analyse d'huile") { g.beginPath(); g.moveTo(60, 12); g.bezierCurveTo(60, 12, 26, 58, 26, 78); g.arc(60, 78, 34, Math.PI, 0, true); g.bezierCurveTo(94, 58, 60, 12, 60, 12); g.stroke(); T("H", 60, 80, 30); }
+    else if (/^Disjoncteur/.test(t)) { contact(); L(52, 30, 68, 46); L(68, 30, 52, 46); }
+    else if (t === "Interrupteur Fusible HTA") { L(60, 4, 60, 22); L(60, 56, 36, 28); L(60, 56, 60, 66); g.lineWidth = 6; O(60, 22, 8); g.strokeRect(46, 66, 28, 40); g.lineWidth = 8; L(60, 66, 60, 116); }
+    else if (/^Interrupteur/.test(t)) { contact(); g.lineWidth = 6; O(60, 34, 9); }
+    else if (t === "Contacteur HTA") { contact(); g.lineWidth = 6; g.beginPath(); g.arc(60, 30, 11, 0, Math.PI); g.stroke(); }
+    else if (t === "Comptage HTA") { L(60, 4, 60, 30); O(60, 60, 30); L(60, 90, 60, 116); T("Wh", 60, 61, 26); }
+    else if (t === "Batterie de compensation") { L(60, 6, 60, 50); L(28, 50, 92, 50); L(28, 68, 92, 68); L(60, 68, 60, 112); }
+    else if (/^Onduleur|^Redresseur/.test(t)) { g.strokeRect(20, 20, 80, 80); L(20, 100, 100, 20); T("~", 44, 42, 44); T(/^Redresseur/.test(t) ? "=" : "~", 76, 78, 44); }
+    else if (t === "Inverseur de source") { L(30, 6, 30, 40); L(90, 6, 90, 40); L(60, 112, 60, 82); L(60, 82, 34, 46); O(30, 40, 4, true); O(90, 40, 4, true); }
+    else if (/^Jeu de barre/.test(t)) { g.lineWidth = 14; L(14, 46, 106, 46); g.lineWidth = 8; L(34, 46, 34, 104); L(60, 46, 60, 104); L(86, 46, 86, 104); }
+    else if (t === "Bilan de puissance") { L(60, 4, 60, 30); O(60, 60, 30); L(60, 90, 60, 116); T("W", 60, 61, 30); }
+    else if (t === "Sécurité") { g.beginPath(); g.moveTo(60, 12); g.lineTo(110, 102); g.lineTo(10, 102); g.closePath(); g.stroke(); g.beginPath(); g.moveTo(66, 40); g.lineTo(50, 70); g.lineTo(64, 70); g.lineTo(52, 92); g.stroke(); }
+    else { O(60, 60, 34); }
+    url = c.toDataURL("image/png");
+  } catch (e) { url = null; }
+  CACHE_SYMBOLES[cle] = url;
+  return url;
+}
+// Symbole de l'équipement à l'écran (trait foncé sur fond clair).
+function SymboleEquipement({ type, taille = 22, couleur = "#1A1F26" }) {
+  const src = symboleEquipementPng(type, couleur);
+  return src ? <img src={src} alt="" width={taille} height={taille} style={{ flexShrink: 0, display: "block" }} /> : null;
+}
+function docxEquipHeader(name, bookmarkId, etat, typeEquipement = null) {
   const title = new DOCX.TextRun({ text: (name || "").toUpperCase(), bold: true, color: DOCX_WHITE, size: 23, characterSpacing: 16 });
   const numericId = nextBookmarkNumericId();
+  // Symbole électrique de l'équipement à gauche du nom (image intégrée : lisible dans Word, Pages et sur iPhone).
+  const symbole = typeEquipement ? symboleEquipementPng(typeEquipement) : null;
+  const imgSymbole = symbole ? docxImage(symbole, 28, 28) : null;
   const contenu = bookmarkId ? [new DOCX.BookmarkStart(bookmarkId, numericId), title, new DOCX.BookmarkEnd(numericId)] : [title];
   // Bandeau sombre ; la barre verticale et la pastille de droite reprennent la couleur de l'état de l'équipement (repère immédiat en parcourant le rapport).
   const couleur = etat ? docxEtatColor(etat) : DOCX_BLUE;
   const a = docxAucuneBordure();
-  const largeurEtat = etat ? 2100 : 0, largeurNom = TABLE_WIDTH - largeurEtat;
+  const largeurEtat = etat ? 2100 : 0, largeurSymbole = imgSymbole ? 760 : 0, largeurNom = TABLE_WIDTH - largeurEtat - largeurSymbole;
+  // Symbole dans sa propre cellule, centré verticalement avec le nom.
+  const celluleSymbole = imgSymbole ? new DOCX.TableCell({
+    width: { size: largeurSymbole, type: DOCX.WidthType.DXA }, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_DARK }, verticalAlign: DOCX.VerticalAlign.CENTER,
+    margins: { top: 70, bottom: 70, left: 200, right: 0 },
+    borders: { top: a, bottom: a, right: a, left: { style: DOCX.BorderStyle.SINGLE, size: 48, color: couleur } },
+    children: [new DOCX.Paragraph({ spacing: { before: 0, after: 0 }, keepNext: true, children: [imgSymbole] })],
+  }) : null;
   const celluleNom = new DOCX.TableCell({
     width: { size: largeurNom, type: DOCX.WidthType.DXA }, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_DARK }, verticalAlign: DOCX.VerticalAlign.CENTER,
-    margins: { top: 110, bottom: 110, left: 220, right: 120 },
-    borders: { top: a, bottom: a, right: a, left: { style: DOCX.BorderStyle.SINGLE, size: 48, color: couleur } },
+    margins: { top: 110, bottom: 110, left: imgSymbole ? 120 : 220, right: 120 },
+    borders: { top: a, bottom: a, right: a, left: imgSymbole ? a : { style: DOCX.BorderStyle.SINGLE, size: 48, color: couleur } },
     children: [new DOCX.Paragraph({ spacing: { before: 0, after: 0 }, keepNext: true, children: contenu })],
   });
   const celluleEtat = etat ? new DOCX.TableCell({
@@ -19108,8 +19159,8 @@ function docxEquipHeader(name, bookmarkId, etat) {
     margins: { top: 110, bottom: 110, left: 100, right: 100 }, borders: docxToutesAucune(),
     children: [new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, spacing: { before: 0, after: 0 }, keepNext: true, children: [new DOCX.TextRun({ text: String(etat).toUpperCase(), bold: true, color: DOCX_WHITE, size: 17, characterSpacing: 20 })] })],
   }) : null;
-  return docxTable({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: etat ? [largeurNom, largeurEtat] : [largeurNom], borders: { ...docxToutesAucune(), insideHorizontal: a, insideVertical: a },
-    rows: [new DOCX.TableRow({ cantSplit: true, children: celluleEtat ? [celluleNom, celluleEtat] : [celluleNom] })] });
+  return docxTable({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: [...(celluleSymbole ? [largeurSymbole] : []), largeurNom, ...(etat ? [largeurEtat] : [])], borders: { ...docxToutesAucune(), insideHorizontal: a, insideVertical: a },
+    rows: [new DOCX.TableRow({ cantSplit: true, children: [...(celluleSymbole ? [celluleSymbole] : []), celluleNom, ...(celluleEtat ? [celluleEtat] : [])] })] });
 }
 function docxSpacer(h) { return new DOCX.Paragraph({ spacing: { after: h || 200 }, children: [] }); }
 function base64ToUint8(dataUrl) {
@@ -21127,11 +21178,11 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
   eq = repairEquipementControles(eq);
   const schema = schemaFiltreeParNiveau(getSchema(eq), eq.niveauMaintenance);
   if (!schema) {
-    return [docxEquipHeader((eq.type || "Équipement") + (nomEquipementSite(eq, { locaux }) ? " — " + nomEquipementSite(eq, { locaux }) : ""), docxBookmarkId(eq), eq.etatFinal), docxSpacer(40),
+    return [docxEquipHeader((eq.type || "Équipement") + (nomEquipementSite(eq, { locaux }) ? " — " + nomEquipementSite(eq, { locaux }) : ""), docxBookmarkId(eq), eq.etatFinal, eq.type), docxSpacer(40),
       new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: "Type d'équipement non reconnu — données non affichées.", italics: true, color: "C0392B", size: 18 })] }), docxSpacer()];
   }
   const localNom = (locaux || []).find((l) => l.id === eq.localId);
-  const elements = [docxEquipHeader(eq.type + (nomEquipementSite(eq, { locaux }) ? " — " + nomEquipementSite(eq, { locaux }) : ""), docxBookmarkId(eq), eq.etatFinal), docxSpacer(40)];
+  const elements = [docxEquipHeader(eq.type + (nomEquipementSite(eq, { locaux }) ? " — " + nomEquipementSite(eq, { locaux }) : ""), docxBookmarkId(eq), eq.etatFinal, eq.type), docxSpacer(40)];
   // Le local est une ligne du tableau d'identification, juste sous le nom / repère. Un équipement sans
   // tableau d'identification (ex. « Sécurité ») garde l'ancienne mention discrète au-dessus.
   const libelleLocal = nomLocalEquipement(eq, locaux);
@@ -21690,7 +21741,7 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
     };
     const itemsAffiches = itemsAffichesBruts.filter((item) => !itemVide(item));
     const autresLignes = (eq.controles[sec.key + "__custom"] || []).length || (sec.key === "electriques" && equipementAvecTC(eq) && (eq.controles.tc_dynamique || []).some((tc) => tc.label));
-    const sectionAvecComplement = ["courbe_declenchement", "analyse_harmonique", "reglage_disjoncteur", "electriques", "bilan_energie", "mesure_isolement"].includes(sec.key); // texte ou calcul ajouté sous le tableau
+    const sectionAvecComplement = ["courbe_declenchement", "analyse_harmonique", "reglage_disjoncteur", "electriques", "bilan_energie"].includes(sec.key); // texte ou calcul ajouté sous le tableau
     if (itemsAffiches.length === 0 && !autresLignes && !sectionAvecComplement) return;
     const courbeAvecFichiers = sec.key === "courbe_declenchement" && eq.type === "Disjoncteur BT"
       && ((eq.courbeFiles || []).length > 0 || (eq.courbeDeclenchementAuto !== false && !!parametresCourbeDeclenchement(eq)));
@@ -21919,7 +21970,7 @@ async function generateAnnexePhotosDocx(site) {
     const photos = collectPhotosEquipement(eq);
     if (!photos.length) return;
     total += photos.length;
-    children.push(docxEquipHeader(eq.type + (nomEquipementSite(eq, site) ? " — " + nomEquipementSite(eq, site) : ""), null, eq.etatFinal));
+    children.push(docxEquipHeader(eq.type + (nomEquipementSite(eq, site) ? " — " + nomEquipementSite(eq, site) : ""), null, eq.etatFinal, eq.type));
     photos.forEach((p) => {
       const { w, h } = dimensionsAdaptees(p, 260, 320);
       const img = docxImage(p.dataUrl, w, h);
@@ -23067,7 +23118,9 @@ const TEXTE_CONDITIONS_UTILISATION = [
 ];
 const MENTION_COPYRIGHT = `© ${new Date().getFullYear()} HT Maintenance — Logiciel propriétaire, reproduction et utilisation hors des comptes autorisés interdites.`;
 try { console.info("%c" + MENTION_COPYRIGHT, "color:#0A5DA8;font-weight:bold"); } catch (e) { /* facultatif */ }
-const cleConditions = (user) => `ht-conditions-v${VERSION_CONDITIONS}:${String((user && user.email) || "").toLowerCase()}`;
+// Clé liée à la dernière connexion du compte (saisie de l'e-mail et du mot de passe) : la fenêtre revient à chaque nouvelle connexion,
+// pas à chaque ouverture d'une session déjà ouverte.
+const cleConditions = (user) => `ht-conditions-v${VERSION_CONDITIONS}:${String((user && user.email) || "").toLowerCase()}:${String((user && user.metadata && user.metadata.lastSignInTime) || "")}`;
 function conditionsAcceptees(user) { try { return !!localStorage.getItem(cleConditions(user)); } catch (e) { return true; } }
 function ConditionsUtilisation({ user, forcer = false, onFermer }) {
   const [vu, setVu] = useState(() => conditionsAcceptees(user));
