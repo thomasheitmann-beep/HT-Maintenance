@@ -1627,6 +1627,10 @@ const CHAMPS_CELLULE_HTA = [
   { key: "courantAssigne", label: "Courant assigné (A)", options: ["200", "400", "630", "800", "1250"] },
   { key: "anneeMiseEnService", label: "Année de mise en service", numeric: true },
 ];
+const LISTE_TECHNO_COMPENSATION = ["Condensateurs à contacteurs", "Condensateurs à thyristors", "Générateur statique SVG (IGBT)", "Hybride (gradins + SVG)"];
+const LISTE_TYPE_GRADIN = ["Condensateurs (contacteur)", "Condensateurs (thyristors)", "SVG (IGBT)"];
+const avecSVG = (eq) => /SVG|Hybride/i.test(String(eq?.identification?.technologieCompensation || ""));
+const estGradinSVG = (g) => /SVG/i.test(String(g?.fields?.typeGradin || ""));
 const LISTE_SELFS_BATTERIE = ["Non", "Oui — p ≈ 7 % (189 Hz)", "Oui — p ≈ 14 % (134 Hz)", "Oui — p ≈ 5,7 % (210 Hz)", "Oui — autre accord"];
 const FREQ_SELFS_BATTERIE = { "Oui — p ≈ 7 % (189 Hz)": 189, "Oui — p ≈ 14 % (134 Hz)": 134, "Oui — p ≈ 5,7 % (210 Hz)": 210 };
 const TYPES_AVEC_ORGANES_DYNAMIQUE = ["Interrupteur HTA", "Interrupteur Fusible HTA", "Disjoncteur HTA", "Disjoncteur BT", "Interrupteur BT"];
@@ -1896,7 +1900,7 @@ function moyenneReferenceBatterie(valeurs, toleranceBasse, toleranceHaute) {
   return Math.round(ref * 1000) / 1000;
 }
 const GRADIN_FIELD_DEFS = [
-  { key: "q" }, { key: "u" }, { key: "i1" }, { key: "i2" }, { key: "i3" },
+  { key: "q" }, { key: "u" }, { key: "i1" }, { key: "i2" }, { key: "i3" }, { key: "typeGradin" }, { key: "description" },
   { key: "selfMA" }, { key: "selfFrequence" },
   { key: "contacteurRef" }, { key: "contacteurAnnee" },
   { key: "fusiblesRef" }, { key: "fusiblesAnnee" },
@@ -2106,7 +2110,11 @@ function gradinPuissances(g, mono) {
 function puissancesBatterie(eq) {
   const mono = estBatterieMono(eq);
   const gradins = (eq.controles?.gradins_dynamique || []).filter((g) => g.label || numOf(g.fields?.q) !== null);
-  const parGradin = gradins.map((g) => ({ nom: g.label || "Gradin", ...gradinPuissances(g, mono) }));
+  const parGradin = gradins.map((g) => (estGradinSVG(g)
+    ? { nom: `${g.label || "Gradin"} (SVG)`, phases: mono ? [null] : [null, null, null], total: numOf(g.fields?.q), source: "declare", declare: numOf(g.fields?.q) }
+    : { nom: g.label || "Gradin", ...gradinPuissances(g, mono) }));
+  const qSVG = numOf(eq.identification?.puissanceSVG);
+  if (avecSVG(eq) && qSVG && !gradins.some(estGradinSVG)) parGradin.push({ nom: "Module SVG", phases: mono ? [null] : [null, null, null], total: qSVG, source: "declare", declare: qSVG });
   const nbPh = mono ? 1 : 3;
   const phasesCompletes = parGradin.length > 0 && parGradin.every((p) => p.phases.every((v) => v !== null));
   const phases = phasesCompletes ? Array.from({ length: nbPh }, (_, k) => Math.round(parGradin.reduce((s2, p) => s2 + p.phases[k], 0) * 100) / 100) : null;
@@ -3649,6 +3657,7 @@ const SCHEMAS = {
     identification: [
       { key: "repere", label: "Repère / Nom de l'équipement" },
       { key: "marque", label: "Marque", options: LISTE_MARQUE_BATTERIE },
+      { key: "technologieCompensation", label: "Technologie", options: LISTE_TECHNO_COMPENSATION },
       { key: "tensionCondensateurs", label: "Tension assignée des condensateurs (V)", options: ["400", "415", "440", "460", "480", "525"] },
       { key: "selfsBatterie", label: "Selfs anti-harmoniques", options: LISTE_SELFS_BATTERIE },
       { key: "qn", label: "Qn (kVAR)", numeric: true }, { key: "triphase", label: "Régime", options: ["Triphasé", "Monophasé"] },
@@ -3936,7 +3945,35 @@ function getOnduleurRegimes(eq) {
     onduleurMono: r.onduleur === "Monophasé",
   };
 }
+// Batterie de compensation avec générateur statique (SVG) : champs d'identification et section « Module SVG » en plus.
+const SECTION_MODULE_SVG = { key: "module_svg", title: "Module SVG (générateur statique à IGBT)", items: [
+  { ...C("svg_consigne", "Consigne et mode de fonctionnement", [F("cosphi", "Cos φ de consigne"), F("nature", "Nature", null, ["Inductif", "Capacitif"]), F("mode", "Mode", null, ["Cos φ", "Puissance réactive fixe", "Équilibrage des phases", "Cos φ + harmoniques"])]), champsFacultatifs: true },
+  C("svg_reactif", "Réactif fourni au moment du contrôle", [F("kvar", "Q fournie", "kVAR"), F("pct", "Taux d'utilisation", "%")]),
+  C("svg_courants", "Courant de sortie du SVG", [F("l1", "L1", "A"), F("l2", "L2", "A"), F("l3", "L3", "A")]),
+  C("svg_temperature", "Température interne (dissipateur / module)", [F("temp", "Valeur", "°C")]),
+  C("svg_ventilation", "Ventilateurs du module"),
+  C("svg_filtres", "Filtres à air (nettoyage / remplacement)"),
+  { ...C("svg_alarmes", "Journal d'alarmes et autodiagnostic", [F("nb", "Alarmes relevées depuis la dernière visite")]), champsFacultatifs: true },
+  { ...C("svg_tc", "TC du SVG (rapport, sens, raccordement au module maître)", [F("rapport", "Rapport TC")]), champsFacultatifs: true },
+  { ...C("svg_heures", "Heures de fonctionnement", [F("h", "Heures", "h")]), optionnel: true },
+  C("svg_communication", "Communication / supervision"),
+  { ...C("svg_usure", "Pièces d'usure du module (année du prochain remplacement, selon notice)", [F("ventProchain", "Ventilateurs", null), F("filtresProchain", "Filtres à air", null), F("condDCProchain", "Condensateurs du bus continu", null)]), champsFacultatifs: true },
+]};
 function getSchema(eq) {
+  const base = getSchemaBase(eq);
+  if (!base || eq.type !== "Batterie de compensation" || !avecSVG(eq)) return base;
+  const idx = base.identification.findIndex((f) => f.key === "technologieCompensation");
+  const champsSVG = [
+    { key: "puissanceSVG", label: "Puissance du SVG (kVAR)", numeric: true },
+    { key: "modeleSVG", label: "Modèle du SVG" },
+    { key: "nombreModulesSVG", label: "Nombre de modules SVG (maître + esclaves)", numeric: true },
+  ];
+  const identification = [...base.identification.slice(0, idx + 1), ...champsSVG, ...base.identification.slice(idx + 1)];
+  const iGradins = base.sections.findIndex((x) => x.key === "gradins");
+  const sections = base.sections.some((x) => x.key === "module_svg") ? base.sections : [...base.sections.slice(0, iGradins + 1), SECTION_MODULE_SVG, ...base.sections.slice(iGradins + 1)];
+  return { ...base, identification, sections };
+}
+function getSchemaBase(eq) {
   if (eq.type === "Disjoncteur BT") {
     const base = SCHEMAS["Disjoncteur BT"];
     const debrochable = String(eq.identification?.debrochable || "").toUpperCase() === "OUI";
@@ -8470,10 +8507,34 @@ function GradinsPanel({ eq, update, idPrefix }) {
             const qTotalMesure = pg.source === "mesure" || pg.source === "estime" ? pg.total : null;
             const qStatus = qTotalMesure === null ? null : toleranceState(e.fields.q, Math.round(qTotalMesure * 0.9 * 100) / 100, Math.round(qTotalMesure * 1.1 * 100) / 100);
             const freqAccordTheo = gradinFrequenceAccordTheorique(e.fields.q, e.fields.u, e.fields.selfMA);
+            const hybride = /Hybride/i.test(String(eq.identification?.technologieCompensation || ""));
+            const selectType = hybride ? (
+              <select value={e.fields.typeGradin || "Condensateurs (contacteur)"} onChange={(ev) => setField(e.id, "typeGradin", ev.target.value)} style={{ fontSize: 12.5, padding: "6px 8px", borderRadius: 8, border: "1px solid #D5DBE2", background: "#fff" }}>
+                {LISTE_TYPE_GRADIN.map((t) => <option key={t} value={t}>{t}</option>)}
+              </select>
+            ) : null;
+            // Gradin électronique (SVG à IGBT) : pas de condensateurs commutés — ni courant théorique ni capacité, seulement sa puissance.
+            if (estGradinSVG(e)) {
+              return (
+                <div key={e.id} style={{ padding: "12px 0", borderBottom: "1px solid #E2E6EB" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+                    <div style={{ flex: "1 1 160px" }}><Combo value={e.label} onChange={(v) => setEntry(e.id, { label: v })} options={options} listId={`${idPrefix}-${e.id}`} placeholder="Nom du gradin" /></div>
+                    {selectType}
+                    {entries.length > 1 && <button onClick={() => removeEntry(e.id)} style={{ background: "none", border: "none", color: "#EF4444", cursor: "pointer", padding: 4 }} title="Retirer"><Trash2 size={15} /></button>}
+                  </div>
+                  <div style={{ marginBottom: 10 }}><TextInput value={e.fields.description || ""} onChange={(ev) => setField(e.id, "description", ev.target.value)} placeholder="Description / référence constructeur (ex. Varplus Can 3×25 kVAR 440 V + self DR 7 %)" /></div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                    <ChampSaisieEtiquete etiquette="Q nominal SVG" unite="kVAR"><CelluleSaisieNombre value={e.fields.q} onChange={(v) => setField(e.id, "q", v)} /></ChampSaisieEtiquete>
+                    <EtatRapide value={e.etat} onChange={(v) => setEntry(e.id, { etat: v })} />
+                  </div>
+                  <div style={{ fontSize: 11.5, color: "#5B6B7D", marginTop: 6 }}>Gradin électronique : compensation par IGBT, sans condensateurs commutés — les contrôles se font dans la section « Module SVG ».</div>
+                </div>
+              );
+            }
             if (gradinsReplies.has(e.id)) {
               const c = ETAT_COULEURS_SAISIE[e.etat] || ETAT_COULEURS_SAISIE.autre;
               const fr = (v) => (v === null || v === undefined || v === "" ? "—" : String(v).replace(".", ","));
-              const resumeGradin = [e.fields.q && `Q ${fr(e.fields.q)} kVAR`, gradinMesure(e) && `I ${(mono ? [e.fields.i1] : [e.fields.i1, e.fields.i2, e.fields.i3]).map(fr).join(" · ")} A`, pg.total !== null && pg.total !== undefined && `Q total ${fr(pg.total)} kVAR`].filter(Boolean).join("  ·  ");
+              const resumeGradin = [e.fields.description && String(e.fields.description).trim(), e.fields.q && `Q ${fr(e.fields.q)} kVAR`, gradinMesure(e) && `I ${(mono ? [e.fields.i1] : [e.fields.i1, e.fields.i2, e.fields.i3]).map(fr).join(" · ")} A`, pg.total !== null && pg.total !== undefined && `Q total ${fr(pg.total)} kVAR`].filter(Boolean).join("  ·  ");
               return (
                 <div key={e.id} role="button" tabIndex={0} onClick={() => replierGradin(e.id, false)} onKeyDown={(ev) => { if (ev.key === "Enter") replierGradin(e.id, false); }}
                   style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, background: "#fff", border: "1px solid #E2E6EB", borderLeft: `4px solid ${c.bord}`, borderRadius: 10, padding: "9px 12px", margin: "4px 0", cursor: "pointer" }}>
@@ -8491,6 +8552,7 @@ function GradinsPanel({ eq, update, idPrefix }) {
                   <div style={{ flex: "1 1 160px" }}>
                     <Combo value={e.label} onChange={(v) => setEntry(e.id, { label: v })} options={options} listId={`${idPrefix}-${e.id}`} placeholder="Nom du gradin" />
                   </div>
+                  {selectType}
                   <button type="button" onClick={() => replierGradin(e.id, true)} style={{ background: "none", border: "none", color: "#8B96A3", cursor: "pointer", padding: 4, fontSize: 12 }} title="Replier ce gradin">Replier ▴</button>
                   <button onClick={() => duplicateEntry(e)} style={{ background: "none", border: "none", color: "#0A5DA8", cursor: "pointer", padding: 4 }} title="Dupliquer ce gradin">
                     <Copy size={15} />
@@ -8502,6 +8564,7 @@ function GradinsPanel({ eq, update, idPrefix }) {
                   )}
                 </div>
 
+                <div style={{ marginBottom: 10 }}><TextInput value={e.fields.description || ""} onChange={(ev) => setField(e.id, "description", ev.target.value)} placeholder="Description / référence constructeur (ex. Varplus Can 3×25 kVAR 440 V + self DR 7 %)" /></div>
                 {/* Mesures du gradin : même présentation que les contrôles (grille par phase, calculs en bleu, pastilles). */}
                 <div className="controle-dense" style={{ background: "#fff", border: "1px solid #E2E6EB", borderRadius: 12, padding: "11px 12px 10px", marginBottom: 10 }}>
                   <div style={{ fontSize: 13.5, fontWeight: 700, color: "#1A1F26", marginBottom: 8 }}>Mesures du gradin</div>
@@ -9134,6 +9197,10 @@ function calcPiecesUsure(eq) {
     if (g.fields.fusiblesAnnee) lignes.push(lg("fusibles", "Fusibles", "Fusibles"));
     if (g.fields.condensateursAnnee) lignes.push(lg("condensateurs", "Condensateurs", "Condensateurs"));
   });
+  const us = eq.controles?.module_svg?.svg_usure?.fields || {};
+  [["ventProchain", "Module SVG — ventilateurs", "Ventilateurs"], ["filtresProchain", "Module SVG — filtres à air", "Filtres"], ["condDCProchain", "Module SVG — condensateurs du bus continu", "Condensateurs"]].forEach(([k, nom, fam]) => {
+    const a = numOf(us[k]); if (a !== null && avecSVG(eq)) lignes.push({ type: nom, client: nom, famille: fam, sousGroupe: "Module SVG", cle: `svg:${k}`, annee: Math.round(a) });
+  });
   const ventilos = ventilateursBatterie(eq);
   ventilos.forEach((v, i) => { if (v.annee) lignes.push({ type: libelleVentilateur(v, i, ventilos.length), client: "Ventilateur" + (ventilos.length > 1 ? ` ${i + 1}` : ""), famille: "Ventilateurs", cle: v.ancien ? "ventilation" : `ventilation:${v.id}`, annee: anneeRemplacement(v.annee, Math.round(numOf(v.duree) ?? DUREE_VIE_VENTILATEUR)) }); });
   return lignes;
@@ -9339,6 +9406,37 @@ function analyseOnduleur(eq, allSites, rapportDate) {
     out.push({ section: "essai_decharge", niveau: 0, texte: `Autonomie estimée à la charge relevée ce jour (≈ ${Math.round(charge)} %) : ≈ ${v2(est, 0)} min (ordre de grandeur, d'après l'essai réalisé à ${Math.round(pctEssai)} % de charge).` });
   }
   return out;
+}
+// Module SVG (générateur statique à IGBT) : taux d'utilisation, température — notes et constats.
+function analyseModuleSVG(eq) {
+  const out = [];
+  if (!eq || eq.type !== "Batterie de compensation" || !avecSVG(eq)) return out;
+  const m = eq.controles?.module_svg || {};
+  const v2 = (x, d = 0) => String(Math.round(x * Math.pow(10, d)) / Math.pow(10, d)).replace(".", ",");
+  const qNom = numOf(eq.identification?.puissanceSVG);
+  const kvar = numOf(m.svg_reactif?.fields?.kvar);
+  const pct = numOf(m.svg_reactif?.fields?.pct) ?? (kvar !== null && qNom ? (kvar / qNom) * 100 : null);
+  if (pct !== null) {
+    if (pct >= 90) {
+      const phrase = `Le SVG fonctionne à environ ${v2(pct)} % de sa puissance${qNom ? ` (${v2(kvar ?? (pct * qNom) / 100, 1)} kVAR sur ${v2(qNom, 1)} kVAR)` : ""} : s'il reste à ce niveau en permanence, il compense probablement le manque de gradins défaillants ou une batterie sous-dimensionnée.`;
+      out.push({ section: "module_svg", niveau: 1, texte: phrase, constat: { phrase, rang: 1, categorie: "svg_sature", sujet: "module SVG" } });
+    } else out.push({ section: "module_svg", niveau: 0, texte: `Taux d'utilisation du SVG au moment du contrôle : ${v2(pct)} %${qNom ? ` (${v2(kvar ?? (pct * qNom) / 100, 1)} kVAR sur ${v2(qNom, 1)} kVAR)` : ""}.` });
+  }
+  const tInt = numOf(m.svg_temperature?.fields?.temp), tAmb = numOf(eq.controles?.environnement?.temperature_locale?.fields?.temp);
+  if (tAmb !== null && tAmb > 40) out.push({ section: "module_svg", niveau: 1, texte: `Température du local ${v2(tAmb)} °C : au-delà d'environ 40 à 45 °C (selon constructeur), le SVG réduit automatiquement sa puissance — ventilation du local à vérifier.` });
+  if (tInt !== null && tInt > 60) out.push({ section: "module_svg", niveau: 1, texte: `Température interne du module ${v2(tInt)} °C : élevée, à comparer aux limites de la notice (ventilateurs, filtres à air, encrassement du dissipateur).` });
+  const iS = ["l1", "l2", "l3"].map((k) => numOf(m.svg_courants?.fields?.[k])).filter((x) => x !== null);
+  if (iS.length === 3) { const moy = iS.reduce((a, b) => a + b, 0) / 3; if (moy > 0 && (Math.max(...iS) - Math.min(...iS)) / moy > 0.5) out.push({ section: "module_svg", niveau: 0, texte: `Courants de sortie du SVG très différents entre phases (${iS.map((x) => v2(x, 1)).join(" / ")} A) : normal si le mode équilibrage est actif sur une installation déséquilibrée.` }); }
+  return out;
+}
+function NotesModuleSVG({ eq }) {
+  const lignes = (() => { try { return analyseModuleSVG(eq); } catch (e) { return []; } })();
+  if (!lignes.length) return null;
+  return (
+    <Card style={{ marginBottom: 14 }}>
+      {lignes.map((l, i) => <div key={i} style={{ display: "flex", gap: 8, fontSize: 12.5, lineHeight: 1.5, color: "#3E4A5C", marginBottom: i < lignes.length - 1 ? 8 : 0 }}><span style={{ color: l.niveau >= 1 ? "#B5730A" : "#0A5DA8", fontWeight: 800 }}>{l.niveau >= 1 ? "⚠" : "ℹ"}</span><span>{l.texte}</span></div>)}
+    </Card>
+  );
 }
 function NotesAnalyseOnduleur({ eq, allSites, rapportDate, section }) {
   const lignes = useMemo(() => { try { return analyseOnduleur(eq, allSites, rapportDate).filter((l) => l.section === section); } catch (e) { return []; } }, [eq, allSites, rapportDate, section]);
@@ -9978,8 +10076,12 @@ function analyseResonanceBatterie(eq, allEquipements) {
   const arrondi = (v, d = 2) => (v === null || v === undefined ? null : Math.round(v * Math.pow(10, d)) / Math.pow(10, d));
   const maxDe = (...vals) => { const v = vals.map(numOf).filter((x) => x !== null); return v.length ? Math.max(...v) : null; };
   const freqReseau = numOf(eq.controles?.mesures_amont?.frequence_amont?.fields?.hz) || 50;
-  const gradins = (eq.controles?.gradins_dynamique || []).filter((g) => g.label || numOf(g.fields?.q));
-  const qn = numOf(eq.identification?.qn);
+  const gradinsTous = (eq.controles?.gradins_dynamique || []).filter((g) => g.label || numOf(g.fields?.q));
+  const gradins = gradinsTous.filter((g) => !estGradinSVG(g)); // le SVG (IGBT) n'a pas de condensateurs commutés : hors calcul de résonance
+  const qSVGRes = gradinsTous.filter(estGradinSVG).reduce((x, g) => x + (numOf(g.fields?.q) || 0), 0) || (avecSVG(eq) ? numOf(eq.identification?.puissanceSVG) || 0 : 0);
+  const qnBrut = numOf(eq.identification?.qn);
+  const qn = qnBrut !== null && qSVGRes ? Math.max(0, qnBrut - qSVGRes) : qnBrut; // Qn des seuls gradins à condensateurs
+  const svgSeul = /^Générateur statique SVG/.test(String(eq.identification?.technologieCompensation || ""));
   // Harmoniques mesurés
   const ah = eq.controles?.analyse_harmonique || {};
   const champs = (k) => ah[k]?.fields || {};
@@ -10033,7 +10135,7 @@ function analyseResonanceBatterie(eq, allEquipements) {
   const sommeQReleves = qsReleves.reduce((x, y) => x + y, 0);
   const gradinsPartiels = !!(qsReleves.length && qn && sommeQReleves < qn * 0.95);
   const nbGradinsDeclares = numOf(eq.identification?.nombreGradins);
-  if (!base.manque && filtrage !== "total") {
+  if (!base.manque && filtrage !== "total" && !svgSeul) {
     const qs = qsReleves;
     const liste = qs.length ? (gradinsPartiels ? [...qs, qn - sommeQReleves] : qs) : (qn ? [qn] : []);
     const configs = base.configurations && base.configurations.length ? base.configurations : [{ label: base.transfoLabel, scc: base.scc, normale: true }];
@@ -10118,8 +10220,10 @@ function analyseResonanceBatterie(eq, allEquipements) {
   const notePartielle = gradinsPartiels
     ? `${qsReleves.length} gradin${qsReleves.length > 1 ? "s" : ""} relevé${qsReleves.length > 1 ? "s" : ""}${nbGradinsDeclares ? ` sur ${nbGradinsDeclares}` : ""} (${String(Math.round(sommeQReleves * 10) / 10).replace(".", ",")} kVAR sur ${String(qn).replace(".", ",")} kVAR déclarés) : la dernière ligne « Tous (Qn) » est calculée avec le Qn de la batterie complète, les étapes intermédiaires des gradins non relevés ne sont pas connues.`
     : null;
+  if (svgSeul) conclusion = "Compensation par générateur statique (SVG à IGBT) : pas de condensateurs commutés, donc pas de risque de résonance avec le transformateur.";
+  const noteSVG = qSVGRes && !svgSeul ? `Le SVG (${String(qSVGRes).replace(".", ",")} kVAR) ne participe pas à la résonance : le calcul porte sur les seuls gradins à condensateurs${qnBrut !== null ? ` (${String(Math.round(qn * 10) / 10).replace(".", ",")} kVAR)` : ""}.` : null;
   const noteIdentiques = mesuresIdentiques ? "Relevés harmoniques batterie hors service et en service strictement identiques : l'amplification à l'enclenchement n'est pas évaluable — refaire la mesure batterie hors service puis en service." : null;
-  return { base, filtrage, accords, etapes, harmoniques, aMesures, thdu, thdi, surcharges, constats, niveau, conclusion, freqReseau, multiConfigs, noteParallele, notePartielle, noteIdentiques, mesuresIdentiques };
+  return { base, filtrage, accords, etapes, harmoniques, aMesures, thdu, thdi, surcharges, constats, niveau, conclusion, freqReseau, multiConfigs, noteParallele, notePartielle, noteIdentiques, mesuresIdentiques, noteSVG };
 }
 function ResonanceHarmoniqueCalculee({ eq, allEquipements }) {
   const a = analyseResonanceBatterie(eq, allEquipements);
@@ -14346,6 +14450,7 @@ function analyserAnomaliesEquipement(eq, contexte) {
       constats.push({ phrase: `Le courant de base primaire du ${libelleTransfo(vf)} (Ib = ${vf.ib} A) dépasse 45 A : au-delà de ce seuil, la protection par fusible n'est normalement plus valable en NF C13-100 pour un poste à un seul transformateur.`, rang: 1, categorie: "fusible_ib", sujet: "protection par fusibles" });
     }
   }
+  try { analyseModuleSVG(eq).filter((l) => l.constat).forEach((l) => ajouter(l.constat.phrase, l.constat.rang, l.constat.categorie, l.constat.sujet)); } catch (e) { /* facultatif */ }
   // Onduleur / redresseur : ThdI d'entrée selon le redresseur, neutre de sortie, surcharge en kW, batterie (température, état de santé, branches, ondulation).
   try { analyseOnduleur(eq, null, contexte && contexte.rapportDate).filter((l) => l.constat).forEach((l) => ajouter(l.constat.phrase, l.constat.rang, l.constat.categorie, l.constat.sujet)); } catch (e) { /* analyse facultative */ }
   // Disjoncteur BT d'arrivée : réglage Ir incohérent avec le transformateur amont
@@ -14399,6 +14504,7 @@ const RECO_PAR_CATEGORIE = {
   batterie_capacite: () => "Remplacer la batterie (capacité mesurée inférieure à 80 % de la référence).",
   temperature_batterie: () => "Abaisser la température du local batterie (ventilation, climatisation) et anticiper le remplacement des blocs.",
   batterie_branche: (s) => `Contrôler la ou les branches concernées (${s}) : mesure bloc par bloc, résistance interne et serrage des connexions.`,
+  svg_sature: () => "Contrôler les gradins à condensateurs (contacteurs, fusibles, condensateurs) et le dimensionnement de la batterie : le SVG ne doit pas compenser en permanence à pleine puissance.",
   reglage_ir: () => "Revoir le réglage long retard (Ir) pour l'adapter au courant nominal du transformateur, en accord avec l'exploitant.",
   isolement_continu: () => "Rechercher le défaut d'isolement sur le réseau continu (départs, batterie, équipements alimentés) avec le contrôleur ou un localisateur de défaut.",
   ondulation_batterie: () => "Faire contrôler les condensateurs de filtrage du redresseur / chargeur.",
@@ -14429,7 +14535,7 @@ const RECO_PAR_CATEGORIE = {
   etat_degrade: (s) => `Surveiller à la prochaine visite : ${s}.`,
 };
 const MAX_PRECONISATIONS = 5;
-const ORDRE_RECO = ["capacite_modules", "module", "redondance_modules", "surcharge_condensateurs", "resonance", "self_accord", "fusible_calibre", "fusible_ib", "fusible", "fusible_rechange", "surcharge_kw", "batterie_capacite", "batterie_branche", "thdi_entree", "neutre_harmoniques", "temperature_batterie", "ondulation_batterie", "isolement_continu", "reglage_ir", "serrage", "contact", "isolement", "enroulements", "huile", "mise_terre", "protection", "disjoncteur", "batterie", "gradin", "cosphi", "usure", "proprete", "ventilation", "thermique", "mesure", "etat_defaillant", "etat_degrade"];
+const ORDRE_RECO = ["capacite_modules", "module", "redondance_modules", "surcharge_condensateurs", "resonance", "self_accord", "fusible_calibre", "fusible_ib", "fusible", "fusible_rechange", "surcharge_kw", "batterie_capacite", "batterie_branche", "thdi_entree", "neutre_harmoniques", "temperature_batterie", "ondulation_batterie", "isolement_continu", "reglage_ir", "svg_sature", "serrage", "contact", "isolement", "enroulements", "huile", "mise_terre", "protection", "disjoncteur", "batterie", "gradin", "cosphi", "usure", "proprete", "ventilation", "thermique", "mesure", "etat_defaillant", "etat_degrade"];
 // Préconisations dédoublonnées, regroupées par famille, les plus urgentes en premier.
 function preconisationsDepuisConstats(constats) {
   const groupes = {};
@@ -15679,6 +15785,24 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
                       <Plus size={13} /> Ajouter un TC homopolaire
                     </button>
                   </div>
+                </React.Fragment>
+              );
+            }
+            if (sec.key === "module_svg") {
+              return (
+                <React.Fragment key={sec.key}>
+                  <SectionBlock
+                    title={sec.title}
+                    items={sec.items}
+                    values={eq.controles[sec.key] || {}}
+                    onChangeItem={(itemKey, v) => setControleItem(sec.key, itemKey, v)}
+                    idPrefix={`${eq.id}-${sec.key}`}
+                    custom={eq.controles[sec.key + "__custom"] || []}
+                    onAddCustom={() => addCustomAction(sec.key)}
+                    onChangeCustom={(id, patch) => changeCustomAction(sec.key, id, patch)}
+                    onRemoveCustom={(id) => removeCustomAction(sec.key, id)}
+                  />
+                  <NotesModuleSVG eq={eq} />
                 </React.Fragment>
               );
             }
@@ -18387,6 +18511,7 @@ function docxAnalyseResonance(a, eq) {
     if (a.noteParallele) { out.push(docxNormeNote(a.noteParallele)); out.push(docxSpacer(80)); }
     if (a.notePartielle) { out.push(docxNormeNote("⚠ " + a.notePartielle)); out.push(docxSpacer(80)); }
   }
+  if (a.noteSVG) { out.push(docxNormeNote(a.noteSVG)); out.push(docxSpacer(80)); }
   if (a.aMesures) {
     const pc = (v) => (v !== null ? `${fr(v)} %` : "—");
     out.push(tableau(["Rang", "Ih hors serv.", "Uh hors serv.", "Ih en serv.", "Uh en serv.", "Verdict"], [900, 1400, 1400, 1400, 1400, 3100],
@@ -21412,6 +21537,16 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
       elements.push(docxHeading(sec.title));
       const freqReseau = numOf(eq.controles.mesures_amont?.frequence_amont?.fields?.hz) || 50;
       (eq.controles.gradins_dynamique || []).filter((g) => g.label).forEach((g) => {
+        if (estGradinSVG(g)) {
+          elements.push(docxBlocInsecable([
+            new DOCX.Paragraph({ spacing: { before: 100, after: 6 }, children: [new DOCX.TextRun({ text: `${g.label.toUpperCase()} — SVG (IGBT)`, bold: true, size: 19, color: DOCX_DARK }), g.etat ? new DOCX.TextRun({ text: "   " + g.etat.toUpperCase(), bold: true, size: 15, color: docxEtatColor(g.etat) }) : new DOCX.TextRun("")] }),
+            ...(String(g.fields.description || "").trim() ? [new DOCX.Paragraph({ spacing: { after: 4 }, children: [new DOCX.TextRun({ text: String(g.fields.description).trim(), size: 16, color: "5A6573", italics: true })] })] : []),
+            new DOCX.Paragraph({ spacing: { after: 6 }, children: [new DOCX.TextRun({ text: `${g.fields.q ? `Q nominal : ${String(g.fields.q).replace(".", ",")} kVAR · ` : ""}compensation électronique, sans condensateurs commutés (voir « Module SVG »).`, size: 16, color: "666666" })] }),
+            new DOCX.Paragraph({ spacing: { before: 0, after: 0 }, children: [] }),
+          ]));
+          elements.push(docxSpacer(60));
+          return;
+        }
         const iTheo = gradinIntensiteTheorique(g.fields.q, g.fields.u, estBatterieMono(eq));
         const mono = estBatterieMono(eq);
         const c1 = gradinCapacite(g.fields.i1, g.fields.u, freqReseau, mono);
@@ -21428,6 +21563,7 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
             g.etat ? new DOCX.TextRun({ text: "   " + g.etat.toUpperCase(), bold: true, size: 15, color: docxEtatColor(g.etat) }) : new DOCX.TextRun(""),
           ],
         }));
+        if (String(g.fields.description || "").trim()) elements.push(new DOCX.Paragraph({ spacing: { after: 4 }, children: [new DOCX.TextRun({ text: String(g.fields.description).trim(), size: 16, color: "5A6573", italics: true })] }));
         const summary = [
           g.fields.q && `Q déclaré : ${g.fields.q} kVAR`, pg.total !== null && pg.source !== "declare" && `Q total calculé : ${pg.total} kVAR${pg.source === "estime" ? " (estimé)" : ""}`,
           g.fields.u && `U : ${g.fields.u} V`, iTheo !== null && `I théorique : ${iTheo} A`,
@@ -21787,6 +21923,7 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
       if (im) elements.push(docxBlocInsecable([new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, spacing: { before: 160, after: 80 }, children: [im] })]));
     }
     if (TYPES_AVEC_BRANCHES_UPS.includes(eq.type) && ["mesures_continu", "redresseur_chargeur"].includes(sec.key)) elements.push(...docxNotesOnduleur(eq, allSites, rapportDate, sec.key));
+    if (sec.key === "module_svg") { try { analyseModuleSVG(eq).forEach((l) => { elements.push(docxNormeNote((l.niveau >= 1 ? "⚠ " : "") + l.texte)); elements.push(docxSpacer(40)); }); } catch (e) { /* facultatif */ } }
     if (sec.key === "analyse_harmonique" && eq.type === "Batterie de compensation") elements.push(...docxAnalyseResonance(analyseResonanceBatterie(eq, equipementsDuSiteDe(eq, allSites)), eq));
     if (sec.key === "reglage_disjoncteur" && eq.type === "Disjoncteur BT") {
       const v = calcVerificationPouvoirCoupure(eq, equipementsDuSiteDe(eq, allSites), locaux);
