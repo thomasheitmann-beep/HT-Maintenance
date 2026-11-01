@@ -6936,7 +6936,10 @@ function facteurUniteSuspect(v, min, max) {
   if (v === null || (min === null && max === null)) return null;
   const dans = (x) => (min === null || x >= min - 1e-9) && (max === null || x <= max + 1e-9);
   if (dans(v)) return null;
-  for (const f of [1000, 100, 10]) { if (dans(v * f)) return { f, v2: v * f }; if (dans(v / f)) return { f: 1 / f, v2: v / f }; }
+  // Simple dépassement (moins de 3 fois la borne) : c'est un hors-tolérance, pas une erreur d'unité.
+  if (max !== null && v > max && v < 3 * Math.abs(max)) return null;
+  if (min !== null && v < min && v > min / 3) return null;
+  for (const f of [10, 100, 1000]) { if (dans(v * f)) return { f, v2: v * f }; if (dans(v / f)) return { f: 1 / f, v2: v / f }; }
   return null;
 }
 function verificationsCoherenceEquipement(eq, site) {
