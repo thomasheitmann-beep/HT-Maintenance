@@ -18411,7 +18411,10 @@ const PAGE_CORPS = { size: { width: A4_LARGEUR, height: A4_HAUTEUR }, margin: { 
 function docxTable(opts) {
   const aucune = { style: DOCX.BorderStyle.NONE, size: 0, color: "FFFFFF" };
   const fin = { style: DOCX.BorderStyle.SINGLE, size: 4, color: "E2E6EB" };
-  return new DOCX.Table({ borders: { top: fin, bottom: fin, left: aucune, right: aucune, insideHorizontal: fin, insideVertical: aucune }, ...opts });
+  const complet = { borders: { top: fin, bottom: fin, left: aucune, right: aucune, insideHorizontal: fin, insideVertical: aucune }, ...opts };
+  const t = new DOCX.Table(complet);
+  t.__opts = complet; // gardé pour pouvoir fusionner ce tableau dans un bloc insécable sans l'imbriquer
+  return t;
 }
 const docxAucuneBordure = () => ({ style: DOCX.BorderStyle.NONE, size: 0, color: "FFFFFF" });
 const docxToutesAucune = () => { const a = docxAucuneBordure(); return { top: a, bottom: a, left: a, right: a }; };
@@ -18455,6 +18458,27 @@ function docxEtatColor(label) {
 function docxBlocInsecable(enfants) {
   const aucune = { style: DOCX.BorderStyle.NONE, size: 0, color: "FFFFFF" };
   const bordures = { top: aucune, bottom: aucune, left: aucune, right: aucune };
+  // Un tableau dans un tableau est converti en texte par Pages (iPhone / Mac) : quand le bloc contient
+  // un tableau, les paragraphes avant / après deviennent des lignes de CE tableau (pas d'imbrication).
+  const tableaux = (enfants || []).filter((e) => e instanceof DOCX.Table);
+  if (tableaux.length === 1 && tableaux[0].__opts && Array.isArray(tableaux[0].__opts.columnWidths) && Array.isArray(tableaux[0].__opts.rows)) {
+    const t = tableaux[0], o = t.__opts, idx = enfants.indexOf(t);
+    const nbCol = o.columnWidths.length;
+    const largeur = o.columnWidths.reduce((x, y) => x + y, 0);
+    const avant = enfants.slice(0, idx).filter(Boolean), apres = enfants.slice(idx + 1).filter(Boolean);
+    const ligne = (paras) => new DOCX.TableRow({ cantSplit: true, children: [new DOCX.TableCell({
+      columnSpan: nbCol, width: { size: largeur, type: DOCX.WidthType.DXA }, margins: { top: 0, bottom: 0, left: 0, right: 0 },
+      borders: { top: aucune, left: aucune, right: aucune, bottom: aucune },
+      children: paras,
+    })] });
+    const bTable = o.borders || {};
+    const rows = [
+      ...(avant.length ? [ligne(avant)] : []),
+      ...o.rows,
+      ...(apres.length ? [ligne(apres)] : []),
+    ];
+    return new DOCX.Table({ ...o, borders: { ...bTable, top: avant.length ? aucune : bTable.top, bottom: apres.length ? aucune : bTable.bottom }, rows });
+  }
   return docxTable({
     width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: [TABLE_WIDTH],
     borders: { ...bordures, insideHorizontal: aucune, insideVertical: aucune },
