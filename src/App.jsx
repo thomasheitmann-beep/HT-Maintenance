@@ -1425,6 +1425,8 @@ const champsTempsManoeuvre = () => [
   ...L1L2L3("ms"), F("synchronisme", "Synchronisme (ensemble des phases)", "ms"), F("reference", "Valeur de référence constructeur", "ms"),
   ...seuilMaxSeul("Synchronisme max", "ms", "synchronisme", [], (f) => (numOf(f.synchronisme) === null ? "" : 3.3)),
 ];
+// Temps mécanique : une seule valeur, le temps complet (commande bobine + mécanisme + ouverture des contacts).
+const CHAMPS_TEMPS_MECANIQUE = [F("temps", "Temps mécanique", "ms")];
 // Tolérance d'écart entre phases pour la résistance d'enroulement — pas de valeur théorique unique
 // à comparer (contrairement au rapport de transformation), donc auto-référencée : ±2 % autour de
 // la moyenne des 3 phases déjà mesurées. Seuil issu de la pratique courante des essais de
@@ -2136,7 +2138,7 @@ function emptyDynamicEntry(label, fieldDefs, withActionEtat) {
 }
 const FUSIBLES = [
   C("fusibles_installes", "Fusibles installés", FUSIBLE_FIELDS),
-  C("fusibles_rechange", "Fusibles de rechange", FUSIBLE_FIELDS),
+  { ...C("fusibles_rechange", "Fusibles de rechange", FUSIBLE_FIELDS), recopieDe: "fusibles_installes" },
   C("fusion_fusibles", "Fusion fusibles"),
 ];
 const CONTROLES_DISJONCTEUR = [
@@ -2154,8 +2156,10 @@ const CONTROLES_DISJONCTEUR = [
   // CEI 62271-100 ne fixe pas de valeur universelle (dépend fortement de la technologie — SF6, vide,
   // air — et du calibre) : le seul repère pertinent est la valeur donnée par le constructeur pour CE
   // modèle précis, à comparer à la mesure relevée.
-  C("temps_ouverture", "Mesure du temps d'ouverture", champsTempsManoeuvre()),
-  C("temps_fermeture", "Mesure du temps de fermeture", champsTempsManoeuvre()),
+  { ...C("temps_ouverture", "Mesure du temps d'ouverture", champsTempsManoeuvre()), avecImage: true },
+  // Décomposition du temps d'ouverture : excitation de la bobine, course du mécanisme, séparation des contacts.
+  { ...C("temps_mecanique", "Mesure du temps mécanique (commande bobine + mécanisme + ouverture des contacts)", CHAMPS_TEMPS_MECANIQUE), avecImage: true, optionnel: true },
+  { ...C("temps_fermeture", "Mesure du temps de fermeture", champsTempsManoeuvre()), avecImage: true },
   C("courbe_compensation_sf6", "Courbe de compensation pression SF6 / température", [F("reference", "Référence / commentaire")]),
   C("essai_dielectrique_pole", "Essai diélectrique après intervention sur le pôle"),
 ];
@@ -3910,16 +3914,16 @@ const SCHEMAS = {
         ]),
       ]},
       { key: "materiel_securite", title: "Matériel de sécurité (NF C18-510)", items: [
-        S("tabouret_tapis", "Tabouret ou tapis isolant", [F("present", "Présent", null, OUI_NON_LIST), F("dateVerification", "Date de dernière vérification")]),
-        S("gants_isolants", "Gants isolants", [F("present", "Présent", null, OUI_NON_LIST), F("dateVerification", "Date de dernière vérification")]),
-        S("perche_sauvetage", "Perche de sauvetage", [F("present", "Présent", null, OUI_NON_LIST), F("dateVerification", "Date de dernière vérification")]),
-        S("perche_vat", "Perche de vérification d'absence de tension (VAT)", [F("present", "Présent", null, OUI_NON_LIST), F("dateVerification", "Date de dernière vérification")]),
-        S("malt_cc", "Dispositif de mise à la terre et en court-circuit (MALT/CC)", [F("present", "Présent", null, OUI_NON_LIST), F("dateVerification", "Date de dernière vérification")]),
-        S("extincteur", "Extincteur CO2 (adapté au risque électrique)", [F("present", "Présent", null, OUI_NON_LIST), F("dateVerification", "Date de dernier contrôle")]),
-        S("lampe_securite", "Lampe de sécurité", [F("present", "Présent", null, OUI_NON_LIST)]),
-        S("casque_ecran", "Casque avec écran facial anti-UV / anti-arc", [F("present", "Présent", null, OUI_NON_LIST), F("dateVerification", "Date de dernière vérification")]),
-        S("balisage", "Balisage / signalisation de la zone de travail", [F("present", "Présent", null, OUI_NON_LIST)]),
-        S("carnet_prescription", "Carnet de prescriptions / registre de consignation", [F("present", "Présent", null, OUI_NON_LIST)]),
+        S("tabouret_tapis", "Tabouret ou tapis isolant", [F("present", "Présent", null, OUI_NON_LIST), { key: "conformite", label: "Conformité", options: ["Conforme", "Non conforme"], visibleSi: (f) => f.present === "OUI" }, F("dateVerification", "Date de dernière vérification")]),
+        S("gants_isolants", "Gants isolants", [F("present", "Présent", null, OUI_NON_LIST), { key: "conformite", label: "Conformité", options: ["Conforme", "Non conforme"], visibleSi: (f) => f.present === "OUI" }, F("dateVerification", "Date de dernière vérification")]),
+        S("perche_sauvetage", "Perche de sauvetage", [F("present", "Présent", null, OUI_NON_LIST), { key: "conformite", label: "Conformité", options: ["Conforme", "Non conforme"], visibleSi: (f) => f.present === "OUI" }, F("dateVerification", "Date de dernière vérification")]),
+        S("perche_vat", "Perche de vérification d'absence de tension (VAT)", [F("present", "Présent", null, OUI_NON_LIST), { key: "conformite", label: "Conformité", options: ["Conforme", "Non conforme"], visibleSi: (f) => f.present === "OUI" }, F("dateVerification", "Date de dernière vérification")]),
+        S("malt_cc", "Dispositif de mise à la terre et en court-circuit (MALT/CC)", [F("present", "Présent", null, OUI_NON_LIST), { key: "conformite", label: "Conformité", options: ["Conforme", "Non conforme"], visibleSi: (f) => f.present === "OUI" }, F("dateVerification", "Date de dernière vérification")]),
+        S("extincteur", "Extincteur CO2 (adapté au risque électrique)", [F("present", "Présent", null, OUI_NON_LIST), { key: "conformite", label: "Conformité", options: ["Conforme", "Non conforme"], visibleSi: (f) => f.present === "OUI" }, F("dateVerification", "Date de dernier contrôle")]),
+        S("lampe_securite", "Lampe de sécurité", [F("present", "Présent", null, OUI_NON_LIST), { key: "conformite", label: "Conformité", options: ["Conforme", "Non conforme"], visibleSi: (f) => f.present === "OUI" }]),
+        S("casque_ecran", "Casque avec écran facial anti-UV / anti-arc", [F("present", "Présent", null, OUI_NON_LIST), { key: "conformite", label: "Conformité", options: ["Conforme", "Non conforme"], visibleSi: (f) => f.present === "OUI" }, F("dateVerification", "Date de dernière vérification")]),
+        S("balisage", "Balisage / signalisation de la zone de travail", [F("present", "Présent", null, OUI_NON_LIST), { key: "conformite", label: "Conformité", options: ["Conforme", "Non conforme"], visibleSi: (f) => f.present === "OUI" }]),
+        S("carnet_prescription", "Carnet de prescriptions / registre de consignation", [F("present", "Présent", null, OUI_NON_LIST), { key: "conformite", label: "Conformité", options: ["Conforme", "Non conforme"], visibleSi: (f) => f.present === "OUI" }]),
       ]},
       { key: "enveloppe_protection", title: "Enveloppe de protection", items: [
         C("conformite_enveloppe", "Conformité de l'enveloppe de protection", [
@@ -4258,6 +4262,16 @@ function repairEquipementControles(eq) {
     if (!v || !v.fields || v.fields[MARQUEUR_FUSIBLE_MOHM]) return;
     controles[sec.key] = { ...controles[sec.key], [item.key]: { ...v, fields: migrerMesuresFusible(v.fields) } };
   }));
+  // Temps mécanique : l'ancienne saisie en trois temps (bobine, mécanisme, contacts) est reprise en un temps complet.
+  {
+    const tm = controles.controles_disjoncteur && controles.controles_disjoncteur.temps_mecanique;
+    const ff = tm && tm.fields;
+    if (ff && String(ff.temps ?? "").trim() === "" && ["bobine", "mecanique", "contacts"].some((k) => numOf(ff[k]) !== null)) {
+      const somme = ["bobine", "mecanique", "contacts"].reduce((a, k) => a + (numOf(ff[k]) || 0), 0);
+      const { bobine, mecanique, contacts, bobineUnite, mecaniqueUnite, contactsUnite, ...reste } = ff;
+      controles.controles_disjoncteur = { ...controles.controles_disjoncteur, temps_mecanique: { ...tm, fields: { ...reste, temps: String(Math.round(somme * 1000) / 1000), tempsUnite: bobineUnite || "ms" } } };
+    }
+  }
   schema.sections.forEach((sec) => {
     controles[sec.key] = { ...(controles[sec.key] || {}) };
     sec.items.forEach((item) => {
@@ -5292,12 +5306,13 @@ const UNIT_FAMILIES = {
   energie: ["Wh", "kWh", "MWh"],
   inductance: ["µH", "mH", "H"],
   capacite: ["nF", "µF", "mF"],
+  temps: ["µs", "ms", "s"],
 };
 const FACTEUR_PREFIXE = { "µ": 1e-6, "m": 1e-3, "": 1, "k": 1e3, "M": 1e6, "G": 1e9, "n": 1e-9 };
 function facteurUnite(u) {
   const fam = unitFamilyFor(u);
   if (!fam) return null;
-  const racine = { tension: "V", courant: "A", resistance: "Ω", puissance: "VA", puissanceActive: "W", puissanceReactive: "VAR", energie: "Wh", inductance: "H", capacite: "F" }[Object.keys(UNIT_FAMILIES).find((k) => UNIT_FAMILIES[k] === fam)];
+  const racine = { tension: "V", courant: "A", resistance: "Ω", puissance: "VA", puissanceActive: "W", puissanceReactive: "VAR", energie: "Wh", inductance: "H", capacite: "F", temps: "s" }[Object.keys(UNIT_FAMILIES).find((k) => UNIT_FAMILIES[k] === fam)];
   const prefixe = u.slice(0, u.length - racine.length);
   return FACTEUR_PREFIXE[prefixe] ?? null;
 }
@@ -7179,7 +7194,9 @@ function controleRenseigne(item, value) {
   return (item.fields || []).some((d) => !d.hidden && !d.compute && !d.options && d.key !== "realise" && f[d.key] !== undefined && f[d.key] !== null && String(f[d.key]).trim() !== "");
 }
 function controleAvecMesures(item) { return (item.fields || []).some((d) => !d.hidden && !d.compute && !d.options && d.key !== "realise"); }
-function ControlRow({ item, value, onChange, idPrefix, toleranceOverride }) {
+// Caractéristiques recopiées d'un contrôle à l'autre (ex. fusibles installés → fusibles de rechange) : pas les mesures, ni l'année.
+const CLES_RECOPIE_CARACTERISTIQUES = ["fabricant", "modele", "un", "unUnite", "in", "inUnite", "reference", "referenceLibre", "dureeVieConstructeur"];
+function ControlRow({ item, value, onChange, idPrefix, toleranceOverride, valeursSection }) {
   if (!value) return null; // donnée incompatible (ancien format) : on ignore plutôt que de planter
   const fields = value.fields || {};
   const setField = (k, v) => onChange({ ...value, fields: { ...fields, [k]: v } });
@@ -7252,12 +7269,14 @@ function ControlRow({ item, value, onChange, idPrefix, toleranceOverride }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uneMesureHorsTolerance, value.etat]);
   // ----- Mise en forme des contrôles chargés : grille par phase, calculs en pastilles, repli -----
-  const visibles = (item.fields || []).filter((f) => !f.hidden);
+  const champVisible = (f) => !f.hidden && (!f.visibleSi || f.visibleSi(fields));
+  const visibles = (item.fields || []).filter(champVisible);
   const groupes = groupesParPhase(visibles);
   const dansGroupe = new Set(groupes.flatMap((g) => g.cellules.filter(Boolean).map((f) => f.key)));
   const pastillesDefs = visibles.filter((f) => f.compute && !f.longText && !dansGroupe.has(f.key));
   const autres = visibles.filter((f) => !dansGroupe.has(f.key) && !(f.compute && !f.longText));
-  const dense = groupes.length > 0 || visibles.length >= 3;
+  // Un champ conditionnel (visibleSi) ne change pas la mise en page : elle reste celle du contrôle sans lui.
+  const dense = groupes.length > 0 || visibles.filter((f) => !f.visibleSi).length >= 3;
   const entetesPhases = groupes.length && groupes.every((g) => g.compose) ? ["U12", "U23", "U31"] : ["L1", "L2", "L3"];
   const uniteAffichee = (f) => (f.unitFrom ? (fields[f.unitFrom + "Unite"] || f.unit) : (fields[f.key + "Unite"] || f.unit)) || "";
   const valeurCalculee = (f) => { const brut = f.compute(fields); const v = f.unitFrom && f.unit ? depuisUniteBase(brut, f.unit, fields[f.unitFrom + "Unite"] || f.unit) : brut; return v === null || v === undefined ? "" : v; };
@@ -7305,7 +7324,7 @@ function ControlRow({ item, value, onChange, idPrefix, toleranceOverride }) {
     return <div style={{ fontSize: 12, color: "#5B6B7D", textAlign: "center" }}>{uniteAffichee(f)}</div>;
   };
   const renderChampClassique = (f) => (
-            f.hidden ? null :
+            !champVisible(f) ? null :
             f.compute && f.longText ? (
               (() => {
                 const texte = f.compute(fields);
@@ -7361,7 +7380,7 @@ function ControlRow({ item, value, onChange, idPrefix, toleranceOverride }) {
                 />
                 {f.unit && <span>{f.unit}</span>}
               </label>
-            ) : f.key === "reference" ? (
+            ) : f.key === "reference" && !f.unit ? (
               (() => {
                 // Liste déroulante des références connues (catalogue constructeur vérifié) pour le
                 // modèle et la tension déjà choisis — sélectionner une référence renseigne aussi le
@@ -7494,6 +7513,20 @@ function ControlRow({ item, value, onChange, idPrefix, toleranceOverride }) {
       champs={champsPlaqueDepuisDefs(item.fields, fields)}
       valeursActuelles={fields} onAppliquer={(patch) => onChange({ ...valueRef.current, fields: { ...(valueRef.current.fields || {}), ...patch } })} />
   );
+  const sourceRecopie = item.recopieDe && valeursSection && valeursSection[item.recopieDe] && valeursSection[item.recopieDe].fields;
+  const boutonRecopie = sourceRecopie && CLES_RECOPIE_CARACTERISTIQUES.some((k) => !/Unite$|Libre$/.test(k) && String(sourceRecopie[k] ?? "").trim() !== "") && (
+    <button type="button" title="Recopier fabricant, modèle, Un, In, référence et durée de vie (le modèle peut ensuite être modifié : seules les caractéristiques doivent être identiques)"
+      onClick={() => { const patch = {}; CLES_RECOPIE_CARACTERISTIQUES.forEach((k) => { if (sourceRecopie[k] !== undefined) patch[k] = sourceRecopie[k]; }); onChange({ ...valueRef.current, fields: { ...(valueRef.current.fields || {}), ...patch } }); }}
+      style={{ ...btnGhost(BRAND.blue), padding: "4px 9px", fontSize: 11.5 }}>
+      <Copy size={12} /> Recopier les fusibles installés
+    </button>
+  );
+  const blocImage = item.avecImage ? (
+    <div style={{ marginTop: 10 }}>
+      <div style={{ fontSize: 11, color: "#8B96A3", marginBottom: 4 }}>Image de la mesure (copie d'écran de l'appareil, photo…) — imprimée sous le tableau dans le rapport</div>
+      <FileGallery files={value.photos || []} onChange={(liste) => onChange({ ...valueRef.current, photos: liste })} idPrefix={`${idPrefix}-${item.key}-img`} />
+    </div>
+  ) : null;
   // Mesure optionnelle (case « Mesure réalisée ? ») : tant qu'elle n'est pas cochée, seule la case est affichée.
   const champRealise = (item.fields || []).find((f) => f.key === "realise" && f.options);
   if (champRealise && !mesureRealisee(item, value)) {
@@ -7521,6 +7554,7 @@ function ControlRow({ item, value, onChange, idPrefix, toleranceOverride }) {
             {piedAction}
           </div>
         </div>
+        {blocImage}
       </div>
     );
   }
@@ -7532,7 +7566,7 @@ function ControlRow({ item, value, onChange, idPrefix, toleranceOverride }) {
         style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, background: "#fff", border: "1px solid #E2E6EB", borderLeft: `4px solid ${couleurEtat.bord}`, borderRadius: 10, padding: "9px 12px", margin: "8px 0", cursor: "pointer" }}>
         <div style={{ minWidth: 0 }}>
           <div style={{ fontSize: 13, fontWeight: 700, color: "#1A1F26" }}>{item.label}</div>
-          <div style={{ fontSize: 11.5, color: "#5B6B7D", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{resume || "—"}{value.action ? ` — ${value.action}` : ""}</div>
+          <div style={{ fontSize: 11.5, color: "#5B6B7D", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{resume || "—"}{value.action ? ` — ${value.action}` : ""}{item.avecImage && (value.photos || []).length ? `  ·  ${(value.photos || []).length} image${(value.photos || []).length > 1 ? "s" : ""}` : ""}</div>
         </div>
         <span style={{ flex: "0 0 auto", fontSize: 11, fontWeight: 800, padding: "3px 9px", borderRadius: 999, background: couleurEtat.fond, color: couleurEtat.texte, whiteSpace: "nowrap" }}>{(ETATS_RAPIDES.find(([e]) => e === value.etat) || [null, "•"])[1]} {accordEtat(value.etat || "—")}</span>
       </div>
@@ -7544,7 +7578,7 @@ function ControlRow({ item, value, onChange, idPrefix, toleranceOverride }) {
   return (
     <div id={idControle} className={`controle-dense${aCompleter ? " a-completer" : ""}`} style={{ background: "#fff", border: `1px solid ${aCompleter ? "#B9D7F5" : "#E2E6EB"}`, borderRadius: 12, padding: "11px 12px 10px", margin: "8px 0", scrollMarginTop: 70 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
-        <span style={{ fontSize: 13.5, fontWeight: 700, color: "#1A1F26", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>{item.label}{boutonPlaque}</span>
+        <span style={{ fontSize: 13.5, fontWeight: 700, color: "#1A1F26", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>{item.label}{boutonPlaque}{boutonRecopie}</span>
         {repliable && rempli && (
           <button type="button" onClick={() => setReplie(true)} title="Replier ce contrôle" style={{ border: "none", background: "none", color: "#8B96A3", cursor: "pointer", fontSize: 12, padding: 4 }}>Replier ▴</button>
         )}
@@ -7601,6 +7635,7 @@ function ControlRow({ item, value, onChange, idPrefix, toleranceOverride }) {
           </div>
         );
       })()}
+      {blocImage}
       <div className="pied-controle" style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginTop: 10 }}>
         {piedAction}
       </div>
@@ -7654,7 +7689,7 @@ function SectionBlock({ title, items, values, onChangeItem, idPrefix, custom, on
       {entete}
       <div>
         {items.map((item) => (
-          <ControlRow key={item.key} item={item} value={values[item.key]} onChange={(v) => onChangeItem(item.key, v)} idPrefix={idPrefix} toleranceOverride={toleranceOverrides && toleranceOverrides[item.key]} />
+          <ControlRow key={item.key} item={item} value={values[item.key]} onChange={(v) => onChangeItem(item.key, v)} idPrefix={idPrefix} toleranceOverride={toleranceOverrides && toleranceOverrides[item.key]} valeursSection={values} />
         ))}
       </div>
       {custom && (
@@ -12303,6 +12338,27 @@ function tempsOuvertureDisjoncteur(eq) {
 }
 const arrondiN = (x, d) => Math.round(x * Math.pow(10, d)) / Math.pow(10, d);
 const estSeuilCEI = (s) => !!(s && s.fields && s.fields.courbe && s.fields.courbe !== "Constant");
+// TMS d'un seuil à temps inverse : la valeur saisie fait foi ; à défaut, il est déduit de la temporisation
+// saisie, lue comme le temps de déclenchement à 10 × Is (convention Sepam / Easergy).
+function tmsEffectif(s) {
+  const f = (s && s.fields) || {};
+  const t = numOf(f.tms);
+  if (t !== null && t > 0) return { tms: t, deduit: false };
+  if (!estSeuilCEI(s)) return null;
+  const tempo = numOf(f.temporisation);
+  if (tempo === null || tempo <= 0) return null;
+  const tS = (f.temporisation_unite || "ms") === "ms" ? tempo / 1000 : tempo;
+  const f10 = calcTempsTheoriqueCEI(f.courbe, 1, 10);
+  if (!f10) return null;
+  return { tms: Math.round((tS / f10) * 10000) / 10000, deduit: true, tempoS: tS };
+}
+const tmsValeur = (s) => { const r = tmsEffectif(s); return r ? r.tms : null; };
+function texteTmsSeuil(s, court) {
+  const r = tmsEffectif(s);
+  if (!r) return "—";
+  if (!r.deduit) return String(s.fields.tms).replace(".", ",");
+  return court ? `≈ ${frN(r.tms, 4)} (déduit)` : `≈ ${frN(r.tms, 4)} (déduit de T = ${frN(r.tempoS, 3)} s à 10 × Is)`;
+}
 function uniteReglageSeuil(s) {
   const defs = ANSI_REGLAGE_FIELDS[ansiFamily(s.label)] || ANSI_REGLAGE_FIELDS_DEFAUT;
   return (defs.find((d) => d.key === "reglage") || {}).unit || null;
@@ -12312,7 +12368,7 @@ const FAMILLES_MINIMUM = ["27", "27D", "27R", "37", "37P", "37Q", "81L", "14"];
 const estFonctionMinimum = (s) => FAMILLES_MINIMUM.includes(ansiFamily(s.label));
 // Temps attendu du relais seul (s) : courbe CEI au multiple donné, ou temporisation à temps constant.
 function tempsRelaisAttendu(s, multiple) {
-  if (estSeuilCEI(s)) return calcTempsTheoriqueCEI(s.fields.courbe, s.fields.tms, multiple !== undefined && multiple !== null ? multiple : s.essai && s.essai.fields && s.essai.fields.multipleInjection);
+  if (estSeuilCEI(s)) return calcTempsTheoriqueCEI(s.fields.courbe, tmsValeur(s), multiple !== undefined && multiple !== null ? multiple : s.essai && s.essai.fields && s.essai.fields.multipleInjection);
   const t = numOf(s.fields.temporisation);
   if (t === null) return null;
   return (s.fields.temporisation_unite || "ms") === "ms" ? t / 1000 : t;
@@ -12616,7 +12672,7 @@ function alertesParametrageRelais(eq, seuils) {
     if (r > 20 * inTC) out.push(`${n} : ${frN(r, 0)} A > 20 × le calibre du TC (${frN(inTC, 0)} A) — saturation possible (TC 5P20 / 10P20).`);
   });
   actifs.filter((s) => /actif/i.test(s.fields.etat || "") && ansiFamily(s.label) !== "DEC" && uniteReglageSeuil(s) && numOf(s.fields.reglage) === null).forEach((s) => out.push(`${s.label.split(" — ")[0]} : actif mais sans réglage.`));
-  actifs.filter((s) => estSeuilCEI(s) && numOf(s.fields.tms) === null).forEach((s) => out.push(`${s.label.split(" — ")[0]} : courbe ${s.fields.courbe} sans TMS — temps théorique incalculable.`));
+  actifs.filter((s) => estSeuilCEI(s) && tmsEffectif(s) === null).forEach((s) => out.push(`${s.label.split(" — ")[0]} : courbe ${s.fields.courbe} sans TMS ni temporisation — temps théorique incalculable.`));
   const Un = unHTA(eq);
   if (Un) actifs.forEach((s) => {
     const f = ansiFamily(s.label), r = numOf(s.fields.reglage), n = s.label.split(" — ")[0];
@@ -12679,7 +12735,7 @@ function genererCourbeDeclenchementRelais(eq, s) {
     ctx.fillStyle = SCHEMA_MARINE; ctx.font = `bold 12.5px ${SCHEMA_POLICE}`;
     ctx.fillText(`Courbe de déclenchement — ${s.label.split(" — ")[0]}`, 16, 20);
     ctx.font = `10.5px ${SCHEMA_POLICE}`; ctx.fillStyle = "#5B6B7D";
-    ctx.fillText(`${cei ? `${s.fields.courbe} · TMS ${s.fields.tms || "—"}` : `Temps constant · ${s.fields.temporisation || "—"} ${s.fields.temporisation_unite || ""}`} · réglage ${s.fields.reglage || "—"} A`, 16, 37);
+    ctx.fillText(`${cei ? `${s.fields.courbe} · TMS ${texteTmsSeuil(s)}` : `Temps constant · ${s.fields.temporisation || "—"} ${s.fields.temporisation_unite || ""}`} · réglage ${s.fields.reglage || "—"} A`, 16, 37);
     // Grille
     ctx.strokeStyle = "#EEF1F4"; ctx.lineWidth = 1;
     [1, 1.5, 2, 3, 5, 7, 10, 15, 20].forEach((M) => { ctx.beginPath(); ctx.moveTo(X(M), y0); ctx.lineTo(X(M), y1); ctx.stroke(); });
@@ -12771,7 +12827,7 @@ function genererCourbeFamilleRelais(eq, groupe) {
     ctx.fillStyle = SCHEMA_MARINE; ctx.font = `bold 12.5px ${SCHEMA_POLICE}`;
     ctx.fillText(`Courbe de déclenchement — ${GROUPES_COURBE_RELAIS[groupe].nom}`, 16, 20);
     ctx.font = `10.5px ${SCHEMA_POLICE}`; ctx.fillStyle = "#5B6B7D";
-    ctx.fillText(etages.map((e) => `${e.s.label.split(" — ")[0]} : ${frN(e.R, 1)} A, ${e.cei ? `${e.s.fields.courbe}, TMS ${e.s.fields.tms}` : `${e.s.fields.temporisation} ${e.s.fields.temporisation_unite || ""}`.trim()}`).join("   ·   "), 16, 38);
+    ctx.fillText(etages.map((e) => `${e.s.label.split(" — ")[0]} : ${frN(e.R, 1)} A, ${e.cei ? `${e.s.fields.courbe}, TMS ${texteTmsSeuil(e.s, true)}` : `${e.s.fields.temporisation} ${e.s.fields.temporisation_unite || ""}`.trim()}`).join("   ·   "), 16, 38);
     // Grille
     const ticksI = []; for (let d = Math.pow(10, Math.floor(Math.log10(Imin))); d <= Imax; d *= 10) [1, 2, 5].forEach((k) => { const v = d * k; if (v >= Imin && v <= Imax) ticksI.push(v); });
     ctx.lineWidth = 1;
@@ -12957,7 +13013,7 @@ function AssistantEssaiSeuil({ eq, seuils, s, onFermer, onEnregistrer }) {
                 <div style={{ fontSize: 12.5, color: "#3E4A5C", lineHeight: 1.5 }}>{texteCablageEssai(mode, mesureSur, prise)}</div>
                 {blocRaccord}
                 {methodeAnsi(s) && <div style={{ fontSize: 12, color: "#B5730A", lineHeight: 1.5, marginTop: 6 }}>Méthode : {methodeAnsi(s).texte}</div>}
-                <div style={{ fontSize: 12.5, color: "#3E4A5C", lineHeight: 1.5, marginTop: 6 }}>Réglage : <b>{s.fields.reglage || "—"} {uniteReglageSeuil(s) || ""}</b>{cei ? <> · courbe <b>{s.fields.courbe}</b>, TMS <b>{s.fields.tms || "—"}</b></> : s.fields.temporisation ? <> · temporisation <b>{s.fields.temporisation} {s.fields.temporisation_unite}</b></> : null}</div>
+                <div style={{ fontSize: 12.5, color: "#3E4A5C", lineHeight: 1.5, marginTop: 6 }}>Réglage : <b>{s.fields.reglage || "—"} {uniteReglageSeuil(s) || ""}</b>{cei ? <> · courbe <b>{s.fields.courbe}</b>, TMS <b>{texteTmsSeuil(s)}</b></> : s.fields.temporisation ? <> · temporisation <b>{s.fields.temporisation} {s.fields.temporisation_unite}</b></> : null}</div>
               </div>
               <div style={carte}>
                 <div style={{ fontSize: 12, fontWeight: 700, color: "#1A1F26", marginBottom: 6 }}>Avant l'essai <span style={{ fontWeight: 500, color: "#8B96A3" }}>(repères, rien n'est obligatoire)</span></div>
@@ -13086,7 +13142,7 @@ async function genererPlanEssaiRelais(eq) {
   seuils.forEach((s, n) => {
     const fond = n % 2 === 1 ? { type: DOCX.ShadingType.CLEAR, fill: DOCX_ZEBRE } : undefined;
     const mode = modeInjectionEssai(s), fac = facteursSeuil(s);
-    const regl = `${s.fields.reglage || "—"} ${uniteReglageSeuil(s) || ""} · ${estSeuilCEI(s) ? `${s.fields.courbe}, TMS ${s.fields.tms || "—"}` : `${s.fields.temporisation || "—"} ${s.fields.temporisation_unite || ""}`} · ${mode}`;
+    const regl = `${s.fields.reglage || "—"} ${uniteReglageSeuil(s) || ""} · ${estSeuilCEI(s) ? `${s.fields.courbe}, TMS ${texteTmsSeuil(s)}` : `${s.fields.temporisation || "—"} ${s.fields.temporisation_unite || ""}`} · ${mode}`;
     const rac = raccordementEssai(eq, s, mode), alT = alerteTerreCalculee(seuils, s);
     rows.push(new DOCX.TableRow({ cantSplit: true, children: [new DOCX.TableCell({ columnSpan: 5, width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, margins: { top: 80, bottom: 60, left: 90, right: 80 }, shading: fond, children: [
       new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: s.label, size: 16, bold: true, color: DOCX_DARK }), new DOCX.TextRun({ text: "   " + regl, size: 15, color: "5B6B7D" })] }),
@@ -13643,7 +13699,7 @@ function DisjoncteurRelaisPanel({ eq, update, custom, onAddCustom, onChangeCusto
         {renseignes.map((s) => {
           const estCEI = s.fields.courbe && s.fields.courbe !== "Constant" && s.fields.courbe !== "";
           const est49 = estThermique49(s);
-          const tempsTheorique = estCEI ? calcTempsTheoriqueCEI(s.fields.courbe, s.fields.tms, s.essai.fields.multipleInjection) : null;
+          const tempsTheorique = estCEI ? calcTempsTheoriqueCEI(s.fields.courbe, tmsValeur(s), s.essai.fields.multipleInjection) : null;
           const tempsThermique = est49 ? calcTempsThermique(s.fields.constante_temps, s.essai.fields.multipleThermique || "150") : null;
           const tol = toleranceEssaiSeuil(eq, s);
           const derive = deriveTempsSeuil(precedent, s);
@@ -13678,7 +13734,7 @@ function DisjoncteurRelaisPanel({ eq, update, custom, onAddCustom, onChangeCusto
                   <MiniSelect label="Valise d'injection" options={LISTE_TYPE_VALISE} value={s.essai.fields.typeValise || "1U1I (monophasé)"} onChange={(v) => setEssaiField(s.id, "typeValise", v)} />
                   {tempsTheorique !== null && (
                     <span style={{ fontSize: 11, color: "#0A5DA8", background: "rgba(10,93,168,0.08)", padding: "4px 8px", borderRadius: 6 }} title="Temps de déclenchement théorique (formule CEI 60255) — non imprimé dans le rapport">
-                      Temps théorique (CEI) : ≈ {tempsTheorique} s
+                      Temps théorique (CEI) : ≈ {tempsTheorique} s{tmsEffectif(s) && tmsEffectif(s).deduit ? ` — TMS ${texteTmsSeuil(s, true)}` : ""}
                     </span>
                   )}
                   {tempsThermique !== null && (
@@ -14464,7 +14520,14 @@ function analyserAnomaliesEquipement(eq, contexte) {
       else if (vIr && vIr.etat === "bas") ajouter(`Le réglage long retard du disjoncteur (Ir = ${vIr.ir} A) est nettement inférieur au courant nominal du transformateur (In ≈ ${vIr.inTr} A) : risque de déclenchement intempestif à forte charge.`, 0, "reglage_ir", "réglage long retard");
     } catch (e) { /* facultatif */ }
   }
-  // Fusibles de rechange différents des fusibles installés (calibre ou modèle) : en cas de fusion, on remplacerait par autre chose.
+  // Matériel de sécurité présent mais déclaré non conforme (usure, date de vérification dépassée, défaut d'isolement…).
+  if (eq.controles && eq.controles.materiel_securite) {
+    const sch = (() => { try { return getSchema(eq); } catch (e) { return null; } })();
+    const secS = sch && (sch.sections || []).find((x) => x.key === "materiel_securite");
+    const nonConf = ((secS && secS.items) || []).filter((it) => { const f = (eq.controles.materiel_securite[it.key] || {}).fields || {}; return f.present === "OUI" && f.conformite === "Non conforme"; }).map((it) => it.label);
+    if (nonConf.length) ajouter(`Matériel de sécurité présent mais non conforme : ${nonConf.join(", ")} — à remplacer ou à faire vérifier avant toute intervention (NF C18-510).`, 1, "securite_non_conforme", "matériel de sécurité");
+  }
+  // Fusibles de rechange aux caractéristiques différentes des fusibles installés (In ou Un) : le modèle peut différer, seules les caractéristiques comptent.
   Object.keys(eq.controles || {}).forEach((sk) => {
     const sec = eq.controles[sk];
     if (!sec || typeof sec !== "object" || !sec.fusibles_installes || !sec.fusibles_rechange) return;
@@ -14473,11 +14536,13 @@ function analyserAnomaliesEquipement(eq, contexte) {
     const inI = numOf(fi.in), inR = numOf(fr2.in);
     const mod = (f) => [f.fabricant, f.modele].map((x) => String(x || "").trim()).filter(Boolean).join(" ");
     const mI = mod(fi), mR = mod(fr2);
+    const unI = numOf(fi.un), unR = numOf(fr2.un);
     const calibreDiff = inI !== null && inR !== null && inI !== inR;
-    const modeleDiff = String(fi.modele || "").trim() && String(fr2.modele || "").trim() && String(fi.modele).trim().toLowerCase() !== String(fr2.modele).trim().toLowerCase();
-    if (!calibreDiff && !modeleDiff) return;
-    const desc = (m, i) => [m, i !== null ? `${String(i).replace(".", ",")} A` : ""].filter(Boolean).join(", ");
-    ajouter(`Les fusibles de rechange (${desc(mR, inR)}) ne correspondent pas aux fusibles installés (${desc(mI, inI)})${calibreDiff ? " : en cas de fusion, le remplacement se ferait avec un calibre différent" : " : modèle différent, à vérifier (dimensions, percuteur, caractéristiques)"}.`, calibreDiff ? 1 : 0, "fusible_rechange", "fusibles de rechange");
+    const tensionDiff = unI !== null && unR !== null && unI !== unR;
+    if (!calibreDiff && !tensionDiff) return;
+    const desc = (m, u, i) => [m, u !== null ? `${String(u).replace(".", ",")} kV` : "", i !== null ? `${String(i).replace(".", ",")} A` : ""].filter(Boolean).join(", ");
+    const ecarts = [calibreDiff ? "un calibre" : "", tensionDiff ? "une tension assignée" : ""].filter(Boolean).join(" et ");
+    ajouter(`Les fusibles de rechange (${desc(mR, unR, inR)}) n'ont pas les mêmes caractéristiques que les fusibles installés (${desc(mI, unI, inI)}) : en cas de fusion, le remplacement se ferait avec ${ecarts} différent${calibreDiff && tensionDiff ? "s" : calibreDiff ? "" : "e"}.`, 1, "fusible_rechange", "fusibles de rechange");
   });
   // Même phrase produite deux fois (deux lots identiques, deux items équivalents…) : on ne la garde qu'une fois, au meilleur rang.
   const vues = new Map();
@@ -14511,7 +14576,8 @@ const RECO_PAR_CATEGORIE = {
   reglage_ir: () => "Revoir le réglage long retard (Ir) pour l'adapter au courant nominal du transformateur, en accord avec l'exploitant.",
   isolement_continu: () => "Rechercher le défaut d'isolement sur le réseau continu (départs, batterie, équipements alimentés) avec le contrôleur ou un localisateur de défaut.",
   ondulation_batterie: () => "Faire contrôler les condensateurs de filtrage du redresseur / chargeur.",
-  fusible_rechange: () => "Mettre à disposition des fusibles de rechange identiques aux fusibles installés (calibre et modèle).",
+  fusible_rechange: () => "Mettre à disposition des fusibles de rechange de mêmes caractéristiques que les fusibles installés (tension assignée et calibre ; le modèle peut différer).",
+  securite_non_conforme: () => "Remplacer ou faire vérifier le matériel de sécurité non conforme (NF C18-510).",
   isolement: (s) => `Rechercher la cause de la baisse d'isolement et refaire la mesure (${s}).`,
   enroulements: (s) => `Faire contrôler les enroulements et le changeur de prises (${s}).`,
   huile: (s) => `Réaliser une analyse complémentaire de l'huile (${s}).`,
@@ -14538,7 +14604,7 @@ const RECO_PAR_CATEGORIE = {
   etat_degrade: (s) => `Surveiller à la prochaine visite : ${s}.`,
 };
 const MAX_PRECONISATIONS = 5;
-const ORDRE_RECO = ["capacite_modules", "module", "redondance_modules", "surcharge_condensateurs", "resonance", "self_accord", "fusible_calibre", "fusible_ib", "fusible", "fusible_rechange", "surcharge_kw", "batterie_capacite", "batterie_branche", "thdi_entree", "neutre_harmoniques", "temperature_batterie", "ondulation_batterie", "isolement_continu", "reglage_ir", "svg_sature", "serrage", "contact", "isolement", "enroulements", "huile", "mise_terre", "protection", "disjoncteur", "batterie", "gradin", "cosphi", "usure", "proprete", "ventilation", "thermique", "mesure", "etat_defaillant", "etat_degrade"];
+const ORDRE_RECO = ["capacite_modules", "module", "redondance_modules", "surcharge_condensateurs", "resonance", "self_accord", "fusible_calibre", "fusible_ib", "fusible", "fusible_rechange", "securite_non_conforme", "surcharge_kw", "batterie_capacite", "batterie_branche", "thdi_entree", "neutre_harmoniques", "temperature_batterie", "ondulation_batterie", "isolement_continu", "reglage_ir", "svg_sature", "serrage", "contact", "isolement", "enroulements", "huile", "mise_terre", "protection", "disjoncteur", "batterie", "gradin", "cosphi", "usure", "proprete", "ventilation", "thermique", "mesure", "etat_defaillant", "etat_degrade"];
 // Préconisations dédoublonnées, regroupées par famille, les plus urgentes en premier.
 function preconisationsDepuisConstats(constats) {
   const groupes = {};
@@ -15933,6 +15999,7 @@ function printFieldParts(item, value) {
   const fields = value.fields || {};
   (item.fields || []).forEach((f) => {
     if (f.key === "realise") return; // sa présence même dans le rapport indique déjà que c'est réalisé
+    if (f.visibleSi && !f.visibleSi(fields)) return; // champ conditionnel masqué (ex. conformité d'un matériel absent)
     if (f.key === "aide") return; // aide technicien (couple de serrage indicatif) : utile en saisie, pas dans le rapport — seule la valeur de couple renseignée par le technicien doit y figurer
     const unitKey = f.unitFrom ? f.unitFrom + "Unite" : f.key + "Unite";
     const unit = f.unit ? fields[unitKey] || f.unit : "";
@@ -15944,7 +16011,7 @@ function printFieldParts(item, value) {
       // texte plutôt que de champTolStatus (qui ne s'applique pas à ce type de champ).
       const etat = f.longText
         ? (String(v).startsWith("🔴") ? "bad" : String(v).startsWith("✓") ? "ok" : String(v).startsWith("⚠") ? "warning" : null)
-        : champTolStatus(item, fields, f.key, value.etat);
+        : f.key === "conformite" && v === "Non conforme" ? "warning" : champTolStatus(item, fields, f.key, value.etat);
       parts.push({ text: `${f.label} : ${v}${unit ? " " + unit : ""}`, etat });
     }
   });
@@ -18761,7 +18828,7 @@ function docxTableauSeuilsRelais(seuils) {
       cellule(2, [valeur(actif, { gras: true, couleur: /actif/i.test(actif) ? DOCX_GREEN : DOCX_DARK })], fond),
       cellule(3, [valeur([f.courbe, f.type].filter(Boolean).join(" · "))], fond),
       cellule(4, [valeur(f.reglage !== "" && f.reglage !== undefined && f.reglage !== null ? `${f.reglage} ${uReglage}` : "", { gras: true, couleur: DOCX_BLUE })], fond),
-      cellule(5, [valeur(f.tms)], fond),
+      cellule(5, [valeur(String(f.tms ?? "").trim() !== "" ? f.tms : estSeuilCEI(s) && tmsEffectif(s) ? texteTmsSeuil(s, true) : "")], fond),
       cellule(6, [valeur(f.temporisation !== "" && f.temporisation !== undefined && f.temporisation !== null ? `${f.temporisation} ${f.temporisation_unite || ""}`.trim() : "", { gras: true })], fond),
     ] });
   });
@@ -21391,7 +21458,7 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
       (eq.controles.parametrage_relais_seuils || []).filter((s) => s.label).forEach((s) => {
         const estCEI2 = s.fields.courbe && s.fields.courbe !== "Constant" && s.fields.courbe !== "";
         const est492 = estThermique49(s);
-        const tempsTheorique2 = estCEI2 ? calcTempsTheoriqueCEI(s.fields.courbe, s.fields.tms, s.essai.fields.multipleInjection) : null;
+        const tempsTheorique2 = estCEI2 ? calcTempsTheoriqueCEI(s.fields.courbe, tmsValeur(s), s.essai.fields.multipleInjection) : null;
         const tempsThermique2 = est492 ? calcTempsThermique(s.fields.constante_temps, s.essai.fields.multipleThermique || "150") : null;
         const tol = toleranceEssaiSeuil(eq, s);
         const asst = s.essai.assistant;
@@ -21919,6 +21986,13 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
     if (courbeAvecFichiers) { elements.push(...docxCourbeDeclenchement(eq, sec.title)); courbeIntegree = true; }
     const t = sectionEtat ? docxControlTableCompact(rows) : docxControlTable(rows); // sections « État » sur deux colonnes, les autres ligne par ligne
     if (t) elements.push(t);
+    // Images jointes aux mesures de temps (copie d'écran de l'analyseur…) : sous le tableau, avec leur légende.
+    itemsAffiches.filter((it) => it.avecImage).forEach((it) => {
+      const ph = ((eq.controles[sec.key][it.key] || {}).photos || []).filter((x) => x && x.dataUrl);
+      if (!ph.length) return;
+      const galerie = docxPhotosCoteACote(ph, 230, 200);
+      if (galerie) elements.push(docxBlocInsecable([new DOCX.Paragraph({ keepNext: true, spacing: { before: 120, after: 40 }, children: [new DOCX.TextRun({ text: it.label, bold: true, size: 16, color: "555555" })] }), galerie]));
+    });
     if (sec.key === "mesure_isolement" && eq.type === "Transformateur") {
       const img = genererCourbeAbsorptionIsolement(eq);
       const dims = img ? dimensionsPng(img) : null;
