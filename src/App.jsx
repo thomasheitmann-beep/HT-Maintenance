@@ -871,7 +871,77 @@ function referencesDeclencheurBT(identification) {
   }
   return assoc || famille || combineValues(MARQUE_GAMME_RELAIS_BT);
 }
-const LISTE_REF_DISJONCTEUR = ["SF1", "ORTHOFLUOR"];
+// Disjoncteurs HTA : temps de manœuvre publiés par les constructeurs (valeurs à tension auxiliaire
+// nominale). ref = valeur nominale ; min / max = plage publiée. Sans valeur publiée trouvée : null
+// (renseigner la valeur de la notice du disjoncteur).
+const CATALOGUE_DISJONCTEURS_HTA = {
+  "SF1": { constructeur: "Schneider Electric", coupure: "SF6", ouverture: { ref: 55, min: 50, max: 60 }, fermeture: { ref: 70 }, source: "Schneider Electric, FAQ FA22960 (SF1, cellules SM6 DM1)" },
+  "SF2": { constructeur: "Schneider Electric", coupure: "SF6", ouverture: null, fermeture: null },
+  "Evolis": { constructeur: "Schneider Electric", coupure: "vide", ouverture: null, fermeture: null },
+  "LF1": { constructeur: "Schneider Electric", coupure: "SF6", ouverture: { ref: 48 }, fermeture: { ref: 65 }, source: "Schneider Electric, FAQ FA22641 (LF1/LF2/LF3, temps moyens à Un)" },
+  "LF2": { constructeur: "Schneider Electric", coupure: "SF6", ouverture: { ref: 48 }, fermeture: { ref: 65 }, source: "Schneider Electric, FAQ FA22641 (LF1/LF2/LF3, temps moyens à Un)" },
+  "LF3": { constructeur: "Schneider Electric", coupure: "SF6", ouverture: { ref: 48 }, fermeture: { ref: 65 }, source: "Schneider Electric, FAQ FA22641 (LF1/LF2/LF3, temps moyens à Un)" },
+  "ORTHOFLUOR": { constructeur: "Merlin Gerin", coupure: "SF6", ouverture: null, fermeture: null },
+  "VD4": { constructeur: "ABB", coupure: "vide", ouverture: { ref: 45 }, fermeture: { ref: 80 }, source: "ABB, catalogue VD4 12-24 kV (1VCP000001)" },
+  "HD4": { constructeur: "ABB", coupure: "SF6", ouverture: { min: 35, max: 60 }, fermeture: { max: 85 }, source: "ABB, notice HD4 (1VCP000005)" },
+  "3AH4": { constructeur: "Siemens", coupure: "vide", ouverture: { max: 60 }, fermeture: { max: 75 }, source: "Siemens, catalogue HG 11.04 (3AH4, 1er déclencheur)" },
+};
+const LISTE_REF_DISJONCTEUR = Object.keys(CATALOGUE_DISJONCTEURS_HTA);
+// Disjoncteurs proposés selon la gamme de cellule (et le type de cellule pour SM6) ; sinon liste complète, saisie libre toujours possible.
+const DISJONCTEURS_PAR_GAMME = {
+  "SM6": (tc) => (/DMV/i.test(tc || "") ? ["Evolis"] : /DM1|DM2/i.test(tc || "") ? ["SF1"] : ["SF1", "Evolis"]),
+  "MCset": () => ["LF1", "LF2", "LF3", "SF1", "SF2", "Evolis"],
+  "UniGear": () => ["VD4", "HD4"], "UniGear ZS1": () => ["VD4", "HD4"], "UniGear ZS3.2": () => ["VD4", "HD4"], "UniSec": () => ["VD4", "HD4"],
+};
+function referencesDisjoncteurHTA(identification) {
+  const id = identification || {};
+  const f = DISJONCTEURS_PAR_GAMME[id.modele];
+  if (f) return f(id.typeCellule);
+  const parMarque = LISTE_REF_DISJONCTEUR.filter((r) => id.marque && new RegExp(String(CATALOGUE_DISJONCTEURS_HTA[r].constructeur).split(" ")[0], "i").test(id.marque));
+  return parMarque.length ? parMarque : LISTE_REF_DISJONCTEUR;
+}
+const entreeCatalogueDisjoncteur = (ref) => {
+  const k = Object.keys(CATALOGUE_DISJONCTEURS_HTA).find((x) => x.toLowerCase() === String(ref || "").trim().toLowerCase());
+  return k ? { nom: k, ...CATALOGUE_DISJONCTEURS_HTA[k] } : null;
+};
+function texteRepereTemps(nom, t, source) {
+  if (!t) return "";
+  const n = (x) => String(x).replace(".", ",");
+  const val = t.min != null && t.max != null ? `${n(t.min)} – ${n(t.max)} ms` : t.max != null ? `≤ ${n(t.max)} ms` : t.min != null ? `≥ ${n(t.min)} ms` : `${n(t.ref)} ms (± 20 %)`;
+  return `Valeur constructeur ${nom} : ${val} — source : ${source}`;
+}
+// Plage attendue d'un temps de manœuvre : plage constructeur (référence non modifiée) ou ± 20 % autour de la référence saisie.
+function plageTempsManoeuvre(eq, key) {
+  const elec = (eq.controles && (eq.controles.controles_disjoncteur || eq.controles.electriques)) || {};
+  const f = (elec[key] && elec[key].fields) || {};
+  const cat = eq.type === "Disjoncteur HTA" ? entreeCatalogueDisjoncteur(eq.identification && eq.identification.referenceDisjoncteur) : null;
+  const t = cat && cat[key === "temps_ouverture" ? "ouverture" : "fermeture"];
+  const ref = numOf(f.reference);
+  const refCatalogue = !t || ref === null || (t.ref != null && ref === t.ref);
+  if (t && refCatalogue && (t.min != null || t.max != null)) return { min: t.min ?? null, max: t.max ?? null, libelle: texteRepereTemps(cat.nom, t, cat.source).replace(/ — source.*$/, ""), constructeur: true };
+  if (ref === null || ref === 0) return null;
+  return { min: Math.round(ref * 0.8 * 10) / 10, max: Math.round(ref * 1.2 * 10) / 10, libelle: `${t && t.ref === ref ? `valeur constructeur ${cat.nom}` : "référence"} ${String(ref).replace(".", ",")} ms ± 20 %`, constructeur: !!(t && t.ref === ref) };
+}
+// Choix du disjoncteur : pré-remplit les références de temps (si vides ou issues d'un choix précédent).
+function appliquerTempsConstructeur(eq) {
+  const sec = eq.controles && eq.controles.controles_disjoncteur;
+  if (!sec) return eq;
+  const cat = entreeCatalogueDisjoncteur(eq.identification && eq.identification.referenceDisjoncteur);
+  const maj = { ...sec };
+  [["temps_ouverture", "ouverture"], ["temps_fermeture", "fermeture"]].forEach(([k, cle]) => {
+    const v = sec[k]; if (!v) return;
+    const f = v.fields || {};
+    const auto = String(f.reference ?? "").trim() === "" || (f.referenceAuto != null && String(f.reference) === String(f.referenceAuto));
+    if (!auto) return; // valeur saisie à la main : conservée
+    const t = cat && cat[cle];
+    const nf = { ...f };
+    nf.reference = t && t.ref != null ? String(t.ref) : "";
+    nf.referenceAuto = t && t.ref != null ? String(t.ref) : null;
+    nf.repereSource = t ? texteRepereTemps(cat.nom, t, cat.source) : cat ? `${cat.nom} : pas de valeur constructeur publiée connue — renseigner la valeur de la notice` : "";
+    maj[k] = { ...v, fields: nf };
+  });
+  return { ...eq, controles: { ...eq.controles, controles_disjoncteur: maj } };
+}
 const LISTE_TYPE_CELLULE = {
   "Interrupteur HTA": ["INTERRUPTEUR - IM", "INTERRUPTEUR - IS", "INTERRUPTEUR - N1G", "INTERRUPTEUR - SDC"],
   "Comptage HTA": ["COMPTAGE - CM", "COMPTAGE - CM2", "COMPTAGE - LT", "COMPTAGE - N5G", "COMPTAGE - TM"],
@@ -1423,6 +1493,7 @@ const CHAMPS_CONTACTS_CHAMBRES = [
 // Temps d'ouverture / de fermeture : synchronisme entre pôles, repère ≤ 3,3 ms (1/6 de période à 50 Hz, valeur usuelle des constructeurs).
 const champsTempsManoeuvre = () => [
   ...L1L2L3("ms"), F("synchronisme", "Synchronisme (ensemble des phases)", "ms"), F("reference", "Valeur de référence constructeur", "ms"),
+  { key: "repereConstructeur", label: "Repère constructeur", longText: true, compute: (f) => (f.repereSource && (String(f.reference ?? "").trim() === "" || (f.referenceAuto != null && String(f.reference) === String(f.referenceAuto))) ? f.repereSource : "") },
   ...seuilMaxSeul("Synchronisme max", "ms", "synchronisme", [], (f) => (numOf(f.synchronisme) === null ? "" : 3.3)),
 ];
 // Temps mécanique : une seule valeur, le temps complet (commande bobine + mécanisme + ouverture des contacts).
@@ -2039,11 +2110,11 @@ function tempsManoeuvreHorsTolerance(eq) {
   return ["temps_ouverture", "temps_fermeture"].some((k) => {
     const f = elec[k] && elec[k].fields;
     if (!f) return false;
-    const ref = numOf(f.reference);
-    if (ref === null || ref === 0) return false;
+    const pl = plageTempsManoeuvre(eq, k);
+    if (!pl) return false;
     return ["l1", "l2", "l3"].some((p) => {
       const v = numOf(f[p]);
-      return v !== null && Math.abs(v - ref) / ref > 0.2;
+      return v !== null && ((pl.min !== null && v < pl.min) || (pl.max !== null && v > pl.max));
     });
   });
 }
@@ -3439,7 +3510,7 @@ const SCHEMAS = {
       { key: "marque", label: "Marque", options: LISTE_MARQUE_CELLULE_HTA },
       { key: "modele", label: "Modèle", options: LISTE_MODELE_CELLULE_HTA_OPTIONS },
       { key: "typeCellule", label: "Type de cellule", options: typeCelluleParGamme("Disjoncteur HTA") }, { key: "numeroSerie", label: "Numéro de série" }, ...CHAMPS_CELLULE_HTA,
-      { key: "referenceDisjoncteur", label: "Référence du disjoncteur", options: LISTE_REF_DISJONCTEUR }, { key: "numeroSerieDisjoncteur", label: "Numéro de série (disjoncteur)" },
+      { key: "referenceDisjoncteur", label: "Référence du disjoncteur", options: referencesDisjoncteurHTA }, { key: "numeroSerieDisjoncteur", label: "Numéro de série (disjoncteur)" },
       { key: "marqueRelais", label: "Marque du relais de protection", options: LISTE_MARQUE_RELAIS_HTA }, { key: "referenceRelais", label: "Référence du relais", options: LISTE_REFERENCE_RELAIS_HTA_OPTIONS }, { key: "numeroSerieRelais", label: "Numéro de série (relais)" },
       { key: "rapportTPProtection", label: "Rapport TP de protection", options: LISTE_RAPPORT_TP },
     ],
@@ -6991,6 +7062,11 @@ function verificationsCoherenceEquipement(eq, site) {
       if (!it.optionnel && (v.etat || "") === "Conforme" && clesMesure.length && clesMesure.every((d) => String(f[d.key] ?? "").trim() === "") && !["l1", "l2", "l3"].some((k) => String(f[k] ?? "").trim() !== "") && !controleACompleter(it, v) && !(it.fields || []).some((d) => d.key === "realise"))
         push(sec.key, `${it.label} : état « Conforme » sans valeur mesurée (${clesMesure.map((d) => d.label).join(", ")}) — saisir la mesure ou passer en « Non réalisé »`);
       if (horsTol && v.etat === "Conforme") push(sec.key, `${it.label} : état « Conforme » alors qu'une mesure est hors de la plage attendue (le rapport la signale comme anomalie) — corriger la mesure ou l'état`);
+      if (["temps_ouverture", "temps_fermeture"].includes(it.key)) {
+        const pl = plageTempsManoeuvre(eq, it.key);
+        const hors = pl ? ["l1", "l2", "l3"].filter((p) => { const x = numOf(f[p]); return x !== null && ((pl.min !== null && x < pl.min) || (pl.max !== null && x > pl.max)); }) : [];
+        if (hors.length && (v.etat || "Conforme") === "Conforme") push(sec.key, `${it.label} : ${hors.map((p) => `${p.toUpperCase()} = ${fmtV(numOf(f[p]))} ms`).join(", ")} hors plage (${pl.libelle}) alors que l'état est « Conforme »`);
+      }
       if (["temps_ouverture", "temps_fermeture"].includes(it.key) && numOf(f.synchronisme) !== null && numOf(f.synchronisme) > 15 && !["l1", "l2", "l3"].some((k) => numOf(f[k]) !== null))
         push(sec.key, `${it.label} : ${fmtV(numOf(f.synchronisme))} ms saisis dans « Synchronisme » sans temps L1 / L2 / L3 — le temps de manœuvre se saisit en L1 / L2 / L3, le synchronisme est l'écart entre pôles (≤ 3,3 ms)`);
     });
@@ -7290,7 +7366,8 @@ function ControlRow({ item, value, onChange, idPrefix, toleranceOverride, valeur
   }).filter((p) => !(p.seuil && p.vide));
   incoherencesGroupesPhases(groupes, fields, entetesPhases).forEach((x) => pastilles.push({ cle: "coh-" + x.cle, titre: "Écart anormal entre phases : vérifier la saisie", seuil: false, vide: false, etat: "warning", texte: x.texte }));
   const champsMesures = [...groupes.flatMap((g) => g.cellules.filter((f) => f && !f.compute)), ...autres.filter((f) => !f.compute && !f.options && f.key !== "realise")];
-  const rempli = champsMesures.some((f) => { const v = fields[f.key]; return v !== undefined && v !== null && String(v).trim() !== ""; });
+  // Une référence pré-remplie depuis le catalogue constructeur n'est pas une saisie : le contrôle reste ouvert.
+  const rempli = champsMesures.some((f) => { const v = fields[f.key]; if (f.key === "reference" && fields.referenceAuto != null && String(v) === String(fields.referenceAuto)) return false; return v !== undefined && v !== null && String(v).trim() !== ""; });
   const repliable = dense && value.etat !== undefined;
   const [replie, setReplie] = useState(() => repliable && rempli && !!value.etat);
   const resume = [
@@ -14878,7 +14955,9 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
       const t = types.find((x) => norm(v).includes(norm(x)));
       if (t) id2.typeDisjoncteur = t;
     }
-    update(repairEquipementControles({ ...eq, identification: id2 }));
+    let eq2 = repairEquipementControles({ ...eq, identification: id2 });
+    if (eq.type === "Disjoncteur HTA" && k === "referenceDisjoncteur") eq2 = appliquerTempsConstructeur(eq2);
+    update(eq2);
   };
   const setControleItem = (sectionKey, itemKey, v) =>
     update({ ...eq, controles: { ...eq.controles, [sectionKey]: { ...eq.controles[sectionKey], [itemKey]: v } } });
