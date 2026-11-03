@@ -36,7 +36,7 @@ const EQUIPMENT_TYPES_HTABT = [
   "Bilan de puissance",
 ];
 // Types de la conversion d'énergie (onduleur, redresseur chargeur, inverseur de source statique).
-const EQUIPMENT_TYPES_CONVERSION = ["Onduleur", "Onduleur simplifié", "Redresseur chargeur", "Inverseur de source"];
+const EQUIPMENT_TYPES_CONVERSION = ["Onduleur", "Onduleur simplifié", "By-pass externe", "Redresseur chargeur", "Inverseur de source"];
 const EQUIPMENT_TYPES = [...EQUIPMENT_TYPES_HTABT, ...EQUIPMENT_TYPES_CONVERSION];
 
 // petit constructeur : un contrôle avec Action + État final (+ champs de mesure optionnels)
@@ -1099,7 +1099,22 @@ const LISTE_TYPE_COMPENSATION = ["Compensateur d'énergie réactive", "Power Fac
 const LISTE_TYPE_REGULATEUR = ["Statique", "Électromécanique"];
 const LISTE_ACCESSIBILITE = ["Conforme", "Difficile", "Très difficile"];
 const LISTE_TYPE_UPS = ["Onduleur", "ASI", "UPS", "Onduleur sécurité"];
-const LISTE_CONFIG_UPS = ["Unitaire", "Unitaire sans bypass", "Parallèle modulaire", "Parallèle centralisé"];
+// Configuration d'un onduleur. Le by-pass (statique / maintenance) est choisi à part : interne dans la grande majorité des cas,
+// externe en option (équipement « By-pass externe »), ou absent.
+const LISTE_CONFIG_UPS = ["Unitaire", "Parallèle", "Modulaire", "Redondance série (hot standby)", "2N (deux voies indépendantes)"];
+const LISTE_BYPASS_STATIQUE = ["Interne", "Externe (armoire by-pass centralisée)", "Aucun"];
+const LISTE_BYPASS_MAINTENANCE = ["Interne", "Externe", "Aucun"];
+const LISTE_OBJECTIF_PARALLELE = ["Redondance (N+1)", "Puissance (toutes les machines nécessaires)"];
+const LISTE_BATTERIES_PARALLELE = ["Séparées par machine", "Communes au système"];
+const LISTE_VOIE_2N = ["Voie A", "Voie B"];
+const LISTE_TYPE_BYPASS_EXT = ["By-pass de maintenance (manuel)", "By-pass statique + maintenance (armoire centralisée)", "By-pass statique seul"];
+const estUpsParallele = (eq) => eq?.type === "Onduleur" && eq?.identification?.configuration === "Parallèle";
+const estUps2N = (eq) => eq?.type === "Onduleur" && /^2N/.test(eq?.identification?.configuration || "");
+const estUpsSerie = (eq) => eq?.type === "Onduleur" && /^Redondance série/.test(eq?.identification?.configuration || "");
+// By-pass statique hors de la machine (armoire centralisée) ou absent : pas de réseau secours ni de commutation à contrôler sur l'onduleur.
+const bypassStatiqueHorsMachine = (eq) => /^(Externe|Aucun)/.test(eq?.identification?.bypassStatique || "");
+const bypassExterneStatique = (eq) => eq?.type === "By-pass externe" && !/^By-pass de maintenance/.test(eq?.identification?.typeBypass || "");
+const bypassExterneMaintenance = (eq) => eq?.type === "By-pass externe" && !/statique seul/.test(eq?.identification?.typeBypass || "");
 // Équipement modulaire : batteries communes à tous les modules ou une batterie par module.
 const LISTE_BATTERIES_MODULES = ["Communes à tous les modules", "Indépendantes par module"];
 // By-pass statique d'un onduleur modulaire : un module by-pass commun, ou un by-pass intégré à chaque module.
@@ -2754,6 +2769,8 @@ function buildOnduleurSchema({ normalMono = false, secoursMono = false, utilisat
       { key: "marque", label: "Marque", options: LISTE_MARQUE_ONDULEUR }, { key: "modele", label: "Modèle", options: LISTE_MODELE_ONDULEUR_OPTIONS },
       { key: "numeroSerie", label: "Numéro de série" },
       { key: "configuration", label: "Configuration", options: LISTE_CONFIG_UPS },
+      { key: "bypassStatique", label: "By-pass statique", options: LISTE_BYPASS_STATIQUE },
+      { key: "bypassMaintenance", label: "By-pass de maintenance", options: LISTE_BYPASS_MAINTENANCE },
       { key: "puissanceKVA", label: "Puissance (kVA)", numeric: true }, { key: "puissanceKW", label: "Puissance (kW)", numeric: true },
       { key: "tensionEntreeSortie", label: "Tension entrée / sortie", options: LISTE_TENSION_ENTREE_SORTIE },
       { key: "regimeSortie", label: "Régime de sortie", options: LISTE_REGIME_SORTIE_UPS },
@@ -2990,6 +3007,64 @@ function buildRedresseurSchema({ reseauMono = false, reseau2Mono = false, double
 }
 // Inverseur de source (commutateur statique / manuel entre 2 sources) : pas de batterie sur cet
 // équipement — Source 1, Source 2, Utilisation, chacune avec son régime mono/tri indépendant.
+// By-pass externe (armoire / coffret) : by-pass de maintenance manuel, et/ou by-pass statique centralisé d'un système
+// d'onduleurs en parallèle. Relié aux onduleurs qu'il dessert (champ « Onduleurs raccordés »).
+function buildBypassExterneSchema(identification = {}) {
+  const t = identification.typeBypass || "";
+  const statique = !/^By-pass de maintenance/.test(t);
+  const maintenance = !/statique seul/.test(t);
+  const mono = identification.reseauBypass === "Monophasé";
+  const base = buildOnduleurSchema({ secoursMono: mono, utilisationMono: mono });
+  const secours = base.sections.find((x) => x.key === "mesures_reseau_secours");
+  const util = base.sections.find((x) => x.key === "mesures_utilisation");
+  const garderUtil = ["tension_simple_utilisation", "tension_utilisation", "courant_utilisation", "frequence_utilisation"];
+  return {
+    identification: [
+      { key: "repere", label: "Repère / Nom de l'équipement" },
+      { key: "marque", label: "Marque", options: LISTE_MARQUE_ONDULEUR }, { key: "modele", label: "Modèle" },
+      { key: "numeroSerie", label: "Numéro de série" },
+      { key: "typeBypass", label: "Type de by-pass", options: LISTE_TYPE_BYPASS_EXT },
+      { key: "onduleursRaccordes", label: "Onduleurs raccordés", multi: true },
+      { key: "courantNominal", label: "Courant nominal (A)", numeric: true }, { key: "puissanceKVA", label: "Puissance (kVA)", numeric: true },
+      { key: "reseauBypass", label: "Réseau", options: ["Triphasé", "Monophasé"] },
+      { key: "anneeMiseEnService", label: "Année de mise en service", numeric: true },
+    ],
+    sections: [
+      { key: "environnement_ups", title: "État de l'installation", items: [
+        C("local_ups", "Local", [F("acces", "Accessibilité", null, LISTE_ACCESSIBILITE)]),
+        C("temperature_ups", "Température", [F("valeur", "Valeur", "°C")]),
+        C("machine_ups", "Armoire", [F("etat", "État", null, LISTE_ENVIRONNEMENT_UPS)]),
+        C("environnement_ups_item", "Environnement", [F("etat", "État", null, LISTE_MACHINE_ETAT)]),
+      ]},
+      ...(maintenance ? [{ key: "manoeuvre_bypass", title: "By-pass de maintenance", items: [
+        C("passage_bypass", "Passage sur by-pass de maintenance sans coupure de l'utilisation"),
+        C("retour_onduleur", "Retour sur onduleur(s) sans coupure"),
+        C("interverrouillages_bp", "Interverrouillages / verrouillage à clé"),
+        C("consignes_manoeuvre_bp", "Repérage des organes et consignes de manœuvre affichées"),
+        C("organes_coupure_bp", "État des organes de coupure (sectionneurs, interrupteurs)"),
+        C("connexions_bp", "Connexions de puissance (état, serrage)"),
+      ]}] : []),
+      ...(statique ? [{ key: "commutateur_statique_bp", title: "By-pass statique", items: [
+        C("essai_alarme_bp", "Essai alarme / défaut"),
+        C("ventilation_bp", "Ventilation"),
+        C("alim_electroniques_bp", "Alimentations électroniques"),
+        C("transfert_bp", "Transfert onduleurs → by-pass statique et retour"),
+        C("synchronisation_bp", "Synchronisation onduleurs / réseau by-pass"),
+        C("controle_rs_bp", "Contrôle RS"),
+      ]}] : []),
+      { key: "synoptique_bp", title: "Synoptique / signalisations", items: [
+        C("signalisations_leds_bp", "Signalisations / LEDs"),
+        C("affichage_alarmes_bp", "Affichage alarmes / défauts"),
+        C("report_alarme_bp", "Report d'alarme"),
+      ]},
+      ...(statique ? [{ key: "mesures_reseau_bypass", title: "Mesures — Réseau by-pass (secours)", items: secours.items }] : []),
+      { key: "mesures_sortie_bp", title: "Mesures — Sortie (utilisation)", items: util.items.filter((it) => garderUtil.includes(it.key)) },
+      { key: "thermographie_ups", title: "Thermographie", items: [
+        C("controle_thermo_ups", "Contrôle thermographique", [F("temperature", "Température relevée", "°C"), F("charge", "Charge au moment du contrôle", "%")]),
+      ]},
+    ],
+  };
+}
 function buildInverseurSchema({ source1Mono = false, source2Mono = false, utilisationMono = false } = {}) {
   return {
     identification: [
@@ -3879,6 +3954,7 @@ const SCHEMAS = {
   },
   "Redresseur chargeur": buildRedresseurSchema({}),
   "Inverseur de source": buildInverseurSchema({}),
+  "By-pass externe": buildBypassExterneSchema({}),
   "Bilan de puissance": {
     identification: [
       { key: "repere", label: "Repère / Point de mesure" },
@@ -4066,7 +4142,7 @@ function getSchemaBase(eq) {
     // Configuration "Parallèle modulaire" : nombre de modules installés, puissance unitaire par
     // module, et répartition entre modules nécessaires à la charge, redondants (N+x, déjà
     // installés et sous tension) et en réserve (spares non installés, gardés au magasin).
-    if (eq.identification?.configuration === "Parallèle modulaire") {
+    if (eq.identification?.configuration === "Modulaire") {
       const idxConfig = out.identification.findIndex((f) => f.key === "configuration");
       const champsModulaires = [
         { key: "nombreModules", label: "Modules en service (prennent la charge)", numeric: true },
@@ -4075,8 +4151,41 @@ function getSchemaBase(eq) {
         { key: "moduleBypass", label: "By-pass statique", options: LISTE_BYPASS_MODULES },
         { key: "batteriesModules", label: "Batteries", options: LISTE_BATTERIES_MODULES },
       ];
-      const identification = [...out.identification.slice(0, idxConfig + 1), ...champsModulaires, ...out.identification.slice(idxConfig + 1)];
+      // Modulaire : le by-pass statique est décrit par « By-pass statique » des modules (commun ou intégré).
+      const identification = [...out.identification.slice(0, idxConfig + 1), ...champsModulaires, ...out.identification.slice(idxConfig + 1).filter((f) => f.key !== "bypassStatique")];
       out = { ...out, identification };
+    }
+    // Parallèle / 2N / redondance série : lien entre les machines du système.
+    {
+      const cfg = eq.identification?.configuration || "";
+      const champs = cfg === "Parallèle" ? [
+        { key: "machinesParallele", label: "Machines en parallèle (autres onduleurs du système)", multi: true },
+        { key: "objectifParallele", label: "Objectif du parallèle", options: LISTE_OBJECTIF_PARALLELE },
+        { key: "batteriesParallele", label: "Batteries", options: LISTE_BATTERIES_PARALLELE },
+      ] : /^2N/.test(cfg) ? [
+        { key: "voie2N", label: "Voie", options: LISTE_VOIE_2N },
+        { key: "machinesParallele", label: "Onduleur(s) de l'autre voie", multi: true },
+      ] : /^Redondance série/.test(cfg) ? [
+        { key: "onduleurSecours", label: "Onduleur alimentant l'entrée by-pass (secours)" },
+      ] : [];
+      if (champs.length) {
+        const i = out.identification.findIndex((f) => f.key === "configuration");
+        out = { ...out, identification: [...out.identification.slice(0, i + 1), ...champs, ...out.identification.slice(i + 1)] };
+      }
+    }
+    // By-pass statique externe ou absent : réseau secours, commutation et ΔV sortie / secours se contrôlent ailleurs (ou n'existent pas).
+    // By-pass de maintenance : seul le contrôle correspondant (interne / externe) est proposé. Valeur non renseignée (ancien relevé) : tout reste affiché.
+    {
+      const bs = eq.identification?.bypassStatique || "", bm = eq.identification?.bypassMaintenance || "";
+      const masquerItems = [
+        ...(bypassStatiqueHorsMachine(eq) ? ["auto_alim_commutateur", "commutation_r0_r2", "controle_rs", "dv_sortie_secours"] : []),
+        ...(bm === "Interne" ? ["bypass_manuel_externe"] : bm === "Externe" ? ["bypass_manuel_interne"] : bm === "Aucun" ? ["bypass_manuel_interne", "bypass_manuel_externe"] : []),
+      ];
+      if (bs || bm) {
+        out = { ...out, sections: out.sections
+          .filter((x) => !(bypassStatiqueHorsMachine(eq) && x.key === "mesures_reseau_secours"))
+          .map((x) => ({ ...x, items: x.items.filter((it) => !masquerItems.includes(it.key)) })) };
+      }
     }
     // Un onduleur sécurité n'a ni réseau secours, ni by-pass / commutation R2 (RS) — masqués.
     if (eq.identification?.typeUPS === "Onduleur sécurité") {
@@ -4105,6 +4214,7 @@ function getSchemaBase(eq) {
     }
     return out;
   }
+  if (eq.type === "By-pass externe") return buildBypassExterneSchema(eq.identification || {});
   if (eq.type === "Inverseur de source") {
     const r = (eq.controles && eq.controles.regimes_reseaux) || {};
     return buildInverseurSchema({ source1Mono: r.source1 === "Monophasé", source2Mono: r.source2 === "Monophasé", utilisationMono: r.utilisation === "Monophasé" });
@@ -4297,6 +4407,12 @@ function repairEquipementControles(eq) {
   if (ancienBypass === "Séparé (module dédié)" || ancienBypass === "Intégré à chaque module de puissance") {
     eq = { ...eq, identification: { ...eq.identification, moduleBypass: ancienBypass.startsWith("Intégré") ? LISTE_BYPASS_MODULES[1] : LISTE_BYPASS_MODULES[0] } };
   }
+  // Onduleur : anciennes configurations → configuration + by-pass statique.
+  if (eq?.type === "Onduleur") {
+    const ancien = eq.identification?.configuration;
+    const conv = { "Unitaire sans bypass": ["Unitaire", "Aucun"], "Parallèle modulaire": ["Modulaire", null], "Parallèle centralisé": ["Parallèle", LISTE_BYPASS_STATIQUE[1]] }[ancien];
+    if (conv) eq = { ...eq, identification: { ...eq.identification, configuration: conv[0], ...(conv[1] && !eq.identification.bypassStatique ? { bypassStatique: conv[1] } : {}) } };
+  }
   const schema = getSchema(eq);
   if (!schema) return eq;
   const controles = { ...eq.controles };
@@ -4431,6 +4547,8 @@ function emptyEquipement(type) {
     getCategoriesUsure(type).forEach((cat) => { controles.pieces_usure_ups[cat.key] = [emptyModeleUsure(cat.dureeDefaut)]; });
   }
   if (type === "Onduleur" || type === "Redresseur chargeur") controles.regimes_reseaux = { normal: "Triphasé", secours: "Triphasé", utilisation: "Triphasé", onduleur: "Triphasé" };
+  if (type === "Onduleur") { identification.configuration = "Unitaire"; identification.bypassStatique = "Interne"; identification.bypassMaintenance = "Interne"; }
+  if (type === "By-pass externe") identification.reseauBypass = "Triphasé";
   if (type === "Inverseur de source") controles.regimes_reseaux = { source1: "Triphasé", source2: "Triphasé", utilisation: "Triphasé" };
   if (TYPES_AVEC_MESURES_UTILISATION.includes(type)) controles.photos_utilisation = { l1: [], l2: [], l3: [] };
   if (type === "Redresseur chargeur") controles.photos_reseau_entree = { l1: [], l2: [], l3: [] };
@@ -7086,6 +7204,15 @@ function verificationsCoherenceEquipement(eq, site) {
       if (sus && ls.every((y) => toleranceState(y, tol.min, tol.max) === "bad")) push("controles_relais", `Essai ${x.label.split(" — ")[0]} : temps ${ls.map(fmtV).join(" / ")} ${tol.unite} pour ${fmtV(tol.min)} – ${fmtV(tol.max)} ${tol.unite} attendus — erreur d'unité ou de virgule ? (${fmtV(sus.v2)} ${tol.unite} serait dans la plage)`);
     });
   }
+  // Systèmes d'onduleurs : liens à compléter.
+  {
+    const eqs = (site && site.equipements) || [];
+    if ((estUpsParallele(eq) || estUps2N(eq)) && groupeOnduleurs(eq, eqs).length < 2) push("identification", `configuration ${estUps2N(eq) ? "2N" : "parallèle"} sans autre onduleur relié (champ « ${estUps2N(eq) ? "Onduleur(s) de l'autre voie" : "Machines en parallèle"} »)`);
+    if (estUpsSerie(eq) && !String(eq.identification?.onduleurSecours || "").trim()) push("identification", "redondance série : onduleur alimentant l'entrée by-pass non renseigné");
+    if (eq.type === "Onduleur" && /^Externe/.test(eq.identification?.bypassStatique || "") && !bypassExternesRaccordes(eq, eqs).some(bypassExterneStatique)) push("identification", "by-pass statique externe déclaré, mais aucun équipement « By-pass externe » (statique) n'est relié à cet onduleur");
+    if (eq.type === "Onduleur" && eq.identification?.bypassMaintenance === "Externe" && !bypassExternesRaccordes(eq, eqs).some(bypassExterneMaintenance)) push("identification", "by-pass de maintenance externe déclaré, mais aucun équipement « By-pass externe » n'est relié à cet onduleur");
+    if (eq.type === "By-pass externe" && !listeRepere(eq.identification?.onduleursRaccordes).length) push("identification", "aucun onduleur raccordé n'est sélectionné");
+  }
   // Relais déclaré présent mais ni marque ni seuil paramétré.
   if (eq.identification?.presenceRelais === "Oui") {
     const seuils = (eq.controles?.parametrage_relais_seuils || []).filter((x) => String(x.label || "").trim() && ["reglage", "temporisation"].some((k) => String((x.fields || {})[k] ?? "").trim() !== ""));
@@ -9357,6 +9484,11 @@ function analyseOnduleur(eq, allSites, rapportDate) {
   }
   }
 
+  // Système d'onduleurs (parallèle, 2N, redondance série, by-pass externe) : autres machines du même site.
+  if (eq.type === "Onduleur" && allSites) {
+    const siteEq = allSites.find((s) => (s.equipements || []).some((e) => e.id === eq.id));
+    if (siteEq) try { out.push(...analyseSystemeOnduleur(eq, siteEq.equipements.map((e) => (e.id === eq.id ? eq : e)))); } catch (e) { /* facultatif */ }
+  }
   // 5. Sortie : ThdI lié aux charges, courant de neutre
   const mu = c.mesures_utilisation || {};
   const thdiS = nums(mu.thdi_utilisation?.fields);
@@ -9552,6 +9684,101 @@ function NotesModuleSVG({ eq }) {
       {lignes.map((l, i) => <div key={i} style={{ display: "flex", gap: 8, fontSize: 12.5, lineHeight: 1.5, color: "#3E4A5C", marginBottom: i < lignes.length - 1 ? 8 : 0 }}><span style={{ color: l.niveau >= 1 ? "#B5730A" : "#0A5DA8", fontWeight: 800 }}>{l.niveau >= 1 ? "⚠" : "ℹ"}</span><span>{l.texte}</span></div>)}
     </Card>
   );
+}
+// ----- Systèmes d'onduleurs : parallèle, 2N, redondance série, by-pass externe -----
+const repereNorm = (e) => String(e?.identification?.repere || "").trim().toLowerCase();
+const listeRepere = (v) => (Array.isArray(v) ? v : v ? [v] : []).map((x) => String(x).trim().toLowerCase()).filter(Boolean);
+// Machines reliées (dans un sens ou dans l'autre, de proche en proche) par le champ « Machines en parallèle ».
+function groupeOnduleurs(eq, eqs) {
+  const ond = (eqs || []).filter((e) => e.type === "Onduleur");
+  const groupe = [eq];
+  for (let i = 0; i < groupe.length; i++) {
+    const cur = groupe[i];
+    ond.forEach((o) => {
+      if (groupe.some((g) => g.id === o.id) || !repereNorm(o)) return;
+      if (listeRepere(cur.identification?.machinesParallele).includes(repereNorm(o)) || (repereNorm(cur) && listeRepere(o.identification?.machinesParallele).includes(repereNorm(cur)))) groupe.push(o);
+    });
+  }
+  const ordre = (e) => ond.findIndex((o) => o.id === e.id);
+  return groupe.sort((a, b) => ordre(a) - ordre(b));
+}
+const bypassExternesRaccordes = (eq, eqs) => (eqs || []).filter((b) => b.type === "By-pass externe" && repereNorm(eq) && listeRepere(b.identification?.onduleursRaccordes).includes(repereNorm(eq)));
+function chargeKvaOnduleur(e) {
+  const pn = numOf(e.identification?.puissanceKVA);
+  let taux = null;
+  try { const tc = calcTauxCharge(e); const v = tc ? [tc.t1, tc.t2, tc.t3].filter((x) => x !== null && x !== undefined && isFinite(x)) : []; if (v.length) taux = v.reduce((a, b) => a + b, 0) / v.length; } catch (er) { /* facultatif */ }
+  return { pn, taux, kva: pn && taux !== null ? (pn * taux) / 100 : null };
+}
+function analyseSystemeOnduleur(eq, eqs) {
+  const out = [];
+  if (!eq || eq.type !== "Onduleur" || !eqs) return out;
+  const nom = (e) => e.identification?.repere || "sans repère";
+  const f1 = (x) => String(Math.round(x * 10) / 10).replace(".", ",");
+  const S = "mesures_utilisation";
+  const id = eq.identification || {};
+  // By-pass externe
+  const bps = bypassExternesRaccordes(eq, eqs);
+  if (bypassStatiqueHorsMachine(eq) && /^Externe/.test(id.bypassStatique || "")) {
+    const st = bps.filter(bypassExterneStatique);
+    out.push(st.length
+      ? { section: S, niveau: 0, texte: `By-pass statique centralisé : réseau secours, commutation et transfert sont contrôlés sur le by-pass externe « ${st.map(nom).join(", ")} ».` }
+      : { section: S, niveau: 1, texte: "By-pass statique externe déclaré, mais aucun équipement « By-pass externe » n'est relié à cet onduleur : réseau secours et commutation non contrôlés dans ce rapport." });
+  }
+  if (id.bypassMaintenance === "Externe" && bps.some(bypassExterneMaintenance)) out.push({ section: S, niveau: 0, texte: `By-pass de maintenance externe : « ${bps.filter(bypassExterneMaintenance).map(nom).join(", ")} ».` });
+  // Redondance série
+  if (estUpsSerie(eq)) {
+    const sec = String(id.onduleurSecours || "").trim();
+    out.push({ section: S, niveau: sec ? 0 : 1, texte: sec ? `Redondance série : l'entrée by-pass (réseau secours) de cet onduleur est alimentée par l'onduleur « ${sec} » ; en cas de défaut, la charge est reprise par celui-ci.` : "Redondance série : préciser l'onduleur qui alimente l'entrée by-pass de cette machine." });
+  }
+  const alimentes = (eqs || []).filter((o) => o.id !== eq.id && estUpsSerie(o) && repereNorm(eq) && String(o.identification?.onduleurSecours || "").trim().toLowerCase() === repereNorm(eq));
+  if (alimentes.length) out.push({ section: S, niveau: 0, texte: `Redondance série : cet onduleur alimente l'entrée by-pass de « ${alimentes.map(nom).join(", ")} ».` });
+  // Parallèle et 2N
+  if (!estUpsParallele(eq) && !estUps2N(eq)) return out;
+  const grp = groupeOnduleurs(eq, eqs);
+  if (grp.length < 2) {
+    out.push({ section: S, niveau: 0, texte: `${estUps2N(eq) ? "2N" : "Configuration parallèle"} : relier les autres machines (champ « ${estUps2N(eq) ? "Onduleur(s) de l'autre voie" : "Machines en parallèle"} ») pour analyser la charge totale et la redondance.` });
+    return out;
+  }
+  const premier = grp[0].id === eq.id; // le constat du système n'est porté que par la première machine
+  const data = grp.map((e) => ({ e, ...chargeKvaOnduleur(e) }));
+  const manquants = data.filter((d) => d.kva === null).map((d) => nom(d.e));
+  const liste = grp.map(nom).join(", ");
+  if (estUps2N(eq)) {
+    if (manquants.length) { out.push({ section: S, niveau: 0, texte: `Système 2N (${liste}) : charge non calculable pour ${manquants.join(", ")} (puissance nominale ou mesures de sortie manquantes).` }); return out; }
+    const voie = (d) => d.e.identification?.voie2N || "";
+    const total = data.reduce((a, d) => a + d.kva, 0);
+    const parVoie = LISTE_VOIE_2N.map((v) => ({ v, pn: data.filter((d) => voie(d) === v).reduce((a, d) => a + (d.pn || 0), 0) })).filter((x) => x.pn > 0);
+    if (parVoie.length < 2) { out.push({ section: S, niveau: 0, texte: `Système 2N (${liste}) : charge totale ≈ ${f1(total)} kVA — préciser la voie (A / B) de chaque onduleur pour vérifier la reprise par une seule voie.` }); return out; }
+    const faible = parVoie.filter((x) => total > x.pn);
+    if (faible.length) {
+      const phrase = `Système 2N (${liste}) : la charge totale des deux voies (≈ ${f1(total)} kVA) dépasse la puissance de la ${faible.map((x) => `${x.v.replace("Voie", "voie")} (${f1(x.pn)} kVA)`).join(" et de la ")} : en cas de perte d'une voie, l'autre ne peut pas reprendre toute la charge.`;
+      out.push({ section: S, niveau: 1, texte: phrase, ...(premier ? { constat: { phrase, rang: 1, categorie: "redondance_parallele", sujet: "système 2N" } } : {}) });
+    } else out.push({ section: S, niveau: 0, texte: `Système 2N (${liste}) : charge totale ≈ ${f1(total)} kVA, reprise possible par une seule voie (${parVoie.map((x) => `${x.v} ${f1(x.pn)} kVA`).join(", ")}).` });
+    return out;
+  }
+  if (manquants.length) { out.push({ section: S, niveau: 0, texte: `Système parallèle (${liste}) : charge non calculable pour ${manquants.join(", ")} (puissance nominale ou mesures de sortie manquantes).` }); return out; }
+  const total = data.reduce((a, d) => a + d.kva, 0), cap = data.reduce((a, d) => a + d.pn, 0);
+  const capN1 = cap - Math.max(...data.map((d) => d.pn));
+  out.push({ section: S, niveau: 0, texte: `Système parallèle de ${grp.length} machines (${liste}) : charge totale ≈ ${f1(total)} kVA pour ${f1(cap)} kVA installés (${Math.round((total / cap) * 100)} %).` });
+  const redondance = !/^Puissance/.test(id.objectifParallele || "");
+  if (redondance) {
+    if (total <= capN1) out.push({ section: S, niveau: 0, texte: `Redondance N+1 assurée à la charge mesurée : après la perte d'une machine, ${f1(capN1)} kVA restent disponibles.` });
+    else {
+      const phrase = `Système parallèle (${liste}) : la charge mesurée (≈ ${f1(total)} kVA) dépasse la capacité restante après la perte d'une machine (${f1(capN1)} kVA) : la redondance N+1 n'est plus assurée.`;
+      out.push({ section: S, niveau: 1, texte: phrase, ...(premier ? { constat: { phrase, rang: 1, categorie: "redondance_parallele", sujet: "système parallèle" } } : {}) });
+    }
+  } else out.push({ section: S, niveau: total > cap * 0.9 ? 1 : 0, texte: `Parallèle de puissance : toutes les machines sont nécessaires, pas de redondance${total > cap * 0.9 ? " — marge faible à la charge mesurée" : ""}.` });
+  const taux = data.map((d) => d.taux), moy = taux.reduce((a, b) => a + b, 0) / taux.length;
+  if (moy >= 10) {
+    const ecart = ((Math.max(...taux) - Math.min(...taux)) / moy) * 100;
+    const detail = data.map((d) => `${nom(d.e)} ${Math.round(d.taux)} %`).join(", ");
+    if (ecart > 10) {
+      const phrase = `Système parallèle (${liste}) : partage de charge déséquilibré entre machines (${detail}, écart ${Math.round(ecart)} %) — vérifier les réglages de partage et les mesures.`;
+      out.push({ section: S, niveau: 1, texte: phrase, ...(premier ? { constat: { phrase, rang: 1, categorie: "partage_charge", sujet: "partage de charge" } } : {}) });
+    } else out.push({ section: S, niveau: 0, texte: `Partage de charge équilibré (${detail}).` });
+  }
+  if (/^Communes/.test(id.batteriesParallele || "")) out.push({ section: S, niveau: 0, texte: "Batterie commune au système : son autonomie est partagée entre toutes les machines." });
+  return out;
 }
 function NotesAnalyseOnduleur({ eq, allSites, rapportDate, section }) {
   const lignes = useMemo(() => { try { return analyseOnduleur(eq, allSites, rapportDate).filter((l) => l.section === section); } catch (e) { return []; } }, [eq, allSites, rapportDate, section]);
@@ -11280,7 +11507,7 @@ function contextePlaqueComposant(libelle) {
   return `Plaque signalétique du composant « ${libelle} » : ne remplir que ce qui est lisible.`;
 }
 // Champs d'identification jamais lus sur une plaque (repère interne, liens vers d'autres équipements, choix d'app).
-const CHAMPS_IDENTIFICATION_HORS_PLAQUE = ["repere", "transformateurAssocie", "transformateursParallele", "transfoNbParallele", "transfoManuel", "presenceRelais", "presenceTC", "transfoSnManuel", "transfoUccManuel"];
+const CHAMPS_IDENTIFICATION_HORS_PLAQUE = ["repere", "machinesParallele", "objectifParallele", "batteriesParallele", "voie2N", "onduleurSecours", "onduleursRaccordes", "bypassStatique", "bypassMaintenance", "transformateurAssocie", "transformateursParallele", "transfoNbParallele", "transfoManuel", "presenceRelais", "presenceTC", "transfoSnManuel", "transfoUccManuel"];
 function PiecesUsureUPSPanel({ eq, update, itemFicheBatterie }) {
   const [catalogueOuvert, setCatalogueOuvert] = useState(null); // id du modèle dont le catalogue est ouvert
   const valeurFiche = eq.controles.batterie_id?.batterie_caracteristiques || { fields: {} };
@@ -14589,6 +14816,7 @@ function analyserAnomaliesEquipement(eq, contexte) {
   try { analyseModuleSVG(eq).filter((l) => l.constat).forEach((l) => ajouter(l.constat.phrase, l.constat.rang, l.constat.categorie, l.constat.sujet)); } catch (e) { /* facultatif */ }
   // Onduleur / redresseur : ThdI d'entrée selon le redresseur, neutre de sortie, surcharge en kW, batterie (température, état de santé, branches, ondulation).
   try { analyseOnduleur(eq, null, contexte && contexte.rapportDate).filter((l) => l.constat).forEach((l) => ajouter(l.constat.phrase, l.constat.rang, l.constat.categorie, l.constat.sujet)); } catch (e) { /* analyse facultative */ }
+  if (contexte && contexte.allEquipements) try { analyseSystemeOnduleur(eq, contexte.allEquipements).filter((l) => l.constat).forEach((l) => ajouter(l.constat.phrase, l.constat.rang, l.constat.categorie, l.constat.sujet)); } catch (e) { /* facultatif */ }
   // Disjoncteur BT d'arrivée : réglage Ir incohérent avec le transformateur amont
   if (eq.type === "Disjoncteur BT" && contexte && contexte.allEquipements) {
     try {
@@ -14668,6 +14896,8 @@ const RECO_PAR_CATEGORIE = {
   cosphi: () => "Vérifier le régulateur (consigne, seuil C/K, temporisations) et la disponibilité de tous les gradins ; refaire la mesure à charge représentative.",
   module: (s) => `Remplacer ou réparer les modules de puissance concernés (${s}).`,
   redondance_modules: () => "Rétablir la redondance : remettre en service les modules en défaut ou ajouter un module.",
+  redondance_parallele: () => "Réduire la charge ou ajouter une machine pour rétablir la redondance du système d'onduleurs.",
+  partage_charge: () => "Faire vérifier le partage de charge entre les onduleurs en parallèle (réglages, câblage, mesures).",
   capacite_modules: () => "Remettre en service ou ajouter des modules : la puissance disponible ne couvre plus la charge.",
   usure: (s) => `Remplacer ${s}.`,
   resonance: () => "Mesurer les harmoniques sur une période représentative ; si la résonance est confirmée, équiper la batterie de selfs anti-harmoniques.",
@@ -14681,7 +14911,7 @@ const RECO_PAR_CATEGORIE = {
   etat_degrade: (s) => `Surveiller à la prochaine visite : ${s}.`,
 };
 const MAX_PRECONISATIONS = 5;
-const ORDRE_RECO = ["capacite_modules", "module", "redondance_modules", "surcharge_condensateurs", "resonance", "self_accord", "fusible_calibre", "fusible_ib", "fusible", "fusible_rechange", "securite_non_conforme", "surcharge_kw", "batterie_capacite", "batterie_branche", "thdi_entree", "neutre_harmoniques", "temperature_batterie", "ondulation_batterie", "isolement_continu", "reglage_ir", "svg_sature", "serrage", "contact", "isolement", "enroulements", "huile", "mise_terre", "protection", "disjoncteur", "batterie", "gradin", "cosphi", "usure", "proprete", "ventilation", "thermique", "mesure", "etat_defaillant", "etat_degrade"];
+const ORDRE_RECO = ["capacite_modules", "module", "redondance_modules", "redondance_parallele", "partage_charge", "surcharge_condensateurs", "resonance", "self_accord", "fusible_calibre", "fusible_ib", "fusible", "fusible_rechange", "securite_non_conforme", "surcharge_kw", "batterie_capacite", "batterie_branche", "thdi_entree", "neutre_harmoniques", "temperature_batterie", "ondulation_batterie", "isolement_continu", "reglage_ir", "svg_sature", "serrage", "contact", "isolement", "enroulements", "huile", "mise_terre", "protection", "disjoncteur", "batterie", "gradin", "cosphi", "usure", "proprete", "ventilation", "thermique", "mesure", "etat_defaillant", "etat_degrade"];
 // Préconisations dédoublonnées, regroupées par famille, les plus urgentes en premier.
 function preconisationsDepuisConstats(constats) {
   const groupes = {};
@@ -15105,6 +15335,48 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
                   }
                   if (TYPES_TRANSFO_MANUEL.includes(eq.type) && CHAMPS_TRANSFO_MANUEL.includes(f.key) && champIdentificationMasque(eq, f.key)) {
                     return null; // saisie manuelle du transformateur : visible seulement si demandée (boutons Oui / Non)
+                  }
+                  // Systèmes d'onduleurs : choix parmi les onduleurs du site (lien entre machines, by-pass externe).
+                  if (f.key === "machinesParallele" || f.key === "onduleursRaccordes") {
+                    const autres = allEquipements.filter((e) => e.type === "Onduleur" && e.id !== eq.id);
+                    const choisis = Array.isArray(eq.identification[f.key]) ? eq.identification[f.key] : [];
+                    const norm = (x) => String(x || "").trim().toLowerCase();
+                    const moi = norm(eq.identification.repere);
+                    const reliesDepuis = f.key === "machinesParallele" && moi ? autres.filter((o) => (o.identification?.machinesParallele || []).map(norm).includes(moi)).map((o) => o.identification.repere) : [];
+                    return (
+                      <Field key={f.key} label={f.label} span="1 / -1">
+                        {autres.length === 0 ? <div style={{ fontSize: 11.5, color: "#8B96A3" }}>Aucun autre onduleur sur ce site pour l'instant.</div> : (
+                          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                            {autres.map((o) => {
+                              const r = o.identification?.repere;
+                              if (!r) return <span key={o.id} style={{ fontSize: 12, padding: "5px 10px", borderRadius: 999, border: "1.5px dashed #D8DEE5", color: "#9AA5B1" }}>Onduleur sans repère</span>;
+                              const actif = choisis.map(norm).includes(norm(r));
+                              const indirect = !actif && reliesDepuis.map(norm).includes(norm(r));
+                              return (
+                                <span key={o.id} onClick={() => setIdentification(f.key, actif ? choisis.filter((x) => norm(x) !== norm(r)) : [...choisis, r])}
+                                  style={{ cursor: "pointer", userSelect: "none", fontSize: 12, padding: "5px 10px", borderRadius: 999, border: `1.5px solid ${actif || indirect ? BRAND.blue : "#D8DEE5"}`, background: actif ? "#EEF4FB" : "#fff", color: actif || indirect ? "#0A5DA8" : "#3E4A5C", fontWeight: actif ? 700 : 500 }}>
+                                  {actif ? "✓ " : indirect ? "↔ " : ""}{r}
+                                </span>
+                              );
+                            })}
+                          </div>
+                        )}
+                        {reliesDepuis.length > 0 && <div style={{ fontSize: 10.5, color: "#8B96A3", marginTop: 4 }}>↔ déjà relié depuis l'autre machine : le lien est pris en compte dans les deux sens.</div>}
+                      </Field>
+                    );
+                  }
+                  if (f.key === "onduleurSecours") {
+                    const autres = allEquipements.filter((e) => e.type === "Onduleur" && e.id !== eq.id && e.identification?.repere);
+                    return (
+                      <Field key={f.key} label={f.label}>
+                        {autres.length ? (
+                          <Select value={eq.identification[f.key] || ""} onChange={(e2) => setIdentification(f.key, e2.target.value)}>
+                            <option value="">— Choisir l'onduleur —</option>
+                            {autres.map((o) => <option key={o.id} value={o.identification.repere}>{o.identification.repere}</option>)}
+                          </Select>
+                        ) : <TextInput value={eq.identification[f.key] || ""} onChange={(e2) => setIdentification(f.key, e2.target.value)} placeholder="Repère de l'onduleur (non suivi dans l'app)" />}
+                      </Field>
+                    );
                   }
                   if (f.multi && f.key !== "transformateursParallele") {
                     const valeurs = eq.identification[f.key] || [];
@@ -16123,7 +16395,7 @@ function iconeTypeEquipement(type) {
   if (type === "Analyse d'huile") return Droplets;
   if (type === "Bilan de puissance") return Activity;
   if (/Jeu de barre/.test(type || "")) return Layers;
-  if (type === "Inverseur de source") return RefreshCw;
+  if (type === "Inverseur de source" || type === "By-pass externe") return RefreshCw;
   if (/Disjoncteur|Interrupteur|Contacteur|Comptage/.test(type || "")) return Power;
   return Settings2;
 }
@@ -19413,6 +19685,7 @@ function symboleEquipementPng(type, couleur = "#FFFFFF") {
     else if (t === "Comptage HTA") { L(60, 4, 60, 30); O(60, 60, 30); L(60, 90, 60, 116); T("Wh", 60, 61, 26); }
     else if (t === "Batterie de compensation") { L(60, 6, 60, 50); L(28, 50, 92, 50); L(28, 68, 92, 68); L(60, 68, 60, 112); }
     else if (/^Onduleur|^Redresseur/.test(t)) { g.strokeRect(20, 20, 80, 80); L(20, 100, 100, 20); T("~", 44, 42, 44); T(/^Redresseur/.test(t) ? "=" : "~", 76, 78, 44); }
+    else if (t === "By-pass externe") { L(60, 4, 60, 22); L(28, 22, 92, 22); L(28, 22, 28, 98); L(92, 22, 92, 44); L(92, 78, 74, 48); L(92, 78, 92, 98); L(28, 98, 92, 98); L(60, 98, 60, 116); }
     else if (t === "Inverseur de source") { L(30, 6, 30, 40); L(90, 6, 90, 40); L(60, 112, 60, 82); L(60, 82, 34, 46); O(30, 40, 4, true); O(90, 40, 4, true); }
     else if (/^Jeu de barre/.test(t)) { g.lineWidth = 14; L(14, 46, 106, 46); g.lineWidth = 8; L(34, 46, 34, 104); L(60, 46, 60, 104); L(86, 46, 86, 104); }
     else if (t === "Bilan de puissance") { L(60, 4, 60, 30); O(60, 60, 30); L(60, 90, 60, 116); T("W", 60, 61, 30); }
@@ -20749,7 +21022,7 @@ function bilanRedondanceModules(eq) {
 const MAX_MODULES_SCHEMA = 10;
 function estEquipementModulaire(eq) {
   const c = eq?.identification?.configuration || "";
-  return (eq?.type === "Onduleur" && c === "Parallèle modulaire") || (eq?.type === "Redresseur chargeur" && /^Modulaire/.test(c));
+  return (eq?.type === "Onduleur" && c === "Modulaire") || (eq?.type === "Redresseur chargeur" && /^Modulaire/.test(c));
 }
 // Modules installés : en service (prennent la charge) puis de réserve (installés, hors charge), avec leur état saisi.
 // La redondance n'est plus déclarée : elle se déduit de la charge mesurée (voir bilanRedondanceModules).
@@ -20875,7 +21148,7 @@ function dessinerReserveSchema(ctx, info, x, y) {
 function genererSchemaOnduleur(eq) {
   if (typeof document === "undefined" || !document.createElement) return null;
   try {
-    const avecBypass = eq.identification?.typeUPS !== "Onduleur sécurité";
+    const avecBypass = eq.identification?.typeUPS !== "Onduleur sécurité" && !bypassStatiqueHorsMachine(eq);
     const r = (eq.controles && eq.controles.regimes_reseaux) || {};
     const regime = (k) => (r[k] === "Monophasé" ? "1~" : "3~");
     // Transformateur(s) amont, réseaux pontés, transformateur de sortie : ces caractéristiques
