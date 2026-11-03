@@ -1114,6 +1114,8 @@ const estUpsSerie = (eq) => eq?.type === "Onduleur" && /^Redondance série/.test
 // By-pass statique hors de la machine (armoire centralisée) ou absent : pas de réseau secours ni de commutation à contrôler sur l'onduleur.
 const bypassStatiqueHorsMachine = (eq) => /^(Externe|Aucun)/.test(eq?.identification?.bypassStatique || "");
 const bypassExterneStatique = (eq) => eq?.type === "By-pass externe" && !/^By-pass de maintenance/.test(eq?.identification?.typeBypass || "");
+// Champs de l'onduleur réglés dans le panneau « Configuration » du schéma synoptique (masqués de l'identification à l'écran, toujours imprimés).
+const CHAMPS_CONFIG_SYNOPTIQUE = ["configuration", "bypassStatique", "bypassMaintenance", "nombreModules", "puissanceParModule", "nombreModulesReserve", "moduleBypass", "batteriesModules"];
 const bypassExterneMaintenance = (eq) => eq?.type === "By-pass externe" && !/statique seul/.test(eq?.identification?.typeBypass || "");
 // Équipement modulaire : batteries communes à tous les modules ou une batterie par module.
 const LISTE_BATTERIES_MODULES = ["Communes à tous les modules", "Indépendantes par module"];
@@ -9869,7 +9871,7 @@ function CapaciteFiltreCalculee({ eq }) {
 }
 // Schéma synoptique affiché dans l'app — recalculé (via <canvas>) à chaque changement de
 // configuration (type d'onduleur, régimes mono/tri des réseaux).
-function SchemaOnduleur({ eq, update }) {
+function SchemaOnduleur({ eq, update, eqsSite = null }) {
   const [dataUrl, setDataUrl] = useState(null);
   const typeUPS = eq.identification?.typeUPS;
   const transformateurAmont = eq.identification?.transformateurAmont;
@@ -9877,10 +9879,12 @@ function SchemaOnduleur({ eq, update }) {
   const transformateurSortie = eq.identification?.transformateurSortie;
   const presenceChargeur = eq.identification?.presenceChargeur;
   const regimesKey = JSON.stringify(eq.controles?.regimes_reseaux || {});
-  const modulesKey = JSON.stringify([eq.identification?.configuration, eq.identification?.moduleBypass, modulesEquipement(eq)]);
+  const idS = eq.identification || {};
+  const lienSysteme = eq.type === "Onduleur" && eqsSite ? [groupeOnduleurs(eq, eqsSite).map((e) => e.identification?.repere), bypassExternesRaccordes(eq, eqsSite).map((b) => [b.identification?.repere, b.identification?.typeBypass])] : null;
+  const modulesKey = JSON.stringify([idS.configuration, idS.moduleBypass, modulesEquipement(eq), idS.bypassStatique, idS.bypassMaintenance, idS.machinesParallele, idS.voie2N, idS.onduleurSecours, idS.repere, lienSysteme]);
   const regenerer = () => {
     const gen = eq.type === "Onduleur" ? genererSchemaOnduleur : eq.type === "Redresseur chargeur" ? genererSchemaRedresseurChargeur : genererSchemaInverseurSource;
-    setDataUrl(gen(eq));
+    setDataUrl(gen(eq, eqsSite));
   };
   useEffect(() => {
     regenerer();
@@ -9905,6 +9909,12 @@ function SchemaOnduleur({ eq, update }) {
     </div>
   );
   const miniRegime = (label, reseau) => miniSelect(label, regimes[reseau] || "Triphasé", (v) => setRegime(reseau, v), ["Triphasé", "Monophasé"]);
+  const miniNombre = (label, cle) => (
+    <div style={{ marginBottom: 10 }}>
+      <div style={{ fontSize: 10.5, color: "#8B96A3", marginBottom: 3 }}>{label}</div>
+      <TextInput inputMode="decimal" value={idS[cle] ?? ""} onChange={(e) => setIdent(cle, e.target.value)} style={{ width: "100%", padding: "5px 7px", fontSize: 12 }} />
+    </div>
+  );
 
   return (
     <Card style={{ marginBottom: 14 }}>
@@ -9927,6 +9937,19 @@ function SchemaOnduleur({ eq, update }) {
             </div>
             {eq.type === "Onduleur" && (
               <>
+                {miniSelect("Configuration", idS.configuration || "Unitaire", (v) => setIdent("configuration", v), LISTE_CONFIG_UPS)}
+                {idS.configuration !== "Modulaire" && typeUPS !== "Onduleur sécurité" && miniSelect("By-pass statique", idS.bypassStatique || "", (v) => setIdent("bypassStatique", v), ["", ...LISTE_BYPASS_STATIQUE])}
+                {miniSelect("By-pass de maintenance", idS.bypassMaintenance || "", (v) => setIdent("bypassMaintenance", v), ["", ...LISTE_BYPASS_MAINTENANCE])}
+                {idS.configuration === "Modulaire" && (
+                  <>
+                    {miniNombre("Modules en service", "nombreModules")}
+                    {miniNombre("Puissance par module (kVA)", "puissanceParModule")}
+                    {miniNombre("Modules de réserve", "nombreModulesReserve")}
+                    {miniSelect("By-pass des modules", idS.moduleBypass || "", (v) => setIdent("moduleBypass", v), ["", ...LISTE_BYPASS_MODULES])}
+                    {miniSelect("Batteries", idS.batteriesModules || "", (v) => setIdent("batteriesModules", v), ["", ...LISTE_BATTERIES_MODULES])}
+                  </>
+                )}
+                <div style={{ borderTop: "1px solid #E2E6EB", margin: "4px 0 10px" }} />
                 {miniSelect("Type", typeUPS || "", (v) => setIdent("typeUPS", v), LISTE_TYPE_UPS)}
                 {miniSelect("Transformateur amont", transformateurAmont || "", (v) => setIdent("transformateurAmont", v), LISTE_TRANSFORMATEUR_AMONT)}
                 {miniSelect("Réseaux normal / secours", alimentationReseaux || "", (v) => setIdent("alimentationReseaux", v), LISTE_ALIMENTATION_RESEAUX)}
@@ -15330,6 +15353,7 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
                   // rattachement précis (transformateur / disjoncteur / TGBT) — masqués de la
                   // liste générique, ils sont rendus dans un panneau dédié par type sélectionné
                   // juste en dessous (voir plus bas), au lieu d'être tous affichés en permanence.
+                  if (eq.type === "Onduleur" && CHAMPS_CONFIG_SYNOPTIQUE.includes(f.key)) return null; // réglés dans le panneau « Configuration » du schéma synoptique
                   if (eq.type === "Bilan de puissance" && ["transfo_id", "transfo_reference", "puissanceKVA", "disj_id", "disj_reference", "calibreDisjoncteur", "tgbt_reference", "tgbt_calibre", "tgbt_departs"].includes(f.key)) {
                     return null;
                   }
@@ -15552,7 +15576,7 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
             </div>
           )}
 
-          {(eq.type === "Onduleur" || eq.type === "Redresseur chargeur" || eq.type === "Inverseur de source") && <SchemaOnduleur eq={eq} update={update} />}
+          {(eq.type === "Onduleur" || eq.type === "Redresseur chargeur" || eq.type === "Inverseur de source") && <SchemaOnduleur eq={eq} update={update} eqsSite={allEquipements} />}
           {estEquipementModulaire(eq) && <ModulesPuissancePanel eq={eq} update={update} />}
 
           {eq.type === "Transformateur" && eq.identification?.typeRefroidissement && DESCRIPTION_REFROIDISSEMENT_TRANSFO[eq.identification.typeRefroidissement] && (
@@ -21145,10 +21169,22 @@ function dessinerReserveSchema(ctx, info, x, y) {
   return h;
 }
 
-function genererSchemaOnduleur(eq) {
+function genererSchemaOnduleur(eq, eqsSite = null) {
   if (typeof document === "undefined" || !document.createElement) return null;
   try {
-    const avecBypass = eq.identification?.typeUPS !== "Onduleur sécurité" && !bypassStatiqueHorsMachine(eq);
+    const idc = eq.identification || {};
+    const avecBypass = idc.typeUPS !== "Onduleur sécurité" && !bypassStatiqueHorsMachine(eq);
+    // By-pass statique externe : réseau secours et commutateur statique dans une armoire hors de la machine.
+    const bsExterne = idc.typeUPS !== "Onduleur sécurité" && /^Externe/.test(idc.bypassStatique || "");
+    const avecR2 = avecBypass || bsExterne;
+    const bm = idc.bypassMaintenance || "";
+    const avecManuel = bm === "Interne" || bm === "Externe";
+    const eqsS = eqsSite || [];
+    const bpRelies = eqsS.length ? bypassExternesRaccordes(eq, eqsS) : [];
+    const nomBP = (filtre) => { const l = bpRelies.filter(filtre).map((b) => b.identification?.repere).filter(Boolean); return l.length ? ` « ${l.join(", ")} »` : ""; };
+    const parallele = estUpsParallele(eq), deuxN = estUps2N(eq), serie = estUpsSerie(eq);
+    const grp = parallele && eqsS.length ? groupeOnduleurs(eq, eqsS) : [eq];
+    const nomsGrp = parallele ? (grp.length > 1 ? grp.map((e) => e.identification?.repere || "?") : [idc.repere || "cette machine", ...(Array.isArray(idc.machinesParallele) ? idc.machinesParallele : [])]) : [];
     const r = (eq.controles && eq.controles.regimes_reseaux) || {};
     const regime = (k) => (r[k] === "Monophasé" ? "1~" : "3~");
     // Transformateur(s) amont, réseaux pontés, transformateur de sortie : ces caractéristiques
@@ -21166,7 +21202,7 @@ function genererSchemaOnduleur(eq) {
     const cxR2Mod = dispModules ? Math.max(390, dispModules.xDroite + 50) : 390;
     const w = dispModules ? Math.max(480, cxR2Mod + 90) : 480;
     const bypassModules = !!(infoModules && avecBypass && bypassParModule(eq));
-    const h = (avecBypass ? 780 : 560) + (avecTransfoR1 || avecTransfoR2 ? TRANSFO_H : 0) + (avecTransfoSortie ? 75 : 0) + (infoModules ? 140 + (bypassModules ? 70 : 0) : 0);
+    const h = (avecR2 ? 780 : 560) + (avecTransfoR1 || avecTransfoR2 ? TRANSFO_H : 0) + (avecTransfoSortie ? 75 : 0) + (infoModules ? 140 + (bypassModules ? 70 : 0) : 0) + (bsExterne ? 40 : 0) + (avecManuel ? 40 : 0) + (parallele ? 70 : 0);
     const { canvas, ctx } = canevasSchema(w, h);
     ctx.textAlign = "center"; ctx.textBaseline = "middle";
     const line = (x1, y1, x2, y2) => { ctx.strokeStyle = SCHEMA_TRAIT; ctx.lineWidth = 1.8; ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); };
@@ -21194,12 +21230,14 @@ function genererSchemaOnduleur(eq) {
     label("R1", cxM, y, SCHEMA_TRAIT, "14px " + SCHEMA_POLICE);
     // Pontés = une seule source réelle : pas de repère "R2" ni de trait indépendant en haut, pour
     // ne jamais donner l'impression que R2 remonte vers une entrée séparée. Tout part de R1.
-    if (avecBypass && !reseauxPontes) label("R2", cxR2, y, SCHEMA_TRAIT, "14px " + SCHEMA_POLICE);
+    if (avecR2 && !reseauxPontes) label("R2", cxR2, y, SCHEMA_TRAIT, "14px " + SCHEMA_POLICE);
     libelleSousRepere(ctx, `Réseau normal ${regime("normal")}`, cxM, y);
-    if (avecBypass && !reseauxPontes) libelleSousRepere(ctx, `Réseau secours ${regime("secours")}`, cxR2, y);
+    const libSecours = serie && String(idc.onduleurSecours || "").trim() ? `Secours = sortie « ${String(idc.onduleurSecours).trim()} »` : `Réseau secours ${regime("secours")}`;
+    if (avecR2 && !reseauxPontes) libelleSousRepere(ctx, libSecours, cxR2, y);
     y += 44;
+    const yR1Haut = y; // départ possible du by-pass de maintenance quand il n'y a pas de réseau secours
     line(cxM, y, cxM, y + GAP_LIGNE);
-    if (avecBypass && !reseauxPontes) { line(cxR2, y, cxR2, y + GAP_LIGNE); yR2Depart = y + GAP_LIGNE; }
+    if (avecR2 && !reseauxPontes) { line(cxR2, y, cxR2, y + GAP_LIGNE); yR2Depart = y + GAP_LIGNE; }
     y += GAP_LIGNE;
 
     // Transformateur d'isolement amont sur R1, si déclaré en identification
@@ -21208,12 +21246,12 @@ function genererSchemaOnduleur(eq) {
       drawIconTransformateur(ctx, cxM - tfW / 2, y, tfW, tfH);
       label("Transfo. amont", cxM + tfW / 2 + 40, y + tfH / 2, "#5B6B7D", "10px " + SCHEMA_POLICE);
     }
-    if (avecTransfoR2 && avecBypass && !reseauxPontes) {
+    if (avecTransfoR2 && avecR2 && !reseauxPontes) {
       drawIconTransformateur(ctx, cxR2 - tfW / 2, y, tfW, tfH);
       label("Transfo. amont", cxR2 + tfW / 2 + 40, y + tfH / 2, "#5B6B7D", "10px " + SCHEMA_POLICE);
       yR2Depart = y + tfH; // continue sans coupure sous son transformateur
     }
-    if (reseauxPontes && avecBypass) {
+    if (reseauxPontes && avecR2) {
       // Pontage : dérive depuis le trajet de R1 (après son transformateur s'il existe), jamais
       // depuis une entrée R2 indépendante. Le transformateur R2 (s'il existe) est alimenté par ce
       // pontage, pas l'inverse.
@@ -21292,7 +21330,8 @@ function genererSchemaOnduleur(eq) {
       label("R0", cxM - redW / 2 - 20, yOnduleurBas + bh / 2 + 10, SCHEMA_TRAIT, "11px " + SCHEMA_POLICE);
     }
 
-    if (avecBypass && !bypassModules) {
+    let xSortie = cxM, yAvantRS = null; // point de sortie (avant la flèche « RS ») — sert au by-pass de maintenance et au bus parallèle
+    if (avecR2 && !bypassModules) {
       // La hauteur finale (yApresOnduleur) doit être connue AVANT de tracer les deux lignes qui
       // entrent dans le commutateur statique (R0 à gauche, réseau secours/pontage à droite) — sinon
       // la ligne de droite s'arrête avant d'atteindre la boîte, flottant sans s'y raccorder.
@@ -21300,6 +21339,7 @@ function genererSchemaOnduleur(eq) {
       const depthCS = boxDepth(csW, csH);
       const csLeft = cxM - bw / 2;
       yApresOnduleur += depthCS + LABEL_MARGIN + 6;
+      if (bsExterne) yApresOnduleur += 34; // place du cadre « By-pass externe »
       // Le réseau secours rejoint directement le commutateur statique — le trait doit être continu
       // depuis son point de départ (pontage ou simple trait initial), sans coupure. Le libellé est
       // placé sous le transformateur (s'il existe), avec un petit espace, jamais collé dessus.
@@ -21310,11 +21350,17 @@ function genererSchemaOnduleur(eq) {
         line(cxR2, yRedresseurBas + 10, cxR2, yApresOnduleur);
       }
       line(cxM, yOnduleurBas, cxM, yApresOnduleur);
-      label(infoModules ? "Module by-pass commun (commutateur statique)" : "Commutateur statique", cxM + (csW - bw) / 2, yApresOnduleur - depthCS - LABEL_MARGIN);
+      if (bsExterne) {
+        // Commutateur statique hors de la machine : cadre en pointillés « By-pass externe ».
+        const fx = csLeft - 14, fy = yApresOnduleur - 46, fw = csW + 28, fh = csH + 60 + (bm === "Externe" ? 0 : 0);
+        ctx.save(); ctx.setLineDash([6, 4]); ctx.strokeStyle = "#0A5DA8"; ctx.lineWidth = 1.4; ctx.strokeRect(fx, fy, fw, fh); ctx.restore();
+        ctx.textAlign = "left"; label(`By-pass externe${nomBP(bypassExterneStatique)}`, fx + 8, fy + 12, "#0A5DA8", "bold 10.5px " + SCHEMA_POLICE); ctx.textAlign = "center";
+      }
+      label(bsExterne ? "By-pass statique (commutateur)" : infoModules ? "Module by-pass commun (commutateur statique)" : "Commutateur statique", cxM + (csW - bw) / 2, yApresOnduleur - depthCS - LABEL_MARGIN);
       drawIconCommutateurStatique(ctx, csLeft, yApresOnduleur, csW, csH);
       const csMidX = csLeft + csW / 2;
       // Sortie — reliée directement (plus d'interrupteur intermédiaire)
-      let yApresCS = yApresOnduleur + csH + GAP_LIGNE + 22;
+      let yApresCS = yApresOnduleur + csH + GAP_LIGNE; // trait continu jusqu'à la sortie (plus d'interrupteur intermédiaire)
       line(csMidX, yApresOnduleur + csH, csMidX, yApresOnduleur + csH + GAP_LIGNE);
       let yFinal = yApresCS;
       if (avecTransfoSortie) {
@@ -21323,11 +21369,7 @@ function genererSchemaOnduleur(eq) {
         label("Transfo. sortie", csMidX + tfW / 2 + 40, yFinal + 16 + tfH / 2, "#5B6B7D", "10px " + SCHEMA_POLICE);
         yFinal += 16 + tfH;
       }
-      line(csMidX, yFinal, csMidX, yFinal + GAP_LIGNE);
-      arrowDown(csMidX, yFinal + GAP_LIGNE);
-      label("RS", csMidX, yFinal + GAP_LIGNE + 18, SCHEMA_TRAIT, "14px " + SCHEMA_POLICE);
-      libelleSousRepere(ctx, `Utilisation ${regime("utilisation")}`, csMidX, yFinal + GAP_LIGNE + 18);
-      yBasDessin = Math.max(yBasDessin, yFinal + GAP_LIGNE + 48);
+      xSortie = csMidX; yAvantRS = yFinal;
     } else {
       let yFinal = yApresOnduleur;
       if (avecTransfoSortie) {
@@ -21336,17 +21378,49 @@ function genererSchemaOnduleur(eq) {
         label("Transfo. sortie", cxM + tfW / 2 + 40, yFinal + 16 + tfH / 2, "#5B6B7D", "10px " + SCHEMA_POLICE);
         yFinal += 16 + tfH;
       }
-      line(cxM, yFinal, cxM, yFinal + GAP_LIGNE);
-      arrowDown(cxM, yFinal + GAP_LIGNE);
-      label("RS", cxM, yFinal + GAP_LIGNE + 18, SCHEMA_TRAIT, "14px " + SCHEMA_POLICE);
-      libelleSousRepere(ctx, `Utilisation ${regime("utilisation")}`, cxM, yFinal + GAP_LIGNE + 18);
-      yBasDessin = Math.max(yBasDessin, yFinal + GAP_LIGNE + 48);
+      xSortie = cxM; yAvantRS = yFinal;
     }
+    // By-pass de maintenance (manuel) : dérivation en pointillés depuis le réseau secours (ou R1 sans réseau secours)
+    // jusqu'à la sortie, avec son interrupteur — interne à la machine ou dans l'armoire « By-pass externe ».
+    if (avecManuel) {
+      const depuisR2 = avecR2 && yR2Depart !== null;
+      const xSrc = depuisR2 ? cxR2 : cxM, ySrc = depuisR2 ? yR2Depart - 8 : yR1Haut + 8;
+      const xm = depuisR2 ? cxR2 + 58 : cxM - 112;
+      const yJ = yAvantRS + (depuisR2 ? 22 : 44); // sans réseau secours : sous le repère R0
+      const ySw = Math.round((ySrc + yJ) / 2);
+      ctx.save(); ctx.setLineDash([5, 4]);
+      line(xSrc, ySrc, xm, ySrc); line(xm, ySrc, xm, ySw - 14); line(xm, ySw + 14, xm, yJ); line(xm, yJ, xSortie, yJ);
+      ctx.restore();
+      // interrupteur ouvert (by-pass manuel normalement ouvert)
+      line(xm, ySw + 14, xm - 13, ySw - 10);
+      ctx.fillStyle = SCHEMA_TRAIT; ctx.beginPath(); ctx.arc(xm, ySw - 14, 2.5, 0, Math.PI * 2); ctx.fill();
+      label(bm === "Externe" ? `By-pass maintenance externe${nomBP(bypassExterneMaintenance)}` : "By-pass de maintenance", (xm + xSortie) / 2, depuisR2 ? yJ - 9 : yJ + 11, "#0A5DA8", "9.5px " + SCHEMA_POLICE);
+      line(xSortie, yAvantRS, xSortie, yJ);
+      yAvantRS = yJ;
+    }
+    // Parallèle : sortie vers le bus commun du système ; 2N : voie.
+    let yFleche = yAvantRS;
+    if (parallele) {
+      line(xSortie, yAvantRS, xSortie, yAvantRS + 18);
+      const yBus = yAvantRS + 18;
+      ctx.save(); ctx.strokeStyle = SCHEMA_TRAIT; ctx.lineWidth = 5; ctx.beginPath(); ctx.moveTo(xSortie - 110, yBus); ctx.lineTo(xSortie + 110, yBus); ctx.stroke(); ctx.restore();
+      ctx.save(); ctx.setLineDash([4, 4]); line(xSortie - 70, yBus - 22, xSortie - 70, yBus); line(xSortie + 70, yBus - 22, xSortie + 70, yBus); ctx.restore();
+      const rang = grp.length > 1 ? grp.findIndex((e) => e.id === eq.id) + 1 : null;
+      label(`Bus parallèle — ${nomsGrp.join(", ")}${rang ? ` (machine ${rang}/${grp.length})` : ""}`, xSortie, yBus + 14, "#0A5DA8", "10px " + SCHEMA_POLICE);
+      yFleche = yBus + 22;
+    }
+    line(xSortie, yFleche, xSortie, yFleche + GAP_LIGNE);
+    arrowDown(xSortie, yFleche + GAP_LIGNE);
+    label("RS", xSortie, yFleche + GAP_LIGNE + 18, SCHEMA_TRAIT, "14px " + SCHEMA_POLICE);
+    libelleSousRepere(ctx, `Utilisation ${regime("utilisation")}${deuxN && idc.voie2N ? ` — ${idc.voie2N}` : ""}`, xSortie, yFleche + GAP_LIGNE + 18);
+    yBasDessin = Math.max(yBasDessin, yFleche + GAP_LIGNE + 48);
 
     ctx.textAlign = "left";
     const yLegende = Math.min(h - 12, Math.max(yBasDessin, yBatt + 60) + 22);
     const legendeModules = infoModules ? ` · ${infoModules.n} en service${infoModules.reserve ? ` + ${infoModules.reserve} de réserve` : ""}${infoModules.puissance ? ` × ${String(infoModules.puissance).replace(".", ",")} kVA` : ""} · batteries ${infoModules.batteriesCommunes ? "communes" : "par module"}${avecBypass ? ` · by-pass ${bypassModules ? "par module" : "commun"}` : ""}` : "";
-    label(avecBypass ? "Configuration : avec commutateur statique et réseau secours" : "Configuration : Onduleur sécurité (sans commutateur statique)", 14, yLegende, "#8B96A3", "italic 10.5px " + SCHEMA_POLICE);
+    const legendeConfig = idc.typeUPS === "Onduleur sécurité" ? "Onduleur sécurité (sans commutateur statique)"
+      : [String(idc.configuration || "Unitaire").replace(/\s*\(.*\)$/, ""), `by-pass statique ${bsExterne ? "externe" : avecBypass ? "interne" : "absent"}`, bm ? `by-pass de maintenance ${bm.toLowerCase()}` : ""].filter(Boolean).join(" · ");
+    label(`Configuration : ${legendeConfig}`, 14, yLegende, "#8B96A3", "italic 10.5px " + SCHEMA_POLICE);
     if (legendeModules) label("Modules" + legendeModules.replace(/^ ·/, " :"), 14, yLegende + 15, "#8B96A3", "italic 10.5px " + SCHEMA_POLICE);
     // Cadre redessiné à la hauteur utile puis recadrage.
     const hUtile = yLegende + 16 + (legendeModules ? 15 : 0);
@@ -21779,7 +21853,8 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
   }
   if (eq.type === "Onduleur" || eq.type === "Redresseur chargeur" || eq.type === "Inverseur de source") {
     const gen = eq.type === "Onduleur" ? genererSchemaOnduleur : eq.type === "Redresseur chargeur" ? genererSchemaRedresseurChargeur : genererSchemaInverseurSource;
-    const schemaImg = gen(eq);
+    const siteSchema = (allSites || []).find((x) => (x.equipements || []).some((e) => e.id === eq.id));
+    const schemaImg = gen(eq, siteSchema ? siteSchema.equipements : null);
     if (schemaImg) {
       // Largeur fixe par type, hauteur déduite des proportions réelles de l'image (schéma recadré à sa hauteur utile).
       const dims = dimensionsPng(schemaImg);
