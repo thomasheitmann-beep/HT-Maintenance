@@ -1103,7 +1103,9 @@ const LISTE_TYPE_UPS = ["Onduleur", "ASI", "UPS", "Onduleur sécurité"];
 // externe en option (équipement « By-pass externe »), ou absent.
 const LISTE_CONFIG_UPS = ["Unitaire", "Parallèle", "Modulaire", "Redondance série (hot standby)", "2N (deux voies indépendantes)"];
 const LISTE_BYPASS_STATIQUE = ["Interne", "Externe (armoire by-pass centralisée)", "Aucun"];
-const LISTE_BYPASS_MAINTENANCE = ["Interne", "Externe", "Aucun"];
+const LISTE_BYPASS_MAINTENANCE = ["Interne", "Externe", "Interne et externe", "Aucun"];
+const maintenanceInterne = (eq) => /^Interne/.test(eq?.identification?.bypassMaintenance || "");
+const maintenanceExterne = (eq) => /xterne/.test(eq?.identification?.bypassMaintenance || "");
 const LISTE_OBJECTIF_PARALLELE = ["Redondance (N+1)", "Puissance (toutes les machines nécessaires)"];
 const LISTE_BATTERIES_PARALLELE = ["Séparées par machine", "Communes au système"];
 const LISTE_VOIE_2N = ["Voie A", "Voie B"];
@@ -4181,7 +4183,7 @@ function getSchemaBase(eq) {
       const bs = eq.identification?.bypassStatique || "", bm = eq.identification?.bypassMaintenance || "";
       const masquerItems = [
         ...(bypassStatiqueHorsMachine(eq) ? ["auto_alim_commutateur", "commutation_r0_r2", "controle_rs", "dv_sortie_secours"] : []),
-        ...(bm === "Interne" ? ["bypass_manuel_externe"] : bm === "Externe" ? ["bypass_manuel_interne"] : bm === "Aucun" ? ["bypass_manuel_interne", "bypass_manuel_externe"] : []),
+        ...(bm === "Interne" ? ["bypass_manuel_externe"] : bm === "Externe" ? ["bypass_manuel_interne"] : bm === "Aucun" ? ["bypass_manuel_interne", "bypass_manuel_externe"] : []), // « Interne et externe » : les deux contrôles
       ];
       if (bs || bm) {
         out = { ...out, sections: out.sections
@@ -7212,7 +7214,7 @@ function verificationsCoherenceEquipement(eq, site) {
     if ((estUpsParallele(eq) || estUps2N(eq)) && groupeOnduleurs(eq, eqs).length < 2) push("identification", `configuration ${estUps2N(eq) ? "2N" : "parallèle"} sans autre onduleur relié (champ « ${estUps2N(eq) ? "Onduleur(s) de l'autre voie" : "Machines en parallèle"} »)`);
     if (estUpsSerie(eq) && !String(eq.identification?.onduleurSecours || "").trim()) push("identification", "redondance série : onduleur alimentant l'entrée by-pass non renseigné");
     if (eq.type === "Onduleur" && /^Externe/.test(eq.identification?.bypassStatique || "") && !bypassExternesRaccordes(eq, eqs).some(bypassExterneStatique)) push("identification", "by-pass statique externe déclaré, mais aucun équipement « By-pass externe » (statique) n'est relié à cet onduleur");
-    if (eq.type === "Onduleur" && eq.identification?.bypassMaintenance === "Externe" && !bypassExternesRaccordes(eq, eqs).some(bypassExterneMaintenance)) push("identification", "by-pass de maintenance externe déclaré, mais aucun équipement « By-pass externe » n'est relié à cet onduleur");
+    if (eq.type === "Onduleur" && maintenanceExterne(eq) && !bypassExternesRaccordes(eq, eqs).some(bypassExterneMaintenance)) push("identification", "by-pass de maintenance externe déclaré, mais aucun équipement « By-pass externe » n'est relié à cet onduleur");
     if (eq.type === "By-pass externe" && !listeRepere(eq.identification?.onduleursRaccordes).length) push("identification", "aucun onduleur raccordé n'est sélectionné");
   }
   // Relais déclaré présent mais ni marque ni seuil paramétré.
@@ -9726,7 +9728,7 @@ function analyseSystemeOnduleur(eq, eqs) {
       ? { section: S, niveau: 0, texte: `By-pass statique centralisé : réseau secours, commutation et transfert sont contrôlés sur le by-pass externe « ${st.map(nom).join(", ")} ».` }
       : { section: S, niveau: 1, texte: "By-pass statique externe déclaré, mais aucun équipement « By-pass externe » n'est relié à cet onduleur : réseau secours et commutation non contrôlés dans ce rapport." });
   }
-  if (id.bypassMaintenance === "Externe" && bps.some(bypassExterneMaintenance)) out.push({ section: S, niveau: 0, texte: `By-pass de maintenance externe : « ${bps.filter(bypassExterneMaintenance).map(nom).join(", ")} ».` });
+  if (maintenanceExterne(eq) && bps.some(bypassExterneMaintenance)) out.push({ section: S, niveau: 0, texte: `By-pass de maintenance externe : « ${bps.filter(bypassExterneMaintenance).map(nom).join(", ")} ».` });
   // Redondance série
   if (estUpsSerie(eq)) {
     const sec = String(id.onduleurSecours || "").trim();
@@ -21178,7 +21180,8 @@ function genererSchemaOnduleur(eq, eqsSite = null) {
     const bsExterne = idc.typeUPS !== "Onduleur sécurité" && /^Externe/.test(idc.bypassStatique || "");
     const avecR2 = avecBypass || bsExterne;
     const bm = idc.bypassMaintenance || "";
-    const avecManuel = bm === "Interne" || bm === "Externe";
+    const manInt = maintenanceInterne(eq), manExt = maintenanceExterne(eq);
+    const avecManuel = manInt || manExt;
     const eqsS = eqsSite || [];
     const bpRelies = eqsS.length ? bypassExternesRaccordes(eq, eqsS) : [];
     const nomBP = (filtre) => { const l = bpRelies.filter(filtre).map((b) => b.identification?.repere).filter(Boolean); return l.length ? ` « ${l.join(", ")} »` : ""; };
@@ -21200,9 +21203,11 @@ function genererSchemaOnduleur(eq, eqsSite = null) {
     const infoModules = modulesEquipement(eq);
     const dispModules = infoModules ? dispositionModulesSchema(infoModules, { avecChargeur }) : null;
     const cxR2Mod = dispModules ? Math.max(390, dispModules.xDroite + 50) : 390;
-    const w = dispModules ? Math.max(480, cxR2Mod + 90) : 480;
+    // By-pass de maintenance : dérivation(s) à droite du réseau secours — largeur ajoutée pour ne rien chevaucher.
+    const xMan1 = cxR2Mod + 75, xMan2 = cxR2Mod + 125;
+    const w = Math.max(dispModules ? Math.max(480, cxR2Mod + 90) : 480, avecManuel ? (manInt && manExt ? xMan2 : xMan1) + 30 : 0);
     const bypassModules = !!(infoModules && avecBypass && bypassParModule(eq));
-    const h = (avecR2 ? 780 : 560) + (avecTransfoR1 || avecTransfoR2 ? TRANSFO_H : 0) + (avecTransfoSortie ? 75 : 0) + (infoModules ? 140 + (bypassModules ? 70 : 0) : 0) + (bsExterne ? 40 : 0) + (avecManuel ? 40 : 0) + (parallele ? 70 : 0);
+    const h = (avecR2 ? 780 : 560) + (avecTransfoR1 || avecTransfoR2 ? TRANSFO_H : 0) + (avecTransfoSortie ? 75 : 0) + (infoModules ? 140 + (bypassModules ? 70 : 0) : 0) + (bsExterne ? 40 : 0) + (avecManuel ? 70 : 0) + (parallele ? 70 : 0);
     const { canvas, ctx } = canevasSchema(w, h);
     ctx.textAlign = "center"; ctx.textBaseline = "middle";
     const line = (x1, y1, x2, y2) => { ctx.strokeStyle = SCHEMA_TRAIT; ctx.lineWidth = 1.8; ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); };
@@ -21352,7 +21357,7 @@ function genererSchemaOnduleur(eq, eqsSite = null) {
       line(cxM, yOnduleurBas, cxM, yApresOnduleur);
       if (bsExterne) {
         // Commutateur statique hors de la machine : cadre en pointillés « By-pass externe ».
-        const fx = csLeft - 14, fy = yApresOnduleur - 46, fw = csW + 28, fh = csH + 60 + (bm === "Externe" ? 0 : 0);
+        const fx = csLeft - 14, fy = yApresOnduleur - 46, fw = csW + 28, fh = csH + 60;
         ctx.save(); ctx.setLineDash([6, 4]); ctx.strokeStyle = "#0A5DA8"; ctx.lineWidth = 1.4; ctx.strokeRect(fx, fy, fw, fh); ctx.restore();
         ctx.textAlign = "left"; label(`By-pass externe${nomBP(bypassExterneStatique)}`, fx + 8, fy + 12, "#0A5DA8", "bold 10.5px " + SCHEMA_POLICE); ctx.textAlign = "center";
       }
@@ -21380,35 +21385,48 @@ function genererSchemaOnduleur(eq, eqsSite = null) {
       }
       xSortie = cxM; yAvantRS = yFinal;
     }
-    // By-pass de maintenance (manuel) : dérivation en pointillés depuis le réseau secours (ou R1 sans réseau secours)
-    // jusqu'à la sortie, avec son interrupteur — interne à la machine ou dans l'armoire « By-pass externe ».
-    if (avecManuel) {
-      const depuisR2 = avecR2 && yR2Depart !== null;
-      const xSrc = depuisR2 ? cxR2 : cxM, ySrc = depuisR2 ? yR2Depart - 8 : yR1Haut + 8;
-      const xm = depuisR2 ? cxR2 + 58 : cxM - 112;
-      const yJ = yAvantRS + (depuisR2 ? 22 : 44); // sans réseau secours : sous le repère R0
-      const ySw = Math.round((ySrc + yJ) / 2);
+    // By-pass de maintenance (manuel), dérivations en pointillés à droite depuis le réseau secours (ou R1 sans réseau secours) :
+    //  - interne : rejoint la sortie de la machine (avant le bus parallèle) ;
+    //  - externe : rejoint la sortie du système (après le bus parallèle), juste avant l'utilisation.
+    // Libellé écrit verticalement le long de chaque dérivation, sous son interrupteur : aucun chevauchement.
+    const depuisR2 = avecR2 && yR2Depart !== null;
+    const xSrc = depuisR2 ? cxR2 : cxM;
+    const ySrcBase = depuisR2 ? yR2Depart - 8 : yR1Haut + 8;
+    const derivation = (xm, ySrc, yJ, texte) => {
+      const ySw = Math.round(ySrc + Math.min(140, (yJ - ySrc) * 0.35));
       ctx.save(); ctx.setLineDash([5, 4]);
       line(xSrc, ySrc, xm, ySrc); line(xm, ySrc, xm, ySw - 14); line(xm, ySw + 14, xm, yJ); line(xm, yJ, xSortie, yJ);
       ctx.restore();
-      // interrupteur ouvert (by-pass manuel normalement ouvert)
-      line(xm, ySw + 14, xm - 13, ySw - 10);
+      line(xm, ySw + 14, xm - 13, ySw - 10); // interrupteur ouvert (normalement ouvert)
       ctx.fillStyle = SCHEMA_TRAIT; ctx.beginPath(); ctx.arc(xm, ySw - 14, 2.5, 0, Math.PI * 2); ctx.fill();
-      label(bm === "Externe" ? `By-pass maintenance externe${nomBP(bypassExterneMaintenance)}` : "By-pass de maintenance", (xm + xSortie) / 2, depuisR2 ? yJ - 9 : yJ + 11, "#0A5DA8", "9.5px " + SCHEMA_POLICE);
-      line(xSortie, yAvantRS, xSortie, yJ);
-      yAvantRS = yJ;
+      ctx.save(); ctx.translate(xm + 11, ySw + 26); ctx.rotate(Math.PI / 2); ctx.textAlign = "left"; ctx.textBaseline = "middle";
+      ctx.fillStyle = "#0A5DA8"; ctx.font = "9.5px " + SCHEMA_POLICE; ctx.fillText(texte, 0, 0); ctx.restore();
+    };
+    const xExt = manInt && manExt ? xMan2 : xMan1;
+    let yCourant = yAvantRS;
+    if (manInt) {
+      const yJ = yCourant + 22;
+      line(xSortie, yCourant, xSortie, yJ);
+      derivation(xMan1, ySrcBase, yJ, "By-pass de maintenance interne");
+      yCourant = yJ;
     }
-    // Parallèle : sortie vers le bus commun du système ; 2N : voie.
-    let yFleche = yAvantRS;
+    // Parallèle : sortie vers le bus commun du système (nom des machines sous le bus).
     if (parallele) {
-      line(xSortie, yAvantRS, xSortie, yAvantRS + 18);
-      const yBus = yAvantRS + 18;
+      const yBus = yCourant + 20;
+      line(xSortie, yCourant, xSortie, yBus);
       ctx.save(); ctx.strokeStyle = SCHEMA_TRAIT; ctx.lineWidth = 5; ctx.beginPath(); ctx.moveTo(xSortie - 110, yBus); ctx.lineTo(xSortie + 110, yBus); ctx.stroke(); ctx.restore();
-      ctx.save(); ctx.setLineDash([4, 4]); line(xSortie - 70, yBus - 22, xSortie - 70, yBus); line(xSortie + 70, yBus - 22, xSortie + 70, yBus); ctx.restore();
       const rang = grp.length > 1 ? grp.findIndex((e) => e.id === eq.id) + 1 : null;
       label(`Bus parallèle — ${nomsGrp.join(", ")}${rang ? ` (machine ${rang}/${grp.length})` : ""}`, xSortie, yBus + 14, "#0A5DA8", "10px " + SCHEMA_POLICE);
-      yFleche = yBus + 22;
+      yCourant = yBus + 24;
+      line(xSortie, yBus, xSortie, yCourant);
     }
+    if (manExt) {
+      const yJ = yCourant + (parallele ? 14 : 22);
+      line(xSortie, yCourant, xSortie, yJ);
+      derivation(xExt, ySrcBase - (manInt ? 12 : 0), yJ, `By-pass de maintenance externe${nomBP(bypassExterneMaintenance)}`);
+      yCourant = yJ;
+    }
+    let yFleche = yCourant;
     line(xSortie, yFleche, xSortie, yFleche + GAP_LIGNE);
     arrowDown(xSortie, yFleche + GAP_LIGNE);
     label("RS", xSortie, yFleche + GAP_LIGNE + 18, SCHEMA_TRAIT, "14px " + SCHEMA_POLICE);
