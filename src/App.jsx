@@ -21230,6 +21230,7 @@ function genererSchemaOnduleur(eq, eqsSite = null) {
 
     let y = 16;
     let yBasDessin = 0; // bas du dessin, pour placer la légende et recadrer l'image
+    let yTapPonte = null; // réseaux pontés : départ des by-pass de maintenance sur R1, sous son transformateur
     let yR2Depart = null; // position depuis laquelle R2 continue sans coupure vers le commutateur
     const avecAnnotationPontage = (eq.identification?.alimentationReseaux || "").includes("pontés");
     label("R1", cxM, y, SCHEMA_TRAIT, "14px " + SCHEMA_POLICE);
@@ -21260,7 +21261,10 @@ function genererSchemaOnduleur(eq, eqsSite = null) {
       // depuis une entrée R2 indépendante. Le transformateur R2 (s'il existe) est alimenté par ce
       // pontage, pas l'inverse.
       const yDepart = avecTransfoR1 ? y + tfH : y;
-      const yPontage = yDepart + 14;
+      // Réseaux pontés au bornier : le by-pass de maintenance ne peut se raccorder que sur R1, juste sous son transformateur
+      // (avant le pontage) — on laisse la place à ses départs au-dessus du pontage.
+      yTapPonte = yDepart;
+      const yPontage = yDepart + (avecManuel ? 32 : 14);
       line(cxM, yDepart, cxM, yPontage);
       line(cxM, yPontage, cxR2, yPontage);
       if (avecAnnotationPontage) label("(pontés — source unique)", (cxM + cxR2) / 2, yPontage + 12, "#8B96A3", "9.5px " + SCHEMA_POLICE);
@@ -21375,10 +21379,10 @@ function genererSchemaOnduleur(eq, eqsSite = null) {
     //  - interne : rejoint la sortie de la machine (avant le bus parallèle) ;
     //  - externe : rejoint la sortie du système (après le bus parallèle), juste avant l'utilisation.
     // Libellé écrit verticalement le long de chaque dérivation, sous son interrupteur : aucun chevauchement.
-    const depuisR2 = avecR2 && yR2Depart !== null;
+    const depuisR2 = avecR2 && yR2Depart !== null && yTapPonte === null;
     const xSrc = depuisR2 ? cxR2 : cxM;
     // Départ sous les transformateurs amont (R2, ou R1 sans réseau secours) : ils sont en amont des by-pass.
-    const ySrcBase = depuisR2 ? yR2Depart + 22 : yR1Tap;
+    const ySrcBase = yTapPonte !== null ? yTapPonte + 22 : depuisR2 ? yR2Depart + 22 : yR1Tap;
     const derivation = (xm, ySrc, yJ, texte) => {
       const ySw = Math.round(ySrc + Math.min(140, (yJ - ySrc) * 0.35));
       ctx.save(); ctx.setLineDash([5, 4]);
