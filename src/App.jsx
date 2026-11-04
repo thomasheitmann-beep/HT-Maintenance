@@ -21240,7 +21240,6 @@ function genererSchemaOnduleur(eq, eqsSite = null) {
     const libSecours = serie && String(idc.onduleurSecours || "").trim() ? `Secours = sortie « ${String(idc.onduleurSecours).trim()} »` : `Réseau secours ${regime("secours")}`;
     if (avecR2 && !reseauxPontes) libelleSousRepere(ctx, libSecours, cxR2, y);
     y += 44;
-    const yR1Haut = y; // départ possible du by-pass de maintenance quand il n'y a pas de réseau secours
     line(cxM, y, cxM, y + GAP_LIGNE);
     if (avecR2 && !reseauxPontes) { line(cxR2, y, cxR2, y + GAP_LIGNE); yR2Depart = y + GAP_LIGNE; }
     y += GAP_LIGNE;
@@ -21253,7 +21252,7 @@ function genererSchemaOnduleur(eq, eqsSite = null) {
     }
     if (avecTransfoR2 && avecR2 && !reseauxPontes) {
       drawIconTransformateur(ctx, cxR2 - tfW / 2, y, tfW, tfH);
-      label("Transfo. amont", cxR2 + tfW / 2 + 40, y + tfH / 2, "#5B6B7D", "10px " + SCHEMA_POLICE);
+      label("Transfo. amont", cxR2 - tfW / 2 - 40, y + tfH / 2, "#5B6B7D", "10px " + SCHEMA_POLICE); // à gauche : la droite est réservée aux by-pass de maintenance
       yR2Depart = y + tfH; // continue sans coupure sous son transformateur
     }
     if (reseauxPontes && avecR2) {
@@ -21268,7 +21267,7 @@ function genererSchemaOnduleur(eq, eqsSite = null) {
       if (avecTransfoR2) {
         line(cxR2, yPontage, cxR2, yPontage + 10);
         drawIconTransformateur(ctx, cxR2 - tfW / 2, yPontage + 10, tfW, tfH);
-        label("Transfo. R2", cxR2 + tfW / 2 + 40, yPontage + 10 + tfH / 2, "#5B6B7D", "10px " + SCHEMA_POLICE);
+        label("Transfo. R2", cxR2 - tfW / 2 - 40, yPontage + 10 + tfH / 2, "#5B6B7D", "10px " + SCHEMA_POLICE);
         yR2Depart = yPontage + 10 + tfH;
       } else {
         yR2Depart = yPontage;
@@ -21281,6 +21280,7 @@ function genererSchemaOnduleur(eq, eqsSite = null) {
     }
 
     // Réseau normal — relié directement au redresseur (plus d'interrupteur intermédiaire)
+    const yR1Tap = y + 11; // sous le transformateur amont de R1 (s'il existe) : départ du by-pass de maintenance sans réseau secours
     let yReseauNormalBas = y + 22;
     line(cxM, y, cxM, yReseauNormalBas);
     y = yReseauNormalBas + GAP_LIGNE;
@@ -21367,23 +21367,9 @@ function genererSchemaOnduleur(eq, eqsSite = null) {
       // Sortie — reliée directement (plus d'interrupteur intermédiaire)
       let yApresCS = yApresOnduleur + csH + GAP_LIGNE; // trait continu jusqu'à la sortie (plus d'interrupteur intermédiaire)
       line(csMidX, yApresOnduleur + csH, csMidX, yApresOnduleur + csH + GAP_LIGNE);
-      let yFinal = yApresCS;
-      if (avecTransfoSortie) {
-        line(csMidX, yFinal, csMidX, yFinal + 16);
-        drawIconTransformateur(ctx, csMidX - tfW / 2, yFinal + 16, tfW, tfH);
-        label("Transfo. sortie", csMidX + tfW / 2 + 40, yFinal + 16 + tfH / 2, "#5B6B7D", "10px " + SCHEMA_POLICE);
-        yFinal += 16 + tfH;
-      }
-      xSortie = csMidX; yAvantRS = yFinal;
+      xSortie = csMidX; yAvantRS = yApresCS;
     } else {
-      let yFinal = yApresOnduleur;
-      if (avecTransfoSortie) {
-        line(cxM, yFinal, cxM, yFinal + 16);
-        drawIconTransformateur(ctx, cxM - tfW / 2, yFinal + 16, tfW, tfH);
-        label("Transfo. sortie", cxM + tfW / 2 + 40, yFinal + 16 + tfH / 2, "#5B6B7D", "10px " + SCHEMA_POLICE);
-        yFinal += 16 + tfH;
-      }
-      xSortie = cxM; yAvantRS = yFinal;
+      xSortie = cxM; yAvantRS = yApresOnduleur;
     }
     // By-pass de maintenance (manuel), dérivations en pointillés à droite depuis le réseau secours (ou R1 sans réseau secours) :
     //  - interne : rejoint la sortie de la machine (avant le bus parallèle) ;
@@ -21391,7 +21377,8 @@ function genererSchemaOnduleur(eq, eqsSite = null) {
     // Libellé écrit verticalement le long de chaque dérivation, sous son interrupteur : aucun chevauchement.
     const depuisR2 = avecR2 && yR2Depart !== null;
     const xSrc = depuisR2 ? cxR2 : cxM;
-    const ySrcBase = depuisR2 ? yR2Depart - 8 : yR1Haut + 8;
+    // Départ sous les transformateurs amont (R2, ou R1 sans réseau secours) : ils sont en amont des by-pass.
+    const ySrcBase = depuisR2 ? yR2Depart + 22 : yR1Tap;
     const derivation = (xm, ySrc, yJ, texte) => {
       const ySw = Math.round(ySrc + Math.min(140, (yJ - ySrc) * 0.35));
       ctx.save(); ctx.setLineDash([5, 4]);
@@ -21425,6 +21412,13 @@ function genererSchemaOnduleur(eq, eqsSite = null) {
       line(xSortie, yCourant, xSortie, yJ);
       derivation(xExt, ySrcBase - (manInt ? 12 : 0), yJ, `By-pass de maintenance externe${nomBP(bypassExterneMaintenance)}`);
       yCourant = yJ;
+    }
+    // Transformateur de sortie : en aval des by-pass (commun à l'onduleur et aux by-pass), juste au-dessus de RS.
+    if (avecTransfoSortie) {
+      line(xSortie, yCourant, xSortie, yCourant + 16);
+      drawIconTransformateur(ctx, xSortie - tfW / 2, yCourant + 16, tfW, tfH);
+      label("Transfo. sortie", xSortie + tfW / 2 + 40, yCourant + 16 + tfH / 2, "#5B6B7D", "10px " + SCHEMA_POLICE);
+      yCourant += 16 + tfH;
     }
     let yFleche = yCourant;
     line(xSortie, yFleche, xSortie, yFleche + GAP_LIGNE);
