@@ -746,7 +746,7 @@ const LISTE_TR_CLASSE = ["1.5", "6"];
 // Le relais de protection peut être d'une marque différente de celle de la cellule (ex. cellule
 // Schneider avec relais ABB) — sa marque et sa gamme sont donc indépendantes de celles de l'équipement.
 // HTA : relais de protection numériques autonomes.
-const LISTE_MARQUE_RELAIS_HTA = ["Schneider Electric", "Merlin Gerin", "SEG", "Areva", "Alstom", "GE / Alstom", "ABB", "Siemens", "Ormazabal", "VAMP", "Schweitzer Engineering Laboratories (SEL)", "Socomec", "Chauvin Arnoux"];
+const LISTE_MARQUE_RELAIS_HTA = ["Schneider Electric", "Merlin Gerin", "SEG", "Areva", "Alstom", "GE / Alstom", "GEC Alsthom", "ABB", "Siemens", "Ormazabal", "VAMP", "Schweitzer Engineering Laboratories (SEL)", "Socomec", "Chauvin Arnoux"];
 // Familles de relais réutilisées entre plusieurs marques (la même gamme porte des plaques différentes
 // selon l'époque : MiCOM est née chez Alstom, est passée chez Areva T&D, puis chez Schneider Electric
 // en 2010 ; Sepam / VIP / Statimax sont d'origine Merlin Gerin).
@@ -756,13 +756,52 @@ const RELAIS_SEPAM_ANCIENS = ["SEPAM 100", "SEPAM 1000+", "SEPAM 2000"];
 const RELAIS_VIP = ["VIP 35", "VIP 200", "VIP 201", "VIP 300 LL/LH", "VIP 400"];
 // Easergy Flair (Schneider, origine Merlin Gerin) : détecteurs de passage de défaut HTA au format DIN, montés en cellule.
 const DETECTEURS_FLAIR = ["Flair 21D", "Flair 22D", "Flair 23D", "Flair 23DM"];
+// TROPIC (GEC Alsthom, puis Alstom ; générations TROPIC, TROPIC 1, TROPIC 2) : relais statiques modulaires, un module
+// enfichable par fonction dans un rack à fond de panier. Aucune notice constructeur publiée en ligne : fonctions reprises
+// des libellés des revendeurs de pièces ; « deduit: true » = fonction déduite de la référence, à confirmer sur la plaque.
+const RELAIS_TROPIC = "TROPIC (rack de modules)";
+// Plages relevées sur les faces avant (photos terrain) : seuil = somme de deux commutateurs (valeurs secondaires TC / TP),
+// temporisation t1 par curseur. Codification déduite : A = courant, AH = homopolaire, V = tension ; 1er chiffre = nombre de
+// grandeurs mesurées (2I>, 2U<) ; 3e chiffre = temporisation (TA 2100 instantané, TA 2110 temporisé).
+const crans = (debut, pas, n) => Array.from({ length: n }, (_, i) => Math.round((debut + i * pas) * 1000) / 1000);
+const MODULES_TROPIC = [
+  { ref: "TA 2100", fonction: "2I> max. de courant 2 phases, instantané", seuils: ["50-51-2 — Max I phase (seuil 2)"], reglage: { symbole: "2I>", grandeur: "I", unite: "A", a: [12, 32, 52, 72], b: [0, 4, 8, 12, 16], t: null } },
+  { ref: "TA 2110", fonction: "2I> max. de courant 2 phases, temporisé", seuils: ["50-51-1 — Max I phase (seuil 1)"], reglage: { symbole: "2I>", grandeur: "I", unite: "A", a: [6, 16, 26, 36], b: [0, 2, 4, 6, 8], t: crans(0.05, 0.05, 11) } },
+  { ref: "TAH 1110", fonction: "I⏚> max. de courant homopolaire, temporisé", seuils: ["50N-51N-1 — Max I terre (seuil 1)"], reglage: { symbole: "I⏚>", grandeur: "Io", unite: "A", a: [0.12, 0.32, 0.52, 0.72], b: [0, 0.04, 0.08, 0.12, 0.16], t: crans(0.05, 0.05, 11) } },
+  { ref: "TVN 2111", fonction: "2U< minimum de tension (2 tensions), temporisé", seuils: ["27 — Minimum de tension"], reglage: { symbole: "2U<", grandeur: "U", unite: "V", a: [60, 80, 100, 120], b: [0, 4, 8, 12, 16], t: crans(0.8, 0.8, 11) } },
+  { ref: "TR11", fonction: "Relais temporisé (temporisation auxiliaire 0,1 à 1,1 s)", seuils: [], tempoAux: crans(0.1, 0.1, 11) },
+  { ref: "TA1100P", fonction: "Maximum de courant phase", seuils: ["50-51-1 — Max I phase (seuil 1)"] },
+  { ref: "TA2111P", fonction: "Maximum de courant phase (TROPIC 2)", seuils: ["50-51-1 — Max I phase (seuil 1)"] },
+  { ref: "TA3220", fonction: "Maximum de courant phase", seuils: ["50-51-1 — Max I phase (seuil 1)"] },
+  { ref: "TA3222", fonction: "Maximum de courant phase", seuils: ["50-51-1 — Max I phase (seuil 1)"] },
+  { ref: "TA5234C", fonction: "Maximum de courant phase", seuils: ["50-51-1 — Max I phase (seuil 1)"] },
+  { ref: "TMA311P", fonction: "Maxima de courant de phase", seuils: ["50-51-1 — Max I phase (seuil 1)"] },
+  { ref: "TAH1111", fonction: "Maximum de courant homopolaire", seuils: ["50N-51N-1 — Max I terre (seuil 1)"] },
+  { ref: "TV1110", fonction: "Maximum de tension", seuils: ["59 — Maximum de tension"] },
+  { ref: "TV1100P", fonction: "Tension alternative (maximum de tension)", seuils: ["59 — Maximum de tension"] },
+  { ref: "TVN3100", fonction: "Minimum de tension (d'après le TVN 2111)", seuils: ["27 — Minimum de tension"], deduit: true },
+  { ref: "TVN3111", fonction: "Minimum de tension (d'après le TVN 2111)", seuils: ["27 — Minimum de tension"], deduit: true },
+  { ref: "TVH3111", fonction: "Tension homopolaire", seuils: ["59N — Surtension résiduelle"], deduit: true },
+  { ref: "TF1111", fonction: "Fréquence (alim. 100 V CA / 48 V CC)", seuils: ["81L — Minimum de fréquence", "81H — Maximum de fréquence"], deduit: true },
+  { ref: "TP130", fonction: "Détection de puissance triphasée, perte de synchronisme", seuils: ["32P — Maximum de puissance active directionnelle", "78PS — Perte de synchronisme (pole slip)"] },
+  { ref: "TT61", fonction: "Surveillance de température, 6 sondes platine, 1 seuil par sonde", seuils: ["49T — Sonde de température"] },
+  { ref: "TUG1111", fonction: "Surveillance de tension continue (auxiliaire)", seuils: [] },
+  { ref: "TDD3T", fonction: "Boîtier de mesure de temps (accessoire)", seuils: [] },
+  ...["TWL1111", "TX1603", "RN2100", "TAI3220", "TMV311", "TMUG", "TMUM"].map((ref) => ({ ref, fonction: "fonction non documentée", seuils: [], inconnu: true })),
+  { ref: "Autre module", fonction: "à préciser", seuils: [], inconnu: true },
+];
+const libelleModuleTropic = (m) => `${m.ref} — ${m.fonction}`;
+const codesAnsiTropic = (m) => m.seuils.map((l) => l.split(" — ")[0].replace(/-\d$/, ""));
+const estRelaisTropic = (id) => /tropic/i.test(String((id && id.referenceRelais) || ""));
+const modulesTropicChoisis = (id) => (Array.isArray(id && id.modulesTropic) ? id.modulesTropic : []).map((l) => MODULES_TROPIC.find((m) => libelleModuleTropic(m) === l || m.ref === String(l).split(" — ")[0])).filter(Boolean);
 const MARQUE_GAMME_RELAIS_HTA = {
   "Schneider Electric": ["SEPAM série 10", "SEPAM série 20", "SEPAM série 40", "SEPAM série 60", "SEPAM série 80", "SEPAM S20", "SEPAM S40", "SEPAM S80", "SEPAM T20", "SEPAM M20", ...RELAIS_SEPAM_ANCIENS, "Statimax", "Statimax RAH 411 E", ...RELAIS_VIP, ...DETECTEURS_FLAIR, "Easergy P3", "Easergy P5", "VAMP 50 (série)", "VAMP 200 (série)", ...RELAIS_MICOM],
   "Merlin Gerin": ["SEPAM S20", "SEPAM S40", "SEPAM S80", ...RELAIS_SEPAM_ANCIENS, "Statimax", "Statimax RAH 411 E", ...RELAIS_VIP, ...DETECTEURS_FLAIR],
   "SEG": ["WIC1-1", "WIC1-2", "WIC1-3"], // relais autonomes WI-LINE (manuel WIC1)
   "Areva": [...RELAIS_MICOM, ...RELAIS_MICOM_ANCIENS],
-  "Alstom": [...RELAIS_MICOM, ...RELAIS_MICOM_ANCIENS],
-  "GE / Alstom": [...RELAIS_MICOM, ...RELAIS_MICOM_ANCIENS],
+  "Alstom": [...RELAIS_MICOM, ...RELAIS_MICOM_ANCIENS, RELAIS_TROPIC],
+  "GE / Alstom": [...RELAIS_MICOM, ...RELAIS_MICOM_ANCIENS, RELAIS_TROPIC],
+  "GEC Alsthom": [RELAIS_TROPIC],
   "ABB": ["REF615", "REJ601", "REM620", "Relion 615", "Relion 611", "Relion 620", "Relion 630", "REF541", "REF542plus", "REF543", "REF545", "REF610", "REF620", "REF630", "REM610", "REM615", "REM630", "REU610", "REX521", "REJ603", "SPAJ 140 C", "SPAJ 141 C", "SPAJ 142 C", "SPAJ 144 C"],
   "Siemens": ["SIPROTEC 5", "SIPROTEC 4", "SIPROTEC Compact", "7SJ", "7SJ600", "7SJ511", "7SJ512", "7SJ531", "7SJ61", "7SJ62", "7SJ63", "7SJ64", "7SJ80", "7SJ81", "7SJ82", "7SJ85", "7SK80"],
   "Ormazabal": ["ekor.rpg", "ekor.rpt", "ekor.rps", "ekor.rci", "ekor.rpa", "ekor.sys", "RPGM", "RPTA"],
@@ -4115,7 +4154,13 @@ const SECTION_MODULE_SVG = { key: "module_svg", title: "Module SVG (générateur
   { ...C("svg_usure", "Pièces d'usure du module (année du prochain remplacement, selon notice)", [F("ventProchain", "Ventilateurs", null), F("filtresProchain", "Filtres à air", null), F("condDCProchain", "Condensateurs du bus continu", null)]), champsFacultatifs: true },
 ]};
 function getSchema(eq) {
-  const base = getSchemaBase(eq);
+  const base0 = getSchemaBase(eq);
+  // Relais TROPIC (rack de modules) : choix des modules installés, juste après la référence du relais.
+  let base = base0;
+  if (base0 && TYPES_AVEC_RELAIS.includes(eq.type) && estRelaisTropic(eq.identification) && base0.identification.some((f) => f.key === "referenceRelais") && !base0.identification.some((f) => f.key === "modulesTropic")) {
+    const i = base0.identification.findIndex((f) => f.key === "referenceRelais");
+    base = { ...base0, identification: [...base0.identification.slice(0, i + 1), { key: "modulesTropic", label: "Modules TROPIC du rack", multi: true }, ...base0.identification.slice(i + 1)] };
+  }
   if (!base || eq.type !== "Batterie de compensation" || !avecSVG(eq)) return base;
   const idx = base.identification.findIndex((f) => f.key === "technologieCompensation");
   const champsSVG = [
@@ -11532,7 +11577,7 @@ function contextePlaqueComposant(libelle) {
   return `Plaque signalétique du composant « ${libelle} » : ne remplir que ce qui est lisible.`;
 }
 // Champs d'identification jamais lus sur une plaque (repère interne, liens vers d'autres équipements, choix d'app).
-const CHAMPS_IDENTIFICATION_HORS_PLAQUE = ["repere", "machinesParallele", "objectifParallele", "batteriesParallele", "voie2N", "onduleurSecours", "onduleursRaccordes", "bypassStatique", "bypassMaintenance", "transformateurAssocie", "transformateursParallele", "transfoNbParallele", "transfoManuel", "presenceRelais", "presenceTC", "transfoSnManuel", "transfoUccManuel"];
+const CHAMPS_IDENTIFICATION_HORS_PLAQUE = ["repere", "modulesTropic", "machinesParallele", "objectifParallele", "batteriesParallele", "voie2N", "onduleurSecours", "onduleursRaccordes", "bypassStatique", "bypassMaintenance", "transformateurAssocie", "transformateursParallele", "transfoNbParallele", "transfoManuel", "presenceRelais", "presenceTC", "transfoSnManuel", "transfoUccManuel"];
 function PiecesUsureUPSPanel({ eq, update, itemFicheBatterie }) {
   const [catalogueOuvert, setCatalogueOuvert] = useState(null); // id du modèle dont le catalogue est ouvert
   const valeurFiche = eq.controles.batterie_id?.batterie_caracteristiques || { fields: {} };
@@ -11711,7 +11756,52 @@ function CourantDechargeBranches({ eq, update }) {
 // ----- Relais HTA autonomes (sans source auxiliaire), alimentés par leurs capteurs et déclenchant un Mitop / une bobine à faible consommation -----
 // Statimax RAH 411 E (Merlin Gerin) : méthode de calcul des seuils (document RAH411E) et tableaux des nombres de passages.
 // WIC1-1 / -2 / -3 (SEG WI-LINE) : manuel WIC1 (TD_WIC1_01.08_FR). VIP 300 LL / LH (Schneider Electric) : notice technique VIP300 (2004).
-const RELAIS_AUTONOME_RE = [["statimax", /rah\s?-?411|statimax/i], ["wic1", /wic\s?-?1/i], ["vip300", /vip\s?-?300/i]];
+const RELAIS_AUTONOME_RE = [["statimax", /rah\s?-?411|statimax/i], ["wic1", /wic\s?-?1/i], ["vip300", /vip\s?-?300/i], ["tropic", /tropic/i]];
+// ----- TROPIC : seuil = commutateur 1 + commutateur 2 (secondaire), converti en primaire avec le TC / TP de l'équipement -----
+function rapportsTropic(eq, d) {
+  // Multiplicateur secondaire → primaire (primaire ÷ secondaire). Saisie « 100/5 » ou directement « 20 ».
+  const k = (txt) => { const t = String(txt || "").trim(); if (!t) return null; if (t.includes("/")) { const r = ratioTransformation(t); return r ? 1 / r : null; } return nbR(t); };
+  const tcs = (eq.controles && eq.controles.tc_dynamique) || [];
+  const kTc = (tc) => (tc && tc.fields && tc.fields.rapportPrimaire && tc.fields.secondaire ? k(`${tc.fields.rapportPrimaire}/${tc.fields.secondaire}`) : null);
+  const tcPhase = tcs.find((t) => t.label !== "Homopolaire (terre)" && kTc(t)), tcTerre = tcs.find((t) => t.label === "Homopolaire (terre)" && kTc(t));
+  return {
+    I: k(d.ratioTC) ?? kTc(tcPhase),
+    Io: k(d.ratioTCTerre) ?? kTc(tcTerre) ?? k(d.ratioTC) ?? kTc(tcPhase),
+    U: k(d.ratioTP) ?? k(eq.identification && eq.identification.rapportTPProtection),
+  };
+}
+function calcTropic(eq, d) {
+  const lignes = [], alertes = [], seuils = [];
+  const mods = modulesTropicChoisis(eq.identification || {});
+  const reg = mods.filter((m) => m.reglage);
+  if (!mods.length) return { lignes: ["Cochez d'abord les modules du rack (identification, « Modules TROPIC du rack »)."], alertes, seuils };
+  if (!reg.length) return { lignes: ["Aucun module coché n'a de plage de réglage connue (TA 2100, TA 2110, TAH 1110, TVN 2111)."], alertes, seuils };
+  const ratios = rapportsTropic(eq, d);
+  const tr11 = mods.find((m) => m.tempoAux);
+  const tAux = tr11 ? nbR(d.tr11) : null;
+  reg.forEach((m) => {
+    const g = m.reglage, cle = m.ref.replace(/\s+/g, "");
+    const a = nbR(d[cle + "_a"]), b = nbR(d[cle + "_b"]), t = g.t ? nbR(d[cle + "_t"]) : 0;
+    if (a === null || b === null) { lignes.push(`${m.ref} (${g.symbole}) : choisir la position des deux commutateurs.`); return; }
+    if (!g.a.includes(a) || !g.b.includes(b)) alertes.push(`${m.ref} : valeur hors des crans du module.`);
+    const sec = Math.round((a + b) * 1000) / 1000;
+    const ratio = ratios[g.grandeur];
+    const prim = ratio ? Math.round(sec * ratio * 100) / 100 : null;
+    const avecAux = tAux !== null && d.tr11Module === m.ref;
+    const tTot = g.t ? (t === null ? null : Math.round((t + (avecAux ? tAux : 0)) * 1000) / 1000) : (avecAux ? tAux : 0);
+    const u = g.unite;
+    const detail = `${g.symbole} = ${frN(a, 2)} + ${frN(b, 2)} = ${frN(sec, 2)} ${u} sec.${prim !== null ? ` → ${frN(prim, 1)} ${u} prim.` : ""}${g.t ? ` · t1 = ${t === null ? "—" : frN(t, 2) + " s"}` : " · instantané"}${avecAux ? ` + TR11 ${frN(tAux, 1)} s` : ""}`;
+    lignes.push(`${m.ref} : ${detail}`);
+    if (prim === null) alertes.push(`${m.ref} : rapport ${g.grandeur === "U" ? "TP" : "TC"} inconnu — seuil reporté en valeur secondaire (renseigner le rapport ci-dessus ou dans l'équipement).`);
+    if (g.t && t === null) alertes.push(`${m.ref} : choisir la temporisation t1.`);
+    m.seuils.forEach((label) => seuils.push({ label, fields: {
+      courbe: g.grandeur === "U" ? undefined : "Constant", ...(g.grandeur === "I" ? { type: "Indépendant" } : {}), ...(g.grandeur === "Io" ? { modeDetection: ratios.Io && d.ratioTCTerre ? "TC homopolaire dédié" : undefined } : {}),
+      reglage: String(prim !== null ? prim : sec), temporisation: tTot === null ? "" : String(tTot), temporisation_unite: "s", reperesTropic: `${m.ref} — ${detail}`,
+    } }));
+  });
+  seuils.forEach((x) => Object.keys(x.fields).forEach((k) => x.fields[k] === undefined && delete x.fields[k]));
+  return { lignes, alertes, seuils };
+}
 function typeRelaisAutonome(identification) {
   const ref = String((identification && identification.referenceRelais) || "");
   const m = RELAIS_AUTONOME_RE.find(([, re]) => re.test(ref));
@@ -12400,6 +12490,7 @@ function BoutonImportReglagesSepam({ eq, update }) {
   );
 }
 const AIDE_PRECISION_RELAIS = {
+  tropic: "TROPIC (GEC Alsthom / Alstom) : plages relevées sur les faces avant ; pas de notice publiée, précision non documentée — tolérance d'essai générique de l'app (temps constant). Seuils affichés en valeurs secondaires des TC / TP.",
   statimax: "Statimax RAH 411 E : temporisation minimale de 100 ms, temps de fonctionnement du Mitop compris. Les TC 10P30 habituellement associés limitent la plage utile à 30 × Inp (30 A au secondaire).",
   wic1: "WIC1 (manuel constructeur) : temps à temps constant ±1 % ou ±10 ms ; temps inverse ±10 ms ; seuil terre ≤ 5 % ; mesure ≤ 5 % de 0 à 50 °C (≤ 7,5 % de −40 à 85 °C). Courant minimal d'alimentation : 0,9 × plus petit courant nominal du TC. Essai du seuil terre : valise triphasée ; la source d'injection sert aussi d'alimentation.",
   vip300: "VIP 300 (notice constructeur) : seuils ±5 % ou 0/+2 A ; temps à temps constant ±2 % ou ±20 ms ; temps inverse classe 5 (CEI 60255-3) ou 0/+20 ms (0/+25 ms à la terre) ; seuil haut ±5 % ; dégagement 95 %. Temps hors réponse du Mitop. Essai à la valise VAP6 : stimulus = 20 × Is (phase) ou 20 × Ios (terre).",
@@ -12421,7 +12512,39 @@ function AssistantRelaisAutonome({ eq, update, type }) {
   const S = (label, liste, cle, defaut) => <MiniSelect key={cle} label={label} options={liste.map(String)} value={donnees[cle] !== undefined ? String(donnees[cle]) : defaut || ""} onChange={(v) => set(cle, v)} />;
   const I = (label, cle, unit) => <MiniInput key={cle} label={label} unit={unit} value={donnees[cle] || ""} onChange={(v) => set(cle, v)} />;
   let res = null, formulaire = null, titre = "";
-  if (type === "statimax") {
+  if (type === "tropic") {
+    titre = "TROPIC — position des commutateurs et seuils calculés";
+    const mods = modulesTropicChoisis(eq.identification || {});
+    const reg = mods.filter((m) => m.reglage);
+    const ratios = rapportsTropic(eq, donnees);
+    res = calcTropic(eq, donnees);
+    const tr11 = mods.find((m) => m.tempoAux);
+    formulaire = (
+      <>
+        {I(`Rapport TC phase (ex. 100/5)${ratios.I && !donnees.ratioTC ? ` — équipement : × ${frN(ratios.I, 1)}` : ""}`, "ratioTC")}
+        {reg.some((m) => m.reglage.grandeur === "Io") && I("Rapport TC terre / tore (ex. 50/1)", "ratioTCTerre")}
+        {reg.some((m) => m.reglage.grandeur === "U") && I(`Rapport TP (ex. 20000/100)${ratios.U && !donnees.ratioTP ? ` — équipement : × ${frN(ratios.U, 1)}` : ""}`, "ratioTP")}
+        {reg.map((m) => {
+          const g = m.reglage, cle = m.ref.replace(/\s+/g, "");
+          return (
+            <React.Fragment key={cle}>
+              <div style={{ flex: "1 1 100%", fontWeight: 700, fontSize: 12, color: "#3E4A5C", marginTop: 4 }}>{m.ref} — {g.symbole} ({g.unite} secondaires)</div>
+              {S("Commutateur 1", ["", ...g.a.map((x) => String(x).replace(".", ","))], cle + "_a")}
+              {S("+ commutateur 2", ["", ...g.b.map((x) => String(x).replace(".", ","))], cle + "_b")}
+              {g.t && S("t1 (s)", ["", ...g.t.map((x) => String(x).replace(".", ","))], cle + "_t")}
+            </React.Fragment>
+          );
+        })}
+        {tr11 && (
+          <>
+            <div style={{ flex: "1 1 100%", fontWeight: 700, fontSize: 12, color: "#3E4A5C", marginTop: 4 }}>TR11 — temporisation auxiliaire (facultatif)</div>
+            {S("Temporisation TR11 (s)", ["", ...tr11.tempoAux.map((x) => String(x).replace(".", ","))], "tr11")}
+            {S("Ajoutée au module", ["", ...reg.map((m) => m.ref)], "tr11Module")}
+          </>
+        )}
+      </>
+    );
+  } else if (type === "statimax") {
     titre = "Statimax RAH 411 E — calcul des seuils";
     const tc = donnees.tc || "1A";
     res = calcStatimax({ ...donnees, tc });
@@ -12502,7 +12625,7 @@ function AssistantRelaisAutonome({ eq, update, type }) {
   );
 }
 // Accès à l'assistant même quand la « Référence du relais » n'est pas (encore) renseignée ou reconnue : le technicien choisit lui-même le relais.
-const ASSISTANTS_RELAIS_AUTONOMES = { "Statimax RAH 411 E": "statimax", "WIC1 (SEG)": "wic1", "VIP 300 (Schneider Electric)": "vip300" };
+const ASSISTANTS_RELAIS_AUTONOMES = { "Statimax RAH 411 E": "statimax", "WIC1 (SEG)": "wic1", "VIP 300 (Schneider Electric)": "vip300", "TROPIC (GEC Alsthom / Alstom)": "tropic" };
 function SelecteurAssistantRelais({ eq, update }) {
   const choix = Object.keys(ASSISTANTS_RELAIS_AUTONOMES).find((k) => ASSISTANTS_RELAIS_AUTONOMES[k] === eq.assistantRelaisType) || "";
   return (
@@ -12851,6 +12974,12 @@ const FICHES_METHODE_RELAIS = [
     "Menu « Test relais de sortie » pour vérifier chaque sortie ; le perturbographe (4,96 s, dont 80 % avant déclenchement) permet de relire le temps de déclenchement et l'ouverture du disjoncteur.",
     "Blocage par harmonique 2 interdit en C13-100 (I> et Io>). PWH : Sw>1 réglé en % de Pno (Pno = √3 × Un × In du TC), secteur ±71°, mémoire 0,2 s.",
     "Mot de passe : à vérifier sur la notice / auprès de l'exploitant.",
+  ] },
+  { cle: "tropic", re: /tropic/i, nom: "GEC Alsthom / Alstom — TROPIC", lignes: [
+    "Relais statique modulaire à alimentation auxiliaire : vérifier la présence et la valeur de la tension auxiliaire avant l'essai.",
+    "Un module par fonction : relever les réglages (molettes, commutateurs) de chaque module avant l'essai et les remettre à l'identique après.",
+    "Essai par injection secondaire, module par module : vérifier le déclenchement du disjoncteur et la signalisation de chaque module.",
+    "Pas de notice constructeur publiée : plages de réglage et fonction à relever sur la face avant / la plaque de chaque module.",
   ] },
   { cle: "sepam", re: /sepam/i, nom: "Schneider Electric — Sepam", lignes: [
     "Lecture / modification du paramétrage : face avant (IHM avancée) ou logiciel SFT2841 (série 20/40/80) ; Easergy pour les gammes récentes.",
@@ -15361,6 +15490,50 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
                   }
                   if (TYPES_TRANSFO_MANUEL.includes(eq.type) && CHAMPS_TRANSFO_MANUEL.includes(f.key) && champIdentificationMasque(eq, f.key)) {
                     return null; // saisie manuelle du transformateur : visible seulement si demandée (boutons Oui / Non)
+                  }
+                  // Relais TROPIC : modules du rack (plusieurs), fonction ANSI de chacun, création des seuils correspondants.
+                  if (f.key === "modulesTropic") {
+                    const choisis = Array.isArray(eq.identification.modulesTropic) ? eq.identification.modulesTropic : [];
+                    const actifs = modulesTropicChoisis(eq.identification);
+                    const seuilsExistants = new Set(((eq.controles && eq.controles.parametrage_relais_seuils) || []).map((x) => x.label));
+                    const aCreer = [...new Set(actifs.flatMap((m) => m.seuils))].filter((l) => !seuilsExistants.has(l) && PARAM_SEUIL_TYPES.includes(l));
+                    const ajouterSeuils = () => {
+                      const existants = (eq.controles && eq.controles.parametrage_relais_seuils) || [];
+                      const vierge = (x) => !["reglage", "temporisation", "tms", "courbe"].some((k) => String((x.fields || {})[k] || "").trim()) && !["l1", "l2", "l3"].some((k) => String(((x.essai || {}).fields || {})[k] || "").trim());
+                      const gardes = existants.filter((x) => !(vierge(x) && !aCreer.includes(x.label) && actifs.length)); // le seuil vide proposé par défaut est retiré
+                      update({ ...eq, controles: { ...eq.controles, parametrage_relais_seuils: [...gardes, ...aCreer.map((l) => { const n = emptySeuilEntry(l); n.fields = { ...n.fields, etat: "Actif" }; return n; })] } });
+                    };
+                    return (
+                      <Field key={f.key} label={f.label} span="1 / -1">
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                          {MODULES_TROPIC.map((m) => {
+                            const lib = libelleModuleTropic(m);
+                            const actif = choisis.includes(lib);
+                            return (
+                              <span key={m.ref} title={m.fonction} onClick={() => setIdentification(f.key, actif ? choisis.filter((x) => x !== lib) : [...choisis, lib])}
+                                style={{ cursor: "pointer", userSelect: "none", fontSize: 12, padding: "5px 10px", borderRadius: 999, border: `1.5px solid ${actif ? BRAND.blue : "#D8DEE5"}`, background: actif ? "#EEF4FB" : "#fff", color: actif ? "#0A5DA8" : m.inconnu ? "#8B96A3" : "#3E4A5C", fontWeight: actif ? 700 : 500 }}>
+                                {actif ? "✓ " : ""}{m.ref}
+                              </span>
+                            );
+                          })}
+                        </div>
+                        <div style={{ marginTop: 8, padding: "9px 12px", borderRadius: 8, background: "#EEF4FB", color: "#0A5DA8", fontSize: 11.5, lineHeight: 1.55 }}>
+                          <b>Relais TROPIC</b> (GEC Alsthom / Alstom) — relais statique modulaire, un module par fonction. Pas de notice constructeur publiée : relever les réglages directement sur les molettes et commutateurs de chaque module.
+                          {actifs.length > 0 && (
+                            <div style={{ marginTop: 6 }}>
+                              {actifs.map((m) => (
+                                <div key={m.ref}>• <b>{m.ref}</b> : {m.fonction}{m.seuils.length ? ` → ANSI ${codesAnsiTropic(m).join(" / ")}` : ""}{m.deduit ? " (fonction déduite de la référence, à confirmer sur la plaque)" : ""}{m.inconnu ? " — fonction à relever sur la plaque" : ""}</div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                        {aCreer.length > 0 && (
+                          <button type="button" onClick={ajouterSeuils} style={{ ...btnGhost(BRAND.blue), marginTop: 8 }}>
+                            <Plus size={13} /> Ajouter les seuils correspondants ({aCreer.map((l) => l.split(" — ")[0]).join(", ")})
+                          </button>
+                        )}
+                      </Field>
+                    );
                   }
                   // Systèmes d'onduleurs : choix parmi les onduleurs du site (lien entre machines, by-pass externe).
                   if (f.key === "machinesParallele" || f.key === "onduleursRaccordes") {
@@ -19218,6 +19391,7 @@ function docxTableauSeuilsRelais(seuils) {
     const uReglage = (defs.find((d) => d.key === "reglage") || {}).unit || "A";
     const autres = defs.filter((d) => !["courbe", "type", "reglage", "tms"].includes(d.key) && f[d.key] !== "" && f[d.key] !== undefined && f[d.key] !== null)
       .map((d) => `${d.label} : ${f[d.key]}${d.unit ? " " + d.unit : ""}`);
+    if (String(f.reperesTropic || "").trim()) autres.push(f.reperesTropic);
     const fond = i % 2 === 1 ? { type: DOCX.ShadingType.CLEAR, fill: DOCX_ZEBRE } : undefined;
     const actif = String(f.etat || "").trim();
     return new DOCX.TableRow({ cantSplit: true, children: [
@@ -21909,6 +22083,11 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
   schema.sections.forEach((sec) => {
     if (isRelais && sec.key === "parametrage_relais") {
       elements.push(docxHeading(sec.title));
+      if (estRelaisTropic(eq.identification)) {
+        const mods = modulesTropicChoisis(eq.identification);
+        elements.push(docxNormeNote(`Relais TROPIC (GEC Alsthom / Alstom) : relais statique modulaire, un module par fonction${mods.length ? ` — modules : ${mods.map((m) => `${m.ref} (${m.fonction}${m.seuils.length ? `, ANSI ${codesAnsiTropic(m).join("/")}` : ""})`).join(" ; ")}` : ""}. Réglages relevés sur les modules (pas de notice constructeur publiée).`));
+        elements.push(docxSpacer(60));
+      }
       const seuils = eq.controles.parametrage_relais_seuils || [];
       if (seuils.length === 0) {
         elements.push(new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: "Aucun seuil paramétré", size: 18, color: "666666" })] }));
