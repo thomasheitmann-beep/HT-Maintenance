@@ -1843,7 +1843,7 @@ function OrganesGammePanel({ eq, update }) {
       return e;
     });
     const gardes = (eq.controles.organes_dynamique || []).filter((o) => o.label || Object.entries(o.fields || {}).some(([k, v]) => !k.endsWith("Unite") && String(v || "").trim()));
-    update({ ...eq, controles: { ...eq.controles, organes_dynamique: [...gardes, ...nouveaux] } });
+    update(repairEquipementControles({ ...eq, controles: { ...eq.controles, organes_dynamique: [...gardes, ...nouveaux] } }));
     setCoches({}); setTensions({}); setOuvert(false);
   };
   return (
@@ -2271,7 +2271,7 @@ const FUSIBLES = [
   C("fusion_fusibles", "Fusion fusibles"),
 ];
 const CONTROLES_DISJONCTEUR = [
-  C("moteur_rearmement", "Contrôle du moteur de réarmement"),
+  { ...C("moteur_rearmement", "Contrôle du moteur de réarmement", [F("courant", "Courant moteur", "A"), F("temps", "Temps de fonctionnement (réarmement)", "s")]), champsFacultatifs: true, avecImage: true },
   C("telecommande", "Contrôle de la télécommande"),
   C("contacts_position_disj", "Contrôle des contacts de position"),
   C("resistance_bobine_declenchement", "Résistances de la bobine de déclenchement", CHAMPS_BOBINE_DECLENCHEMENT),
@@ -3723,7 +3723,7 @@ const SCHEMAS = {
         C("essai_mx", "Ouverture électrique (bobine MX)"),
         C("essai_mn", "Déclenchement à manque de tension (bobine MN)"),
         C("essai_xf", "Fermeture électrique (bobine XF)"),
-        { ...C("essai_moteur", "Moteur de réarmement (MCH)", [F("temps", "Temps de réarmement", "s")]), champsFacultatifs: true },
+        C("essai_moteur", "Moteur de réarmement (MCH)"),
       ]},
       { key: "debrochage", title: "Châssis débrochable", items: [
         C("embrochage", "Manœuvre d'embrochage / débrochage"),
@@ -3785,6 +3785,7 @@ const SCHEMAS = {
         C("bouton_test_rearmement", "Test du bouton test / réarmement"),
       ]},
       { key: "organes", title: "Organes internes", items: [] },
+      { key: "manoeuvre_electrique", title: "Essais des organes de manœuvre", items: [C("fonctionnement_organes", "Fonctionnement des organes de manœuvre")] },
     ],
   },
   "Transformateur": buildTransformateurSchema({}),
@@ -4153,8 +4154,43 @@ const SECTION_MODULE_SVG = { key: "module_svg", title: "Module SVG (générateur
   C("svg_communication", "Communication / supervision"),
   { ...C("svg_usure", "Pièces d'usure du module (année du prochain remplacement, selon notice)", [F("ventProchain", "Ventilateurs", null), F("filtresProchain", "Filtres à air", null), F("condDCProchain", "Condensateurs du bus continu", null)]), champsFacultatifs: true },
 ]};
+// Bobines renseignées dans les organes (Mitop, à manque, ouverture, fermeture, déclencheur voltmétrique) : une mesure de
+// résistance par bobine dans « Contrôles du disjoncteur », à la place de la ligne générique « bobine de déclenchement ».
+const estOrganeBobine = (label) => /^(Bobine|Déclencheur voltmétrique)/i.test(String(label || "")) && !/retardateur/i.test(String(label || ""));
+const bobinesOrganes = (eq) => (eq.type === "Disjoncteur HTA" ? ((eq.controles && eq.controles.organes_dynamique) || []).filter((o) => o.label && estOrganeBobine(o.label)) : []);
+const cleBobine = (o) => `resistance_bobine_${o.id}`;
+const libelleBobine = (o) => { const f = o.fields || {}; const d = [f.modele, f.tension ? `${f.tension} V${f.type ? " " + ({ VCC: "CC", VCA: "CA", "VCC/VCA": "CA/CC" }[f.type] || f.type) : ""}` : ""].filter(Boolean).join(", "); return `Résistance — ${o.label}${d ? ` (${d})` : ""}`; };
+function getSchemaOrganes(eq, base) {
+  if (!base || !base.sections || !base.sections.some((x) => x.key === "controles_disjoncteur")) return base;
+  const bobines = bobinesOrganes(eq);
+  const moteur = eq.type === "Disjoncteur HTA" ? ((eq.controles && eq.controles.organes_dynamique) || []).find((o) => /^Moteur/i.test(o.label || "")) : null;
+  if (!bobines.length && !moteur) return base;
+  const sections = base.sections.map((sec) => {
+    if (sec.key !== "controles_disjoncteur") return sec;
+    const items = sec.items.flatMap((it) => {
+      if (it.key === "resistance_bobine_declenchement" && bobines.length) return bobines.map((o) => ({ ...C(cleBobine(o), libelleBobine(o), CHAMPS_BOBINE_DECLENCHEMENT), organeId: o.id }));
+      if (it.key === "moteur_rearmement" && moteur) { const d = texteOrganeRapport(moteur); return [{ ...it, label: `${it.label}${d ? ` (${d.split(" · Réf.")[0]})` : ""}` }]; }
+      return [it];
+    });
+    return { ...sec, items };
+  });
+  return { ...base, sections };
+}
+// Disjoncteur / interrupteur BT : contrôle de fonctionnement (état + action, sans mesure) de chaque organe renseigné, contacts exclus.
+const TYPES_FONCTIONNEMENT_ORGANES = ["Disjoncteur BT", "Interrupteur BT"];
+const organesManoeuvreBT = (eq) => (TYPES_FONCTIONNEMENT_ORGANES.includes(eq.type) ? ((eq.controles && eq.controles.organes_dynamique) || []).filter((o) => o.label && !estOrganeContact(o.label)) : []);
+const cleFonctionnementOrgane = (o) => `fonctionnement_organe_${o.id}`;
+const libelleFonctionnementOrgane = (o) => { const f = o.fields || {}; const d = [f.modele, f.tension ? `${f.tension} V${f.type ? " " + ({ VCC: "CC", VCA: "CA", "VCC/VCA": "CA/CC" }[f.type] || f.type) : ""}` : ""].filter(Boolean).join(", "); return `Fonctionnement — ${o.label}${d ? ` (${d})` : ""}`; };
+// Anciennes lignes fixes du disjoncteur BT → organe correspondant (reprise de l'état et de l'action).
+const ANCIENS_ESSAIS_ORGANES_BT = [["essai_mx", /^(Bobine d'ouverture|Déclencheur voltmétrique)/i], ["essai_mn", /à manque/i], ["essai_xf", /fermeture/i], ["essai_moteur", /^Moteur/i]];
+function getSchemaOrganesBT(eq, base) {
+  if (!base || !TYPES_FONCTIONNEMENT_ORGANES.includes(eq.type)) return base;
+  const orgs = organesManoeuvreBT(eq);
+  if (!orgs.length) return base;
+  return { ...base, sections: base.sections.map((sec) => (sec.key !== "manoeuvre_electrique" ? sec : { ...sec, items: orgs.map((o) => ({ ...C(cleFonctionnementOrgane(o), libelleFonctionnementOrgane(o)), organeId: o.id })) })) };
+}
 function getSchema(eq) {
-  const base0 = getSchemaBase(eq);
+  const base0 = getSchemaOrganesBT(eq, getSchemaOrganes(eq, getSchemaBase(eq)));
   // Relais TROPIC (rack de modules) : choix des modules installés, juste après la référence du relais.
   let base = base0;
   if (base0 && TYPES_AVEC_RELAIS.includes(eq.type) && estRelaisTropic(eq.identification) && base0.identification.some((f) => f.key === "referenceRelais") && !base0.identification.some((f) => f.key === "modulesTropic")) {
@@ -4455,6 +4491,34 @@ function repairEquipementControles(eq) {
   const ancienBypass = eq?.identification?.moduleBypass;
   if (ancienBypass === "Séparé (module dédié)" || ancienBypass === "Intégré à chaque module de puissance") {
     eq = { ...eq, identification: { ...eq.identification, moduleBypass: ancienBypass.startsWith("Intégré") ? LISTE_BYPASS_MODULES[1] : LISTE_BYPASS_MODULES[0] } };
+  }
+  // Disjoncteur HTA : ancienne mesure « bobine de déclenchement » reprise sur la première bobine de déclenchement des organes.
+  if (eq?.type === "Disjoncteur HTA") {
+    const bob = bobinesOrganes(eq);
+    const cd = eq.controles && eq.controles.controles_disjoncteur;
+    const ancien = cd && cd.resistance_bobine_declenchement;
+    const rempli = (v) => v && v.fields && ["rd", "rn"].some((k) => String(v.fields[k] ?? "").trim() !== "");
+    const cible = bob.find((o) => !/fermeture/i.test(o.label)) || bob[0];
+    if (cible && rempli(ancien) && !bob.some((o) => rempli(cd[cleBobine(o)]))) {
+      eq = { ...eq, controles: { ...eq.controles, controles_disjoncteur: { ...cd, [cleBobine(cible)]: JSON.parse(JSON.stringify(ancien)) } } };
+    }
+  }
+  // Disjoncteur BT : état / action des anciens essais fixes (MX, MN, XF, moteur) repris sur l'organe correspondant.
+  if (eq?.type === "Disjoncteur BT") {
+    const me = eq.controles && eq.controles.manoeuvre_electrique;
+    if (me) {
+      const maj = { ...me };
+      const utilises = new Set();
+      ANCIENS_ESSAIS_ORGANES_BT.forEach(([cle, re]) => {
+        const v = me[cle];
+        if (!v || ((v.etat || "Conforme") === "Conforme" && !String(v.action || "").trim())) return;
+        const o = organesManoeuvreBT(eq).find((x) => re.test(x.label) && !utilises.has(x.id));
+        if (!o || maj[cleFonctionnementOrgane(o)]) return;
+        utilises.add(o.id);
+        maj[cleFonctionnementOrgane(o)] = { action: v.action || "", etat: v.etat || "Conforme", fields: {} };
+      });
+      eq = { ...eq, controles: { ...eq.controles, manoeuvre_electrique: maj } };
+    }
   }
   // Onduleur : anciennes configurations → configuration + by-pass statique.
   if (eq?.type === "Onduleur") {
@@ -16360,7 +16424,7 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
                 <DynamicListPanel
                   title="Organes internes"
                   entries={eq.controles.organes_dynamique || []}
-                  onChange={(entries) => update({ ...eq, controles: { ...eq.controles, organes_dynamique: entries } })}
+                  onChange={(entries) => update(repairEquipementControles({ ...eq, controles: { ...eq.controles, organes_dynamique: entries } }))}
                   typeOptions={LISTE_TYPE_ORGANE_DYNAMIQUE}
                   fieldDefs={champsOrgane}
                   withActionEtat={false}
@@ -16550,6 +16614,7 @@ function printFieldParts(item, value) {
   (item.fields || []).forEach((f) => {
     if (f.key === "realise") return; // sa présence même dans le rapport indique déjà que c'est réalisé
     if (f.visibleSi && !f.visibleSi(fields)) return; // champ conditionnel masqué (ex. conformité d'un matériel absent)
+    if (f.key === "tolPct" && numOf(fields.rd) === null && numOf(fields.rn) === null) return; // écart admis seul (bobine non mesurée) : sans intérêt
     if (f.key === "aide") return; // aide technicien (couple de serrage indicatif) : utile en saisie, pas dans le rapport — seule la valeur de couple renseignée par le technicien doit y figurer
     const unitKey = f.unitFrom ? f.unitFrom + "Unite" : f.key + "Unite";
     const unit = f.unit ? fields[unitKey] || f.unit : "";
@@ -22632,6 +22697,20 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
     if (courbeAvecFichiers) { elements.push(...docxCourbeDeclenchement(eq, sec.title)); courbeIntegree = true; }
     const t = sectionEtat ? docxControlTableCompact(rows) : docxControlTable(rows); // sections « État » sur deux colonnes, les autres ligne par ligne
     if (t) elements.push(t);
+    // Moteur de réarmement : courant et temps comparés à la visite précédente (écart > 20 % = usure / graissage à vérifier).
+    if (sec.key === "controles_disjoncteur") {
+      const fm = (eq.controles[sec.key].moteur_rearmement || {}).fields || {};
+      let prec = null; try { prec = equipementPrecedent(allSites, eq, rapportDate); } catch (e) { /* facultatif */ }
+      const pe = prec && prec.eq;
+      const fp = pe && pe.controles && pe.controles.controles_disjoncteur && pe.controles.controles_disjoncteur.moteur_rearmement ? pe.controles.controles_disjoncteur.moteur_rearmement.fields || {} : {};
+      const notes = [["courant", "Courant moteur", "A"], ["temps", "Temps de fonctionnement du moteur", "s"]].map(([k, lib, u]) => {
+        const v = numOf(fm[k]), w = numOf(fp[k]);
+        if (v === null || w === null || !w) return null;
+        const ec = ((v - w) / w) * 100;
+        return `${lib} : ${String(v).replace(".", ",")} ${u} contre ${String(w).replace(".", ",")} ${u} à la visite de ${moisAnneeVisite(prec.date)} (${ec >= 0 ? "+" : ""}${Math.round(ec)} %)${Math.abs(ec) > 20 ? " — écart significatif : vérifier le mécanisme (usure, graissage, ressorts)" : ""}.`;
+      }).filter(Boolean);
+      notes.forEach((n) => elements.push(docxNormeNote((/écart significatif/.test(n) ? "⚠ " : "") + n), docxSpacer(40)));
+    }
     // Images jointes aux mesures de temps (copie d'écran de l'analyseur…) : sous le tableau, avec leur légende.
     itemsAffiches.filter((it) => it.avecImage).forEach((it) => {
       const ph = ((eq.controles[sec.key][it.key] || {}).photos || []).filter((x) => x && x.dataUrl);
