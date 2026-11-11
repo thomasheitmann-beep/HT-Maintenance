@@ -15795,6 +15795,14 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
                 </Select>
               </Field>
             </div>
+            <div style={{ maxWidth: 260 }}>
+              <Field label="Délai conseillé (plan d'actions)">
+                <Select value={eq.delaiConseille || ""} onChange={(e) => update({ ...eq, delaiConseille: e.target.value })}>
+                  <option value="">Automatique (selon l'état)</option>
+                  {DELAIS_CONSEILLES.map((d) => <option key={d} value={d}>{d}</option>)}
+                </Select>
+              </Field>
+            </div>
           </div>
           {schema.identification.length > 0 && (
             <div style={{ marginBottom: 16 }} onPaste={(e) => { const f = imageDuPressePapiers(e); if (f) { e.preventDefault(); photoEquipementDepuisFichier(f).then((p) => update({ ...eq, photoEquipement: p })).catch(() => {}); } }}>
@@ -19180,10 +19188,12 @@ function virguleDecimale(t) {
 async function ensureDocx() {
   if (!DOCX) {
     const mod = await import("docx");
+    // Police Arial écrite sur chaque texte : Pages (Mac / iPhone) ignore la police par défaut du document et affichait du Times.
     class TextRunFr extends mod.TextRun {
       constructor(o) {
-        if (typeof o === "string") super(virguleDecimale(o));
-        else if (o && typeof o.text === "string") super({ ...o, text: virguleDecimale(o.text) });
+        if (typeof o === "string") super({ text: virguleDecimale(o), font: "Arial" });
+        else if (o && typeof o.text === "string") super({ font: "Arial", ...o, text: virguleDecimale(o.text) });
+        else if (o && typeof o === "object") super({ font: "Arial", ...o });
         else super(o);
       }
     }
@@ -19223,15 +19233,15 @@ const docxAucuneBordure = () => ({ style: DOCX.BorderStyle.NONE, size: 0, color:
 const docxToutesAucune = () => { const a = docxAucuneBordure(); return { top: a, bottom: a, left: a, right: a }; };
 const docxMiniParagraphe = () => new DOCX.Paragraph({ spacing: { before: 0, after: 0 }, children: [new DOCX.TextRun({ text: "", size: 4 })] });
 // Carte : fond clair ou blanc, filet de couleur en haut, petit libellé en capitales puis valeur en gras.
-function docxCarte({ label, valeur, couleur, taille = 30, sousTexte, fond = DOCX_WHITE, filet = "haut" }, largeur) {
+function docxCarte({ label, valeur, couleur, taille = 30, sousTexte, fond = DOCX_WHITE, filet = "haut", compact = false }, largeur) {
   const a = docxAucuneBordure();
   const trait = { style: DOCX.BorderStyle.SINGLE, size: filet === "gauche" ? 48 : 36, color: couleur };
   return new DOCX.TableCell({
     width: { size: largeur, type: DOCX.WidthType.DXA }, shading: { type: DOCX.ShadingType.CLEAR, fill: fond },
-    margins: { top: 190, bottom: 210, left: filet === "gauche" ? 300 : 260, right: 200 }, verticalAlign: DOCX.VerticalAlign.CENTER,
+    margins: { top: 190, bottom: 210, left: compact ? 170 : filet === "gauche" ? 300 : 260, right: compact ? 100 : 200 }, verticalAlign: DOCX.VerticalAlign.CENTER,
     borders: filet === "gauche" ? { top: a, bottom: a, left: trait, right: a } : { top: trait, bottom: a, left: a, right: a },
     children: [
-      new DOCX.Paragraph({ spacing: { after: 50 }, children: [new DOCX.TextRun({ text: String(label || "").toUpperCase(), bold: true, size: 15, color: "8B96A3", characterSpacing: 30 })] }),
+      new DOCX.Paragraph({ spacing: { after: 50 }, children: [new DOCX.TextRun({ text: String(label || "").toUpperCase(), bold: true, size: compact ? 14 : 15, color: "66717E", characterSpacing: compact ? 0 : 30 })] }),
       new DOCX.Paragraph({ spacing: { after: 0 }, children: [new DOCX.TextRun({ text: String(valeur === undefined || valeur === null || valeur === "" ? "—" : valeur), bold: true, size: taille, color: DOCX_DARK })] }),
       ...(sousTexte ? [new DOCX.Paragraph({ spacing: { before: 50, after: 0 }, children: [new DOCX.TextRun({ text: sousTexte, size: 17, color: "5A6573" })] })] : []),
     ],
@@ -19320,10 +19330,10 @@ function docxCarteRemarques({ titre = "", lien = "", etat = "", constats = [], p
   const W = [4800, 4800];
   const fond = { type: DOCX.ShadingType.CLEAR, fill: "FAFBFC" };
   const etiquette = (t, couleur) => new DOCX.Paragraph({ keepNext: true, spacing: { before: 60, after: 90 }, border: { bottom: { style: DOCX.BorderStyle.SINGLE, size: 6, color: couleur, space: 3 } },
-    children: [new DOCX.TextRun({ text: t, bold: true, size: 15, color: couleur, characterSpacing: 30 })] });
-  const puce = (t, symbole, couleurSymbole) => new DOCX.Paragraph({ spacing: { before: 0, after: 80, line: 280 }, indent: { left: 300, hanging: 300 },
-    children: [new DOCX.TextRun({ text: symbole, bold: true, size: 19, color: couleurSymbole }), new DOCX.TextRun({ text: "\u00A0\u00A0" + finPhrase(t), size: 19, color: DOCX_DARK })] });
-  const vide = (t) => new DOCX.Paragraph({ spacing: { after: 40 }, children: [new DOCX.TextRun({ text: t, size: 19, italics: true, color: "8B96A3" })] });
+    children: [new DOCX.TextRun({ text: t, bold: true, size: 16, color: couleur, characterSpacing: 30 })] });
+  const puce = (t, symbole, couleurSymbole) => new DOCX.Paragraph({ spacing: { before: 0, after: 80, line: 288 }, indent: { left: 300, hanging: 300 },
+    children: [new DOCX.TextRun({ text: symbole, bold: true, size: 20, color: couleurSymbole }), new DOCX.TextRun({ text: "\u00A0\u00A0" + finPhrase(t), size: 20, color: DOCX_DARK })] });
+  const vide = (t) => new DOCX.Paragraph({ spacing: { after: 40 }, children: [new DOCX.TextRun({ text: t, size: 20, italics: true, color: "66717E" })] });
   const ligneTitre = titre ? [new DOCX.Paragraph({ keepNext: true, spacing: { before: 0, after: 60 }, children: [
     lien ? new DOCX.InternalHyperlink({ anchor: lien, children: [new DOCX.TextRun({ text: titre, bold: true, size: 21, color: DOCX_DARK })] }) : new DOCX.TextRun({ text: titre, bold: true, size: 21, color: DOCX_DARK }),
   ] })] : [];
@@ -19332,13 +19342,13 @@ function docxCarteRemarques({ titre = "", lien = "", etat = "", constats = [], p
     new DOCX.TextRun({ text: "\u00A0\u00A0●\u00A0", bold: true, size: 15, color: teinte.barre, shading: { type: DOCX.ShadingType.CLEAR, fill: teinte.fond, color: "auto" } }),
     new DOCX.TextRun({ text: (rang < 0 ? String(etat || "").toUpperCase() : teinte.etiquette) + "\u00A0\u00A0", bold: true, size: 15, color: teinte.texte, characterSpacing: 10, shading: { type: DOCX.ShadingType.CLEAR, fill: teinte.fond, color: "auto" } }),
   ] })] : [];
-  const libres = autres.map((t) => new DOCX.Paragraph({ spacing: { after: 80, line: 280 }, children: [new DOCX.TextRun({ text: t, size: 19, color: DOCX_DARK })] }));
-  const gauche = [...ligneTitre, ...libres, etiquette("CONSTATS", "5A6573"), ...(constats.length ? constats.map((t) => puce(t, "•", "8B96A3")) : [vide("Aucune remarque particulière.")])];
+  const libres = autres.map((t) => new DOCX.Paragraph({ spacing: { after: 80, line: 288 }, children: [new DOCX.TextRun({ text: t, size: 20, color: DOCX_DARK })] }));
+  const gauche = [...ligneTitre, ...libres, etiquette("CONSTATS", "4A5563"), ...(constats.length ? constats.map((t) => puce(t, "•", "66717E")) : [vide("Aucune remarque particulière.")])];
   const pucePreco = (t) => {
     const m = String(t).match(/^(.*?)\s*—\s*Prioritaire\.?$/i);
     if (!m) return puce(t, "→", teinte.barre);
-    return new DOCX.Paragraph({ spacing: { before: 0, after: 80, line: 280 }, indent: { left: 300, hanging: 300 }, children: [
-      new DOCX.TextRun({ text: "→", bold: true, size: 19, color: teinte.barre }), new DOCX.TextRun({ text: "\u00A0\u00A0" + finPhrase(m[1]) + " ", size: 19, color: DOCX_DARK }),
+    return new DOCX.Paragraph({ spacing: { before: 0, after: 80, line: 288 }, indent: { left: 300, hanging: 300 }, children: [
+      new DOCX.TextRun({ text: "→", bold: true, size: 20, color: teinte.barre }), new DOCX.TextRun({ text: "\u00A0\u00A0" + finPhrase(m[1]) + " ", size: 20, color: DOCX_DARK }),
       new DOCX.TextRun({ text: "PRIORITAIRE", bold: true, size: 15, color: "C0392B", characterSpacing: 10 })] });
   };
   const droite = [...lignePastille, etiquette("NOS PRÉCONISATIONS", teinte.texte), ...(preconisations.length ? preconisations.map(pucePreco) : [vide("Aucune action nécessaire.")])];
@@ -19390,9 +19400,10 @@ function docxEncartSynthese(lignes, teinte) {
     })] })],
   });
 }
-function docxSyntheseSiteStructuree(texte, site) {
+// Données de la synthèse du site (paragraphe général + un bloc constats / préconisations par équipement, du plus
+// critique au conforme) — partagées entre le plan d'actions et les cartes « Détail par équipement ».
+function donneesSyntheseSite(texte, site) {
   const p = parserSyntheseSite(texte);
-  const out = [];
   const equipements = (site && site.equipements) || [];
   const titreDe = (e) => `${e.type}${nomEquipementSite(e, site) ? " (" + nomEquipementSite(e, site) + ")" : ""}`;
   const equipementDuTitre = (titre) => equipements.find((e) => titreDe(e) === titre) || equipements.find((e) => titre && titre.startsWith(e.type) && e.identification && e.identification.repere && titre.includes(e.identification.repere));
@@ -19403,42 +19414,187 @@ function docxSyntheseSiteStructuree(texte, site) {
   // Paragraphe général généré automatiquement (non réécrit à la main) : toujours remis à jour.
   const generaleAuto = p.generale.length && /^(Lors de cette intervention de maintenance préventive|Aucun équipement n'a été renseigné)/i.test(p.generale[0]);
   const generale = generaleAuto ? auto.generale : p.generale;
+  // Remarques : celles du texte de synthèse (éventuellement retouchées à la main), sinon celles de la fiche équipement.
+  const blocDe = (liste, eq) => liste.find((b) => b.titre && equipementDuTitre(b.titre) === eq);
+  const utilises = new Set();
+  const blocs = [...equipements]
+    .map((eq, i) => ({ eq, i }))
+    .sort((a, b) => ((RANK_OF[b.eq.etatFinal] ?? 0) - (RANK_OF[a.eq.etatFinal] ?? 0)) || (a.i - b.i))
+    .map(({ eq }) => {
+      const b = blocDe(p.equipements, eq) || blocDe(auto.equipements, eq);
+      if (b) utilises.add(b);
+      if (b) return { ...b, titre: titreDe(eq), eq };
+      if ((RANK_OF[eq.etatFinal] ?? 0) < 0) return { titre: titreDe(eq), eq, autres: [], constats: [eq.etatFinal === "Non présent" ? "Équipement non présent sur le site." : "La maintenance de cet équipement n'a pas pu être réalisée."], preconisations: [eq.etatFinal === "Non présent" ? "Aucune action nécessaire." : "Maintenance à planifier lors d'une prochaine intervention."] };
+      return { titre: titreDe(eq), eq, autres: [], constats: [], preconisations: [] };
+    })
+    .map((b) => ({ ...b,
+      constats: (b.constats || []).filter((t) => !/^Aucune remarque particulière\.?$/i.test(t)),
+      preconisations: (b.preconisations || []).filter((t) => !/^Aucune action nécessaire\.?$/i.test(t)),
+      autres: b.autres || [] }));
+  // Blocs du texte qui ne correspondent plus à aucun équipement (titre modifié à la main) : conservés à la fin.
+  p.equipements.filter((b) => !utilises.has(b) && !equipementDuTitre(b.titre)).forEach((b) => blocs.push({ ...b, autres: b.autres || [], eq: null }));
+  return { generale, blocs };
+}
+// Plan d'actions : une ligne par préconisation, triée par priorité. Délai : choix du technicien sur la fiche
+// équipement (« Délai conseillé »), sinon automatique — défaillant → immédiat, dégradé → sous 3 mois, sinon → prochaine visite.
+// Les défauts corrigés sur place ne produisent pas de préconisation : ils n'apparaissent donc pas ici.
+const DELAIS_CONSEILLES = ["Immédiat", "Sous 1 mois", "Sous 3 mois", "Sous 6 mois", "Sous 1 an", "Prochaine visite"];
+const PRIORITES_PLAN = {
+  3: { etiquette: "PRIORITAIRE", delai: "Immédiat", rang: 2 },
+  2: { etiquette: "À PLANIFIER", delai: "Sous 3 mois", rang: 1 },
+  1: { etiquette: "À SURVEILLER", delai: "Prochaine visite", rang: 0 },
+};
+function lignesPlanActions(donnees) {
+  const lignes = [];
+  (donnees.blocs || []).forEach((b, ordre) => {
+    const rangEq = b.eq ? (RANK_OF[b.eq.etatFinal] ?? 0) : 0;
+    b.preconisations.forEach((t, k) => {
+      const m = String(t).match(/^(.*?)\s*—\s*Prioritaire\.?$/i);
+      const aSurveiller = /^surveiller\b|à surveiller|(lors de |à )la prochaine (visite|maintenance|intervention)/i.test(m ? m[1] : t);
+      const niveau = (m || rangEq >= 2) ? 3 : (rangEq === 1 && !aSurveiller) ? 2 : 1;
+      const delai = (b.eq && b.eq.delaiConseille) || PRIORITES_PLAN[niveau].delai;
+      lignes.push({ niveau, delai, action: finPhrase(m ? m[1] : t), bloc: b, ordre, k });
+    });
+  });
+  return lignes.sort((a, b) => (b.niveau - a.niveau) || (a.ordre - b.ordre) || (a.k - b.k));
+}
+function docxPlanActions(donnees, site) {
+  const lignes = lignesPlanActions(donnees);
+  const W = [1600, 2700, 3800, 1500];
+  const a = docxAucuneBordure();
+  const filet = { style: DOCX.BorderStyle.SINGLE, size: 4, color: "E2E6EB" };
+  const cell = (largeur, enfants, o = {}) => new DOCX.TableCell({ width: { size: largeur, type: DOCX.WidthType.DXA }, margins: o.marges || { top: 90, bottom: 90, left: 120, right: 100 }, verticalAlign: DOCX.VerticalAlign.CENTER,
+    shading: o.fond ? { type: DOCX.ShadingType.CLEAR, fill: o.fond } : undefined, borders: { top: a, left: o.barre ? { style: DOCX.BorderStyle.SINGLE, size: 36, color: o.barre } : a, right: a, bottom: filet }, children: enfants });
+  const para = (runs, o = {}) => new DOCX.Paragraph({ alignment: o.centre ? DOCX.AlignmentType.CENTER : undefined, spacing: { before: 0, after: 0, line: 264 }, children: runs });
+  const out = [docxHeading("Plan d'actions", 360, 160)];
+  if (!lignes.length) {
+    out.push(docxTable({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: [TABLE_WIDTH], borders: { ...docxToutesAucune(), insideHorizontal: a, insideVertical: a },
+      rows: [new DOCX.TableRow({ cantSplit: true, children: [new DOCX.TableCell({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, shading: { type: DOCX.ShadingType.CLEAR, fill: "EAF6EF" }, margins: { top: 160, bottom: 160, left: 260, right: 200 },
+        borders: { top: a, bottom: a, right: a, left: { style: DOCX.BorderStyle.SINGLE, size: 48, color: DOCX_GREEN } },
+        children: [para([new DOCX.TextRun({ text: "✓  Aucune action à prévoir : ", bold: true, size: 20, color: "0F8A5F" }), new DOCX.TextRun({ text: "aucune préconisation n'a été émise lors de cette intervention.", size: 20, color: DOCX_DARK })])] })] })] }));
+    return out;
+  }
+  const entete = new DOCX.TableRow({ tableHeader: true, cantSplit: true, children: ["Priorité", "Équipement", "Action préconisée", "Délai conseillé"].map((t, i) => new DOCX.TableCell({
+    width: { size: W[i], type: DOCX.WidthType.DXA }, margins: CELL_MARGINS_ENTETE, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_ENTETE }, borders: { top: a, bottom: a, left: a, right: a },
+    children: [para([new DOCX.TextRun({ text: t.toUpperCase(), bold: true, size: 15, color: DOCX_WHITE, characterSpacing: 20 })], { centre: i === 0 || i === 3 })] })) });
+  const rows = lignes.map((l, idx) => {
+    const p = PRIORITES_PLAN[l.niveau], t = teinteSyntheseRang(p.rang);
+    const eq = l.bloc.eq, nom = eq ? nomEquipementSite(eq, site) : "";
+    const titreEq = eq ? eq.type : (l.bloc.titre || "—");
+    const runTitre = new DOCX.TextRun({ text: titreEq, bold: true, size: 18, color: DOCX_DARK });
+    const zebre = idx % 2 ? DOCX_ZEBRE : undefined;
+    return new DOCX.TableRow({ cantSplit: true, children: [
+      cell(W[0], [para([new DOCX.TextRun({ text: p.etiquette, bold: true, size: 15, color: t.texte, characterSpacing: 10 })], { centre: true })], { fond: t.fond, barre: t.barre }),
+      cell(W[1], [para([eq ? new DOCX.InternalHyperlink({ anchor: docxBookmarkId(eq), children: [runTitre] }) : runTitre]), ...(nom ? [para([new DOCX.TextRun({ text: nom, size: 16, color: "5A6573" })])] : [])], { fond: zebre }),
+      cell(W[2], [para([new DOCX.TextRun({ text: l.action, size: 18, color: DOCX_DARK })])], { fond: zebre }),
+      cell(W[3], [para([new DOCX.TextRun({ text: l.delai, bold: l.niveau === 3, size: 18, color: l.niveau === 3 ? "C0392B" : DOCX_DARK })], { centre: true })], { fond: zebre }),
+    ] });
+  });
+  out.push(docxTable({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: W, borders: { ...docxToutesAucune(), insideHorizontal: a, insideVertical: a }, rows: [entete, ...rows] }));
+  out.push(new DOCX.Paragraph({ spacing: { before: 80, after: 0 }, children: [new DOCX.TextRun({ text: "Délais conseillés : défaillant → immédiat, dégradé → sous 3 mois, point à surveiller → prochaine visite (sauf délai précisé par le technicien). Cliquez sur un équipement pour ouvrir sa fiche.", size: 15, italics: true, color: "5A6573" })] }));
+  return out;
+}
+// « Comment lire ce rapport » : légende des états, puis glossaire limité aux termes réellement présents dans ce rapport.
+const GLOSSAIRE_RAPPORT = [
+  { terme: "HTA / BT", def: "haute tension A (de 1 à 50 kV) / basse tension (jusqu'à 1 000 V en alternatif).", re: /\bHTA\b|\bBT\b/ },
+  { terme: "Codes ANSI (50/51, 50N/51N, 67N…)", def: "numérotation internationale des fonctions de protection : maximum de courant phase (50/51), terre (50N/51N), directionnelle (67/67N).", re: /\bANSI\b|\b5[01]N?\b|\b67N?\b|relais de protection|seuils? de protection/i },
+  { terme: "TC / TT", def: "transformateurs de courant / de tension : ils réduisent les grandeurs du réseau pour alimenter protections et comptages.", re: /\bTC\b|transformateurs? de courant/ },
+  { terme: "MITOP", def: "bobine de déclenchement à faible consommation, commandée directement par le relais de protection.", re: /mitop/i },
+  { terme: "Résistance de contact", def: "mesure en micro-ohms (µΩ) de la qualité du contact électrique de chaque pôle ; une valeur élevée signale usure ou desserrage.", re: /résistance de contact|résistances de contact|micro-?ohm/i },
+  { terme: "Temps de manœuvre / synchronisme", def: "durée d'ouverture ou de fermeture des pôles ; le synchronisme est l'écart entre le pôle le plus rapide et le plus lent.", re: /temps de manœuvre|temps d'ouverture|temps de fermeture|synchronisme/i },
+  { terme: "Isolement, PI / DAR", def: "résistance d'isolement en MΩ ; PI et DAR sont des indices de qualité de l'isolement (rapports des mesures à 10 min / 1 min et 60 s / 30 s).", re: /\bPI\b|\bDAR\b|isolement/i },
+  { terme: "Rapport de transformation", def: "rapport des tensions primaire / secondaire du transformateur ; un écart révèle un défaut d'enroulement ou de prise.", re: /rapport de transformation/i },
+  { terme: "Analyse d'huile (CEI 60422)", def: "contrôle en laboratoire de l'huile isolante (eau, acidité, rigidité diélectrique…) classé selon les seuils de la norme CEI 60422.", re: /analyse d'huile|rigidité diélectrique|60422/i },
+  { terme: "Thermographie", def: "recherche d'échauffements anormaux à l'aide d'une caméra infrarouge, installation en charge.", re: /thermograph/i },
+  { terme: "THDu / THDi", def: "taux de distorsion harmonique de la tension / du courant : mesure de la « pollution » du réseau par les harmoniques.", re: /\bTHD/i },
+  { terme: "cos φ / kvar", def: "facteur de puissance et puissance réactive ; la batterie de condensateurs compense la puissance réactive pour éviter les pénalités.", re: /cos\s?φ|facteur de puissance|kvar|batterie de compensation/i },
+  { terme: "Onduleur (ASI / UPS)", def: "alimentation sans interruption : la charge reste alimentée par les batteries en cas de coupure du réseau.", re: /onduleur|\bUPS\b|\bASI\b/i },
+  { terme: "By-pass statique / de maintenance", def: "chemin de secours qui alimente la charge sans passer par l'onduleur : automatique (statique) ou manuel, pour intervenir hors tension (maintenance).", re: /by-?pass/i },
+  { terme: "Autonomie", def: "durée pendant laquelle les batteries alimentent la charge seules, vérifiée par un essai de décharge.", re: /autonomie|essai de décharge|test de décharge/i },
+  { terme: "SF6", def: "gaz isolant et de coupure utilisé dans les appareils HTA ; sa pression est surveillée.", re: /\bSF6\b/i },
+  { terme: "VPIS", def: "indicateur de présence de tension intégré à la cellule HTA.", re: /\bVPIS\b|présence (de )?tension/i },
+  { terme: "Régime de neutre (TN, TT, IT)", def: "mode de raccordement du neutre et des masses à la terre, qui fixe le fonctionnement des protections contre les défauts.", re: /régime de neutre|régimes de neutre/i },
+];
+function texteGlossaireSite(site, donnees) {
+  const morceaux = [];
+  (site.equipements || []).forEach((eq) => {
+    morceaux.push(eq.type);
+    let schema = null;
+    try { schema = getSchema(eq); } catch (e) { schema = null; }
+    (schema && schema.sections || []).forEach((sec) => {
+      const valeurs = (eq.controles || {})[sec.key] || {};
+      (sec.items || []).forEach((item) => {
+        const v = valeurs[item.key];
+        const rempli = v && ((v.fields && Object.values(v.fields).some((x) => x !== "" && x !== null && x !== undefined && typeof x !== "object")) || (v.etat && v.etat !== "Non contrôlé") || (v.valeur));
+        if (rempli) morceaux.push(sec.title || "", item.label || "");
+      });
+    });
+  });
+  (site.locaux || []).forEach((l) => { if (texteRegimesNeutre(l)) morceaux.push("régime de neutre"); });
+  (donnees.blocs || []).forEach((b) => morceaux.push(...b.constats, ...b.preconisations, ...b.autres));
+  return morceaux.join(" \n ");
+}
+function docxCommentLire(site, donnees) {
+  const a = docxAucuneBordure();
+  const filet = { style: DOCX.BorderStyle.SINGLE, size: 4, color: "E2E6EB" };
+  const W = [3000, 6600];
+  const ligne = (gauche, droite, o = {}) => new DOCX.TableRow({ cantSplit: true, children: [
+    new DOCX.TableCell({ width: { size: W[0], type: DOCX.WidthType.DXA }, margins: { top: 70, bottom: 70, left: 140, right: 100 }, verticalAlign: DOCX.VerticalAlign.CENTER,
+      shading: o.fond ? { type: DOCX.ShadingType.CLEAR, fill: o.fond } : undefined,
+      borders: { top: a, right: a, bottom: filet, left: o.barre ? { style: DOCX.BorderStyle.SINGLE, size: 36, color: o.barre } : a }, children: [gauche] }),
+    new DOCX.TableCell({ width: { size: W[1], type: DOCX.WidthType.DXA }, margins: { top: 70, bottom: 70, left: 160, right: 100 }, verticalAlign: DOCX.VerticalAlign.CENTER,
+      borders: { top: a, right: a, left: a, bottom: filet }, children: [droite] }),
+  ] });
+  const p = (runs) => new DOCX.Paragraph({ spacing: { before: 0, after: 0, line: 260 }, children: runs });
+  const etats = [
+    [2, "DÉFAILLANT · PRIORITAIRE", "anomalie qui compromet la sécurité ou la continuité de service : remise en conformité rapide."],
+    [1, "DÉGRADÉ · À PLANIFIER", "anomalie sans danger immédiat : action à programmer."],
+    [0, "CONFORME", "aucune anomalie ; les éventuels points « à surveiller » sont revus à la prochaine visite."],
+    [-1, "NON RÉALISÉ · NON PRÉSENT", "contrôle impossible (accès, consignation…) ou équipement absent du site."],
+  ];
+  const lignesEtats = etats.map(([r, lib, def]) => { const t = teinteSyntheseRang(r); return ligne(p([new DOCX.TextRun({ text: lib, bold: true, size: 15, color: t.texte, characterSpacing: 10 })]), p([new DOCX.TextRun({ text: def, size: 18, color: DOCX_DARK })]), { fond: t.fond, barre: t.barre }); });
+  const corpus = texteGlossaireSite(site, donnees);
+  const termes = GLOSSAIRE_RAPPORT.filter((g) => g.re.test(corpus));
+  const lignesGlossaire = termes.map((g) => ligne(p([new DOCX.TextRun({ text: g.terme, bold: true, size: 17, color: DOCX_DARK })]), p([new DOCX.TextRun({ text: g.def.charAt(0).toUpperCase() + g.def.slice(1), size: 17, color: "3E4A5C" })])));
+  const sousTitre = (t) => new DOCX.Paragraph({ keepNext: true, spacing: { before: 160, after: 80 }, children: [new DOCX.TextRun({ text: t, bold: true, size: 20, color: DOCX_BLUE })] });
+  const tableau = (rows) => docxTable({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: W, borders: { ...docxToutesAucune(), insideHorizontal: a, insideVertical: a }, rows });
+  const out = [docxHeading("Comment lire ce rapport", 480, 140), docxBlocInsecable([sousTitre("États des équipements"), tableau(lignesEtats)])];
+  if (lignesGlossaire.length) out.push(sousTitre("Termes techniques employés dans ce rapport"), tableau(lignesGlossaire));
+  return out;
+}
+function docxSyntheseSiteStructuree(texte, site, donneesCalculees) {
+  const out = [];
+  const equipements = (site && site.equipements) || [];
+  const { generale, blocs } = donneesCalculees || donneesSyntheseSite(texte, site);
   if (generale.length) {
     const rangGlobal = overallRank(site); // même état global que le bandeau en tête du rapport
     out.push(docxEncartSynthese(generale, teinteSyntheseRang(rangGlobal)));
     out.push(docxSpacer(200));
   }
-  if (p.equipements.length || equipements.length) {
+  if (blocs.length || equipements.length) {
     out.push(new DOCX.Paragraph({ keepNext: true, spacing: { before: 160, after: 120 }, children: [new DOCX.TextRun({ text: "Détail par équipement", bold: true, size: 24, color: DOCX_BLUE })] }));
-    // Une ligne par équipement du site, du plus critique au conforme, chacune à la couleur de son
-    // état réel. Remarques : celles du texte de synthèse (éventuellement retouchées à la main), sinon
-    // celles de la fiche équipement, sinon une mention « aucune remarque ».
-    const blocDe = (liste, eq) => liste.find((b) => b.titre && equipementDuTitre(b.titre) === eq);
-    const utilises = new Set();
-    const blocs = [...equipements]
-      .map((eq, i) => ({ eq, i }))
-      .sort((a, b) => ((RANK_OF[b.eq.etatFinal] ?? 0) - (RANK_OF[a.eq.etatFinal] ?? 0)) || (a.i - b.i))
-      .map(({ eq }) => {
-        let b = blocDe(p.equipements, eq) || blocDe(auto.equipements, eq);
-        if (b) utilises.add(b);
-        if (b) return { ...b, titre: titreDe(eq), eq };
-        if ((RANK_OF[eq.etatFinal] ?? 0) < 0) return { titre: titreDe(eq), eq, autres: [], constats: [eq.etatFinal === "Non présent" ? "Équipement non présent sur le site." : "La maintenance de cet équipement n'a pas pu être réalisée."], preconisations: [eq.etatFinal === "Non présent" ? "Aucune action nécessaire." : "Maintenance à planifier lors d'une prochaine intervention."] };
-        return { titre: titreDe(eq), eq, autres: [], constats: ["Aucune remarque particulière."], preconisations: ["Aucune action nécessaire."] };
-      });
-    // Blocs du texte qui ne correspondent plus à aucun équipement (titre modifié à la main) : conservés à la fin.
-    p.equipements.filter((b) => !utilises.has(b) && !equipementDuTitre(b.titre)).forEach((b) => blocs.push({ ...b, eq: null }));
-    // Une carte par équipement (du plus critique au conforme), nom cliquable vers sa fiche dans le rapport.
-    blocs.forEach((e) => {
+    // Une carte par équipement AYANT des remarques (du plus critique au conforme), nom cliquable vers sa fiche.
+    // Les équipements conformes sans aucune remarque sont regroupés sur une seule ligne verte.
+    const sansRemarque = (b) => b.eq && (RANK_OF[b.eq.etatFinal] ?? 0) === 0 && !b.constats.length && !b.preconisations.length && !b.autres.length;
+    const conformes = blocs.filter(sansRemarque);
+    blocs.filter((b) => !sansRemarque(b)).forEach((e) => {
       const eq = e.eq;
-      out.push(docxCarteRemarques({
-        titre: e.titre || "—", lien: eq ? docxBookmarkId(eq) : "", etat: eq ? eq.etatFinal : "Conforme",
-        constats: e.constats.filter((t) => !/^Aucune remarque particulière\.?$/i.test(t)),
-        preconisations: e.preconisations.filter((t) => !/^Aucune action nécessaire\.?$/i.test(t)),
-        autres: e.autres,
-      }));
+      out.push(docxCarteRemarques({ titre: e.titre || "—", lien: eq ? docxBookmarkId(eq) : "", etat: eq ? eq.etatFinal : "Conforme", constats: e.constats, preconisations: e.preconisations, autres: e.autres }));
       out.push(new DOCX.Paragraph({ spacing: { before: 0, after: 0, line: 160, lineRule: DOCX.LineRuleType ? DOCX.LineRuleType.EXACT : "exact" }, children: [new DOCX.TextRun({ text: "", size: 4 })] }));
     });
-    out.push(new DOCX.Paragraph({ spacing: { before: 100, after: 40 }, children: [new DOCX.TextRun({ text: "Code couleur :  rouge = prioritaire (remise en conformité rapide)  ·  orange = à planifier / à surveiller  ·  vert = conforme, aucune action.", size: 16, italics: true, color: "8B96A3" })] }));
+    if (conformes.length) {
+      const a = docxAucuneBordure();
+      const runs = [new DOCX.TextRun({ text: `✓  Équipement${conformes.length > 1 ? "s" : ""} conforme${conformes.length > 1 ? "s" : ""}, sans remarque (${conformes.length}) : `, bold: true, size: 20, color: "0F8A5F" })];
+      conformes.forEach((b, i) => {
+        if (i) runs.push(new DOCX.TextRun({ text: "  ·  ", size: 20, color: "5A6573" }));
+        runs.push(new DOCX.InternalHyperlink({ anchor: docxBookmarkId(b.eq), children: [new DOCX.TextRun({ text: b.titre, size: 20, color: DOCX_DARK })] }));
+      });
+      runs.push(new DOCX.TextRun({ text: ".", size: 20, color: DOCX_DARK }));
+      out.push(docxTable({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: [TABLE_WIDTH], borders: { ...docxToutesAucune(), insideHorizontal: a, insideVertical: a },
+        rows: [new DOCX.TableRow({ cantSplit: true, children: [new DOCX.TableCell({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, shading: { type: DOCX.ShadingType.CLEAR, fill: "EAF6EF" },
+          margins: { top: 150, bottom: 150, left: 260, right: 200 }, borders: { top: a, bottom: a, right: a, left: { style: DOCX.BorderStyle.SINGLE, size: 48, color: DOCX_GREEN } },
+          children: [new DOCX.Paragraph({ spacing: { before: 0, after: 0, line: 280 }, children: runs })] })] })] }));
+    }
   }
   return out;
 }
@@ -19528,7 +19684,7 @@ function docxEncartEtat(titre, etat) {
   const commun = { shading: fond, border: bordure, indent: { left: 200, right: 0 } };
   return [
     new DOCX.Paragraph({ ...commun, keepNext: true, spacing: { before: 0, after: 0, line: 300 }, children: [new DOCX.TextRun({ text: " " + String(titre || "").toUpperCase(), bold: true, size: 15, color: "6B7785", characterSpacing: 30 })] }),
-    new DOCX.Paragraph({ ...commun, spacing: { before: 0, after: 0, line: 420 }, children: [new DOCX.TextRun({ text: " " + String(etat || "—").toUpperCase(), bold: true, size: 30, color: c ? c.texte : DOCX_DARK, characterSpacing: 20 })] }),
+    new DOCX.Paragraph({ ...commun, spacing: { before: 0, after: 0, line: 420 }, children: [new DOCX.TextRun({ text: "\u00A0" + String(etat || "—").toUpperCase() + "\u00A0", bold: true, size: 30, color: c ? c.texte : DOCX_DARK, characterSpacing: 20, shading: { type: DOCX.ShadingType.CLEAR, fill: c ? c.fond : DOCX_LIGHT, color: "auto" } })] }),
   ];
 }
 function docxNormeNote(texte) {
@@ -19661,6 +19817,13 @@ function docxPrevisionRemplacementTable(lignes) {
   ] }));
   return docxTable({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: largeurs, rows: [enTete, ...corps] });
 }
+// Contrôle en anomalie (dégradé / défaillant) : fond teinté et barre de couleur à gauche de la ligne — repérable d'un coup d'œil.
+function teinteAnomalieDocx(etat) {
+  const r = RANK_OF[etat] ?? 0;
+  if (r >= 2) return { fond: "FDF1F0", barre: DOCX_RED };
+  if (r === 1) return { fond: "FDF3E3", barre: DOCX_ORANGE };
+  return null;
+}
 function docxControlRow(label, detail, action, etat, isAlternate, garderAvecSuite = false) {
   // Valeur vide ou faite d'espaces : aucune seconde ligne (sinon le libellé remonte en haut de la rangée, décalé par rapport à la pastille d'état).
   detail = Array.isArray(detail) ? detail.filter((p) => p && String(p.text ?? "").trim()) : (typeof detail === "string" ? detail.trim() : detail);
@@ -19676,7 +19839,7 @@ function docxControlRow(label, detail, action, etat, isAlternate, garderAvecSuit
     // l'écran. Un séparateur gris clair entre chaque valeur, jamais coloré lui-même.
     const runs = [];
     detail.forEach((p, i) => {
-      if (i > 0) runs.push(new DOCX.TextRun({ text: "  ·  ", size: 16, color: "999999", italics: true }));
+      if (i > 0) runs.push(new DOCX.TextRun({ text: "  ·  ", size: 16, color: "707070", italics: true }));
       const couleur = p.etat === "bad" ? "C0392B" : p.etat === "warning" ? "B5730A" : p.etat === "ok" ? "0F8A5F" : DOCX_DARK;
       const t = String(p.text), k = t.indexOf(" : ");
       if (k > 0) {
@@ -19691,9 +19854,11 @@ function docxControlRow(label, detail, action, etat, isAlternate, garderAvecSuit
   if (action) children.push(new DOCX.Paragraph({ keepNext: garderAvecSuite, children: [new DOCX.TextRun({ text: "Action : " + action, size: 16, color: "666666" })] }));
   // Fond gris très clair en alternance une ligne sur deux — casse la monotonie du blanc uniforme
   // sans nuire à la lisibilité ni gêner l'impression.
-  const fondAlterne = isAlternate ? DOCX_ZEBRE : undefined;
+  const anomalie = teinteAnomalieDocx(etat);
+  const fondAlterne = anomalie ? anomalie.fond : isAlternate ? DOCX_ZEBRE : undefined;
   return new DOCX.TableRow({ children: [
-    new DOCX.TableCell({ width: { size: 7600, type: DOCX.WidthType.DXA }, columnSpan: 4, margins: marges, verticalAlign: DOCX.VerticalAlign.CENTER, shading: fondAlterne ? { type: DOCX.ShadingType.CLEAR, fill: fondAlterne } : undefined, children }),
+    new DOCX.TableCell({ width: { size: 7600, type: DOCX.WidthType.DXA }, columnSpan: 4, margins: marges, verticalAlign: DOCX.VerticalAlign.CENTER, shading: fondAlterne ? { type: DOCX.ShadingType.CLEAR, fill: fondAlterne } : undefined,
+      ...(anomalie ? { borders: { left: { style: DOCX.BorderStyle.SINGLE, size: 36, color: anomalie.barre } } } : {}), children }),
     etat
       ? new DOCX.TableCell({
           width: { size: 2000, type: DOCX.WidthType.DXA }, margins: marges, verticalAlign: DOCX.VerticalAlign.CENTER,
@@ -19752,9 +19917,34 @@ function estDetailDense(detail) {
   const parts = detail.filter((p) => p && String(p.text ?? "").trim());
   return parts.length >= 1 && parts.some((p) => String(p.text).includes(" : ")); // dès qu'il y a un résultat : grille Libellé | Valeur
 }
+// Mini-barres (une par phase) à côté des mesures : hauteur proportionnelle à la valeur, couleur de l'état de chaque mesure,
+// zone de tolérance en vert quand elle est connue. Indique « où regarder » sans agrandir le tableau.
+function miniBarresPng(valeurs, tol, reference = null) {
+  try {
+    const vs = valeurs.filter((x) => x.v !== null && isFinite(x.v));
+    if (vs.length < 2 || typeof document === "undefined") return null;
+    const W = 54, H = 15, K = 4;
+    const c = document.createElement("canvas"); c.width = W * K; c.height = H * K;
+    const g = c.getContext("2d"); g.scale(K, K);
+    const max = Math.max(...vs.map((x) => Math.abs(x.v)), tol ? tol.max : 0, reference || 0) * 1.12 || 1;
+    const y = (v) => H - 1 - (Math.max(0, v) / max) * (H - 2);
+    g.fillStyle = "#EEF1F4"; g.fillRect(0, 0, W, H);
+    if (tol && tol.max > tol.min) { g.fillStyle = "rgba(15,138,95,0.18)"; g.fillRect(0, y(tol.max), W, y(tol.min) - y(tol.max)); }
+    const n = valeurs.length, bw = (W - 6) / n;
+    valeurs.forEach((x, i) => {
+      if (x.v === null || !isFinite(x.v)) return;
+      g.fillStyle = x.etat === "bad" ? "#C0392B" : x.etat === "warning" ? "#B5730A" : x.etat === "ok" ? "#0F8A5F" : "#5B6B7D";
+      g.fillRect(3 + i * bw + bw * 0.18, y(x.v), bw * 0.64, H - 1 - y(x.v));
+    });
+    if (reference) { g.strokeStyle = "#0A5DA8"; g.lineWidth = 0.7; g.setLineDash([1.5, 1.2]); g.beginPath(); g.moveTo(0, y(reference)); g.lineTo(W, y(reference)); g.stroke(); }
+    if (tol) { g.strokeStyle = "#C0392B"; g.lineWidth = 0.6; g.setLineDash([1.5, 1.2]); g.beginPath(); g.moveTo(0, y(tol.max)); g.lineTo(W, y(tol.max)); g.stroke(); }
+    return { dataUrl: c.toDataURL("image/png"), w: W, h: H };
+  } catch (e) { return null; }
+}
 function docxControlRowsDense(label, detail, action, etat, isAlternate, garderAvecSuite = false) {
   const parts = detail.filter((p) => p && String(p.text ?? "").trim());
-  const fond = isAlternate ? { type: DOCX.ShadingType.CLEAR, fill: DOCX_ZEBRE } : undefined;
+  const anomalie = teinteAnomalieDocx(etat);
+  const fond = anomalie ? { type: DOCX.ShadingType.CLEAR, fill: anomalie.fond } : isAlternate ? { type: DOCX.ShadingType.CLEAR, fill: DOCX_ZEBRE } : undefined;
   const couleurEtat = (e) => (e === "bad" ? DOCX_RED : e === "warning" ? DOCX_ORANGE : e === "ok" ? DOCX_GREEN : DOCX_DARK);
   const courts = [], longs = [];
   const decoupe = parts.map((p) => { const t = String(p.text), k = t.indexOf(" : "); return { cle: k > 0 ? t.slice(0, k) : "", val: k > 0 ? t.slice(k + 3) : t, etat: p.etat }; });
@@ -19775,6 +19965,14 @@ function docxControlRowsDense(label, detail, action, etat, isAlternate, garderAv
           runs.push(new DOCX.TextRun({ text: phases.every((x) => unite(x.val) === u) ? nombre(q.val) : q.val, size: 16, bold: true, color: couleurEtat(q.etat) }));
         });
         if (u && phases.every((x) => unite(x.val) === u)) runs.push(new DOCX.TextRun({ text: " " + u, size: 15, color: "6B7785" }));
+        const nb = (v) => numOf(String(v).replace(",", "."));
+        const seuilMax = decoupe.find((x) => /^Seuil( max| maximum)?/i.test(x.cle) && unite(x.val) === u && nb(nombre(x.val)) !== null);
+        const reference = decoupe.find((x) => /référence/i.test(x.cle) && unite(x.val) === u && nb(nombre(x.val)) !== null);
+        const tol = tolMin && tolMax && nb(nombre(tolMin.val)) !== null && nb(nombre(tolMax.val)) !== null ? { min: nb(nombre(tolMin.val)), max: nb(nombre(tolMax.val)) }
+          : seuilMax ? { min: 0, max: nb(nombre(seuilMax.val)) } : null;
+        const barres = phases.length >= 2 && phases.every((x) => unite(x.val) === u) ? miniBarresPng(phases.map((q) => ({ v: nb(nombre(q.val)), etat: q.etat })), tol, reference ? nb(nombre(reference.val)) : null) : null;
+        const imgBarres = barres ? docxImage(barres.dataUrl, barres.w, barres.h) : null;
+        if (imgBarres) runs.push(new DOCX.TextRun({ text: "     ", size: 16 }), imgBarres);
         longs.unshift({ cle: "Mesures", runs });
       }
       if (p === tolMin) {
@@ -19821,7 +20019,8 @@ function docxControlRowsDense(label, detail, action, etat, isAlternate, garderAv
   longs.forEach((p) => paragraphes.push(ligneSeule(p)));
   if (action) paragraphes.push(ligneSeule({ cle: "Action", val: action }));
   return [new DOCX.TableRow({ cantSplit: true, children: [
-    new DOCX.TableCell({ width: { size: 7600, type: DOCX.WidthType.DXA }, columnSpan: 4, margins: { top: 110, bottom: 90, left: 130, right: 120 }, shading: fond, children: paragraphes }),
+    new DOCX.TableCell({ width: { size: 7600, type: DOCX.WidthType.DXA }, columnSpan: 4, margins: { top: 110, bottom: 90, left: 130, right: 120 }, shading: fond,
+      ...(anomalie ? { borders: { left: { style: DOCX.BorderStyle.SINGLE, size: 36, color: anomalie.barre } } } : {}), children: paragraphes }),
     new DOCX.TableCell({ width: { size: 2000, type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, verticalAlign: DOCX.VerticalAlign.CENTER, shading: fond, children: [etat ? docxPastilleEtat(etat, { garder: garderAvecSuite }) : docxMiniParagraphe()] }),
   ] })];
 }
@@ -19849,7 +20048,7 @@ function docxControlTableCompact(rows) {
     if (Array.isArray(detail) && detail.length) {
       const runs = [];
       detail.forEach((p, i) => {
-        if (i > 0) runs.push(new DOCX.TextRun({ text: "  ·  ", size: 15, color: "999999", italics: true }));
+        if (i > 0) runs.push(new DOCX.TextRun({ text: "  ·  ", size: 15, color: "707070", italics: true }));
         const couleur = p.etat === "bad" ? "C0392B" : p.etat === "warning" ? "B5730A" : p.etat === "ok" ? "0F8A5F" : "666666";
         runs.push(new DOCX.TextRun({ text: p.text, size: 15, color: couleur, italics: true, ...(p.etat === "bad" ? { bold: true } : {}) }));
       });
@@ -19878,6 +20077,32 @@ function docxControlTableCompact(rows) {
       ? [cellLabel(l.pleine, L[0] + L[1] + L[2], 3, false, z), cellEtat(l.pleine[3], L[3], z)]
       : [cellLabel(l.paire[0], L[0], 1, false, z), cellEtat(l.paire[0][3], L[1], z), cellLabel(l.paire[1], L[2], 1, true, z), l.paire[1] ? cellEtat(l.paire[1][3], L[3], z) : new DOCX.TableCell({ width: { size: L[3], type: DOCX.WidthType.DXA }, shading: z ? { type: DOCX.ShadingType.CLEAR, fill: z } : undefined, borders: { top: aucune, bottom: aucune, left: aucune, right: aucune }, children: [docxMiniParagraphe()] })] }); }),
   });
+}
+// Tableau de contrôles « automatique » : les suites d'au moins deux contrôles conformes sans mesure ni action sont placées
+// deux par ligne (version compacte) ; les mesures et les anomalies gardent leur ligne pleine largeur. Retourne une liste d'éléments.
+function docxControlesAuto(rows) {
+  if (!rows.length) return [];
+  const sansDetail = (r) => !(Array.isArray(r[1]) ? r[1].some((p) => p && String(p.text ?? "").trim()) : String(r[1] || "").trim());
+  const simple = (r) => sansDetail(r) && !String(r[2] || "").trim() && (RANK_OF[r[3]] ?? 0) <= 0;
+  const groupes = [];
+  rows.forEach((r) => {
+    const s = simple(r), g = groupes[groupes.length - 1];
+    if (g && g.simple === s) g.rows.push(r); else groupes.push({ simple: s, rows: [r] });
+  });
+  // Un contrôle simple isolé reste dans le tableau ligne par ligne voisin.
+  const fusion = [];
+  groupes.forEach((g) => {
+    const prec = fusion[fusion.length - 1];
+    if (g.simple && g.rows.length < 2) { if (prec && !prec.simple) prec.rows.push(...g.rows); else fusion.push({ simple: false, rows: [...g.rows] }); return; }
+    if (!g.simple && prec && !prec.simple) prec.rows.push(...g.rows); else fusion.push({ simple: g.simple, rows: [...g.rows] });
+  });
+  const out = [];
+  fusion.forEach((g, i) => {
+    if (i) out.push(new DOCX.Paragraph({ spacing: { before: 0, after: 0, line: 120, lineRule: DOCX.LineRuleType ? DOCX.LineRuleType.EXACT : "exact" }, children: [new DOCX.TextRun({ text: "", size: 4 })] }));
+    const t = g.simple ? docxControlTableCompact(g.rows) : docxControlTable(g.rows);
+    if (t) out.push(t);
+  });
+  return out;
 }
 function docxControlTable(rows, garderAvecSuite = false) {
   if (rows.length === 0) return null;
@@ -19995,7 +20220,7 @@ function docxBuildMesuresTable(rows, headers, enteteDerniere = "Synthèse", mono
 }
 // Section de mesures sans aucune valeur saisie : une phrase plutôt qu'un titre seul ou un tableau de tirets.
 function docxAucuneMesure() {
-  return new DOCX.Paragraph({ spacing: { before: 20, after: 60 }, children: [new DOCX.TextRun({ text: "Aucune mesure relevée.", italics: true, size: 17, color: "8B96A3" })] });
+  return new DOCX.Paragraph({ spacing: { before: 20, after: 60 }, children: [new DOCX.TextRun({ text: "Aucune mesure relevée.", italics: true, size: 17, color: "66717E" })] });
 }
 // Mesures « avec » et « sans » compensation strictement identiques (au moins deux valeurs numériques comparées).
 function mesuresCompensationIdentiques(eq) {
@@ -20168,6 +20393,31 @@ function docxSyntheseRow(label, etat, bookmarkId, alterne = false, aPlanifier = 
 // permet d'intercaler des équipements de types différents dans l'ordre physique du terrain.
 function equipementsTries(equipements) {
   return [...(equipements || [])].sort((a, b) => (a.ordre ?? 0) - (b.ordre ?? 0));
+}
+// Équipement « parent » dans le rapport : un équipement rattaché suit son parent, sur la même page s'il reste de la place.
+//  - Analyse d'huile et Jeu de barre / Gaine à barre → leur transformateur (repère « transformateur associé / amont ») ;
+//  - By-pass externe → le premier onduleur raccordé ; Bilan de puissance → son disjoncteur BT, sinon son transformateur.
+function parentRapportEquipement(eq, eqs) {
+  const id = (eq && eq.identification) || {};
+  const parRepere = (r, types) => { const k = String(r || "").trim().toLowerCase(); return k ? (eqs || []).find((e) => e !== eq && types.includes(e.type) && repereNorm(e) === k) || null : null; };
+  if (eq.type === "Analyse d'huile" || eq.type === "Jeu de barre / Gaine à barre") return parRepere(id.transformateurAssocie, ["Transformateur"]);
+  if (eq.type === "By-pass externe") { const r = listeRepere(id.onduleursRaccordes)[0]; return r ? parRepere(r, ["Onduleur", "Onduleur simplifié"]) : null; }
+  if (eq.type === "Bilan de puissance") return (eqs || []).find((e) => e !== eq && e.id === id.disj_id) || (eqs || []).find((e) => e !== eq && e.id === id.transfo_id) || null;
+  return null;
+}
+// Ordre des équipements dans le rapport : ordre saisi, chaque équipement rattaché placé juste après son parent.
+function equipementsOrdreRapport(equipements) {
+  const tries = equipementsTries(equipements);
+  const parent = new Map(tries.map((e) => [e.id, parentRapportEquipement(e, tries)]));
+  // Pas de boucle : un équipement dont la chaîne de parents revient sur lui-même reste à sa place.
+  const racine = (e) => { const vus = new Set([e.id]); let p = parent.get(e.id); while (p) { if (vus.has(p.id)) return null; vus.add(p.id); if (!parent.get(p.id)) return p; p = parent.get(p.id); } return e; };
+  const enfants = new Map();
+  tries.forEach((e) => { const p = parent.get(e.id); if (p && racine(e)) { if (!enfants.has(p.id)) enfants.set(p.id, []); enfants.get(p.id).push(e); } });
+  const out = [], places = new Set();
+  const placer = (e) => { if (places.has(e.id)) return; places.add(e.id); out.push(e); (enfants.get(e.id) || []).forEach(placer); };
+  tries.forEach((e) => { const p = parent.get(e.id); if (!(p && racine(e))) placer(e); });
+  tries.forEach(placer); // filet de sécurité : rien n'est oublié
+  return out.map((e) => ({ eq: e, rattache: !!(parent.get(e.id) && racine(e)) }));
 }
 // Nom affiché d'un équipement : repère sans espaces parasites ; à défaut (fiche Sécurité…), le nom du local.
 function nomEquipementSite(eq, site) {
@@ -21223,7 +21473,7 @@ function docxBlocTauxCharge(eq, allSites) {
     const base = libelleBaseTauxCharge(eq);
     elements.push(new DOCX.Paragraph({ keepNext: true, spacing: { before: 0, after: 40 }, children: [
       new DOCX.TextRun({ text: `Taux de charge calculé — L1 : ${tc.t1 ?? "—"}% · L2 : ${tc.t2 ?? "—"}% · L3 : ${tc.t3 ?? "—"}%`, bold: true, size: 17, color: DOCX_DARK }),
-      new DOCX.TextRun({ text: `   (${base})`, size: 15, color: "8B96A3", italics: true }),
+      new DOCX.TextRun({ text: `   (${base})`, size: 15, color: "66717E", italics: true }),
     ] }));
     const graphTC = genererGraphiqueTauxCharge([tc.t1, tc.t2, tc.t3], ["L1", "L2", "L3"]);
     const dimTC = graphTC ? dimensionsPng(graphTC) : null;
@@ -21240,7 +21490,7 @@ function docxBlocTauxCharge(eq, allSites) {
       children: [new DOCX.Paragraph({ keepNext: true, alignment: i === 0 ? DOCX.AlignmentType.LEFT : DOCX.AlignmentType.CENTER, children: [new DOCX.TextRun({ text: h, bold: true, size: 17, color: DOCX_WHITE })] })],
     })) });
     const corps = histo.map((p) => new DOCX.TableRow({ cantSplit: true, children: [
-      new DOCX.TableCell({ width: { size: largeurs[0], type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, children: [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: fmtDate(p.date), size: 18, bold: p.courante, color: DOCX_DARK }), ...(p.courante ? [new DOCX.TextRun({ text: "  (cette visite)", size: 14, color: "8B96A3", italics: true })] : [])] })] }),
+      new DOCX.TableCell({ width: { size: largeurs[0], type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, children: [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: fmtDate(p.date), size: 18, bold: p.courante, color: DOCX_DARK }), ...(p.courante ? [new DOCX.TextRun({ text: "  (cette visite)", size: 14, color: "66717E", italics: true })] : [])] })] }),
       ...[p.t1, p.t2, p.t3, p.valeur].map((v, i) => { const c = couleur(v); return new DOCX.TableCell({
         width: { size: largeurs[i + 1], type: DOCX.WidthType.DXA }, margins: CELL_MARGINS, shading: { type: DOCX.ShadingType.CLEAR, fill: c.fond },
         children: [new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, children: [new DOCX.TextRun({ text: v === null || v === undefined ? "—" : `${v}%`, bold: i === 3, size: 18, color: c.texte })] })],
@@ -22341,6 +22591,51 @@ function docxCourbeDecharge(eq) {
 // Saut de page avant un nouvel équipement : paragraphe d'un point de haut (marque de paragraphe comprise), pour qu'il tienne toujours
 // en bas de la page précédente — sinon, quand cette page est pleine, il glisse sur la suivante et son saut crée une page blanche.
 function docxDebutPage() { return new DOCX.Paragraph({ spacing: { before: 0, after: 0, line: 20, lineRule: DOCX.LineRuleType ? DOCX.LineRuleType.EXACT : "exact" }, run: { size: 2 }, children: [new DOCX.TextRun({ text: "", size: 2 }), new DOCX.PageBreak()] }); }
+// Fiche d'identité : UNE seule rangée de tableau (jamais coupée entre deux pages, Pages compris) —
+// panneau sombre à gauche (symbole, type, repère, état), identification sur deux colonnes, photo à droite.
+// Uniquement des fonds de cellule et des surlignages de texte : Pages ignore les fonds de paragraphe et les taquets de tabulation.
+function docxFicheIdentite(titre, bookmarkId, etat, typeEquipement, lignes, photo, sousTitre = "") {
+  const a = docxAucuneBordure();
+  const couleur = etat ? docxEtatColor(etat) : DOCX_BLUE;
+  const img = docxImagePhotoEquipement(photo);
+  const WP = img ? 2850 : 0, WS = 2400, WI = Math.floor((TABLE_WIDTH - WS - WP) / 2);
+  const W = [WS, WI, TABLE_WIDTH - WS - WP - WI, ...(img ? [WP] : [])];
+  const symbole = typeEquipement ? symboleEquipementPng(typeEquipement) : null;
+  const imgSymbole = symbole ? docxImage(symbole, 26, 26) : null;
+  const numericId = nextBookmarkNumericId();
+  const [type, ...reste] = String(titre || "").split(" — ");
+  const runType = new DOCX.TextRun({ text: String(type).toUpperCase(), bold: true, color: DOCX_WHITE, size: 20, characterSpacing: 14 });
+  const contenuTitre = bookmarkId ? [new DOCX.BookmarkStart(bookmarkId, numericId), runType, new DOCX.BookmarkEnd(numericId)] : [runType];
+  const panneau = [
+    ...(imgSymbole ? [new DOCX.Paragraph({ keepNext: true, spacing: { before: 0, after: 100 }, children: [imgSymbole] })] : []),
+    new DOCX.Paragraph({ keepNext: true, spacing: { before: 0, after: 60, line: 260 }, children: contenuTitre }),
+    ...(reste.length ? [new DOCX.Paragraph({ keepNext: true, spacing: { before: 0, after: 140, line: 260 }, children: [new DOCX.TextRun({ text: reste.join(" — "), bold: true, color: DOCX_SILVER, size: 19 })] })] : []),
+    ...(etat ? [new DOCX.Paragraph({ keepNext: true, spacing: { before: 60, after: 0 }, children: [new DOCX.TextRun({ text: "  " + String(etat).toUpperCase() + "  ", bold: true, size: 16, color: DOCX_WHITE, characterSpacing: 20, shading: { type: DOCX.ShadingType.CLEAR, fill: couleur, color: "auto" } })] })] : []),
+  ];
+  // Identification : un couple par paragraphe (libellé au-dessus, valeur en gras), réparti sur deux colonnes équilibrées.
+  const L = (lignes || []).filter((l) => String(l[1] ?? "").trim());
+  const champ = (l) => [
+    new DOCX.Paragraph({ keepNext: true, spacing: { before: 0, after: 10 }, children: [new DOCX.TextRun({ text: String(l[0]), size: 14, color: "5A6573" })] }),
+    new DOCX.Paragraph({ keepNext: true, spacing: { before: 0, after: 90, line: 250 }, children: [new DOCX.TextRun({ text: String(l[1]), size: 17, bold: true, color: DOCX_DARK })] }),
+  ];
+  const poids = (l) => 1 + Math.floor(String(l[1]).length * 92 / (WI - 260));
+  const total = L.reduce((t, l) => t + poids(l), 0);
+  let cumul = 0, coupe = L.length;
+  for (let k = 0; k < L.length; k++) { if (cumul >= total / 2) { coupe = k; break; } cumul += poids(L[k]); }
+  const colA = L.slice(0, coupe), colB = L.slice(coupe);
+  const vide = [new DOCX.Paragraph({ children: [] })];
+  const cell = (largeur, enfants, o = {}) => new DOCX.TableCell({ width: { size: largeur, type: DOCX.WidthType.DXA }, margins: o.marges || { top: 160, bottom: 100, left: 180, right: 120 },
+    verticalAlign: o.centre ? DOCX.VerticalAlign.CENTER : DOCX.VerticalAlign.TOP, shading: o.fond ? { type: DOCX.ShadingType.CLEAR, fill: o.fond } : undefined,
+    borders: { top: a, bottom: a, right: a, left: o.barre ? { style: DOCX.BorderStyle.SINGLE, size: 48, color: o.barre } : a }, children: enfants && enfants.length ? enfants : vide });
+  const cellules = [
+    cell(W[0], panneau, { fond: DOCX_DARK, barre: couleur, marges: { top: 200, bottom: 200, left: 220, right: 160 } }),
+    cell(W[1], colA.flatMap(champ), { fond: DOCX_LIGHT }),
+    cell(W[2], colB.flatMap(champ), { fond: DOCX_LIGHT }),
+    ...(img ? [cell(W[3], [new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, spacing: { before: 0, after: 0 }, children: [img] })], { fond: DOCX_LIGHT, centre: true, marges: { top: 100, bottom: 100, left: 80, right: 80 } })] : []),
+  ];
+  return docxTable({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: W, borders: { ...docxToutesAucune(), insideHorizontal: a, insideVertical: a },
+    rows: [new DOCX.TableRow({ cantSplit: true, children: cellules })] });
+}
 function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
   // Filet de sécurité : quelle que soit l'origine des données (ancien format, migration, edge case),
   // on s'assure que la structure de contrôles est complète avant de générer le rapport — évite un
@@ -22351,28 +22646,19 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
     return [docxEquipHeader((eq.type || "Équipement") + (nomEquipementSite(eq, { locaux }) ? " — " + nomEquipementSite(eq, { locaux }) : ""), docxBookmarkId(eq), eq.etatFinal, eq.type), docxSpacer(40),
       new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: "Type d'équipement non reconnu — données non affichées.", italics: true, color: "C0392B", size: 18 })] }), docxSpacer()];
   }
-  const localNom = (locaux || []).find((l) => l.id === eq.localId);
-  const elements = [docxEquipHeader(eq.type + (nomEquipementSite(eq, { locaux }) ? " — " + nomEquipementSite(eq, { locaux }) : ""), docxBookmarkId(eq), eq.etatFinal, eq.type), docxSpacer(40)];
-  // Le local est une ligne du tableau d'identification, juste sous le nom / repère. Un équipement sans
-  // tableau d'identification (ex. « Sécurité ») garde l'ancienne mention discrète au-dessus.
+  // En-tête (nom, symbole, état) + identification compacte (deux couples par ligne) + photo : une seule rangée de tableau insécable.
   const libelleLocal = nomLocalEquipement(eq, locaux);
-  if (libelleLocal && !schema.identification.length) elements.push(new DOCX.Paragraph({ spacing: { after: 60 }, children: [new DOCX.TextRun({ text: "Local : " + libelleLocal, size: 16, color: "666666", italics: true })] }));
-  else elements.push(docxSpacer(40));
+  let lignesId = [];
   if (schema.identification.length) {
     const identificationAffichee = identificationBilanPuissanceAffichee(eq, allSites);
     const champsId = schema.identification.filter((f) => !champIdentificationMasque(eq, f.key));
-    const lignesId = champsId.map((f) => [f.label, formatIdentificationValue(identificationAffichee[f.key])]);
+    lignesId = champsId.map((f) => [f.label, formatIdentificationValue(identificationAffichee[f.key])]);
     if (libelleLocal) {
       const idxRepere = champsId.findIndex((f) => f.key === "repere");
       lignesId.splice(idxRepere >= 0 ? idxRepere + 1 : 0, 0, ["Local", libelleLocal]);
     }
-    const t = docxFieldTable(lignesId, eq.photoEquipement);
-    if (t) { elements.push(t); elements.push(docxSpacer()); }
-  } else if (eq.photoEquipement && eq.photoEquipement.dataUrl) {
-    // Type sans champ d'identification : la photo seule, centrée.
-    const imgSeule = docxImagePhotoEquipement(eq.photoEquipement);
-    if (imgSeule) { elements.push(new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, spacing: { after: 100 }, children: [imgSeule] })); elements.push(docxSpacer()); }
-  }
+  } else if (libelleLocal) lignesId = [["Local", libelleLocal]];
+  const elements = [docxFicheIdentite(eq.type + (nomEquipementSite(eq, { locaux }) ? " — " + nomEquipementSite(eq, { locaux }) : ""), docxBookmarkId(eq), eq.etatFinal, eq.type, lignesId, eq.photoEquipement), docxSpacer(160)];
   if (eq.type === "Transformateur" && eq.identification?.typeRefroidissement && DESCRIPTION_REFROIDISSEMENT_TRANSFO[eq.identification.typeRefroidissement]) {
     elements.push(docxNormeNote(`${eq.identification.typeRefroidissement} (CEI 60076-2) — ${DESCRIPTION_REFROIDISSEMENT_TRANSFO[eq.identification.typeRefroidissement]}`));
   }
@@ -22402,7 +22688,7 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
     const tablePrevision = docxPrevisionRemplacementTable(lignesEcheancesRemplacement(eq).map((l) => ({ ...l, type: l.client || l.famille || l.type })));
     elements.push(docxHeading("Prévision de remplacement des pièces", 520, 160));
     if (tablePrevision) {
-      elements.push(new DOCX.Paragraph({ keepNext: true, spacing: { before: 0, after: 100 }, children: [new DOCX.TextRun({ text: `Vert (✓) : pièce en bon état prévu, avant son échéance.  Orange (●) : année d'échéance — remplacement à faire cette année-là.  Rouge (!) : échéance dépassée (années suivantes, si la pièce n'est pas remplacée).  ${prevision.annees[0]} = année en cours.`, size: 15, color: "8B96A3", italics: true })] }));
+      elements.push(new DOCX.Paragraph({ keepNext: true, spacing: { before: 0, after: 100 }, children: [new DOCX.TextRun({ text: `Vert (✓) : pièce en bon état prévu, avant son échéance.  Orange (●) : année d'échéance — remplacement à faire cette année-là.  Rouge (!) : échéance dépassée (années suivantes, si la pièce n'est pas remplacée).  ${prevision.annees[0]} = année en cours.`, size: 15, color: "66717E", italics: true })] }));
       elements.push(tablePrevision);
       if (prevision.dansHorizon === 0) elements.push(new DOCX.Paragraph({ spacing: { after: 60 }, children: [new DOCX.TextRun({ text: `Aucun remplacement à prévoir d'ici fin ${prevision.annees[3]}.`, size: 18, bold: true, color: DOCX_GREEN })] }));
     } else {
@@ -22659,7 +22945,7 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
           const horsTol = iTheo !== null && toleranceState(g.fields.i1, Math.round(iTheo * 0.9 * 100) / 100, Math.round(iTheo * 1.1 * 100) / 100) === "bad";
           if (mesMono) elements.push(new DOCX.Paragraph({ spacing: { after: 6 }, children: [new DOCX.TextRun({ text: mesMono, size: 16, color: horsTol ? DOCX_ORANGE : "333333", bold: horsTol })] }));
         } else if (![g.fields.i1, g.fields.i2, g.fields.i3].some((v) => numOf(v) !== null)) {
-          elements.push(new DOCX.Paragraph({ spacing: { after: 6 }, children: [new DOCX.TextRun({ text: "Courants non mesurés.", italics: true, size: 16, color: "8B96A3" })] }));
+          elements.push(new DOCX.Paragraph({ spacing: { after: 6 }, children: [new DOCX.TextRun({ text: "Courants non mesurés.", italics: true, size: 16, color: "66717E" })] }));
         } else elements.push(docxPhaseTable([
           ["I (A)", g.fields.i1, g.fields.i2, g.fields.i3],
           ["C (µF, ×3 triangle)", c1, c2, c3],
@@ -22927,8 +23213,7 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
       });
       const custom = eq.controles[sec.key + "__custom"] || [];
       custom.forEach((c) => rowsMeca.push([c.label || "(action ajoutée)", "", c.action, c.etat]));
-      const tMeca = docxControlTable(rowsMeca);
-      if (tMeca) elements.push(tMeca);
+      elements.push(...docxControlesAuto(rowsMeca));
       elements.push(docxSpacer());
       return;
     }
@@ -22998,8 +23283,8 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
     }
     // Courbe de déclenchement : titre + image (+ phrase) d'un seul bloc, puis le tableau de référence.
     if (courbeAvecFichiers) { elements.push(...docxCourbeDeclenchement(eq, sec.title)); courbeIntegree = true; }
-    const t = sectionEtat ? docxControlTableCompact(rows) : docxControlTable(rows); // sections « État » sur deux colonnes, les autres ligne par ligne
-    if (t) elements.push(t);
+    if (sectionEtat) { const t = docxControlTableCompact(rows); if (t) elements.push(t); } // sections « État » sur deux colonnes
+    else elements.push(...docxControlesAuto(rows)); // les autres : conformes sans mesure deux par ligne, mesures et anomalies ligne par ligne
     // Moteur de réarmement : courant et temps comparés à la visite précédente (écart > 20 % = usure / graissage à vérifier).
     if (sec.key === "controles_disjoncteur") {
       const fm = (eq.controles[sec.key].moteur_rearmement || {}).fields || {};
@@ -23054,7 +23339,7 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
   // Encart « Synthèse de l'état » : liseré et fond à la couleur de l'état final de l'équipement.
   elements.push(docxSpacer(120));
   elements.push(...docxRemarquesEquipement(texteRemarquesRapport(eq, { allEquipements: equipementsDuSiteDe(eq, allSites), locaux, rapportDate }), eq.etatFinal, docxEncartEtat("Synthèse de l'état — à l'issue de la maintenance", eq.etatFinal)));
-  { const galerie = docxPhotosCoteACote(eq.photos, 200, 220); if (galerie) { elements.push(docxSpacer(160)); elements.push(galerie); } }
+  { const grille = docxGrillePhotos(eq.photos, { legendeDefaut: "" }); if (grille) { elements.push(docxSpacer(160)); elements.push(new DOCX.Paragraph({ keepNext: true, spacing: { before: 0, after: 80 }, children: [new DOCX.TextRun({ text: "Photos", bold: true, size: 18, color: DOCX_BLUE })] })); elements.push(grille); } }
 
   // Courbe de déclenchement (Disjoncteur BT) : normalement insérée dans sa propre section (voir la boucle
   // des sections ci-dessus). Repli : si cette section n'a pas été affichée (ex. niveau de maintenance qui
@@ -23093,7 +23378,7 @@ function docxFooterPagination() {
         spacing: { before: 40, after: 0 },
         children: [
           new DOCX.TextRun({ text: "HT MAINTENANCE", bold: true, color: DOCX_BLUE, size: 16, characterSpacing: 30 }),
-          new DOCX.TextRun({ text: "   ·   Maintenance électrique HTA / BT / Conversion d'énergie", color: "8B96A3", size: 14 }),
+          new DOCX.TextRun({ text: "   ·   Maintenance électrique HTA / BT / Conversion d'énergie", color: "66717E", size: 14 }),
           new DOCX.TextRun({ text: "\tPage ", size: 15, color: "5A6573" }),
           new DOCX.TextRun({ children: [DOCX.PageNumber.CURRENT], size: 15, color: "5A6573", bold: true }),
           new DOCX.TextRun({ text: " / ", size: 15, color: "5A6573" }),
@@ -23194,6 +23479,295 @@ async function resolvePhotosForDocx(obj) {
 }
 // Génère un fichier Word séparé regroupant l'ensemble des photos du site, classées par équipement
 // puis par contrôle d'origine (au lieu d'être dispersées dans le rapport principal).
+// ===== Navigation du rapport : ancres, sommaire, évolution, photos en grille =====
+// Ancre invisible (signet) devant une partie du rapport : cible des liens du sommaire.
+function docxAncre(id) {
+  const n = nextBookmarkNumericId();
+  return new DOCX.Paragraph({ keepNext: true, spacing: { before: 0, after: 0, line: 20, lineRule: DOCX.LineRuleType ? DOCX.LineRuleType.EXACT : "exact" }, children: [new DOCX.BookmarkStart(id, n), new DOCX.TextRun({ text: "", size: 2 }), new DOCX.BookmarkEnd(n)] });
+}
+// Photos en grille deux colonnes : plus grandes, légendées, une rangée insécable par paire.
+function docxGrillePhotos(photos, { largeur = 300, hauteur = 225, legendeDefaut = "" } = {}) {
+  const liste = (photos || []).filter((p) => p && p.dataUrl);
+  if (!liste.length) return null;
+  const a = docxAucuneBordure();
+  const L = [TABLE_WIDTH / 2, TABLE_WIDTH / 2];
+  const cellule = (p) => {
+    if (!p) return new DOCX.TableCell({ width: { size: L[0], type: DOCX.WidthType.DXA }, borders: { top: a, bottom: a, left: a, right: a }, children: [docxMiniParagraphe()] });
+    const { w, h } = dimensionsAdaptees(p, largeur, hauteur);
+    const img = docxImage(p.dataUrl, w, h);
+    const legende = String(p.caption || p.legende || legendeDefaut || "").trim();
+    return new DOCX.TableCell({ width: { size: L[0], type: DOCX.WidthType.DXA }, margins: { top: 80, bottom: 120, left: 80, right: 80 }, verticalAlign: DOCX.VerticalAlign.TOP, borders: { top: a, bottom: a, left: a, right: a }, children: [
+      new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, spacing: { before: 0, after: 60 }, children: img ? [img] : [] }),
+      ...(legende ? [new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, spacing: { before: 0, after: 0 }, children: [new DOCX.TextRun({ text: legende, size: 15, italics: true, color: "4A5563" })] })] : []),
+    ] });
+  };
+  const rows = [];
+  for (let i = 0; i < liste.length; i += 2) rows.push(new DOCX.TableRow({ cantSplit: true, children: [cellule(liste[i]), cellule(liste[i + 1])] }));
+  return docxTable({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: L, borders: { ...docxToutesAucune(), insideHorizontal: a, insideVertical: a }, rows });
+}
+// Évolution depuis la dernière visite : changements d'état (équipement et contrôles) et écarts de mesure importants.
+function lignesEvolutionSite(site, allSites) {
+  const date = (site.rapport && site.rapport.date) || "";
+  const lignes = [];
+  let datesPrec = new Set(), avecHistorique = 0;
+  equipementsTries(site.equipements).forEach((eq) => {
+    let prec = null; try { prec = equipementPrecedent(allSites, eq, date); } catch (e) { prec = null; }
+    if (!prec || !prec.eq) return;
+    avecHistorique++; if (prec.date) datesPrec.add(prec.date);
+    const pe = prec.eq, out = [];
+    const r = (x) => RANK_OF[x] ?? 0;
+    if (pe.etatFinal && eq.etatFinal && pe.etatFinal !== eq.etatFinal && r(pe.etatFinal) >= 0 && r(eq.etatFinal) >= 0) {
+      out.push({ texte: `État de l'équipement : ${pe.etatFinal} → ${eq.etatFinal}`, sens: r(eq.etatFinal) > r(pe.etatFinal) ? "pire" : "mieux", poids: 100 });
+    }
+    let schema = null; try { schema = getSchema(eq); } catch (e) { schema = null; }
+    const fr = (v) => String(Math.round(v * 100) / 100).replace(".", ",");
+    ((schema && schema.sections) || []).forEach((sec) => (sec.items || []).forEach((item) => {
+      const v = ((eq.controles || {})[sec.key] || {})[item.key], w = ((pe.controles || {})[sec.key] || {})[item.key];
+      if (!v || !w || typeof v !== "object" || typeof w !== "object") return;
+      // Plus grand écart relatif entre deux mesures numériques du même champ.
+      let ecart = null;
+      (item.fields || []).forEach((f) => {
+        const a = numOf((w.fields || {})[f.key]), b = numOf((v.fields || {})[f.key]);
+        if (a === null || b === null || !a || /année|annee|date/i.test(f.label || f.key)) return;
+        const pct = ((b - a) / Math.abs(a)) * 100;
+        if (!ecart || Math.abs(pct) > Math.abs(ecart.pct)) ecart = { f, a, b, pct };
+      });
+      const mesure = ecart ? `${ecart.f.label && !/^valeur$/i.test(ecart.f.label) ? ecart.f.label + " " : ""}${fr(ecart.a)} → ${fr(ecart.b)}${ecart.f.unit ? " " + ecart.f.unit : ""}` : "";
+      if (w.etat && v.etat && w.etat !== v.etat && r(w.etat) >= 0 && r(v.etat) >= 0) {
+        out.push({ texte: `${item.label} : ${w.etat.toLowerCase()} → ${v.etat.toLowerCase()}${mesure ? " (" + mesure + ")" : ""}`, sens: r(v.etat) > r(w.etat) ? "pire" : "mieux", poids: 50 + Math.abs(r(v.etat) - r(w.etat)) });
+      } else if (ecart && Math.abs(ecart.pct) >= 30 && Math.abs(ecart.b - ecart.a) > 1e-9) {
+        out.push({ texte: `${item.label} : ${mesure} (${ecart.pct > 0 ? "+" : ""}${Math.round(ecart.pct)} %)`, sens: "ecart", poids: Math.min(40, Math.abs(ecart.pct) / 10) });
+      }
+    }));
+    out.sort((x, y) => y.poids - x.poids).slice(0, 4).forEach((l, i) => lignes.push({ ...l, eq, premier: i === 0, datePrec: prec.date }));
+  });
+  return { lignes, avecHistorique, datesPrec: [...datesPrec].sort() };
+}
+function docxEvolution(site, allSites) {
+  const { lignes, avecHistorique, datesPrec } = lignesEvolutionSite(site, allSites);
+  if (!avecHistorique) return [];
+  const a = docxAucuneBordure(), filet = { style: DOCX.BorderStyle.SINGLE, size: 4, color: "E2E6EB" };
+  const titre = datesPrec.length === 1 ? `Évolution depuis la visite du ${dateFrIso(datesPrec[0])}` : "Évolution depuis la dernière visite";
+  const out = [docxAncre("som_evolution"), docxHeading(titre, 360, 160)];
+  if (!lignes.length) {
+    out.push(new DOCX.Paragraph({ spacing: { after: 80 }, children: [new DOCX.TextRun({ text: "Aucune évolution notable : les états et les mesures sont comparables à ceux de la visite précédente.", size: 18, color: DOCX_DARK })] }));
+    return out;
+  }
+  const W = [2700, 5100, 1800];
+  const cell = (i, enfants, o = {}) => new DOCX.TableCell({ width: { size: W[i], type: DOCX.WidthType.DXA }, margins: { top: 70, bottom: 70, left: 120, right: 100 }, verticalAlign: DOCX.VerticalAlign.CENTER,
+    shading: o.fond ? { type: DOCX.ShadingType.CLEAR, fill: o.fond } : undefined, borders: { top: a, left: a, right: a, bottom: o.sansFilet ? a : filet }, children: enfants });
+  const para = (runs, centre) => new DOCX.Paragraph({ alignment: centre ? DOCX.AlignmentType.CENTER : undefined, spacing: { before: 0, after: 0, line: 260 }, children: runs });
+  const TENDANCE = { pire: { t: "▲ dégradé", c: "C0392B", f: "FDF1F0" }, mieux: { t: "✓ amélioré", c: "0F8A5F", f: "EAF7F1" }, ecart: { t: "≈ à surveiller", c: "B5730A", f: "FDF3E3" } };
+  const entete = new DOCX.TableRow({ tableHeader: true, cantSplit: true, children: ["Équipement", "Évolution", "Tendance"].map((t, i) => new DOCX.TableCell({ width: { size: W[i], type: DOCX.WidthType.DXA }, margins: CELL_MARGINS_ENTETE, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_ENTETE }, borders: { top: a, bottom: a, left: a, right: a },
+    children: [para([new DOCX.TextRun({ text: t.toUpperCase(), bold: true, size: 15, color: DOCX_WHITE, characterSpacing: 20 })], i === 2)] })) });
+  const rows = lignes.map((l, k) => {
+    const tnd = TENDANCE[l.sens];
+    const suivantMeme = lignes[k + 1] && lignes[k + 1].eq === l.eq;
+    const nom = nomEquipementSite(l.eq, site);
+    const cEq = l.premier ? [para([new DOCX.InternalHyperlink({ anchor: docxBookmarkId(l.eq), children: [new DOCX.TextRun({ text: l.eq.type, bold: true, size: 17, color: DOCX_DARK })] })]), ...(nom ? [para([new DOCX.TextRun({ text: nom, size: 15, color: "5A6573" })])] : [])] : [docxMiniParagraphe()];
+    return new DOCX.TableRow({ cantSplit: true, children: [
+      cell(0, cEq, { sansFilet: suivantMeme }),
+      cell(1, [para([new DOCX.TextRun({ text: l.texte, size: 17, color: DOCX_DARK })])]),
+      cell(2, [para([new DOCX.TextRun({ text: tnd.t, bold: true, size: 15, color: tnd.c })], true)], { fond: tnd.f }),
+    ] });
+  });
+  out.push(docxTable({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: W, borders: { ...docxToutesAucune(), insideHorizontal: a, insideVertical: a }, rows: [entete, ...rows] }));
+  out.push(new DOCX.Paragraph({ spacing: { before: 80, after: 0 }, children: [new DOCX.TextRun({ text: "Comparaison avec la visite précédente du même équipement : changements d'état, et écarts de mesure d'au moins 30 %.", size: 15, italics: true, color: "5A6573" })] }));
+  return out;
+}
+// Sommaire cliquable : parties du rapport, puis équipements classés par local avec leur état.
+// Tableau sans numéro de page ni taquet de tabulation : Pages ne calcule pas les renvois de page et ignore les taquets.
+function docxSommaire(site, parties) {
+  const a = docxAucuneBordure(), filet = { style: DOCX.BorderStyle.SINGLE, size: 4, color: "E2E6EB" };
+  const W = [7400, 2200];
+  const para = (enfants, o = {}) => new DOCX.Paragraph({ alignment: o.droite ? DOCX.AlignmentType.RIGHT : undefined, indent: o.retrait ? { left: o.retrait } : undefined, spacing: { before: 0, after: 0 }, children: enfants });
+  const rangee = (gauche, droite, o = {}) => new DOCX.TableRow({ cantSplit: true, children: [
+    new DOCX.TableCell({ width: { size: W[0], type: DOCX.WidthType.DXA }, columnSpan: droite ? 1 : 2, margins: { top: o.haut || 70, bottom: 70, left: 120, right: 80 }, verticalAlign: DOCX.VerticalAlign.CENTER,
+      shading: o.fond ? { type: DOCX.ShadingType.CLEAR, fill: o.fond } : undefined, borders: { top: a, left: a, right: a, bottom: o.sansFilet ? a : filet }, children: [gauche] }),
+    ...(droite ? [new DOCX.TableCell({ width: { size: W[1], type: DOCX.WidthType.DXA }, margins: { top: 70, bottom: 70, left: 80, right: 120 }, verticalAlign: DOCX.VerticalAlign.CENTER,
+      shading: o.fond ? { type: DOCX.ShadingType.CLEAR, fill: o.fond } : undefined, borders: { top: a, left: a, right: a, bottom: o.sansFilet ? a : filet }, children: [droite] })] : []),
+  ] });
+  const lienPartie = (x) => rangee(para([new DOCX.InternalHyperlink({ anchor: x.id, children: [new DOCX.TextRun({ text: "›  " + x.titre, bold: true, size: 20, color: DOCX_DARK })] })]), null);
+  const rows = [];
+  parties.filter((x) => x.avant).forEach((x) => rows.push(lienPartie(x)));
+  const equipements = equipementsOrdreRapport(site.equipements).map((x) => x.eq);
+  const locaux = site.locaux || [];
+  const groupes = [];
+  equipements.forEach((eq) => {
+    const loc = locaux.find((l) => l.id === eq.localId);
+    const cle = loc ? loc.id : "__sans__";
+    let g = groupes.find((x) => x.cle === cle);
+    if (!g) { g = { cle, nom: loc ? (loc.nom || "Local sans nom") : "Autres équipements", eqs: [] }; groupes.push(g); }
+    g.eqs.push(eq);
+  });
+  rows.push(rangee(para([new DOCX.TextRun({ text: "Détail des équipements", bold: true, size: 20, color: DOCX_DARK })]), null, { haut: 220, sansFilet: true }));
+  groupes.forEach((g) => {
+    if (groupes.length > 1 || g.cle !== "__sans__") rows.push(rangee(para([new DOCX.TextRun({ text: g.nom.toUpperCase(), bold: true, size: 15, color: DOCX_BLUE, characterSpacing: 30 })], { retrait: 200 }), null, { haut: 140, fond: "EEF4FB", sansFilet: true }));
+    g.eqs.forEach((eq) => {
+      const nom = nomEquipementSite(eq, site);
+      rows.push(rangee(
+        para([new DOCX.InternalHyperlink({ anchor: docxBookmarkId(eq), children: [new DOCX.TextRun({ text: eq.type + (nom ? " — " + nom : ""), size: 18, color: DOCX_DARK })] })], { retrait: 400 }),
+        docxPastilleEtat(eq.etatFinal),
+      ));
+    });
+  });
+  parties.filter((x) => !x.avant).forEach((x) => rows.push(lienPartie(x)));
+  return [
+    docxHeading("Sommaire", 0, 200),
+    docxTable({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: W, borders: { ...docxToutesAucune(), insideHorizontal: a, insideVertical: a }, rows }),
+    new DOCX.Paragraph({ spacing: { before: 120, after: 0 }, children: [new DOCX.TextRun({ text: "Cliquez sur une ligne pour aller à la partie correspondante du rapport.", size: 15, italics: true, color: "5A6573" })] }),
+  ];
+}
+// ===== Synoptique de l'installation (rapport) =====
+// Construit à partir des locaux et des liens déjà saisis (transformateur associé, rattachements du bilan, by-pass raccordés,
+// onduleurs en parallèle) : un cadre par local, les équipements rangés par niveau (HTA → transformateur → BT → conversion),
+// chaque case à la couleur de l'état de l'équipement. Les équipements sans lien connu sont placés dans leur local, sans trait.
+const NIVEAU_SYNOPTIQUE = {
+  "Interrupteur HTA": 0, "Comptage HTA": 0, "Disjoncteur HTA": 0, "Contacteur HTA": 0, "Interrupteur Fusible HTA": 1,
+  "Transformateur": 2, "Analyse d'huile": 2,
+  "Jeu de barre / Gaine à barre": 3, "Disjoncteur BT": 4, "Interrupteur BT": 4, "Batterie de compensation": 4, "Bilan de puissance": 4, "Inverseur de source": 4,
+  "Onduleur": 5, "By-pass externe": 5, "Onduleur simplifié": 5, "Redresseur chargeur": 5, "Sécurité": 6,
+};
+function liensSynoptique(eqs) {
+  const parRepere = (r) => { const k = String(r || "").trim().toLowerCase(); return k ? eqs.find((e) => repereNorm(e) === k) : null; };
+  const liens = [];
+  const ajoute = (a, b, pointille) => { if (a && b && a !== b && !liens.some((l) => (l.a === a && l.b === b) || (l.a === b && l.b === a))) liens.push({ a, b, pointille }); };
+  eqs.forEach((e) => {
+    const id = e.identification || {};
+    if (id.transformateurAssocie) {
+      const tr = parRepere(id.transformateurAssocie);
+      if (tr) { if (e.type === "Interrupteur Fusible HTA") ajoute(e, tr, false); else ajoute(tr, e, e.type === "Analyse d'huile"); }
+    }
+    if (e.type === "Bilan de puissance") {
+      const tr = eqs.find((x) => x.id === id.transfo_id), dj = eqs.find((x) => x.id === id.disj_id);
+      if (dj) ajoute(dj, e, true); else if (tr) ajoute(tr, e, true);
+    }
+    if (e.type === "By-pass externe") listeRepere(id.onduleursRaccordes).forEach((r) => ajoute(parRepere(r), e, true));
+    if (/^Onduleur/.test(e.type)) listeRepere(id.machinesParallele).forEach((r) => ajoute(e, parRepere(r), true));
+  });
+  return liens;
+}
+function genererSynoptiqueInstallation(site) {
+  if (typeof document === "undefined" || !document.createElement) return null;
+  try {
+    const eqs = equipementsTries(site.equipements || []);
+    if (eqs.length < 2) return null;
+    const locaux = site.locaux || [];
+    const groupes = [];
+    eqs.forEach((e) => {
+      const loc = locaux.find((l) => l.id === e.localId);
+      const cle = loc ? loc.id : "__sans__";
+      let g = groupes.find((x) => x.cle === cle);
+      if (!g) { g = { cle, nom: loc ? (loc.nom || "Local sans nom") : "Autres équipements", eqs: [], niv: Infinity }; groupes.push(g); }
+      g.eqs.push(e); g.niv = Math.min(g.niv, NIVEAU_SYNOPTIQUE[e.type] ?? 6);
+    });
+    groupes.sort((a, b) => a.niv - b.niv);
+    const W = 1000, BW = 170, BH = 50, GX = 18, GY = 34, PAD = 20, TITRE = 30;
+    const parLigne = Math.floor((W - 2 * PAD - 20 + GX) / (BW + GX));
+    // Placement : un cadre par local, une rangée par niveau (repliée si trop d'équipements).
+    const pos = new Map();
+    const rangees = []; // y de chaque rangée et ses cases : sert à faire passer les liens à côté des cases intermédiaires
+    let y = 16;
+    const cadres = [];
+    groupes.forEach((g) => {
+      const niveaux = [...new Set(g.eqs.map((e) => NIVEAU_SYNOPTIQUE[e.type] ?? 6))].sort((a, b) => a - b);
+      const y0 = y; y += TITRE + 10;
+      niveaux.forEach((n) => {
+        const ligne = g.eqs.filter((e) => (NIVEAU_SYNOPTIQUE[e.type] ?? 6) === n);
+        for (let i = 0; i < ligne.length; i += parLigne) {
+          const lot = ligne.slice(i, i + parLigne);
+          const largeur = lot.length * BW + (lot.length - 1) * GX;
+          const x0 = (W - largeur) / 2;
+          lot.forEach((e, k) => pos.set(e.id, { x: x0 + k * (BW + GX), y, e }));
+          rangees.push({ y, x0, x1: x0 + largeur });
+          y += BH + GY;
+        }
+      });
+      y += -GY + 18;
+      cadres.push({ nom: g.nom, y: y0, h: y - y0 });
+      y += 22;
+    });
+    const H = y + 36;
+    const K = 3;
+    const c = document.createElement("canvas"); c.width = W * K; c.height = H * K;
+    const g = c.getContext("2d"); g.scale(K, K);
+    const POL = "Helvetica, Arial, sans-serif";
+    g.fillStyle = "#FFFFFF"; g.fillRect(0, 0, W, H);
+    const couleur = (etat) => { const r = RANK_OF[etat]; return r >= 2 ? "#C0392B" : r === 1 ? "#B5730A" : r === 0 || r === undefined ? "#0F8A5F" : "#7A8794"; };
+    const arrondi = (x, y, w, h, r) => { g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r); g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath(); };
+    const coupe = (t, max, font) => { g.font = font; let s = String(t || ""); if (g.measureText(s).width <= max) return s; while (s.length > 1 && g.measureText(s + "…").width > max) s = s.slice(0, -1); return s + "…"; };
+    // Cadres des locaux
+    cadres.forEach((f) => {
+      g.save(); g.setLineDash([6, 4]); g.strokeStyle = "#C9D2DC"; g.lineWidth = 1.2; g.fillStyle = "#F7F9FB";
+      arrondi(PAD, f.y, W - 2 * PAD, f.h, 10); g.fill(); g.stroke(); g.restore();
+      g.fillStyle = "#5B6B7D"; g.font = "800 11px " + POL; g.textBaseline = "middle"; g.textAlign = "left";
+      g.fillText(String(f.nom).toUpperCase().split("").join(String.fromCharCode(8202)), PAD + 14, f.y + 17);
+    });
+    // Liens (sous les cases)
+    const liens = liensSynoptique(eqs);
+    liens.forEach((l) => {
+      const a = pos.get(l.a.id), b = pos.get(l.b.id);
+      if (!a || !b) return;
+      g.save(); g.strokeStyle = "#3E4A5C"; g.lineWidth = 1.6; if (l.pointille) g.setLineDash([5, 4]);
+      g.beginPath();
+      if (Math.abs(a.y - b.y) < 2) {
+        const [gch, drt] = a.x < b.x ? [a, b] : [b, a];
+        // Cases voisines : trait direct ; sinon le lien passe sous la rangée (jamais à travers une autre case).
+        if (drt.x - (gch.x + BW) <= GX + 1) { g.moveTo(gch.x + BW, gch.y + BH / 2); g.lineTo(drt.x, drt.y + BH / 2); }
+        else { const yb = gch.y + BH + 10; g.moveTo(gch.x + BW / 2, gch.y + BH); g.lineTo(gch.x + BW / 2, yb); g.lineTo(drt.x + BW / 2, yb); g.lineTo(drt.x + BW / 2, drt.y + BH); }
+      } else {
+        const [haut, bas] = a.y < b.y ? [a, b] : [b, a];
+        const x1 = haut.x + BW / 2, y1 = haut.y + BH, x2 = bas.x + BW / 2, y2 = bas.y;
+        const ym = y2 - GY / 2;
+        // Rangées traversées : le lien les contourne par la gauche (couloir le long de la case la plus à gauche).
+        const traversees = rangees.filter((r) => r.y > haut.y + 1 && r.y < bas.y - 1);
+        if (!traversees.length) { g.moveTo(x1, y1); g.lineTo(x1, ym); g.lineTo(x2, ym); g.lineTo(x2, y2); }
+        else {
+          const xc = Math.max(PAD + 8, Math.min(...traversees.map((r) => r.x0)) - GX / 2 - 4);
+          const ya = y1 + GY / 2;
+          g.moveTo(x1, y1); g.lineTo(x1, ya); g.lineTo(xc, ya); g.lineTo(xc, ym); g.lineTo(x2, ym); g.lineTo(x2, y2);
+        }
+      }
+      g.stroke(); g.restore();
+    });
+    // Cases
+    pos.forEach(({ x, y, e }) => {
+      const col = couleur(e.etatFinal);
+      g.save(); g.shadowColor = "rgba(26,31,38,0.10)"; g.shadowBlur = 4; g.shadowOffsetY = 1;
+      g.fillStyle = "#FFFFFF"; arrondi(x, y, BW, BH, 6); g.fill(); g.restore();
+      g.strokeStyle = "#C9D2DC"; g.lineWidth = 1; arrondi(x, y, BW, BH, 6); g.stroke();
+      g.fillStyle = col; arrondi(x, y, 6, BH, 2); g.fill();
+      g.beginPath(); g.arc(x + BW - 12, y + 12, 5, 0, Math.PI * 2); g.fill();
+      const nom = nomEquipementSite(e, site) || e.type;
+      g.textAlign = "left"; g.textBaseline = "middle";
+      g.fillStyle = "#1A1F26"; g.fillText(coupe(nom, BW - 40, "700 11.5px " + POL), x + 14, y + 18);
+      g.fillStyle = "#5B6B7D"; g.fillText(coupe(e.type, BW - 22, "9.5px " + POL), x + 14, y + 35);
+    });
+    // Légende
+    const lg = [["#0F8A5F", "Conforme"], ["#B5730A", "Dégradé — à planifier"], ["#C0392B", "Défaillant — prioritaire"], ["#7A8794", "Non réalisé / non présent"]];
+    g.font = "10px " + POL; g.textBaseline = "middle"; g.textAlign = "left";
+    let lx = PAD + 6;
+    lg.forEach(([cl, t]) => { g.fillStyle = cl; g.beginPath(); g.arc(lx + 5, H - 18, 5, 0, Math.PI * 2); g.fill(); g.fillStyle = "#3E4A5C"; g.fillText(t, lx + 15, H - 18); lx += 30 + g.measureText(t).width; });
+    g.save(); g.strokeStyle = "#3E4A5C"; g.lineWidth = 1.6; g.setLineDash([5, 4]); g.beginPath(); g.moveTo(lx + 4, H - 18); g.lineTo(lx + 30, H - 18); g.stroke(); g.restore();
+    g.fillStyle = "#3E4A5C"; g.fillText("lien d'association (analyse, bilan, by-pass, parallèle)", lx + 36, H - 18);
+    return { dataUrl: c.toDataURL("image/png"), w: W, h: H, liens: liens.length };
+  } catch (e) { return null; }
+}
+function docxSynoptiqueInstallation(site) {
+  const syn = genererSynoptiqueInstallation(site);
+  if (!syn) return [];
+  const largeur = 640, hauteurMax = 860;
+  let w = largeur, h = Math.round(largeur * syn.h / syn.w);
+  if (h > hauteurMax) { h = hauteurMax; w = Math.round(hauteurMax * syn.w / syn.h); }
+  const img = docxImage(syn.dataUrl, w, h);
+  if (!img) return [];
+  return [
+    docxAncre("som_synoptique"),
+    docxHeading("Synoptique de l'installation", 0, 160),
+    new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, spacing: { before: 0, after: 80 }, children: [img] }),
+    new DOCX.Paragraph({ spacing: { before: 0, after: 0 }, children: [new DOCX.TextRun({ text: "Construit à partir des locaux et des liens saisis (transformateur associé, rattachements, by-pass raccordés, onduleurs en parallèle). Les équipements sans lien connu sont placés dans leur local, sans trait. Couleur de chaque case : état de l'équipement à l'issue de la maintenance.", size: 15, italics: true, color: "5A6573" })] }),
+  ];
+}
 async function generateAnnexePhotosDocx(site) {
   await ensureDocx();
   site = await resolvePhotosForDocx(site);
@@ -23208,28 +23782,37 @@ async function generateAnnexePhotosDocx(site) {
   })] })] });
   const children = [headerTable, docxSpacer(160)];
   let total = 0;
-  site.equipements.forEach((eq) => {
-    const photos = collectPhotosEquipement(eq);
-    if (!photos.length) return;
-    total += photos.length;
-    children.push(docxEquipHeader(eq.type + (nomEquipementSite(eq, site) ? " — " + nomEquipementSite(eq, site) : ""), null, eq.etatFinal, eq.type));
-    photos.forEach((p) => {
-      const { w, h } = dimensionsAdaptees(p, 260, 320);
-      const img = docxImage(p.dataUrl, w, h);
-      if (!img) return;
-      children.push(new DOCX.Paragraph({ spacing: { before: 60, after: 4 }, children: [new DOCX.TextRun({ text: p.caption, bold: true, size: 16, color: DOCX_DARK })] }));
-      children.push(new DOCX.Paragraph({ spacing: { after: 40 }, children: [img] }));
-    });
-  });
-  const photosSite = (site.rapport && site.rapport.photos) || [];
+  // Photos générales du site d'abord, puis par local et par équipement, en grille 2 colonnes légendée.
+  const photosSite = ((site.rapport && site.rapport.photos) || []).filter((p) => p && p.dataUrl);
   if (photosSite.length) {
     children.push(docxEquipHeader("Photos générales du site", null));
-    photosSite.forEach((p) => {
-      const { w, h } = dimensionsAdaptees(p, 260, 320);
-      const img = docxImage(p.dataUrl, w, h);
-      if (img) { children.push(new DOCX.Paragraph({ spacing: { after: 40 }, children: [img] })); total++; }
-    });
+    children.push(docxSpacer(80));
+    const g = docxGrillePhotos(photosSite);
+    if (g) { children.push(g); total += photosSite.length; }
+    children.push(docxSpacer(200));
   }
+  const locauxAnnexe = site.locaux || [];
+  const groupesAnnexe = [];
+  equipementsTries(site.equipements).forEach((eq) => {
+    const photos = collectPhotosEquipement(eq);
+    if (!photos.length) return;
+    const loc = locauxAnnexe.find((l) => l.id === eq.localId);
+    const cle = loc ? loc.id : "__sans__";
+    let g = groupesAnnexe.find((x) => x.cle === cle);
+    if (!g) { g = { cle, nom: loc ? (loc.nom || "Local sans nom") : "Autres équipements", items: [] }; groupesAnnexe.push(g); }
+    g.items.push({ eq, photos });
+  });
+  groupesAnnexe.forEach((g) => {
+    children.push(new DOCX.Paragraph({ keepNext: true, spacing: { before: 240, after: 100 }, children: [new DOCX.TextRun({ text: g.nom.toUpperCase(), bold: true, size: 20, color: DOCX_BLUE, characterSpacing: 30 })] }));
+    g.items.forEach(({ eq, photos }) => {
+      total += photos.length;
+      children.push(docxEquipHeader(eq.type + (nomEquipementSite(eq, site) ? " — " + nomEquipementSite(eq, site) : ""), null, eq.etatFinal, eq.type));
+      children.push(docxSpacer(60));
+      const grille = docxGrillePhotos(photos);
+      if (grille) children.push(grille);
+      children.push(docxSpacer(200));
+    });
+  });
   if (total === 0) children.push(new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: "Aucune photo n'a été ajoutée sur ce site.", italics: true, size: 20, color: "666666" })] }));
   const doc = new DOCX.Document({ styles: DOCX_STYLES, features: { updateFields: true }, sections: [{ properties: { page: { margin: { top: 500, bottom: 500, left: 600, right: 600 } } }, footers: { default: docxFooterPagination() }, children }] });
   return DOCX.Packer.toBlob(doc);
@@ -23292,11 +23875,39 @@ function docxCoverPage(site, infos = {}) {
     cartes[1], new DOCX.Paragraph({ spacing: { before: 0, after: cartes[2] ? (compact ? 160 : 260) : 0 }, children: [] }),
     ...(cartes[2] ? [cartes[2]] : []),
     ...(photo ? [new DOCX.Paragraph({ spacing: { before: 250, after: 0 }, children: [photo] })] : []),
-    new DOCX.Paragraph({ spacing: { before: compact ? 200 : 500, after: 0 }, children: [new DOCX.TextRun({ text: "Rapport généré le " + dateGeneration, color: "8B96A3", size: 17, italics: true }), new DOCX.PageBreak()] }), // le saut de page est porté par ce dernier paragraphe : jamais de page blanche après la couverture
+    new DOCX.Paragraph({ spacing: { before: compact ? 200 : 500, after: 0 }, children: [new DOCX.TextRun({ text: "Rapport généré le " + dateGeneration, color: "66717E", size: 17, italics: true }), new DOCX.PageBreak()] }), // le saut de page est porté par ce dernier paragraphe : jamais de page blanche après la couverture
   ];
 }
 
-function docxBandeauEtat(site, rankLabel, rank, compteur) {
+function docxBarreRepartition(compteur) {
+  const parts = [
+    { n: compteur.conforme, couleur: DOCX_GREEN, label: "Conforme" },
+    { n: compteur.degrade, couleur: DOCX_ORANGE, label: "Dégradé — à planifier" },
+    { n: compteur.defaillant, couleur: DOCX_RED, label: "Défaillant — prioritaire" },
+    { n: compteur.nonRealise || 0, couleur: "7A8794", label: "Non réalisé" },
+  ].filter((x) => x.n > 0);
+  const total = parts.reduce((t, x) => t + x.n, 0);
+  if (!total) return [];
+  const a = docxAucuneBordure();
+  // Largeurs proportionnelles (minimum lisible), la dernière absorbe l'arrondi.
+  const MIN = 420;
+  let largeurs = parts.map((x) => Math.max(MIN, Math.round(TABLE_WIDTH * x.n / total)));
+  const exces = largeurs.reduce((t, x) => t + x, 0) - TABLE_WIDTH;
+  const iMax = largeurs.indexOf(Math.max(...largeurs));
+  largeurs[iMax] -= exces;
+  const pct = (n) => Math.round(100 * n / total) + " %";
+  const barre = docxTable({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: largeurs, borders: { ...docxToutesAucune(), insideHorizontal: a, insideVertical: a },
+    rows: [new DOCX.TableRow({ cantSplit: true, children: parts.map((x, i) => new DOCX.TableCell({ width: { size: largeurs[i], type: DOCX.WidthType.DXA }, shading: { type: DOCX.ShadingType.CLEAR, fill: x.couleur },
+      margins: { top: 40, bottom: 40, left: 40, right: 40 }, borders: { top: a, bottom: a, left: a, right: i < parts.length - 1 ? { style: DOCX.BorderStyle.SINGLE, size: 12, color: DOCX_WHITE } : a },
+      children: [new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, spacing: { before: 0, after: 0 }, children: [new DOCX.TextRun({ text: largeurs[i] >= 700 ? pct(x.n) : "", bold: true, size: 16, color: DOCX_WHITE })] })] })) })] });
+  const legende = new DOCX.Paragraph({ spacing: { before: 70, after: 0 }, children: parts.flatMap((x, i) => [
+    ...(i ? [new DOCX.TextRun({ text: "     ", size: 15 })] : []),
+    new DOCX.TextRun({ text: "■ ", size: 17, color: x.couleur }),
+    new DOCX.TextRun({ text: `${x.label} (${x.n} · ${pct(x.n)})`, size: 15, color: "4A5563" }),
+  ]) });
+  return [docxSpacer(140), barre, legende];
+}
+function docxBandeauEtat(site, rankLabel, rank, compteur, nbPrioritaires = 0) {
   const couleur = rank >= 2 ? DOCX_RED : rank === 1 ? DOCX_ORANGE : DOCX_GREEN;
   const a = docxAucuneBordure();
   const bandeau = docxTable({
@@ -23312,12 +23923,13 @@ function docxBandeauEtat(site, rankLabel, rank, compteur) {
     })] })],
   });
   const cartes = docxRangeeCartes([
-    { label: "Équipements", valeur: String(compteur.conforme + compteur.degrade + compteur.defaillant + (compteur.nonRealise || 0)), couleur: DOCX_BLUE, taille: 52, fond: DOCX_LIGHT },
-    { label: "Conformes", valeur: String(compteur.conforme), couleur: DOCX_GREEN, taille: 52, fond: DOCX_LIGHT },
-    { label: "Dégradés", valeur: String(compteur.degrade), couleur: DOCX_ORANGE, taille: 52, fond: DOCX_LIGHT },
-    { label: "Défaillants", valeur: String(compteur.defaillant), couleur: DOCX_RED, taille: 52, fond: DOCX_LIGHT },
-  ], TABLE_WIDTH, 160);
-  return [bandeau, docxSpacer(160), cartes];
+    { compact: true, label: "Équipements", valeur: String(compteur.conforme + compteur.degrade + compteur.defaillant + (compteur.nonRealise || 0)), couleur: DOCX_BLUE, taille: 52, fond: DOCX_LIGHT },
+    { compact: true, label: "Conformes", valeur: String(compteur.conforme), couleur: DOCX_GREEN, taille: 52, fond: DOCX_LIGHT },
+    { compact: true, label: "Dégradés", valeur: String(compteur.degrade), couleur: DOCX_ORANGE, taille: 52, fond: DOCX_LIGHT },
+    { compact: true, label: "Défaillants", valeur: String(compteur.defaillant), couleur: DOCX_RED, taille: 52, fond: DOCX_LIGHT },
+    { compact: true, label: "Actions prioritaires", valeur: String(nbPrioritaires), couleur: nbPrioritaires ? DOCX_RED : DOCX_GREEN, taille: 52, fond: nbPrioritaires ? "FDECEA" : DOCX_LIGHT },
+  ], TABLE_WIDTH, 120);
+  return [bandeau, docxSpacer(160), cartes, ...docxBarreRepartition(compteur)];
 }
 async function generateSiteDocx(site, allSites) {
   await ensureDocx();
@@ -23384,7 +23996,13 @@ async function generateSiteDocx(site, allSites) {
   }) : null;
 
   const couverture = docxCoverPage(site, { journees: journeesTexte, intervenants: tousIntervenants });
-  const children = [...docxBandeauEtat(site, rankLabel, rank, compteur), docxSpacer(220)];
+  // Données de synthèse calculées une fois : plan d'actions (en tête) et cartes « Détail par équipement ».
+  const donneesSynthese = donneesSyntheseSite(genererSyntheseSite(site), site);
+  const nbPrioritaires = lignesPlanActions(donneesSynthese).filter((l) => l.niveau === 3).length;
+  const children = [docxAncre("som_synthese"), ...docxBandeauEtat(site, rankLabel, rank, compteur, nbPrioritaires), docxSpacer(120)];
+  children.push(...docxPlanActions(donneesSynthese, site), docxSpacer(120));
+  const evolution = docxEvolution(site, allSites);
+  if (evolution.length) children.push(...evolution, docxSpacer(120));
   if (syntheseTable) {
     children.push(docxHeading("Synthèse des équipements"));
     children.push(syntheseTable); children.push(docxSpacer());
@@ -23393,19 +24011,15 @@ async function generateSiteDocx(site, allSites) {
   const rapportTable = docxFieldTable(rapportRows);
   if (rapportTable) children.push(rapportTable);
   // Synthèse toujours générée à partir des équipements (plus de bouton « compiler ») + complément du technicien.
-  children.push(docxHeading("Synthèse des remarques et préconisations"));
-  children.push(...docxSyntheseSiteStructuree(genererSyntheseSite(site), site));
+  children.push(docxAncre("som_remarques"), docxHeading("Synthèse des remarques et préconisations"));
+  children.push(...docxSyntheseSiteStructuree(null, site, donneesSynthese));
   // Photos générales du site (ajoutées depuis l'onglet Rapport) — absentes du rapport principal
   // jusqu'ici, elles n'étaient reprises que dans le document séparé "Annexe photos".
   const photosSiteRapport = (site.rapport && site.rapport.photos) || [];
   if (photosSiteRapport.length) {
-    children.push(new DOCX.Paragraph({ spacing: { before: 40, after: 80 }, children: [new DOCX.TextRun({ text: "Photos générales du site", bold: true, size: 18, color: DOCX_DARK })] }));
-    photosSiteRapport.forEach((p) => {
-      const img = docxImage(p.dataUrl, 260, 195);
-      if (!img) return;
-      if (p.caption) children.push(new DOCX.Paragraph({ spacing: { before: 40, after: 4 }, children: [new DOCX.TextRun({ text: p.caption, italics: true, size: 15, color: "666666" })] }));
-      children.push(new DOCX.Paragraph({ spacing: { after: 60 }, children: [img] }));
-    });
+    children.push(new DOCX.Paragraph({ keepNext: true, spacing: { before: 360, after: 80 }, children: [new DOCX.TextRun({ text: "Photos générales du site", bold: true, size: 20, color: DOCX_BLUE })] }));
+    const grilleSite = docxGrillePhotos(photosSiteRapport);
+    if (grilleSite) children.push(grilleSite);
   }
 
   if (locauxTable) {
@@ -23414,17 +24028,40 @@ async function generateSiteDocx(site, allSites) {
     children.push(docxHeading("Locaux")); children.push(locauxTable); children.push(docxSpacer());
   }
 
-  equipementsTries(site.equipements).forEach((eq) => {
-    // Chaque équipement commence sur une nouvelle page. Le saut est porté par le DERNIER PARAGRAPHE qui précède (et non par un paragraphe isolé) :
+  equipementsOrdreRapport(site.equipements).forEach(({ eq, rattache }, rangEq) => {
+    // Un équipement par page. Exception : un équipement rattaché (analyse d'huile, jeu de barre, by-pass externe, bilan de puissance)
+    // suit son parent sur la même page s'il reste de la place — sa fiche d'identité est une seule rangée de tableau, jamais coupée (Pages compris).
+    if (rangEq > 0 && rattache) { children.push(new DOCX.Paragraph({ spacing: { before: 520, after: 0 }, children: [] })); children.push(...docxEquipementElements(eq, site.locaux, allSites, site.rapport?.date || "")); return; }
+    if (rangEq > 0) {
+      const dernierEq = children[children.length - 1];
+      if (dernierEq instanceof DOCX.Paragraph) dernierEq.addChildElement(new DOCX.PageBreak());
+      else children.push(docxDebutPage());
+      children.push(...docxEquipementElements(eq, site.locaux, allSites, site.rapport?.date || ""));
+      return;
+    }
+    // Le premier équipement commence sur une nouvelle page. Le saut est porté par le DERNIER PARAGRAPHE qui précède (et non par un paragraphe isolé) :
     // si le contenu précédent remplit exactement la page, un paragraphe isolé passerait sur la page suivante et y créerait une page blanche.
     const dernier = children[children.length - 1];
     if (dernier instanceof DOCX.Paragraph) dernier.addChildElement(new DOCX.PageBreak());
     else children.push(docxDebutPage());
+    // Sommaire cliquable (page dédiée), synoptique de l'installation (page suivante), puis le détail des équipements.
+    const synoptique = docxSynoptiqueInstallation(site);
+    children.push(...docxSommaire(site, [
+      { id: "som_synthese", titre: "Synthèse et plan d'actions", avant: true },
+      ...(evolution.length ? [{ id: "som_evolution", titre: "Évolution depuis la dernière visite", avant: true }] : []),
+      { id: "som_remarques", titre: "Synthèse des remarques et préconisations", avant: true },
+      ...(synoptique.length ? [{ id: "som_synoptique", titre: "Synoptique de l'installation", avant: true }] : []),
+      { id: "som_lire", titre: "Comment lire ce rapport" },
+    ]));
+    if (synoptique.length) { children.push(docxDebutPage()); children.push(...synoptique); }
+    children.push(docxDebutPage());
     children.push(...docxEquipementElements(eq, site.locaux, allSites, site.rapport?.date || ""));
   });
+  // « Comment lire ce rapport » (légende des états + glossaire des termes employés) : en fin de rapport.
+  children.push(docxSpacer(240), docxAncre("som_lire"), ...docxCommentLire(site, donneesSynthese));
 
   children.push(docxSpacer(200));
-  children.push(new DOCX.Paragraph({ border: { top: { color: DOCX_SILVER, space: 4, style: DOCX.BorderStyle.SINGLE, size: 4 } }, spacing: { before: 100 }, children: [new DOCX.TextRun({ text: "HT Maintenance — Maintenance électrique HTA / BT", size: 14, color: "888888", italics: true })] }));
+  children.push(new DOCX.Paragraph({ border: { top: { color: DOCX_SILVER, space: 4, style: DOCX.BorderStyle.SINGLE, size: 4 } }, spacing: { before: 100 }, children: [new DOCX.TextRun({ text: "HT Maintenance — Maintenance électrique HTA / BT", size: 14, color: "666666", italics: true })] }));
 
   const doc = new DOCX.Document({ styles: DOCX_STYLES, features: { updateFields: true }, sections: [
     { properties: { titlePage: true, page: PAGE_CORPS }, footers: { default: docxFooterPagination(), first: new DOCX.Footer({ children: [new DOCX.Paragraph("")] }) }, children: [...couverture, ...children] },
@@ -23772,7 +24409,7 @@ async function generateInterventionDocx(iv, sites = []) {
     children: [
       new DOCX.Paragraph({ spacing: { after: 40 }, children: [new DOCX.TextRun({ text: titre, bold: true, size: 17, color: "555555" }), new DOCX.TextRun({ text: nom ? " — " + nom : "", size: 18, color: DOCX_DARK })] }),
       ...(mention ? [new DOCX.Paragraph({ spacing: { after: 20 }, children: [new DOCX.TextRun({ text: mention, italics: true, size: 15, color: "777777" })] })] : []),
-      image ? new DOCX.Paragraph({ children: [image] }) : new DOCX.Paragraph({ spacing: { before: 520, after: 30 }, children: [new DOCX.TextRun({ text: "Signature :", size: 15, color: "999999" })] }),
+      image ? new DOCX.Paragraph({ children: [image] }) : new DOCX.Paragraph({ spacing: { before: 520, after: 30 }, children: [new DOCX.TextRun({ text: "Signature :", size: 15, color: "707070" })] }),
       ...(dateSignature ? [new DOCX.Paragraph({ spacing: { before: 20 }, children: [new DOCX.TextRun({ text: "Le " + dateSignature, size: 15, color: "777777" })] })] : []),
     ],
   });
