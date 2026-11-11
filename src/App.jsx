@@ -11282,6 +11282,131 @@ function statutEcheance(echeance, anneeRef) {
   if (echeance === anneeRef) return { cle: "annee", libelle: `Cette année (${echeance})` };
   return { cle: "avenir", libelle: `Dans ${echeance - anneeRef} an${echeance - anneeRef > 1 ? "s" : ""} (${echeance})` };
 }
+// ===== Protection d'un PDF (autorisations) =====
+// Chiffrement standard PDF (révision 3, RC4 128 bits) : le PDF s'ouvre sans mot de passe, l'impression reste permise,
+// mais copie du texte / des images, modification, assemblage et annotations sont interdits par le lecteur PDF.
+// Mot de passe « propriétaire » aléatoire, non conservé : le PDF d'origine (non protégé) reste la source.
+const PDF_PADDING = new Uint8Array([0x28, 0xbf, 0x4e, 0x5e, 0x4e, 0x75, 0x8a, 0x41, 0x64, 0x00, 0x4e, 0x56, 0xff, 0xfa, 0x01, 0x08, 0x2e, 0x2e, 0x00, 0xb6, 0xd0, 0x68, 0x3e, 0x80, 0x2f, 0x0c, 0xa9, 0xfe, 0x64, 0x53, 0x69, 0x7a]);
+function md5Octets(octets) {
+  const K = new Int32Array(64), S = [7, 12, 17, 22, 5, 9, 14, 20, 4, 11, 16, 23, 6, 10, 15, 21];
+  for (let i = 0; i < 64; i++) K[i] = Math.floor(Math.abs(Math.sin(i + 1)) * 4294967296) | 0;
+  const n = octets.length, total = (((n + 8) >>> 6) + 1) * 64;
+  const m = new Uint8Array(total); m.set(octets); m[n] = 0x80;
+  const bits = n * 8; for (let i = 0; i < 8; i++) m[total - 8 + i] = i < 4 ? (bits >>> (8 * i)) & 0xff : Math.floor(bits / 2 ** (8 * i)) & 0xff;
+  let a0 = 0x67452301, b0 = 0xefcdab89 | 0, c0 = 0x98badcfe | 0, d0 = 0x10325476;
+  const X = new Int32Array(16);
+  for (let off = 0; off < total; off += 64) {
+    for (let j = 0; j < 16; j++) X[j] = m[off + j * 4] | (m[off + j * 4 + 1] << 8) | (m[off + j * 4 + 2] << 16) | (m[off + j * 4 + 3] << 24);
+    let A = a0, B = b0, C = c0, D = d0;
+    for (let i = 0; i < 64; i++) {
+      let F, g;
+      if (i < 16) { F = (B & C) | (~B & D); g = i; }
+      else if (i < 32) { F = (D & B) | (~D & C); g = (5 * i + 1) % 16; }
+      else if (i < 48) { F = B ^ C ^ D; g = (3 * i + 5) % 16; }
+      else { F = C ^ (B | ~D); g = (7 * i) % 16; }
+      const s = S[(i >> 4) * 4 + (i % 4)];
+      const t = (A + F + K[i] + X[g]) | 0;
+      A = D; D = C; C = B; B = (B + ((t << s) | (t >>> (32 - s)))) | 0;
+    }
+    a0 = (a0 + A) | 0; b0 = (b0 + B) | 0; c0 = (c0 + C) | 0; d0 = (d0 + D) | 0;
+  }
+  const out = new Uint8Array(16);
+  [a0, b0, c0, d0].forEach((v, i) => { for (let k = 0; k < 4; k++) out[i * 4 + k] = (v >>> (8 * k)) & 0xff; });
+  return out;
+}
+function rc4Octets(cle, donnees) {
+  const S = new Uint8Array(256); for (let i = 0; i < 256; i++) S[i] = i;
+  for (let i = 0, j = 0; i < 256; i++) { j = (j + S[i] + cle[i % cle.length]) & 0xff; const t = S[i]; S[i] = S[j]; S[j] = t; }
+  const out = new Uint8Array(donnees.length);
+  for (let k = 0, i = 0, j = 0; k < donnees.length; k++) { i = (i + 1) & 0xff; j = (j + S[i]) & 0xff; const t = S[i]; S[i] = S[j]; S[j] = t; out[k] = donnees[k] ^ S[(S[i] + S[j]) & 0xff]; }
+  return out;
+}
+const concatOctets = (...parts) => { const n = parts.reduce((t, p) => t + p.length, 0), o = new Uint8Array(n); let k = 0; parts.forEach((p) => { o.set(p, k); k += p.length; }); return o; };
+const hexOctets = (b) => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
+async function protegerPdfOctets(octets, PDFLib) {
+  const { PDFDocument, PDFDict, PDFArray, PDFString, PDFHexString, PDFRawStream, PDFName, PDFNumber, PDFRef } = PDFLib;
+  const doc = await PDFDocument.load(octets, { updateMetadata: false });
+  const ctx = doc.context;
+  // Identifiant du fichier (obligatoire pour le calcul de la clé) : conservé s'il existe, sinon créé.
+  const alea = (n) => { const b = new Uint8Array(n); (globalThis.crypto || window.crypto).getRandomValues(b); return b; };
+  let id0 = null;
+  const idExistant = ctx.trailerInfo.ID;
+  const idArr = idExistant instanceof PDFArray ? idExistant : idExistant instanceof PDFRef ? ctx.lookup(idExistant) : null;
+  if (idArr && idArr.size && idArr.size() >= 1) { const x = idArr.get(0); if (x && x.asBytes) id0 = x.asBytes(); }
+  if (!id0 || !id0.length) id0 = alea(16);
+  // Autorisations : impression (y compris haute qualité) et accessibilité permises ; copie, modification, annotations, formulaires et assemblage interdits.
+  const P = (0xfffff0c0 | 4 | 2048 | 512) | 0;
+  const pOctets = new Uint8Array([P & 0xff, (P >>> 8) & 0xff, (P >>> 16) & 0xff, (P >>> 24) & 0xff]);
+  const proprio = new TextEncoder().encode(hexOctets(alea(16))).slice(0, 32);
+  const padUser = PDF_PADDING; // mot de passe d'ouverture vide
+  const padOwner = concatOctets(proprio, PDF_PADDING).slice(0, 32);
+  // Entrée O
+  let h = md5Octets(padOwner); for (let i = 0; i < 50; i++) h = md5Octets(h);
+  const cleO = h.slice(0, 16);
+  let O = rc4Octets(cleO, padUser);
+  for (let i = 1; i <= 19; i++) O = rc4Octets(cleO.map((b) => b ^ i), O);
+  // Clé du fichier
+  let cle = md5Octets(concatOctets(padUser, O, pOctets, id0));
+  for (let i = 0; i < 50; i++) cle = md5Octets(cle.slice(0, 16));
+  cle = cle.slice(0, 16);
+  // Entrée U
+  let U = rc4Octets(cle, md5Octets(concatOctets(PDF_PADDING, id0)));
+  for (let i = 1; i <= 19; i++) U = rc4Octets(cle.map((b) => b ^ i), U);
+  U = concatOctets(U, new Uint8Array(16));
+  // Chiffrement de toutes les chaînes et de tous les flux, objet par objet.
+  const cleObjet = (ref) => md5Octets(concatOctets(cle, new Uint8Array([ref.objectNumber & 0xff, (ref.objectNumber >> 8) & 0xff, (ref.objectNumber >> 16) & 0xff, ref.generationNumber & 0xff, (ref.generationNumber >> 8) & 0xff]))).slice(0, 16);
+  const chiffrer = (obj, k) => {
+    if (obj instanceof PDFString || obj instanceof PDFHexString) return PDFHexString.of(hexOctets(rc4Octets(k, obj.asBytes())));
+    if (obj instanceof PDFDict) { obj.entries().forEach(([cleD, v]) => { const n = chiffrer(v, k); if (n !== v) obj.set(cleD, n); }); return obj; }
+    if (obj instanceof PDFArray) { for (let i = 0; i < obj.size(); i++) { const v = obj.get(i), n = chiffrer(v, k); if (n !== v) obj.set(i, n); } return obj; }
+    return obj;
+  };
+  ctx.enumerateIndirectObjects().forEach(([ref, obj]) => {
+    const k = cleObjet(ref);
+    if (obj instanceof PDFRawStream) { chiffrer(obj.dict, k); obj.contents = rc4Octets(k, obj.contents); }
+    else if (obj && obj.dict && obj.getContents) { throw new Error("Flux non pris en charge"); }
+    else chiffrer(obj, k);
+  });
+  const enc = ctx.obj({ Filter: "Standard", V: 2, R: 3, Length: 128, P });
+  enc.set(PDFName.of("O"), PDFHexString.of(hexOctets(O)));
+  enc.set(PDFName.of("U"), PDFHexString.of(hexOctets(U)));
+  ctx.trailerInfo.Encrypt = ctx.register(enc);
+  ctx.trailerInfo.ID = ctx.obj([PDFHexString.of(hexOctets(id0)), PDFHexString.of(hexOctets(id0))]);
+  return doc.save({ useObjectStreams: false, updateFieldAppearances: false, addDefaultPage: false });
+}
+
+// Bouton « Protéger un PDF » : le technicien choisit le PDF exporté depuis Pages / Word, l'appli le renvoie protégé
+// (ouverture et impression libres ; copie, modification et annotations interdites). Le PDF d'origine n'est pas modifié.
+function BoutonProtegerPdf({ onFait }) {
+  const ref = useRef(null);
+  const [etat, setEtat] = useState("");
+  const traiter = async (f) => {
+    if (!f) return;
+    setEtat("Protection en cours…");
+    try {
+      const PDFLib = await import("pdf-lib");
+      const octets = new Uint8Array(await f.arrayBuffer());
+      const protege = await protegerPdfOctets(octets, PDFLib);
+      const nom = String(f.name || "rapport.pdf").replace(/\.pdf$/i, "");
+      downloadBlob(new Blob([protege], { type: "application/pdf" }), `${nom} - protégé.pdf`);
+      setEtat("");
+      if (onFait) onFait();
+    } catch (e) {
+      const msg = String((e && e.message) || e);
+      setEtat(/encrypt/i.test(msg) ? "Ce PDF est déjà protégé ou chiffré : partez du PDF exporté depuis Pages." : "Protection impossible : " + msg);
+    }
+  };
+  return (
+    <>
+      <input ref={ref} type="file" accept="application/pdf,.pdf" style={{ display: "none" }} onChange={(e) => { const f = e.target.files && e.target.files[0]; e.target.value = ""; traiter(f); }} />
+      <button onClick={() => ref.current && ref.current.click()} style={{ ...btnGhost("#5B6B7D"), justifyContent: "flex-start" }}
+        title="Choisissez le PDF du rapport (exporté depuis Pages) : une copie protégée est téléchargée — le client peut l'ouvrir et l'imprimer, mais pas copier le texte ni le modifier">
+        <ShieldCheck size={13} /> Protéger un PDF (anti-copie)
+      </button>
+      {etat && <div style={{ fontSize: 11, color: /impossible|déjà/.test(etat) ? "#C0392B" : "#5B6B7D", padding: "0 6px", maxWidth: 260 }}>{etat}</div>}
+    </>
+  );
+}
 function BoutonExportPiecesUsure({ site }) {
   const [ouvert, setOuvert] = useState(false);
   const anneeRef = new Date().getFullYear();
@@ -17228,6 +17353,7 @@ function SiteDetail({ site, allSites, update, onBack, onDelete, onPrint, onPrint
                     <ImagePlus size={13} /> Annexe photos
                   </button>
                   <BoutonExportPiecesUsure site={site} />
+                  <BoutonProtegerPdf />
                   <button onClick={() => { setMenuPlus(false); onCreateIntervention(site, site.equipements); }} style={{ ...btnGhost(BRAND.blue), justifyContent: "flex-start" }} title="Crée un compte rendu d'intervention pré-rempli avec tous les équipements de ce site">
                     <ClipboardList size={13} /> Compte rendu d'intervention
                   </button>
@@ -23486,7 +23612,12 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
 // numérotation seule alignée à droite. Le centrage de paragraphe s'étant révélé peu fiable selon
 // le lecteur (ignoré par certains, tout ramené à gauche), on ne s'appuie plus que sur l'alignement
 // gauche (par défaut) et droite, les deux seuls qui se sont montrés fiables partout.
-function docxFooterPagination() {
+// Mention de propriété (pied de page et couverture du rapport).
+function mentionProprieteRapport(site) {
+  const pour = site ? String(site.client || site.nom || "").trim() : "";
+  return `Document établi par HT Maintenance${pour ? " pour " + pour : ""}. Toute reproduction ou diffusion, totale ou partielle, sans autorisation écrite de HT Maintenance est interdite.`;
+}
+function docxFooterPagination(mention = "") {
   return new DOCX.Footer({
     children: [
       new DOCX.Paragraph({
@@ -23502,6 +23633,7 @@ function docxFooterPagination() {
           new DOCX.TextRun({ children: [DOCX.PageNumber.TOTAL_PAGES], size: 15, color: "5A6573" }),
         ],
       }),
+      ...(mention ? [new DOCX.Paragraph({ spacing: { before: 30, after: 0 }, children: [new DOCX.TextRun({ text: mention, size: 12, italics: true, color: "66717E" })] })] : []),
     ],
   });
 }
@@ -23931,7 +24063,7 @@ async function generateAnnexePhotosDocx(site) {
     });
   });
   if (total === 0) children.push(new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: "Aucune photo n'a été ajoutée sur ce site.", italics: true, size: 20, color: "666666" })] }));
-  const doc = new DOCX.Document({ styles: DOCX_STYLES, features: { updateFields: true }, sections: [{ properties: { page: { margin: { top: 500, bottom: 500, left: 600, right: 600 } } }, footers: { default: docxFooterPagination() }, children }] });
+  const doc = new DOCX.Document({ styles: DOCX_STYLES, features: { updateFields: true }, sections: [{ properties: { page: { margin: { top: 500, bottom: 500, left: 600, right: 600 } } }, footers: { default: docxFooterPagination(mentionProprieteRapport(site)) }, children }] });
   return DOCX.Packer.toBlob(doc);
 }
 function docxCoverPage(site, infos = {}) {
@@ -23992,7 +24124,8 @@ function docxCoverPage(site, infos = {}) {
     cartes[1], new DOCX.Paragraph({ spacing: { before: 0, after: cartes[2] ? (compact ? 160 : 260) : 0 }, children: [] }),
     ...(cartes[2] ? [cartes[2]] : []),
     ...(photo ? [new DOCX.Paragraph({ spacing: { before: 250, after: 0 }, children: [photo] })] : []),
-    new DOCX.Paragraph({ spacing: { before: compact ? 200 : 500, after: 0 }, children: [new DOCX.TextRun({ text: "Rapport généré le " + dateGeneration, color: "66717E", size: 17, italics: true }), new DOCX.PageBreak()] }), // le saut de page est porté par ce dernier paragraphe : jamais de page blanche après la couverture
+    new DOCX.Paragraph({ spacing: { before: compact ? 200 : 500, after: 0 }, children: [new DOCX.TextRun({ text: "Rapport généré le " + dateGeneration, color: "66717E", size: 17, italics: true })] }),
+    new DOCX.Paragraph({ spacing: { before: 80, after: 0 }, children: [new DOCX.TextRun({ text: mentionProprieteRapport(site), color: "66717E", size: 15, italics: true }), new DOCX.PageBreak()] }), // le saut de page est porté par ce dernier paragraphe : jamais de page blanche après la couverture
   ];
 }
 
@@ -24181,7 +24314,7 @@ async function generateSiteDocx(site, allSites) {
   children.push(new DOCX.Paragraph({ border: { top: { color: DOCX_SILVER, space: 4, style: DOCX.BorderStyle.SINGLE, size: 4 } }, spacing: { before: 100 }, children: [new DOCX.TextRun({ text: "HT Maintenance — Maintenance électrique HTA / BT", size: 14, color: "666666", italics: true })] }));
 
   const doc = new DOCX.Document({ styles: DOCX_STYLES, features: { updateFields: true }, sections: [
-    { properties: { titlePage: true, page: PAGE_CORPS }, footers: { default: docxFooterPagination(), first: new DOCX.Footer({ children: [new DOCX.Paragraph("")] }) }, children: [...couverture, ...children] },
+    { properties: { titlePage: true, page: PAGE_CORPS }, footers: { default: docxFooterPagination(mentionProprieteRapport(site)), first: new DOCX.Footer({ children: [new DOCX.Paragraph("")] }) }, children: [...couverture, ...children] },
   ] });
   return DOCX.Packer.toBlob(doc);
 }
