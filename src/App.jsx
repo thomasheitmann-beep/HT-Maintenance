@@ -19346,7 +19346,7 @@ const A4_LARGEUR = 11906, A4_HAUTEUR = 16838;
 const DOCX_STYLES = { default: { document: { run: { font: "Arial", color: DOCX_DARK } } } };
 // Une seule section et des marges normales pour tout le document : Pages ne gère pas des marges différentes d'une section à l'autre, ni les sauts de page
 // par propriété de paragraphe, ni les hauteurs de ligne / de rangée « exactes » — on s'en tient donc aux éléments que Word, LibreOffice et Pages respectent tous.
-const PAGE_CORPS = { size: { width: A4_LARGEUR, height: A4_HAUTEUR }, margin: { top: 900, bottom: 1000, left: 1153, right: 1153, header: 400, footer: 450 } };
+const PAGE_CORPS = { size: { width: A4_LARGEUR, height: A4_HAUTEUR }, margin: { top: 900, bottom: 1100, left: 1153, right: 1153, header: 400, footer: 380 } }; // pied de page sur deux lignes (pagination + mention de propriété) : place suffisante aussi dans Pages
 function docxTable(opts) {
   const aucune = { style: DOCX.BorderStyle.NONE, size: 0, color: "FFFFFF" };
   const fin = { style: DOCX.BorderStyle.SINGLE, size: 4, color: "E2E6EB" };
