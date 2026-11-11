@@ -12942,6 +12942,89 @@ function angleEssaiDirectionnel(eq, s) {
   const ref = fam === "67" ? "Ubc (pour I1)" : fam === "67N" || fam === "32N" ? "U0" : "Va (même phase)";
   return { centre, oppose: normAngle(centre + 180), ref };
 }
+// ----- Diagramme de Fresnel d'un seuil directionnel : référence, angle caractéristique, zone, essai, contre-essai, bornes mesurées -----
+const TOLERANCE_ANGLE_DIRECTIONNEL = 5; // repère usuel de précision angulaire (°), à confirmer sur la notice du relais
+function zoneDirectionnelle(eq, s) {
+  const a = angleEssaiDirectionnel(eq, s);
+  if (!a) return null;
+  const zMin = numOf(s.fields.zoneMin), zMax = numOf(s.fields.zoneMax);
+  const defaut = zMin === null || zMax === null;
+  const lo = defaut ? -90 : Math.min(zMin, zMax), hi = defaut ? 90 : Math.max(zMin, zMax);
+  return { ...a, rel: [lo, hi], borneBasse: normAngle(a.centre + lo), borneHaute: normAngle(a.centre + hi), zoneParDefaut: defaut };
+}
+function evalFresnel(eq, s) {
+  const z = zoneDirectionnelle(eq, s);
+  if (!z) return null;
+  const f = (s.essai && s.essai.fields) || {};
+  const mb = numOf(f.angleBas), mh = numOf(f.angleHaut);
+  const ecart = (m, r) => Math.abs(normAngle(m - r));
+  const okB = mb === null ? null : ecart(mb, z.borneBasse) <= TOLERANCE_ANGLE_DIRECTIONNEL;
+  const okH = mh === null ? null : ecart(mh, z.borneHaute) <= TOLERANCE_ANGLE_DIRECTIONNEL;
+  const contre = f.contreEssai || "";
+  const morceaux = [];
+  if (mb !== null || mh !== null) morceaux.push(`bornes mesurées ${mb !== null ? fmtAngle(mb) : "—"} / ${mh !== null ? fmtAngle(mh) : "—"} pour ${fmtAngle(z.borneBasse)} / ${fmtAngle(z.borneHaute)} réglées (±${TOLERANCE_ANGLE_DIRECTIONNEL}°) — ${okB === false || okH === false ? "écart hors repère" : "conforme"}`);
+  if (contre) morceaux.push(`contre-essai à ${fmtAngle(z.oppose)} : ${/^Non/.test(contre) ? "pas de déclenchement (conforme)" : "déclenchement (non conforme)"}`);
+  const nonConforme = okB === false || okH === false || /^Déclench/.test(contre);
+  return { z, mb, mh, okB, okH, contre, nonConforme, phrase: morceaux.length ? `Zone de déclenchement (${s.label.split(" — ")[0]}) : ${morceaux.join(" ; ")}.` : "" };
+}
+function genererFresnelSeuil(eq, s) {
+  if (typeof document === "undefined" || !document.createElement) return null;
+  const ev = evalFresnel(eq, s);
+  if (!ev) return null;
+  const z = ev.z;
+  try {
+    const w = 640, h = 440, cx = 205, cy = 215, R = 150;
+    const { canvas, ctx } = canevasSchema(w, h);
+    const rad = (d) => (d * Math.PI) / 180;
+    const P = (d, r) => [cx + r * Math.cos(rad(d)), cy - r * Math.sin(rad(d))];
+    const fleche = (d, r, couleur, epais, tirets) => {
+      const [x, y] = P(d, r);
+      ctx.save(); ctx.strokeStyle = couleur; ctx.fillStyle = couleur; ctx.lineWidth = epais; if (tirets) ctx.setLineDash(tirets);
+      ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(x, y); ctx.stroke(); ctx.setLineDash([]);
+      const a = -rad(d), t = 10; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x - t * Math.cos(a - 0.4), y - t * Math.sin(a - 0.4)); ctx.lineTo(x - t * Math.cos(a + 0.4), y - t * Math.sin(a + 0.4)); ctx.closePath(); ctx.fill(); ctx.restore();
+    };
+    // Libellé d'un vecteur : à mi-longueur, décalé perpendiculairement (évite les graduations du cercle).
+    const libVecteur = (t, d, r, couleur, font) => { const [x, y] = P(d, r * 0.55); const nx = -Math.sin(rad(d)), ny = -Math.cos(rad(d)); ctx.fillStyle = couleur; ctx.font = font; ctx.textAlign = "center"; ctx.textBaseline = "middle"; const tx = x + nx * 14, ty = y + ny * 14; const lw = ctx.measureText(t).width; ctx.save(); ctx.fillStyle = "rgba(255,255,255,0.85)"; ctx.fillRect(tx - lw / 2 - 3, ty - 8, lw + 6, 16); ctx.restore(); ctx.fillStyle = couleur; ctx.fillText(t, tx, ty); };
+    const texte = (t, d, r, couleur, font) => { const [x, y] = P(d, r); ctx.fillStyle = couleur || "#3E4A5C"; ctx.font = font || `11px ${SCHEMA_POLICE}`; ctx.textAlign = Math.cos(rad(d)) > 0.3 ? "left" : Math.cos(rad(d)) < -0.3 ? "right" : "center"; ctx.textBaseline = "middle"; ctx.fillText(t, x, y); };
+    ctx.fillStyle = "#1A1F26"; ctx.font = `bold 13px ${SCHEMA_POLICE}`; ctx.textAlign = "left"; ctx.fillText(`Diagramme de Fresnel — ${s.label.split(" — ")[0]}`, 16, 22);
+    // zone de non-déclenchement (gris) puis de déclenchement (vert)
+    ctx.fillStyle = "#F2F4F7"; ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "rgba(15,138,95,0.18)"; ctx.beginPath(); ctx.moveTo(cx, cy); ctx.arc(cx, cy, R, -rad(z.centre + z.rel[1]), -rad(z.centre + z.rel[0])); ctx.closePath(); ctx.fill();
+    // graduations
+    ctx.strokeStyle = "#D8DEE5"; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.stroke();
+    for (let d = -180; d < 180; d += 30) { const [x1, y1] = P(d, R - 6), [x2, y2] = P(d, R); ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); texte(`${d > 0 ? "+" : ""}${d}°`, d, R + 14, "#9AA5B1", `9.5px ${SCHEMA_POLICE}`); }
+    ctx.beginPath(); ctx.moveTo(cx - R, cy); ctx.lineTo(cx + R, cy); ctx.moveTo(cx, cy - R); ctx.lineTo(cx, cy + R); ctx.stroke();
+    // bornes réglées
+    [z.centre + z.rel[0], z.centre + z.rel[1]].forEach((d) => { const [x, y] = P(d, R); ctx.save(); ctx.strokeStyle = "#0F8A5F"; ctx.lineWidth = 1.4; ctx.setLineDash([5, 4]); ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(x, y); ctx.stroke(); ctx.restore(); });
+    // référence, essai, contre-essai
+    fleche(0, R - 10, "#1A1F26", 2.4);
+    libVecteur(z.ref.split(" ")[0], 0, R * 1.5, "#1A1F26", `bold 11px ${SCHEMA_POLICE}`);
+    fleche(z.centre, R * 0.78, "#0A5DA8", 2.6);
+    libVecteur(`I essai ${fmtAngle(z.centre)}`, z.centre, R * 0.78, "#0A5DA8", `bold 10.5px ${SCHEMA_POLICE}`);
+    fleche(z.oppose, R * 0.62, "#C0392B", 2, [6, 4]);
+    libVecteur(`contre-essai ${fmtAngle(z.oppose)}`, z.oppose, R * 0.62, "#C0392B", `10.5px ${SCHEMA_POLICE}`);
+    // bornes mesurées
+    [[ev.mb, ev.okB], [ev.mh, ev.okH]].forEach(([m, ok]) => { if (m === null) return; const [x, y] = P(m, R); ctx.fillStyle = ok ? "#0F8A5F" : "#B5730A"; ctx.beginPath(); ctx.arc(x, y, 6, 0, Math.PI * 2); ctx.fill(); ctx.strokeStyle = "#fff"; ctx.lineWidth = 1.5; ctx.stroke(); });
+    // légende
+    const lx = 400; let ly = 70; ctx.textAlign = "left"; ctx.textBaseline = "middle";
+    const leg = (couleur, t, type) => {
+      ctx.save(); ctx.fillStyle = couleur; ctx.strokeStyle = couleur; ctx.lineWidth = 2;
+      if (type === "zone") ctx.fillRect(lx, ly - 6, 14, 12); else if (type === "point") { ctx.beginPath(); ctx.arc(lx + 7, ly, 5, 0, Math.PI * 2); ctx.fill(); } else { if (type === "tirets") ctx.setLineDash([4, 3]); ctx.beginPath(); ctx.moveTo(lx, ly); ctx.lineTo(lx + 14, ly); ctx.stroke(); }
+      ctx.restore(); ctx.fillStyle = "#3E4A5C"; ctx.font = `10.5px ${SCHEMA_POLICE}`; ctx.fillText(t, lx + 20, ly); ly += 19;
+    };
+    leg("#1A1F26", `Référence ${z.ref}`);
+    leg("rgba(15,138,95,0.35)", `Déclenchement ${fmtAngle(z.borneBasse)} → ${fmtAngle(z.borneHaute)}`, "zone");
+    leg("#E2E6EB", "Non-déclenchement", "zone");
+    leg("#0A5DA8", "I d'essai (centre de zone)");
+    leg("#C0392B", "Contre-essai (+180°)", "tirets");
+    if (ev.mb !== null || ev.mh !== null) leg("#0F8A5F", `Bornes mesurées (±${TOLERANCE_ANGLE_DIRECTIONNEL}°)`, "point");
+    ly += 6;
+    const info = [`Sens réglé : ${s.fields.sens || "non renseigné"}`, `Réglage : ${s.fields.reglage || "—"} ${uniteReglageSeuil(s) || ""}`.trim(), ...(numOf(s.fields.angle) !== null ? [`Angle caractéristique : ${fmtAngle(numOf(s.fields.angle))}`] : []), ...(z.zoneParDefaut ? ["Zone non renseignée : ±90° par défaut"] : [])];
+    ctx.font = `10px ${SCHEMA_POLICE}`; ctx.fillStyle = "#5B6B7D"; info.forEach((t) => { ctx.fillText(t, lx, ly); ly += 15; });
+    ctx.font = `italic 9.5px ${SCHEMA_POLICE}`; ctx.fillStyle = "#8B96A3"; ctx.fillText("Angles comptés depuis la tension de référence, sens trigonométrique —", 16, h - 26); ctx.fillText("avance / retard selon la convention du relais (à vérifier sur la notice).", 16, h - 13);
+    return canvas.toDataURL("image/png");
+  } catch (e) { return null; }
+}
 // Valeur à injecter pour un multiple k du réglage (seuil 0,95 / 1,05 ou point de temps 2 ×, 5 ×…), selon le mode d'injection.
 function valeurInjectionSeuil(eq, s, k, mode) {
   const u = uniteReglageSeuil(s), R = numOf(s.fields.reglage);
@@ -14173,6 +14256,7 @@ function DisjoncteurRelaisPanel({ eq, update, custom, onAddCustom, onChangeCusto
   const renseignes = seuils.filter((s) => s.label);
   const [assistantId, setAssistantId] = useState(null);
   const [courbes, setCourbes] = useState({});
+  const [fresnels, setFresnels] = useState({});
   const [ficheOuverte, setFicheOuverte] = useState(false);
   const [planEnCours, setPlanEnCours] = useState(false);
   const cfgEssais = configEssaisRelais(eq);
@@ -14227,14 +14311,28 @@ function DisjoncteurRelaisPanel({ eq, update, custom, onAddCustom, onChangeCusto
           const derive = deriveTempsSeuil(precedent, s);
           const courbePossible = uniteReglageSeuil(s) === "A" && !est49 && tempsRelaisAttendu(s, estCEI ? 2 : null) !== null;
           const courbeImg = courbes[s.id] && courbePossible ? (groupeCourbeSeuil(s) ? genererCourbeFamilleRelais(eq, groupeCourbeSeuil(s)) : genererCourbeDeclenchementRelais(eq, s)) : null;
+          const zoneDir = zoneDirectionnelle(eq, s);
+          const fresnelImg = zoneDir && fresnels[s.id] ? genererFresnelSeuil(eq, s) : null;
+          const evF = zoneDir ? evalFresnel(eq, s) : null;
           return (
             <div key={s.id} style={{ padding: "10px 0", borderBottom: "1px solid #E2E6EB" }}>
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 6 }}>
                 {ansiFamily(s.label) !== "DEC" && !sansInjectionCalculee(s) && <button type="button" onClick={() => setAssistantId(s.id)} style={{ ...btnGhost(BRAND.blue), padding: "4px 9px", fontSize: 11.5 }} title="Assistant pas à pas (facultatif) : préparation, seuil 0,95 / 1,05, temps, remise en service">🧭 Assistant{s.essai.assistant ? " ✓" : ""}</button>}
                 {courbePossible && <button type="button" onClick={() => setCourbes({ ...courbes, [s.id]: !courbes[s.id] })} style={{ ...btnGhost(), padding: "4px 9px", fontSize: 11.5 }}>{courbes[s.id] ? "Masquer la courbe" : "Courbe de déclenchement"}</button>}
+                {zoneDir && <button type="button" onClick={() => setFresnels({ ...fresnels, [s.id]: !fresnels[s.id] })} style={{ ...btnGhost(), padding: "4px 9px", fontSize: 11.5 }}>{fresnels[s.id] ? "Masquer le diagramme" : "Diagramme de Fresnel"}</button>}
                 {derive && <span style={{ fontSize: 11, color: derive.alerte ? "#B5730A" : "#5B6B7D", background: derive.alerte ? "rgba(181,115,10,0.10)" : "rgba(10,93,168,0.06)", padding: "4px 8px", borderRadius: 6 }} title="Comparaison avec la visite précédente — non imprimée">{derive.alerte ? "⚠ " : ""}{moisAnneeVisite(derive.date)} : {frN(derive.tA, 3)} s → {frN(derive.tC, 3)} s ({derive.ecart >= 0 ? "+" : ""}{frN(derive.ecart * 100, 0)} %)</span>}
               </div>
               {courbeImg && <img src={courbeImg} alt="Courbe de déclenchement" style={{ maxWidth: "100%", height: "auto", display: "block", marginBottom: 8 }} onLoad={(e) => { e.currentTarget.style.width = `${e.currentTarget.naturalWidth / SCHEMA_ECHELLE}px`; }} />}
+              {fresnelImg && <img src={fresnelImg} alt="Diagramme de Fresnel" style={{ maxWidth: "100%", height: "auto", display: "block", marginBottom: 8 }} onLoad={(e) => { e.currentTarget.style.width = `${e.currentTarget.naturalWidth / SCHEMA_ECHELLE}px`; }} />}
+              {zoneDir && (
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 6 }}>
+                  <MiniSelect label={`Contre-essai (${fmtAngle(zoneDir.oppose)})`} options={["", "Non déclenché", "Déclenché"]} value={s.essai.fields.contreEssai || ""} onChange={(v) => setEssaiField(s.id, "contreEssai", v)} width={130} />
+                  <MiniInput label="Borne basse mesurée (°)" value={s.essai.fields.angleBas} onChange={(v) => setEssaiField(s.id, "angleBas", v)} validState={evF && evF.okB !== null ? (evF.okB ? "ok" : "warn") : null} />
+                  <MiniInput label="Borne haute mesurée (°)" value={s.essai.fields.angleHaut} onChange={(v) => setEssaiField(s.id, "angleHaut", v)} validState={evF && evF.okH !== null ? (evF.okH ? "ok" : "warn") : null} />
+                  <span style={{ fontSize: 11, color: "#8B96A3" }}>réglées : {fmtAngle(zoneDir.borneBasse)} / {fmtAngle(zoneDir.borneHaute)} (±{TOLERANCE_ANGLE_DIRECTIONNEL}°) — facultatif</span>
+                  {evF && evF.phrase && <div style={{ flexBasis: "100%", fontSize: 11.5, color: evF.nonConforme ? "#B5730A" : "#0F8A5F" }}>{evF.nonConforme ? "⚠ " : "✓ "}{evF.phrase}</div>}
+                </div>
+              )}
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
                 <span style={{ fontSize: 12.5, color: "#3E4A5C", flex: "1 1 240px" }}>Essai de déclenchement — {s.label}{(() => { const a = avisReglageSiprotec(eq, s); return a ? <div style={{ fontSize: 11, color: a.hors ? "#B5730A" : "#8B96A3", marginTop: 3, lineHeight: 1.4 }}>{a.texte}</div> : null; })()}</span>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
@@ -22207,6 +22305,19 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
           ? "Temps de déclenchement mesurés sur le contact de sortie du relais (temps du relais seul)."
           : `Temps de déclenchement mesurés sur les contacts du disjoncteur : temporisation du relais + ouverture du disjoncteur${ouvE ? ` (${frN(ouvE.ms, 0)} ms, incluse dans la tolérance)` : ""}.`));
       }
+      // Diagrammes de Fresnel des seuils directionnels essayés (zone, essai, contre-essai, bornes mesurées).
+      (eq.controles.parametrage_relais_seuils || []).filter((s) => s.label && s.essai && zoneDirectionnelle(eq, s)).forEach((s) => {
+        const f = s.essai.fields || {};
+        const essaye = ["l1", "l2", "l3", "angleBas", "angleHaut", "contreEssai"].some((k) => String(f[k] || "").trim());
+        if (!essaye) return;
+        const img = genererFresnelSeuil(eq, s); const ev = evalFresnel(eq, s);
+        const dims = img ? dimensionsPng(img) : null;
+        const im = img ? docxImage(img, 430, dims && dims.w ? Math.round((430 * dims.h) / dims.w) : 330) : null;
+        const blocs = [];
+        if (im) blocs.push(new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, spacing: { before: 160, after: 60 }, children: [im] }));
+        if (ev && ev.phrase) blocs.push(new DOCX.Paragraph({ spacing: { after: 80 }, children: [new DOCX.TextRun({ text: (ev.nonConforme ? "⚠ " : "") + ev.phrase, size: 17, bold: ev.nonConforme, color: ev.nonConforme ? "B5730A" : DOCX_DARK })] }));
+        if (blocs.length) elements.push(docxBlocInsecable(blocs));
+      });
       // Courbes de déclenchement : une par fonction (phase, terre) dès qu'un de ses seuils a été mesuré — seuils réunis en escalier,
       // tolérance et points mesurés (temps constant comme temps inverse).
       Object.keys(GROUPES_COURBE_RELAIS).filter((g) => etagesCourbeRelais(eq, g).some((e) => pointsMesuresSeuil(e.s).length)).forEach((g) => {
