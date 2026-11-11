@@ -3710,11 +3710,11 @@ const SCHEMAS = {
       ]},
       { key: "electriques", title: "Contrôles électriques", items: [
         C("contacts_auxiliaires", "Contacts auxiliaires"),
-        C("resistances_contacts", "Résistances des contacts", CHAMPS_CONTACTS_PAR_PHASE),
+        { ...C("resistances_contacts", "Résistances des contacts", CHAMPS_CONTACTS_PAR_PHASE), optionnel: true },
         C("verif_unite_controle", "Vérification unité de contrôle"),
         C("tension_aux_unite", "Tension auxiliaire de l'unité de contrôle", [F("tension", "Tension", null, LISTE_TENSION_ORGANES), F("type", "Type", null, LISTE_TYPE_ORGANES)]),
         C("signalisation", "Signalisation"),
-        C("thermographie_connexions", "Contrôle thermographique des connexions", [F("temperature", "Température relevée", "°C"), F("charge", "Charge au moment du contrôle", "%")]),
+        { ...C("thermographie_connexions", "Contrôle thermographique des connexions", [F("temperature", "Température relevée", "°C"), F("charge", "Charge au moment du contrôle", "%")]), optionnel: true },
         C("contacts_aux_signalisation", "Vérification des contacts auxiliaires de signalisation (OF/SD)"),
         C("bouton_test_rearmement", "Test du bouton test / réarmement"),
       ]},
@@ -3746,9 +3746,9 @@ const SCHEMAS = {
         S("differentiel", "Différentiel (Vigi)", [F("idn", "IΔn", "A"), F("dt", "Δt", "ms")]),
       ]},
       { key: "tests_disjoncteur", title: "Tests du disjoncteur", items: [
-        C("test_surcharge_longue", "Surcharge longue", [F("test_a", "Test à", "x Ir"), F("tr_max", "Tr max attendu", "s"), F("declenchement", "Déclenchement", "s")]),
-        C("test_cc_temporise", "Court-circuit temporisé", [F("test_a", "Test à", "x Im"), F("i2t_essai", "I²t pendant l'essai", null, ["OFF", "ON"]), F("declenchement_t0", "Déclenchement à T=0", "ms"), F("declenchement_treg", "Déclenchement à T réglé", "ms")]),
-        C("test_instantane", "Instantané", [F("valise_str", "Valise STR", "mA"), F("declenchement", "Déclenchement", "ms")]),
+        { ...C("test_surcharge_longue", "Surcharge longue", [F("test_a", "Test à", "x Ir"), F("tr_max", "Tr max attendu", "s"), F("declenchement", "Déclenchement", "s")]), optionnel: true },
+        { ...C("test_cc_temporise", "Court-circuit temporisé", [F("test_a", "Test à", "x Im"), F("i2t_essai", "I²t pendant l'essai", null, ["OFF", "ON"]), F("declenchement_t0", "Déclenchement à T=0", "ms"), F("declenchement_treg", "Déclenchement à T réglé", "ms")]), optionnel: true },
+        { ...C("test_instantane", "Instantané", [F("valise_str", "Valise STR", "mA"), F("declenchement", "Déclenchement", "ms")]), optionnel: true },
         { ...C("test_terre", "Protection terre / différentiel", [F("courant", "Courant injecté", "A"), F("declenchement", "Déclenchement", "ms")]), optionnel: true },
       ]},
       { key: "courbe_declenchement", title: "Courbe de déclenchement", items: [
@@ -3776,11 +3776,11 @@ const SCHEMAS = {
       ]},
       { key: "electriques", title: "Contrôles électriques", items: [
         C("contacts_auxiliaires", "Contacts auxiliaires"),
-        C("resistances_contacts", "Résistances des contacts", CHAMPS_CONTACTS_PAR_PHASE),
+        { ...C("resistances_contacts", "Résistances des contacts", CHAMPS_CONTACTS_PAR_PHASE), optionnel: true },
         C("verif_unite_controle", "Vérification unité de contrôle"),
         C("tension_aux_unite", "Tension auxiliaire de l'unité de contrôle"),
         C("signalisation", "Signalisation"),
-        C("thermographie_connexions", "Contrôle thermographique des connexions", [F("temperature", "Température relevée", "°C"), F("charge", "Charge au moment du contrôle", "%")]),
+        { ...C("thermographie_connexions", "Contrôle thermographique des connexions", [F("temperature", "Température relevée", "°C"), F("charge", "Charge au moment du contrôle", "%")]), optionnel: true },
         C("contacts_aux_signalisation", "Vérification des contacts auxiliaires de signalisation (OF/SD)"),
         C("bouton_test_rearmement", "Test du bouton test / réarmement"),
       ]},
@@ -7017,7 +7017,11 @@ function champsManquantsControle(item, value) {
   const vide = (k) => f[k] === undefined || f[k] === null || String(f[k]).trim() === "";
   // Temps de manœuvre : le synchronisme saisi seul suffit (mesures par phase non exigées).
   if (["temps_ouverture", "temps_fermeture"].includes(item.key) && !vide("synchronisme")) return [];
-  const mesurables = (item.fields || []).filter((d) => !d.hidden && !d.compute && !d.options && d.key !== "realise");
+  // Une valeur suffit : si l'une des alternatives est entièrement saisie, le reste n'est pas exigé.
+  const alternatives = ALTERNATIVES_MESURE[item.key];
+  if (alternatives && alternatives.some((alt) => alt.every((k) => !vide(k)))) return [];
+  const nonExiges = [...(CHAMPS_NON_EXIGES[item.key] || []), ...(/thermo/i.test(item.key) ? ["charge"] : [])];
+  const mesurables = (item.fields || []).filter((d) => !d.hidden && !d.compute && !d.options && d.key !== "realise" && !nonExiges.includes(d.key));
   if (!controleRenseigne(item, value)) return mesurables.map((d) => d.key);
   // Série homogène sans phases (ex. rangs d'harmoniques 5/7/11/13 en %) : toutes les valeurs sont attendues.
   const unites = [...new Set(mesurables.map((d) => d.unit || ""))];
@@ -7026,8 +7030,15 @@ function champsManquantsControle(item, value) {
   const totalPuissance = !vide("p") || !vide("s");
   return groupesParPhase((item.fields || []).filter((d) => !d.hidden))
     .filter((g) => !(totalPuissance && /^[pqs]$/.test(g.cle)))
-    .flatMap((g) => g.cellules.filter((d) => d && !d.compute && !d.options && vide(d.key)).map((d) => d.key));
+    .flatMap((g) => g.cellules.filter((d) => d && !d.compute && !d.options && vide(d.key) && !nonExiges.includes(d.key)).map((d) => d.key));
 }
+// Contrôles où une seule valeur suffit (les autres cases ne sont plus « à compléter »).
+const ALTERNATIVES_MESURE = {
+  fusibles_installes: [["valeur"], ["l1", "l2", "l3"]], fusibles_rechange: [["valeur"], ["l1", "l2", "l3"]],
+  test_surcharge_longue: [["declenchement"]], test_cc_temporise: [["declenchement_t0"], ["declenchement_treg"]], test_instantane: [["declenchement"]],
+};
+// Cases jamais exigées (neutre, température de référence) ; la charge des thermographies est traitée à part (toutes les clés « thermo »).
+const CHAMPS_NON_EXIGES = { resistances_contacts: ["n"], resistance_jonctions: ["n"], resistance_enroulements_primaire: ["temperature"], resistance_enroulements_secondaire: ["temperature"] };
 // Mesure optionnelle (case « Mesure réalisée ? ») : réalisée si la case est cochée — ou, pour un relevé
 // antérieur à la case (champ absent), si des valeurs ont déjà été saisies.
 function mesureRealisee(item, value) {
@@ -22128,10 +22139,13 @@ function docxCourbeDeclenchement(eq, titre) {
     ["Instantané", tests.test_instantane.etat],
   ];
   const nonConformes = testEntries.filter(([, etat]) => (RANK_OF[etat] ?? 0) > 0);
-  const phrase = nonConformes.length === 0
+  // Essais facultatifs : aucune valeur saisie et aucun état particulier → pas d'affirmation de conformité.
+  const essaye = ["test_surcharge_longue", "test_cc_temporise", "test_instantane"].some((k) => { const v = tests[k] || {}; return (v.etat && v.etat !== "Conforme") || String(v.action || "").trim() || Object.entries(v.fields || {}).some(([c, x]) => !/Unite$/.test(c) && String(x ?? "").trim()); });
+  const phrase = !essaye ? "Essais de déclenchement non réalisés lors de cette visite."
+    : nonConformes.length === 0
     ? "Tous les essais de déclenchement sont conformes."
     : "Essai(s) non conforme(s) : " + nonConformes.map(([label, etat]) => `${label} (${etat})`).join(", ") + ".";
-  const paragraphePhrase = new DOCX.Paragraph({ spacing: { after: 80 }, children: [new DOCX.TextRun({ text: phrase, bold: true, size: 18, color: nonConformes.length === 0 ? DOCX_GREEN : DOCX_RED })] });
+  const paragraphePhrase = new DOCX.Paragraph({ spacing: { after: 80 }, children: [new DOCX.TextRun({ text: phrase, bold: true, size: 18, color: !essaye ? "8B96A3" : nonConformes.length === 0 ? DOCX_GREEN : DOCX_RED })] });
   // Le titre, la première image et (s'il n'y en a qu'une) la phrase de conformité forment un seul bloc.
   const enTete = titre ? [docxHeading(titre, 480, 160)] : [];
   if (contenus.length <= 1) {
