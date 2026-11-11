@@ -7015,6 +7015,8 @@ function champsManquantsControle(item, value) {
 
   const f = value.fields || {};
   const vide = (k) => f[k] === undefined || f[k] === null || String(f[k]).trim() === "";
+  // Temps de manœuvre : le synchronisme saisi seul suffit (mesures par phase non exigées).
+  if (["temps_ouverture", "temps_fermeture"].includes(item.key) && !vide("synchronisme")) return [];
   const mesurables = (item.fields || []).filter((d) => !d.hidden && !d.compute && !d.options && d.key !== "realise");
   if (!controleRenseigne(item, value)) return mesurables.map((d) => d.key);
   // Série homogène sans phases (ex. rangs d'harmoniques 5/7/11/13 en %) : toutes les valeurs sont attendues.
@@ -7298,8 +7300,6 @@ function verificationsCoherenceEquipement(eq, site) {
         const hors = pl ? ["l1", "l2", "l3"].filter((p) => { const x = numOf(f[p]); return x !== null && ((pl.min !== null && x < pl.min) || (pl.max !== null && x > pl.max)); }) : [];
         if (hors.length && (v.etat || "Conforme") === "Conforme") push(sec.key, `${it.label} : ${hors.map((p) => `${p.toUpperCase()} = ${fmtV(numOf(f[p]))} ms`).join(", ")} hors plage (${pl.libelle}) alors que l'état est « Conforme »`);
       }
-      if (["temps_ouverture", "temps_fermeture"].includes(it.key) && numOf(f.synchronisme) !== null && numOf(f.synchronisme) > 15 && !["l1", "l2", "l3"].some((k) => numOf(f[k]) !== null))
-        push(sec.key, `${it.label} : ${fmtV(numOf(f.synchronisme))} ms saisis dans « Synchronisme » sans temps L1 / L2 / L3 — le temps de manœuvre se saisit en L1 / L2 / L3, le synchronisme est l'écart entre pôles (≤ 3,3 ms)`);
     });
   });
   // Relais de protection
