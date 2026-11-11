@@ -1194,6 +1194,99 @@ const LISTE_FONCTIONNEMENT_INV = ["Utilisation sur Source 1 et Source 1 priorita
 const LISTE_RESULTAT_TRANSFERT_MANUEL = ["Conforme", "Bypass", "Hors tolérance", "Hors tension"];
 const LISTE_RESULTAT_TRANSFERT_AUTO = ["Réalisé et conforme", "Non conforme", "Non réalisé"];
 const LISTE_CONCLUSION_DGA = ["Normal", "Surveillance", "Alerte", "Critique"];
+// ----- Analyse d'huile : classement CEI 60422 (huile minérale en service) et préconisations -----
+// Catégorie C : transformateurs ≤ 72,5 kV (HTA/BT) ; B : > 72,5 kV jusqu'à 170 kV. Seuils [bon, mauvais] : entre les deux = moyen.
+const LISTE_CATEGORIE_IEC60422 = ["C (≤ 72,5 kV)", "B (> 72,5 kV à 170 kV)"];
+const SEUILS_IEC60422 = {
+  C: { rigidite_dielectrique: [40, 30, "kV", "haut"], teneur_eau: [30, 40, "ppm", "bas"], acidite: [0.15, 0.30, "mgKOH/g", "bas"], facteur_dissipation: [10, 50, "%", "bas"] },
+  B: { rigidite_dielectrique: [50, 40, "kV", "haut"], teneur_eau: [20, 30, "ppm", "bas"], acidite: [0.10, 0.20, "mgKOH/g", "bas"], facteur_dissipation: [10, 50, "%", "bas"] },
+};
+const RECO_HUILE = {
+  rigidite_dielectrique: ["physique", "Rigidité diélectrique insuffisante : confirmer par un second prélèvement, puis traiter l'huile (filtration / séchage) et rechercher une entrée d'humidité (joints, assécheur)."],
+  teneur_eau: ["physique", "Teneur en eau élevée : sécher l'huile puis refaire une analyse (l'eau contenue dans le papier repasse dans l'huile) ; vérifier l'assécheur / le silicagel."],
+  acidite: ["chimique", "Acidité élevée : régénérer ou remplacer l'huile et contrôler la présence de boues."],
+  facteur_dissipation: ["chimique", "Facteur de dissipation élevé : régénérer ou remplacer l'huile."],
+  tension_interfaciale: ["chimique", "Tension interfaciale faible : rechercher la présence de boues ; régénérer ou remplacer l'huile."],
+};
+// Classement d'un résultat : { classe: "Bon" | "Moyen" | "Mauvais", rang: 0 | 1 | 2, repere, reco, categorie } ou null.
+function classerResultatHuile(eq, key, fields) {
+  const id = (eq && eq.identification) || {};
+  const cat = /^B/.test(id.categorieIEC60422 || "") ? "B" : "C";
+  const v = numOf(fields && fields.valeur);
+  const r = (classe, rang, repere, reco, categorie) => ({ classe, rang, repere, reco, categorie });
+  const nb = (x) => String(x).replace(".", ",");
+  if (SEUILS_IEC60422[cat][key] && v !== null) {
+    const [bon, mauvais, u, sens] = SEUILS_IEC60422[cat][key];
+    const rep = sens === "haut" ? `bon > ${nb(bon)}, mauvais < ${nb(mauvais)} ${u}` : `bon < ${nb(bon)}, mauvais > ${nb(mauvais)} ${u}`;
+    const repere = `CEI 60422 cat. ${cat} : ${rep}`;
+    const estBon = sens === "haut" ? v > bon : v < bon;
+    const estMauvais = sens === "haut" ? v < mauvais : v > mauvais;
+    if (estBon) return r("Bon", 0, repere, "", "");
+    if (!estMauvais) return r("Moyen", 1, repere, "Analyse à rapprocher et paramètres liés à contrôler.", "huile_surveillance");
+    return r("Mauvais", 2, repere, RECO_HUILE[key][1], "huile_" + RECO_HUILE[key][0]);
+  }
+  if (key === "tension_interfaciale" && v !== null) {
+    const inh = id.huileInhibee === "Oui";
+    const [bon, mauvais] = inh ? [28, 22] : [25, 20];
+    const repere = `CEI 60422 (huile ${inh ? "inhibée" : "non inhibée"}) : bon > ${bon}, mauvais < ${mauvais} mN/m`;
+    if (v > bon) return r("Bon", 0, repere, "", "");
+    if (v >= mauvais) return r("Moyen", 1, repere, "Analyse à rapprocher et paramètres liés à contrôler.", "huile_surveillance");
+    return r("Mauvais", 2, repere, RECO_HUILE.tension_interfaciale[1], "huile_chimique");
+  }
+  if (key === "analyse_gaz_dissous") {
+    const c = (fields && fields.conclusion) || "";
+    if (c === "Normal") return r("Bon", 0, "DGA (interprétation CEI 60599 du laboratoire)", "", "");
+    if (c === "Surveillance") return r("Moyen", 1, "DGA (CEI 60599)", "Gaz dissous en surveillance : refaire une analyse des gaz dissous à échéance rapprochée.", "huile_dga");
+    if (c === "Alerte") return r("Moyen", 1, "DGA (CEI 60599)", "Gaz dissous en alerte : analyse rapprochée et recherche du défaut d'après l'interprétation du laboratoire (CEI 60599).", "huile_dga");
+    if (c === "Critique") return r("Mauvais", 2, "DGA (CEI 60599)", "Gaz dissous critiques : expertise du transformateur, mise hors service à envisager.", "huile_dga_critique");
+    return null;
+  }
+  if (key === "teneur_furanes" && v !== null) {
+    const repere = "2-FAL (repère non réglementaire) : bon < 1, mauvais ≥ 4 ppm";
+    if (v < 1) return r("Bon", 0, repere, "", "");
+    if (v < 4) return r("Moyen", 1, repere, "Dégradation avancée du papier isolant : surveillance rapprochée (furanes à chaque analyse).", "huile_furanes");
+    return r("Mauvais", 2, repere, "Papier isolant en fin de vie probable : expertise du transformateur, remplacement à envisager.", "huile_furanes");
+  }
+  if (key === "teneur_pcb" && v !== null) {
+    const repere = "PCB (décret 2001-63) : < 50 ppm non PCB";
+    if (v < 50) return r("Bon", 0, repere, "", "");
+    if (v < 500) return r("Moyen", 1, repere, "Huile contaminée PCB (50 à 500 ppm) : déclaration en préfecture, étiquetage, élimination à prévoir en fin de vie de l'appareil.", "huile_pcb");
+    return r("Mauvais", 2, repere, "Appareil PCB (≥ 500 ppm) : décontamination ou élimination obligatoire, déclaration en préfecture.", "huile_pcb");
+  }
+  if (key === "point_eclair" && v !== null) {
+    const ref = numOf(fields.reference);
+    if (ref === null || !ref) return null;
+    const baisse = ((ref - v) / ref) * 100;
+    const repere = `baisse ${Math.round(baisse)} % par rapport à ${nb(ref)} °C (repère : 10 %)`;
+    if (baisse <= 10) return r("Bon", 0, repere, "", "");
+    return r("Moyen", 1, repere, "Baisse du point d'éclair : rechercher un défaut interne (analyse des gaz dissous).", "huile_eclair");
+  }
+  if (key === "aspect_couleur") {
+    const a = (fields && fields.valeur) || "";
+    if (!a) return null;
+    if (a === "Clair et limpide") return r("Bon", 0, "aspect", "", "");
+    if (a === "Trouble") return r("Moyen", 1, "aspect", "Huile trouble : contrôler la teneur en eau.", "huile_aspect");
+    return r("Moyen", 1, "aspect", "Particules ou coloration anormale : filtration de l'huile et analyse complémentaire.", "huile_aspect");
+  }
+  return null;
+}
+const ETAT_PAR_RANG_HUILE = ["Conforme", "Dégradé", "Défaillant"];
+// Explicatif de chaque analyse (écran : « ⓘ » ; rapport : encart « Comprendre l'analyse d'huile », analyses réalisées seulement).
+const EXPLICATIF_ANALYSE_HUILE = {
+  rigidite_dielectrique: "Tension que l'huile supporte avant claquage. Elle baisse en présence d'eau ou de particules : c'est la mesure de sa capacité à isoler.",
+  teneur_eau: "Humidité dissoute dans l'huile. L'eau réduit l'isolement et accélère le vieillissement du papier ; elle provient d'une entrée d'air humide ou de la dégradation de l'isolant.",
+  acidite: "Produits acides formés par l'oxydation de l'huile. Ils attaquent le papier isolant et forment des boues : c'est l'indicateur du vieillissement chimique.",
+  tension_interfaciale: "Présence de produits polaires de vieillissement, avant même que l'acidité n'augmente : signe précoce d'oxydation et de formation de boues.",
+  facteur_dissipation: "Pertes diélectriques de l'huile. Il augmente avec la contamination et le vieillissement.",
+  analyse_gaz_dissous: "Gaz produits par les défauts internes (échauffements, décharges partielles, arcs) : diagnostic de l'état interne du transformateur sans l'ouvrir.",
+  point_eclair: "Température à laquelle les vapeurs de l'huile s'enflamment. Une baisse signale des gaz légers formés par un défaut interne.",
+  aspect_couleur: "Contrôle visuel : trouble (eau), particules (usure, contamination), couleur foncée (vieillissement).",
+  teneur_pcb: "Polychlorobiphényles (pyralène) : contrôle réglementaire de la contamination de l'huile.",
+  teneur_furanes: "Produits de dégradation du papier isolant : ils indiquent son vieillissement, donc la durée de vie restante du transformateur.",
+  indice_couleur: "Couleur normalisée de l'huile (échelle ASTM D1500) : elle fonce avec l'oxydation et la contamination ; c'est surtout son évolution d'une analyse à l'autre qui compte.",
+  comptage_particules: "Nombre et taille des particules en suspension (code ISO 4406) : usure, contamination ou dépôts, qui font baisser la rigidité diélectrique.",
+};
+const METHODE_ANALYSE_HUILE = "Classement selon la CEI 60422 : bon / moyen (analyse à rapprocher) / mauvais (action à planifier) ; une action lourde (traitement, régénération, remplacement) se décide après confirmation par un second prélèvement.";
 const LISTE_MARQUE_TDY = ["ABB", "ALSTOM", "AREVA", "CAHORS", "CONTI TRANSFO", "EFACEC", "ELKIMA", "France TRANSFO", "GBE", "MATELEC", "MERLIN GERIN", "PAUWELS", "SCHNEIDER ELECTRIC", "SIEMENS", "SNT DURIEZ", "UNELEC", "GENERAL ELECTRIC", "SGB-SMIT", "TRIHAL", "COTRADIS", "NIDEC", "TRAFOLYX", "IMEFY", "ORMAZABAL"];
 // Marques courantes par catégorie d'équipement — liste + saisie libre (une valeur absente reste saisissable).
 const LISTE_MARQUE_CELLULE_HTA = ["Schneider Electric", "Merlin Gerin", "ABB", "Siemens", "Areva", "Alstom", "GEC Alsthom", "Alstom Grid", "Cahors", "Pommier", "CEM", "GE Grid Solutions", "Nexans", "CG Power", "Ormazabal", "Eaton", "Ensto", "Normelec", "SM6", "Fuji Electric"];
@@ -3796,6 +3889,8 @@ const SCHEMAS = {
       { key: "laboratoire", label: "Laboratoire" }, { key: "datePrelevement", label: "Date de prélèvement" },
       { key: "pointPrelevement", label: "Point de prélèvement", options: ["Point haut", "Vanne basse", "DMCR", "DGPT2", "Bucholtz", "Autre"] },
       { key: "temperatureHuile", label: "Température de l'huile (°C)", numeric: true },
+      { key: "categorieIEC60422", label: "Catégorie CEI 60422", options: LISTE_CATEGORIE_IEC60422 },
+      { key: "huileInhibee", label: "Huile inhibée", options: ["Non", "Oui"] },
     ],
     sections: [
       { key: "resultats", title: "Résultats d'analyse", items: [
@@ -3805,7 +3900,7 @@ const SCHEMAS = {
         C("tension_interfaciale", "Tension interfaciale", [F("valeur", "Valeur", "mN/m")]),
         C("facteur_dissipation", "Facteur de dissipation (tan δ)", [F("valeur", "Valeur", "%")]),
         C("analyse_gaz_dissous", "Analyse des gaz dissous (DGA)", [F("conclusion", "Conclusion", null, LISTE_CONCLUSION_DGA)]),
-        C("point_eclair", "Point d'éclair", [F("valeur", "Valeur", "°C")]),
+        C("point_eclair", "Point d'éclair", [F("valeur", "Valeur", "°C"), F("reference", "Référence (huile neuve / analyse précédente)", "°C")]),
         C("aspect_couleur", "Aspect / Couleur", [F("valeur", "Valeur", null, ["Clair et limpide", "Trouble", "Présence de particules", "Coloration anormale"])]),
         C("teneur_pcb", "Teneur en PCB (pyralène)", [
           F("valeur", "Valeur", "ppm"),
@@ -4491,6 +4586,23 @@ function repairEquipementControles(eq) {
   const ancienBypass = eq?.identification?.moduleBypass;
   if (ancienBypass === "Séparé (module dédié)" || ancienBypass === "Intégré à chaque module de puissance") {
     eq = { ...eq, identification: { ...eq.identification, moduleBypass: ancienBypass.startsWith("Intégré") ? LISTE_BYPASS_MODULES[1] : LISTE_BYPASS_MODULES[0] } };
+  }
+  // Analyse d'huile : état de chaque résultat ajusté d'après le classement CEI 60422 (un état choisi à la main n'est jamais modifié).
+  if (eq?.type === "Analyse d'huile" && eq.controles && eq.controles.resultats) {
+    const res = { ...eq.controles.resultats };
+    let change = false;
+    Object.keys(res).forEach((k) => {
+      const cur = res[k];
+      if (!cur || !cur.fields || cur.fields.realise !== "OUI") return;
+      const cl = classerResultatHuile(eq, k, cur.fields);
+      if (!cl) return;
+      const manuel = cur.etat && cur.etat !== "Conforme" && !cur.etatAuto;
+      if (manuel) return;
+      const cible = ETAT_PAR_RANG_HUILE[cl.rang];
+      if (cl.rang > 0 && cur.etat !== cible) { res[k] = { ...cur, etat: cible, etatAuto: true }; change = true; }
+      else if (cl.rang === 0 && cur.etatAuto && cur.etat !== "Conforme") { res[k] = { ...cur, etat: "Conforme", etatAuto: false }; change = true; }
+    });
+    if (change) eq = { ...eq, controles: { ...eq.controles, resultats: res } };
   }
   // Disjoncteur HTA : ancienne mesure « bobine de déclenchement » reprise sur la première bobine de déclenchement des organes.
   if (eq?.type === "Disjoncteur HTA") {
@@ -8765,13 +8877,22 @@ function MiniCombo({ label, options, value, onChange, listId, unit }) {
 // Analyse d'huile : liste des analyses possibles à cocher — seules celles cochées affichent
 // leur(s) champ(s) de résultat.
 function AnalyseHuilePanel({ eq, update, idPrefix }) {
+  const [aides, setAides] = useState({});
   const schema = SCHEMAS["Analyse d'huile"];
   const items = schema.sections[0].items;
   const values = eq.controles.resultats;
-  const setField = (key, fieldKey, v) =>
-    update({ ...eq, controles: { ...eq.controles, resultats: { ...values, [key]: { ...values[key], fields: { ...values[key].fields, [fieldKey]: v } } } } });
+  // État ajusté automatiquement d'après le classement (jamais un état choisi à la main) : Bon → Conforme, Moyen → Dégradé, Mauvais → Défaillant.
+  const setField = (key, fieldKey, v) => {
+    const cur = values[key];
+    const fields = { ...cur.fields, [fieldKey]: v };
+    const cl = classerResultatHuile(eq, key, fields);
+    let suite = { ...cur, fields };
+    const manuel = cur.etat && cur.etat !== "Conforme" && !cur.etatAuto;
+    if (cl && !manuel) suite = cl.rang > 0 ? { ...suite, etat: ETAT_PAR_RANG_HUILE[cl.rang], etatAuto: true } : (cur.etatAuto ? { ...suite, etat: "Conforme", etatAuto: false } : suite);
+    update({ ...eq, controles: { ...eq.controles, resultats: { ...values, [key]: suite } } });
+  };
   const toggleRealise = (key, checked) => setField(key, "realise", checked ? "OUI" : "");
-  const setEtat = (key, etat) => update({ ...eq, controles: { ...eq.controles, resultats: { ...values, [key]: { ...values[key], etat } } } });
+  const setEtat = (key, etat) => update({ ...eq, controles: { ...eq.controles, resultats: { ...values, [key]: { ...values[key], etat, etatAuto: false } } } });
 
   return (
     <Card style={{ marginBottom: 14 }}>
@@ -8785,7 +8906,14 @@ function AnalyseHuilePanel({ eq, update, idPrefix }) {
               <label style={{ display: "flex", alignItems: "center", gap: 9, cursor: "pointer" }}>
                 <input type="checkbox" checked={checked} onChange={(e) => toggleRealise(item.key, e.target.checked)} style={{ width: 16, height: 16, accentColor: BRAND.blue, cursor: "pointer" }} />
                 <span style={{ fontSize: 13, fontWeight: 600, color: "#1A1F26" }}>{item.label}</span>
+                {EXPLICATIF_ANALYSE_HUILE[item.key] && (
+                  <span role="button" tabIndex={0} title="Ce que mesure cette analyse" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setAides({ ...aides, [item.key]: !aides[item.key] }); }}
+                    style={{ cursor: "pointer", fontSize: 13, color: "#0A5DA8", fontWeight: 700, padding: "0 4px" }}>ⓘ</span>
+                )}
               </label>
+              {aides[item.key] && EXPLICATIF_ANALYSE_HUILE[item.key] && (
+                <div style={{ marginTop: 6, marginLeft: 25, fontSize: 11.5, lineHeight: 1.5, color: "#3E4A5C", background: "#EEF4FB", borderRadius: 8, padding: "6px 10px" }}>{EXPLICATIF_ANALYSE_HUILE[item.key]}</div>
+              )}
               {checked && (
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginTop: 10, marginLeft: 25 }}>
                   {item.fields.map((f) => (
@@ -8804,6 +8932,16 @@ function AnalyseHuilePanel({ eq, update, idPrefix }) {
                     </label>
                   ))}
                   <EtatRapide value={v.etat} onChange={(__v) => setEtat(item.key, __v)} />
+                  {(() => {
+                    const cl = classerResultatHuile(eq, item.key, v.fields);
+                    if (!cl) return null;
+                    const c = cl.rang === 0 ? { bg: "#EAF6EF", fg: "#0F8A5F" } : cl.rang === 1 ? { bg: "#FDF3E3", fg: "#8A5A0A" } : { bg: "#FDECEA", fg: "#C0392B" };
+                    return (
+                      <div style={{ flexBasis: "100%", fontSize: 11.5, lineHeight: 1.5, padding: "6px 10px", borderRadius: 8, background: c.bg, color: c.fg }}>
+                        <b>{cl.classe}</b> — {cl.repere}{cl.reco ? <><br />{cl.reco}</> : null}
+                      </div>
+                    );
+                  })()}
                 </div>
               )}
             </div>
@@ -14962,9 +15100,20 @@ function analyserAnomaliesEquipement(eq, contexte) {
     if (eq.type === "Analyse d'huile" && sec.key === "resultats") {
       sec.items.forEach((item) => {
         const v = eq.controles[sec.key][item.key];
-        if (v.fields.realise === "OUI" && v.etat && RANK_OF[v.etat] > 0) {
+        if (v.fields.realise !== "OUI") return;
+        const cl = classerResultatHuile(eq, item.key, v.fields);
+        const rangEtat = v.etat ? RANK_OF[v.etat] || 0 : 0;
+        if (cl && cl.rang > 0) {
+          const f = item.fields.find((x) => x.key === "valeur" || x.key === "conclusion");
+          const val = f ? `${v.fields[f.key]}${f.unit ? " " + f.unit : ""}`.replace(".", ",") : "";
+          const suiteAction = v.action ? ` — ${actionCourte(v.action)}` : "";
+          const phrase = item.key === "analyse_gaz_dissous" ? `Analyse des gaz dissous : conclusion « ${val} » du laboratoire (interprétation CEI 60599)${suiteAction}.`
+            : item.key === "aspect_couleur" ? `Aspect de l'huile : ${String(val).toLowerCase()}${suiteAction}.`
+            : `${item.label} : ${val} — ${cl.rang === 2 ? "mauvais" : "moyen"} (${cl.repere})${suiteAction}.`;
+          ajouter(phrase, Math.max(cl.rang, rangEtat), actionCorrective(v.action) ? "corrige" : cl.categorie, item.label.toLowerCase());
+        } else if (rangEtat > 0) {
           const info = detailAnomalieItem(item, v);
-          ajouter(phraseConstatItem({ label: item.label, etat: v.etat, mesures: info.mesures, avertissements: info.avertissements, action: v.action }), RANK_OF[v.etat], actionCorrective(v.action) ? "corrige" : "huile", item.label);
+          ajouter(phraseConstatItem({ label: item.label, etat: v.etat, mesures: info.mesures, avertissements: info.avertissements, action: v.action }), rangEtat, actionCorrective(v.action) ? "corrige" : "huile", item.label);
         }
       });
       return;
@@ -15213,6 +15362,15 @@ const RECO_PAR_CATEGORIE = {
   isolement: (s) => `Rechercher la cause de la baisse d'isolement et refaire la mesure (${s}).`,
   enroulements: (s) => `Faire contrôler les enroulements et le changeur de prises (${s}).`,
   huile: (s) => `Réaliser une analyse complémentaire de l'huile (${s}).`,
+  huile_physique: (s) => `Traiter l'huile (filtration / séchage) après confirmation par un second prélèvement ; rechercher l'entrée d'humidité (${s}).`,
+  huile_chimique: (s) => `Régénérer ou remplacer l'huile après confirmation par un second prélèvement ; contrôler la présence de boues (${s}).`,
+  huile_surveillance: (s) => `Rapprocher la prochaine analyse d'huile et contrôler les paramètres liés (${s}).`,
+  huile_dga: () => "Refaire une analyse des gaz dissous à échéance rapprochée et rechercher l'origine du défaut d'après l'interprétation du laboratoire (CEI 60599).",
+  huile_dga_critique: () => "Faire expertiser le transformateur (gaz dissous critiques) ; envisager sa mise hors service.",
+  huile_furanes: () => "Suivre l'état du papier isolant (furanes) à chaque analyse ; au-delà de 4 ppm, faire expertiser le transformateur et envisager son remplacement.",
+  huile_pcb: () => "Déclarer l'appareil contaminé PCB en préfecture, l'étiqueter et planifier son élimination ou sa décontamination (décret 2001-63).",
+  huile_eclair: () => "Rechercher un défaut interne (baisse du point d'éclair) par une analyse des gaz dissous.",
+  huile_aspect: () => "Contrôler la teneur en eau et filtrer l'huile ; réaliser une analyse complémentaire.",
   mise_terre: (s) => `Reprendre la liaison de mise à la terre (${s}).`,
   protection: (s) => `Contrôler le réglage et le déclenchement des protections (${s}).`,
   disjoncteur: (s) => `Contrôler et corriger les réglages de déclenchement du disjoncteur (${s}).`,
@@ -15238,7 +15396,7 @@ const RECO_PAR_CATEGORIE = {
   etat_degrade: (s) => `Surveiller à la prochaine visite : ${s}.`,
 };
 const MAX_PRECONISATIONS = 5;
-const ORDRE_RECO = ["capacite_modules", "module", "redondance_modules", "redondance_parallele", "partage_charge", "surcharge_condensateurs", "resonance", "self_accord", "fusible_calibre", "fusible_ib", "fusible", "fusible_rechange", "securite_non_conforme", "surcharge_kw", "batterie_capacite", "batterie_branche", "thdi_entree", "neutre_harmoniques", "temperature_batterie", "ondulation_batterie", "isolement_continu", "reglage_ir", "svg_sature", "serrage", "contact", "isolement", "enroulements", "huile", "mise_terre", "protection", "disjoncteur", "batterie", "gradin", "cosphi", "usure", "proprete", "ventilation", "thermique", "mesure", "etat_defaillant", "etat_degrade"];
+const ORDRE_RECO = ["huile_dga_critique", "huile_pcb", "huile_physique", "huile_chimique", "huile_dga", "huile_furanes", "huile_eclair", "huile_aspect", "huile_surveillance", "capacite_modules", "module", "redondance_modules", "redondance_parallele", "partage_charge", "surcharge_condensateurs", "resonance", "self_accord", "fusible_calibre", "fusible_ib", "fusible", "fusible_rechange", "securite_non_conforme", "surcharge_kw", "batterie_capacite", "batterie_branche", "thdi_entree", "neutre_harmoniques", "temperature_batterie", "ondulation_batterie", "isolement_continu", "reglage_ir", "svg_sature", "serrage", "contact", "isolement", "enroulements", "huile", "mise_terre", "protection", "disjoncteur", "batterie", "gradin", "cosphi", "usure", "proprete", "ventilation", "thermique", "mesure", "etat_defaillant", "etat_degrade"];
 // Préconisations dédoublonnées, regroupées par famille, les plus urgentes en premier.
 function preconisationsDepuisConstats(constats) {
   const groupes = {};
@@ -22345,9 +22503,29 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
     }
     if (eq.type === "Analyse d'huile" && sec.key === "resultats") {
       elements.push(docxHeading(sec.title));
+      {
+        const faites = sec.items.filter((item) => eq.controles[sec.key][item.key]?.fields?.realise === "OUI" && EXPLICATIF_ANALYSE_HUILE[item.key]);
+        if (faites.length) {
+          const W = TABLE_WIDTH, a = docxAucuneBordure();
+          const enfants = [
+            new DOCX.Paragraph({ spacing: { after: 80 }, children: [new DOCX.TextRun({ text: "COMPRENDRE L'ANALYSE D'HUILE", bold: true, size: 16, color: DOCX_BLUE, characterSpacing: 20 })] }),
+            ...faites.map((item) => new DOCX.Paragraph({ spacing: { after: 50, line: 260 }, indent: { left: 200, hanging: 200 }, children: [
+              new DOCX.TextRun({ text: "•  " + item.label.replace(/\s*\(.*\)\s*$/, "") + " : ", bold: true, size: 16, color: DOCX_DARK }),
+              new DOCX.TextRun({ text: EXPLICATIF_ANALYSE_HUILE[item.key], size: 16, color: "3E4A5C" }),
+            ] })),
+            new DOCX.Paragraph({ spacing: { before: 60, after: 0 }, children: [new DOCX.TextRun({ text: METHODE_ANALYSE_HUILE, italics: true, size: 15, color: "5B6B7D" })] }),
+          ];
+          elements.push(docxTable({ width: { size: W, type: DOCX.WidthType.DXA }, columnWidths: [W], borders: { ...docxToutesAucune(), insideHorizontal: a, insideVertical: a },
+            rows: [new DOCX.TableRow({ cantSplit: faites.length <= 8, children: [new DOCX.TableCell({ width: { size: W, type: DOCX.WidthType.DXA }, shading: { type: DOCX.ShadingType.CLEAR, fill: "EEF4FB" },
+              borders: { top: a, bottom: a, right: a, left: { style: DOCX.BorderStyle.SINGLE, size: 36, color: DOCX_BLUE } }, margins: { top: 120, bottom: 100, left: 220, right: 180 }, children: enfants })] })] }));
+          elements.push(docxSpacer(120));
+        }
+      }
       const rows = sec.items.filter((item) => eq.controles[sec.key][item.key].fields.realise === "OUI").map((item) => {
         const value = eq.controles[sec.key][item.key] || { action: "", etat: "", fields: {} };
         const parts = printFieldParts(item, value);
+        const cl = classerResultatHuile(eq, item.key, value.fields);
+        if (cl) parts.push({ text: `${cl.classe} — ${cl.repere}`, etat: cl.rang === 0 ? "ok" : cl.rang === 1 ? "warning" : "bad" });
         return [item.label, parts, value.action, value.etat];
       });
       const t = docxControlTable(rows);
