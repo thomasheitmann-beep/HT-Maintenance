@@ -19362,13 +19362,15 @@ function docxCarteRemarques({ titre = "", lien = "", etat = "", constats = [], p
     ] })],
   });
 }
-function docxRemarquesEquipement(texte, etat, avant = []) {
+function docxRemarquesEquipement(texte, etat, avant = [], titreCarte = "") {
   const titre = docxHeading("Remarques et préconisations", 360, 140);
   const lignes = String(texte).split("\n").map((l) => l.trim()).filter(Boolean);
   const carte = !remarquesStructurees(texte)
     // Texte libre : chaque ligne devient un constat (lisible en liste, même sans titres « Constats » / « Préconisations »).
-    ? docxCarteRemarques({ etat, constats: lignes.map((l) => l.replace(/^[•\-–*]\s*/, "")) })
-    : (() => { const p = parserSectionsRemarques(lignes); return docxCarteRemarques({ etat, constats: p.constats, preconisations: p.preconisations, autres: p.autres }); })();
+    ? docxCarteRemarques({ titre: titreCarte, etat, constats: lignes.map((l) => l.replace(/^[•\-–*]\s*/, "")) })
+    : (() => { const p = parserSectionsRemarques(lignes); return docxCarteRemarques({ titre: titreCarte, etat, constats: p.constats, preconisations: p.preconisations, autres: p.autres }); })();
+  // Version compacte : la carte porte elle-même le titre et la pastille d'état (pas d'encart ni de titre de section au-dessus).
+  if (titreCarte) return [carte, docxSpacer(60)];
   // Pages / iPhone ignorent « garder avec le suivant » : encart d'état, titre et carte courte sont mis dans une seule ligne
   // de tableau insécable, sinon le titre reste seul en bas de page et son contenu part sur la page suivante.
   if (lignes.join(" ").length < 900) return [docxBlocInsecable([...avant, titre, carte, new DOCX.Paragraph({ spacing: { before: 0, after: 0 }, children: [] })]), docxSpacer(120)];
@@ -20030,7 +20032,7 @@ function docxControlRowsDense(label, detail, action, etat, isAlternate, garderAv
 // Un contrôle qui porte une action ou de longues valeurs garde une ligne pleine largeur (pour rester lisible) ; l'ordre des contrôles est conservé.
 function docxControlTableCompact(rows) {
   if (rows.length === 0) return null;
-  const L = [2800, 2000, 2800, 2000]; // colonne d'état à 2000, comme dans les tableaux ligne par ligne : toutes les pastilles ont la même largeur
+  const L = [3250, 1550, 3250, 1550]; // colonne d'état resserrée : libellés sur une ligne le plus souvent, comme dans les tableaux ligne par ligne : toutes les pastilles ont la même largeur
   const marges = { top: 40, bottom: 40, left: 110, right: 90 };
   const aucune = docxAucuneBordure();
   // Un contrôle se place en demi-largeur s'il n'a pas d'action et au plus une courte valeur (ex. « Valeur : 24 °C ») ; sinon il garde une ligne pleine largeur.
@@ -22598,17 +22600,19 @@ function docxFicheIdentite(titre, bookmarkId, etat, typeEquipement, lignes, phot
   const a = docxAucuneBordure();
   const couleur = etat ? docxEtatColor(etat) : DOCX_BLUE;
   const img = docxImagePhotoEquipement(photo);
-  const WP = img ? 2850 : 0, WS = 2400, WI = Math.floor((TABLE_WIDTH - WS - WP) / 2);
-  const W = [WS, WI, TABLE_WIDTH - WS - WP - WI, ...(img ? [WP] : [])];
+  const peuDeChamps = !img && (lignes || []).filter((l) => String(l[1] ?? "").trim()).length <= 2;
+  const WP = img ? 2850 : 0, WS = 2400, WI = peuDeChamps ? TABLE_WIDTH - WS : Math.floor((TABLE_WIDTH - WS - WP) / 2);
+  const W = peuDeChamps ? [WS, WI] : [WS, WI, TABLE_WIDTH - WS - WP - WI, ...(img ? [WP] : [])];
   const symbole = typeEquipement ? symboleEquipementPng(typeEquipement) : null;
   const imgSymbole = symbole ? docxImage(symbole, 26, 26) : null;
   const numericId = nextBookmarkNumericId();
   const [type, ...reste] = String(titre || "").split(" — ");
   const runType = new DOCX.TextRun({ text: String(type).toUpperCase(), bold: true, color: DOCX_WHITE, size: 20, characterSpacing: 14 });
   const contenuTitre = bookmarkId ? [new DOCX.BookmarkStart(bookmarkId, numericId), runType, new DOCX.BookmarkEnd(numericId)] : [runType];
+  const peuDeChampsP = !img && (lignes || []).filter((l) => String(l[1] ?? "").trim()).length <= 2;
   const panneau = [
-    ...(imgSymbole ? [new DOCX.Paragraph({ keepNext: true, spacing: { before: 0, after: 100 }, children: [imgSymbole] })] : []),
-    new DOCX.Paragraph({ keepNext: true, spacing: { before: 0, after: 60, line: 260 }, children: contenuTitre }),
+    ...(imgSymbole && !peuDeChampsP ? [new DOCX.Paragraph({ keepNext: true, spacing: { before: 0, after: 100 }, children: [imgSymbole] })] : []),
+    new DOCX.Paragraph({ keepNext: true, spacing: { before: 0, after: 60, line: 260 }, children: peuDeChampsP && imgSymbole ? [docxImage(symbole, 18, 18), new DOCX.TextRun({ text: "  ", size: 16 }), ...contenuTitre] : contenuTitre }),
     ...(reste.length ? [new DOCX.Paragraph({ keepNext: true, spacing: { before: 0, after: 140, line: 260 }, children: [new DOCX.TextRun({ text: reste.join(" — "), bold: true, color: DOCX_SILVER, size: 19 })] })] : []),
     ...(etat ? [new DOCX.Paragraph({ keepNext: true, spacing: { before: 60, after: 0 }, children: [new DOCX.TextRun({ text: "  " + String(etat).toUpperCase() + "  ", bold: true, size: 16, color: DOCX_WHITE, characterSpacing: 20, shading: { type: DOCX.ShadingType.CLEAR, fill: couleur, color: "auto" } })] })] : []),
   ];
@@ -22621,20 +22625,84 @@ function docxFicheIdentite(titre, bookmarkId, etat, typeEquipement, lignes, phot
   const poids = (l) => 1 + Math.floor(String(l[1]).length * 92 / (WI - 260));
   const total = L.reduce((t, l) => t + poids(l), 0);
   let cumul = 0, coupe = L.length;
-  for (let k = 0; k < L.length; k++) { if (cumul >= total / 2) { coupe = k; break; } cumul += poids(L[k]); }
+  for (let k = 0; k < L.length && !peuDeChamps; k++) { if (cumul >= total / 2) { coupe = k; break; } cumul += poids(L[k]); }
   const colA = L.slice(0, coupe), colB = L.slice(coupe);
   const vide = [new DOCX.Paragraph({ children: [] })];
   const cell = (largeur, enfants, o = {}) => new DOCX.TableCell({ width: { size: largeur, type: DOCX.WidthType.DXA }, margins: o.marges || { top: 160, bottom: 100, left: 180, right: 120 },
     verticalAlign: o.centre ? DOCX.VerticalAlign.CENTER : DOCX.VerticalAlign.TOP, shading: o.fond ? { type: DOCX.ShadingType.CLEAR, fill: o.fond } : undefined,
     borders: { top: a, bottom: a, right: a, left: o.barre ? { style: DOCX.BorderStyle.SINGLE, size: 48, color: o.barre } : a }, children: enfants && enfants.length ? enfants : vide });
   const cellules = [
-    cell(W[0], panneau, { fond: DOCX_DARK, barre: couleur, marges: { top: 200, bottom: 200, left: 220, right: 160 } }),
-    cell(W[1], colA.flatMap(champ), { fond: DOCX_LIGHT }),
-    cell(W[2], colB.flatMap(champ), { fond: DOCX_LIGHT }),
+    cell(W[0], panneau, { fond: DOCX_DARK, barre: couleur, marges: peuDeChamps ? { top: 120, bottom: 120, left: 220, right: 160 } : { top: 200, bottom: 200, left: 220, right: 160 } }),
+    cell(W[1], colA.flatMap(champ), { fond: DOCX_LIGHT, centre: peuDeChamps }),
+    ...(peuDeChamps ? [] : [cell(W[2], colB.flatMap(champ), { fond: DOCX_LIGHT })]),
     ...(img ? [cell(W[3], [new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, spacing: { before: 0, after: 0 }, children: [img] })], { fond: DOCX_LIGHT, centre: true, marges: { top: 100, bottom: 100, left: 80, right: 80 } })] : []),
   ];
   return docxTable({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: W, borders: { ...docxToutesAucune(), insideHorizontal: a, insideVertical: a },
     rows: [new DOCX.TableRow({ cantSplit: true, children: cellules })] });
+}
+// Fiche « Sécurité » compacte (une page, photos comprises) : contrôles du local regroupés, matériel en tableau d'une ligne
+// par matériel, photos sur une rangée de 4 (4 au plus — toutes restent dans l'annexe photos).
+const TYPES_RAPPORT_COMPACT = ["Interrupteur HTA", "Comptage HTA", "Interrupteur BT", "Contacteur HTA"];
+function docxEquipementSecurite(eq, schema, locaux, allSites, rapportDate) {
+  const a = docxAucuneBordure(), filet = { style: DOCX.BorderStyle.SINGLE, size: 4, color: "E2E6EB" };
+  const libelleLocal = nomLocalEquipement(eq, locaux);
+  const elements = [docxFicheIdentite(eq.type + (nomEquipementSite(eq, { locaux }) ? " — " + nomEquipementSite(eq, { locaux }) : ""), docxBookmarkId(eq), eq.etatFinal, eq.type, libelleLocal ? [["Local", libelleLocal]] : [], eq.photoEquipement), docxSpacer(60)];
+  const sec = (k) => schema.sections.find((x) => x.key === k);
+  const valeur = (k, item) => ((eq.controles || {})[k] || {})[item.key] || { action: "", etat: "", fields: {} };
+  // 1. Contrôles du local (environnement + enveloppe) : un seul tableau compact, deux contrôles par ligne.
+  const lignesLocal = [];
+  ["environnement_local", "enveloppe_protection"].forEach((k) => {
+    const s2 = sec(k); if (!s2) return;
+    s2.items.forEach((item) => { const v = valeur(k, item); lignesLocal.push([item.label, printFieldParts(item, v), v.action, v.etat]); });
+    (eq.controles[k + "__custom"] || []).forEach((c) => lignesLocal.push([c.label || "(action ajoutée)", "", c.action, c.etat]));
+  });
+  if (lignesLocal.length) {
+    elements.push(docxHeading("Contrôles du local", 240, 100));
+    const t = docxControlTableCompact(lignesLocal); if (t) elements.push(t);
+  }
+  // 2. Matériel de sécurité : Matériel | Présent | Vérification | État.
+  const sm = sec("materiel_securite");
+  if (sm) {
+    const lignes = sm.items.map((item) => { const v = valeur("materiel_securite", item); return { label: item.label, f: v.fields || {}, action: v.action, etat: v.etat }; });
+    (eq.controles.materiel_securite__custom || []).forEach((c) => lignes.push({ label: c.label || "(matériel ajouté)", f: {}, action: c.action, etat: c.etat }));
+    const W = [4600, 1100, 1800, 2100];
+    const para = (runs, centre) => new DOCX.Paragraph({ alignment: centre ? DOCX.AlignmentType.CENTER : undefined, spacing: { before: 0, after: 0, line: 240 }, children: runs });
+    const cell = (i, enfants, o = {}) => new DOCX.TableCell({ width: { size: W[i], type: DOCX.WidthType.DXA }, margins: { top: 45, bottom: 45, left: 110, right: 80 }, verticalAlign: DOCX.VerticalAlign.CENTER,
+      shading: o.fond ? { type: DOCX.ShadingType.CLEAR, fill: o.fond } : undefined, borders: { top: a, right: a, bottom: filet, left: o.barre ? { style: DOCX.BorderStyle.SINGLE, size: 36, color: o.barre } : a }, children: enfants });
+    const entete = new DOCX.TableRow({ tableHeader: true, cantSplit: true, children: ["Matériel", "Présent", "Vérification", "État"].map((t, i) => new DOCX.TableCell({ width: { size: W[i], type: DOCX.WidthType.DXA }, margins: CELL_MARGINS_ENTETE,
+      shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_ENTETE }, borders: { top: a, bottom: a, left: a, right: a }, children: [para([new DOCX.TextRun({ text: t.toUpperCase(), bold: true, size: 14, color: DOCX_WHITE, characterSpacing: 20 })], i > 0)] })) });
+    const rows = lignes.map((l, k) => {
+      const an = teinteAnomalieDocx(l.etat);
+      const fond = an ? an.fond : k % 2 ? DOCX_ZEBRE : undefined;
+      const present = String(l.f.present || "").trim();
+      const date = l.f.dateVerification ? dateFrIso(l.f.dateVerification) : "";
+      const nc = l.f.conformite === "Non conforme";
+      return new DOCX.TableRow({ cantSplit: true, children: [
+        cell(0, [para([new DOCX.TextRun({ text: l.label, size: 16, color: DOCX_DARK, bold: !!an })]),
+          ...(nc ? [para([new DOCX.TextRun({ text: "Jugé non conforme", size: 14, color: "C0392B", bold: true })])] : []),
+          ...(String(l.action || "").trim() ? [para([new DOCX.TextRun({ text: "Action : " + String(l.action).trim(), size: 14, color: "4A5563" })])] : [])], { fond, barre: an && an.barre }),
+        cell(1, [para([new DOCX.TextRun({ text: present || "—", size: 16, bold: true, color: present === "NON" ? "B5730A" : DOCX_DARK })], true)], { fond }),
+        cell(2, [para([new DOCX.TextRun({ text: date || "—", size: 16, color: date ? DOCX_DARK : "8A94A0" })], true)], { fond }),
+        cell(3, [l.etat ? docxPastilleEtat(l.etat, { taille: 14 }) : para([new DOCX.TextRun({ text: "—", size: 16, color: "8A94A0" })], true)], { fond }),
+      ] });
+    });
+    elements.push(docxHeading("Matériel de sécurité (NF C18-510)", 280, 100));
+    elements.push(docxTable({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: W, borders: { ...docxToutesAucune(), insideHorizontal: a, insideVertical: a }, rows: [entete, ...rows] }));
+    elements.push(new DOCX.Paragraph({ spacing: { before: 60, after: 0 }, children: [new DOCX.TextRun({ text: "NF C18-510 : chaque équipement de protection doit être vérifié périodiquement (en général chaque année) — sa seule présence ne suffit pas.", size: 14, italics: true, color: "5A6573" })] }));
+  }
+  // 3. Synthèse de l'état + remarques, puis photos (une rangée de 4 au plus).
+  elements.push(docxSpacer(20));
+  elements.push(...docxRemarquesEquipement(texteRemarquesRapport(eq, { allEquipements: equipementsDuSiteDe(eq, allSites), locaux, rapportDate }), eq.etatFinal, docxEncartEtat("Synthèse de l'état — à l'issue de la maintenance", eq.etatFinal)));
+  const photos = (eq.photos || []).filter((p) => p && p.dataUrl);
+  if (photos.length) {
+    const grille = docxGrillePhotos(photos.slice(0, 4), { colonnes: 4, largeur: 140, hauteur: 105, serre: true });
+    if (grille) {
+      elements.push(new DOCX.Paragraph({ keepNext: true, spacing: { before: 60, after: 60 }, children: [new DOCX.TextRun({ text: "Photos", bold: true, size: 18, color: DOCX_BLUE }),
+        ...(photos.length > 4 ? [new DOCX.TextRun({ text: `   (+ ${photos.length - 4} photo${photos.length - 4 > 1 ? "s" : ""} dans l'annexe photos)`, size: 15, italics: true, color: "5A6573" })] : [])] }));
+      elements.push(grille);
+    }
+  }
+  return elements;
 }
 function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
   // Filet de sécurité : quelle que soit l'origine des données (ancien format, migration, edge case),
@@ -22646,6 +22714,7 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
     return [docxEquipHeader((eq.type || "Équipement") + (nomEquipementSite(eq, { locaux }) ? " — " + nomEquipementSite(eq, { locaux }) : ""), docxBookmarkId(eq), eq.etatFinal, eq.type), docxSpacer(40),
       new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: "Type d'équipement non reconnu — données non affichées.", italics: true, color: "C0392B", size: 18 })] }), docxSpacer()];
   }
+  if (eq.type === "Sécurité") return docxEquipementSecurite(eq, schema, locaux, allSites, rapportDate);
   // En-tête (nom, symbole, état) + identification compacte (deux couples par ligne) + photo : une seule rangée de tableau insécable.
   const libelleLocal = nomLocalEquipement(eq, locaux);
   let lignesId = [];
@@ -22658,7 +22727,7 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
       lignesId.splice(idxRepere >= 0 ? idxRepere + 1 : 0, 0, ["Local", libelleLocal]);
     }
   } else if (libelleLocal) lignesId = [["Local", libelleLocal]];
-  const elements = [docxFicheIdentite(eq.type + (nomEquipementSite(eq, { locaux }) ? " — " + nomEquipementSite(eq, { locaux }) : ""), docxBookmarkId(eq), eq.etatFinal, eq.type, lignesId, eq.photoEquipement), docxSpacer(160)];
+  const elements = [docxFicheIdentite(eq.type + (nomEquipementSite(eq, { locaux }) ? " — " + nomEquipementSite(eq, { locaux }) : ""), docxBookmarkId(eq), eq.etatFinal, eq.type, lignesId, eq.photoEquipement), docxSpacer(TYPES_RAPPORT_COMPACT.includes(eq.type) ? 60 : 160)];
   if (eq.type === "Transformateur" && eq.identification?.typeRefroidissement && DESCRIPTION_REFROIDISSEMENT_TRANSFO[eq.identification.typeRefroidissement]) {
     elements.push(docxNormeNote(`${eq.identification.typeRefroidissement} (CEI 60076-2) — ${DESCRIPTION_REFROIDISSEMENT_TRANSFO[eq.identification.typeRefroidissement]}`));
   }
@@ -22699,6 +22768,12 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
   // Taux de charge (+ historique sur 3 ans) : monté sous l'échéancier des pièces d'usure, ou sous le synoptique / l'identification s'il n'y a pas d'échéancier.
   elements.push(...docxBlocTauxCharge(eq, allSites));
   const isRelais = TYPES_AVEC_RELAIS.includes(eq.type);
+  // Types simples (interrupteurs, comptage, contacteur) : titres resserrés et sections de contrôles simples (conformes, sans mesure ni action)
+  // réunies dans un seul tableau « Contrôles », placé à l'endroit de la première d'entre elles — objectif : une page par équipement.
+  const compact = TYPES_RAPPORT_COMPACT.includes(eq.type);
+  const titreSection = (t) => (compact ? docxHeading(t, 160, 80) : docxHeading(t));
+  const MARQUEUR_REGROUPE = { marqueurRegroupe: true };
+  const controlesRegroupes = [];
   let courbeIntegree = false; // la courbe de déclenchement a-t-elle été placée dans sa propre section ?
   let courbeDechargeIntegree = false; // idem pour la courbe de décharge batterie
   schema.sections.forEach((sec) => {
@@ -23200,12 +23275,7 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
       return;
     }
     if (sec.key === "mecaniques" && TYPES_AVEC_MANOEUVRE_DYNAMIQUE.includes(eq.type)) {
-      elements.push(docxHeading("Manœuvre"));
       const rowsM = (eq.controles.manoeuvre_dynamique || []).filter((m) => m.label).map((m) => [m.label, "", m.action, m.etat]);
-      const tM = docxControlTable(rowsM);
-      if (tM) elements.push(tM);
-      elements.push(docxSpacer(60));
-      elements.push(docxHeading(sec.title));
       const rowsMeca = sec.items.map((item) => {
         const value = eq.controles[sec.key][item.key] || { action: "", etat: "", fields: {} };
         const parts = printFieldParts(item, value);
@@ -23213,15 +23283,34 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
       });
       const custom = eq.controles[sec.key + "__custom"] || [];
       custom.forEach((c) => rowsMeca.push([c.label || "(action ajoutée)", "", c.action, c.etat]));
+      // Type compact : les contrôles simples (conformes, sans mesure ni action) rejoignent le tableau « Contrôles » regroupé.
+      if (compact) {
+        const simpleR = (r) => !(Array.isArray(r[1]) ? r[1].some((x) => x && String(x.text ?? "").trim()) : String(r[1] || "").trim()) && !String(r[2] || "").trim() && (RANK_OF[r[3]] ?? 0) <= 0;
+        const groupesM = [["Manœuvre", rowsM], [sec.title, rowsMeca]];
+        const restes = [];
+        groupesM.forEach(([titre, rs]) => rs.forEach((r) => { if (simpleR(r)) { if (!controlesRegroupes.length) elements.push(MARQUEUR_REGROUPE); controlesRegroupes.push([titre === "Manœuvre" ? "Manœuvre — " + r[0] : r[0], "", "", r[3]]); } else restes.push([titre, r]); }));
+        if (restes.length) {
+          elements.push(titreSection("Manœuvre et contrôles mécaniques"));
+          elements.push(...docxControlesAuto(restes.map(([, r]) => r)));
+          elements.push(docxSpacer(80));
+        }
+        return;
+      }
+      elements.push(docxHeading("Manœuvre"));
+      const tM = docxControlTable(rowsM);
+      if (tM) elements.push(tM);
+      elements.push(docxSpacer(60));
+      elements.push(docxHeading(sec.title));
       elements.push(...docxControlesAuto(rowsMeca));
       elements.push(docxSpacer());
       return;
     }
     if (sec.key === "organes" && TYPES_AVEC_ORGANES_DYNAMIQUE.includes(eq.type)) {
-      elements.push(docxHeading(sec.title));
       const rows = (eq.controles.organes_dynamique || []).filter((o) => o.label).map((o) => {
         return [o.label, texteOrganeRapport(o), "", ""];
       });
+      if (!rows.length) return; // section vide : pas de titre seul
+      elements.push(titreSection(sec.title));
       const t = docxControlTable(rows);
       if (t) elements.push(t);
       elements.push(docxSpacer());
@@ -23257,8 +23346,19 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
         ? "CEI 60076-3 / IEEE 43. Tension d'injection identique du début à la fin de l'essai — le type de mesure indique jusqu'où il est poussé : Standard (lecture instantanée), PI = R(10 min)/R(1 min), DAR = R(60 s)/R(10 s). L'enroulement non testé doit être court-circuité (shunté) et relié à la terre."
         : "IEEE 43 / pratique courante. Tension d'injection identique du début à la fin de l'essai — le type de mesure indique jusqu'où il est poussé : Standard (lecture instantanée), PI = R(10 min)/R(1 min), DAR = R(60 s)/R(10 s). Les phases non mesurées sont reliées à la terre pendant l'essai.")
       : null;
-    if (!courbeAvecFichiers && noteNorme) elements.push(docxBlocInsecable([docxHeading(sec.title), docxNormeNote(noteNorme)]));
-    else if (!courbeAvecFichiers) elements.push(sectionEtat ? docxHeading(sec.title, 400, 120) : docxHeading(sec.title));
+    if (compact && !courbeAvecFichiers && !noteNorme && !(sec.key === "electriques" && equipementAvecTC(eq) && (eq.controles.tc_dynamique || []).some((tc) => tc.label))) {
+      const rowsSec = itemsAffiches.map((item) => { const v = eq.controles[sec.key][item.key] || { action: "", etat: "", fields: {} }; return [item.label, printFieldParts(item, v), v.action, v.etat]; });
+      (eq.controles[sec.key + "__custom"] || []).forEach((c) => rowsSec.push([c.label || "(action ajoutée)", "", c.action, c.etat]));
+      const sansDetail = (r) => !(Array.isArray(r[1]) ? r[1].some((x) => x && String(x.text ?? "").trim()) : String(r[1] || "").trim());
+      const avecImages = itemsAffiches.some((it) => it.avecImage && ((eq.controles[sec.key][it.key] || {}).photos || []).length);
+      if (rowsSec.length && !avecImages && rowsSec.every((r) => sansDetail(r) && !String(r[2] || "").trim() && (RANK_OF[r[3]] ?? 0) <= 0)) {
+        if (!controlesRegroupes.length) elements.push(MARQUEUR_REGROUPE);
+        rowsSec.forEach((r) => controlesRegroupes.push([r[0], "", "", r[3]]));
+        return;
+      }
+    }
+    if (!courbeAvecFichiers && noteNorme) elements.push(docxBlocInsecable([titreSection(sec.title), docxNormeNote(noteNorme)]));
+    else if (!courbeAvecFichiers) elements.push(sectionEtat ? docxHeading(sec.title, compact ? 300 : 400, 120) : titreSection(sec.title));
     if (noteNorme) {
       // note déjà placée avec le titre, dans le même bloc insécable
     } else if (["resistance_contact_chambres", "resistances_contacts", "resistance_jonctions"].some((k) => sec.items.some((it) => it.key === k))) {
@@ -23334,12 +23434,29 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
       const c = calcComparaisonEnergie(eq);
       if (c) elements.push(docxComparaisonEnergieBox(c));
     }
-    elements.push(docxSpacer());
+    elements.push(docxSpacer(compact ? 40 : 200));
   });
+  // Contrôles simples regroupés : un seul tableau, à la place de la première section concernée.
+  {
+    const k = elements.indexOf(MARQUEUR_REGROUPE);
+    if (k >= 0) {
+      const t = docxControlTableCompact(controlesRegroupes);
+      elements.splice(k, 1, titreSection("Contrôles"), ...(t ? [t] : []), docxSpacer(80));
+    }
+  }
   // Encart « Synthèse de l'état » : liseré et fond à la couleur de l'état final de l'équipement.
-  elements.push(docxSpacer(120));
-  elements.push(...docxRemarquesEquipement(texteRemarquesRapport(eq, { allEquipements: equipementsDuSiteDe(eq, allSites), locaux, rapportDate }), eq.etatFinal, docxEncartEtat("Synthèse de l'état — à l'issue de la maintenance", eq.etatFinal)));
-  { const grille = docxGrillePhotos(eq.photos, { legendeDefaut: "" }); if (grille) { elements.push(docxSpacer(160)); elements.push(new DOCX.Paragraph({ keepNext: true, spacing: { before: 0, after: 80 }, children: [new DOCX.TextRun({ text: "Photos", bold: true, size: 18, color: DOCX_BLUE })] })); elements.push(grille); } }
+  elements.push(docxSpacer(compact ? 40 : 120));
+  elements.push(...(compact
+    ? docxRemarquesEquipement(texteRemarquesRapport(eq, { allEquipements: equipementsDuSiteDe(eq, allSites), locaux, rapportDate }), eq.etatFinal, [], "Synthèse de l'état et préconisations")
+    : docxRemarquesEquipement(texteRemarquesRapport(eq, { allEquipements: equipementsDuSiteDe(eq, allSites), locaux, rapportDate }), eq.etatFinal, docxEncartEtat("Synthèse de l'état — à l'issue de la maintenance", eq.etatFinal))));
+  if (compact) {
+    const photos = (eq.photos || []).filter((p) => p && p.dataUrl);
+    const grille = photos.length ? docxGrillePhotos(photos.slice(0, 4), { colonnes: 4, largeur: 112, hauteur: 84, serre: true }) : null;
+    if (grille) {
+      elements.push(grille);
+      if (photos.length > 4) elements.push(new DOCX.Paragraph({ spacing: { before: 20, after: 0 }, children: [new DOCX.TextRun({ text: `+ ${photos.length - 4} photo${photos.length - 4 > 1 ? "s" : ""} dans l'annexe photos`, size: 14, italics: true, color: "5A6573" })] }));
+    }
+  } else { const grille = docxGrillePhotos(eq.photos, { legendeDefaut: "" }); if (grille) { elements.push(docxSpacer(160)); elements.push(new DOCX.Paragraph({ keepNext: true, spacing: { before: 0, after: 80 }, children: [new DOCX.TextRun({ text: "Photos", bold: true, size: 18, color: DOCX_BLUE })] })); elements.push(grille); } }
 
   // Courbe de déclenchement (Disjoncteur BT) : normalement insérée dans sa propre section (voir la boucle
   // des sections ci-dessus). Repli : si cette section n'a pas été affichée (ex. niveau de maintenance qui
@@ -23486,23 +23603,23 @@ function docxAncre(id) {
   return new DOCX.Paragraph({ keepNext: true, spacing: { before: 0, after: 0, line: 20, lineRule: DOCX.LineRuleType ? DOCX.LineRuleType.EXACT : "exact" }, children: [new DOCX.BookmarkStart(id, n), new DOCX.TextRun({ text: "", size: 2 }), new DOCX.BookmarkEnd(n)] });
 }
 // Photos en grille deux colonnes : plus grandes, légendées, une rangée insécable par paire.
-function docxGrillePhotos(photos, { largeur = 300, hauteur = 225, legendeDefaut = "" } = {}) {
+function docxGrillePhotos(photos, { largeur = 300, hauteur = 225, legendeDefaut = "", colonnes = 2, serre = false } = {}) {
   const liste = (photos || []).filter((p) => p && p.dataUrl);
   if (!liste.length) return null;
   const a = docxAucuneBordure();
-  const L = [TABLE_WIDTH / 2, TABLE_WIDTH / 2];
+  const L = Array.from({ length: colonnes }, () => Math.floor(TABLE_WIDTH / colonnes));
   const cellule = (p) => {
     if (!p) return new DOCX.TableCell({ width: { size: L[0], type: DOCX.WidthType.DXA }, borders: { top: a, bottom: a, left: a, right: a }, children: [docxMiniParagraphe()] });
     const { w, h } = dimensionsAdaptees(p, largeur, hauteur);
     const img = docxImage(p.dataUrl, w, h);
     const legende = String(p.caption || p.legende || legendeDefaut || "").trim();
-    return new DOCX.TableCell({ width: { size: L[0], type: DOCX.WidthType.DXA }, margins: { top: 80, bottom: 120, left: 80, right: 80 }, verticalAlign: DOCX.VerticalAlign.TOP, borders: { top: a, bottom: a, left: a, right: a }, children: [
+    return new DOCX.TableCell({ width: { size: L[0], type: DOCX.WidthType.DXA }, margins: serre ? { top: 20, bottom: 20, left: 40, right: 40 } : { top: 80, bottom: 120, left: 80, right: 80 }, verticalAlign: DOCX.VerticalAlign.TOP, borders: { top: a, bottom: a, left: a, right: a }, children: [
       new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, spacing: { before: 0, after: 60 }, children: img ? [img] : [] }),
       ...(legende ? [new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, spacing: { before: 0, after: 0 }, children: [new DOCX.TextRun({ text: legende, size: 15, italics: true, color: "4A5563" })] })] : []),
     ] });
   };
   const rows = [];
-  for (let i = 0; i < liste.length; i += 2) rows.push(new DOCX.TableRow({ cantSplit: true, children: [cellule(liste[i]), cellule(liste[i + 1])] }));
+  for (let i = 0; i < liste.length; i += colonnes) rows.push(new DOCX.TableRow({ cantSplit: true, children: L.map((_, k) => cellule(liste[i + k])) }));
   return docxTable({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: L, borders: { ...docxToutesAucune(), insideHorizontal: a, insideVertical: a }, rows });
 }
 // Évolution depuis la dernière visite : changements d'état (équipement et contrôles) et écarts de mesure importants.
