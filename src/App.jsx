@@ -629,7 +629,7 @@ DECLENCHEURS_SCHNEIDER["PXR 20 / PXR 25 (Eaton IZMX16 / IZMX40)"] = {
 // l'identification (aucun champ supplémentaire à remplir) ; null si la référence n'est pas documentée → courbe générique.
 // Non couverts : Micrologic 3.0 (instantané seul), moteur (M), 2.3 G, STR 68 U, Ekip Dip, Ekip Touch hors Emax 2 (le modèle doit indiquer Emax 2).
 function cleDeclencheurBibliotheque(id) {
-  const ref = String((id && id.referenceRelais) || "").trim().toLowerCase().replace(/\s+/g, " ");
+  const ref = referenceDeclencheurComplete(id).toLowerCase().replace(/\s+/g, " ");
   if (!ref) return null;
   const marque = String((id && id.marqueRelais) || "").toLowerCase();
   const disjoncteur = `${(id && id.modele) || ""} ${(id && id.typeDisjoncteur) || ""}`.toLowerCase().replace(/³/g, "3");
@@ -816,7 +816,20 @@ const LISTE_MARQUE_RELAIS_BT = ["Schneider Electric", "Merlin Gerin", "ABB", "Si
 // Schneider / Merlin Gerin : Micrologic 2.0 à 7.0 (Compact NS ≥ 630 A, Masterpact NT/NW ; suffixes A =
 // ampèremètre, P = puissance, H = harmoniques) · Micrologic X (Masterpact MTZ) · gamme STR (Compact NS
 // < 630 A et ≥ 630 A anciens, Masterpact M) · thermique-magnétique TM-D / TM-G / MA (Compact NS/NSX).
-const MICROLOGIC_2_7 = ["Micrologic 2.0", "Micrologic 3.0", "Micrologic 5.0", "Micrologic 6.0", "Micrologic 7.0", "Micrologic 2.0 A", "Micrologic 3.0 A", "Micrologic 5.0 A", "Micrologic 6.0 A", "Micrologic 7.0 A", "Micrologic 5.0 P", "Micrologic 6.0 P", "Micrologic 7.0 P", "Micrologic 5.0 H", "Micrologic 6.0 H", "Micrologic 7.0 H"];
+// Micrologic X.Y Z (Masterpact NT/NW, Compact NS ≥ 630 A) : X = protection (2 base, 3 instantané, 5 sélective, 6 sélective + terre,
+// 7 sélective + différentielle), Y = version (0), Z = type de mesure (A ampèremètre, P puissance, H harmonique, ou aucune).
+// La référence est choisie SANS la mesure ; le type de mesure est un champ à part (« mesureMicrologic »), recomposé par referenceDeclencheurComplete().
+const MICROLOGIC_2_7 = ["Micrologic 2.0", "Micrologic 3.0", "Micrologic 5.0", "Micrologic 6.0", "Micrologic 7.0"];
+const LISTE_MESURE_MICROLOGIC = ["Aucune", "A — ampèremètre", "P — puissance", "H — harmonique"];
+const RE_MICROLOGIC_BASE = /^micrologic\s*[23567]\.0$/i;
+const estMicrologicAvecMesure = (id) => RE_MICROLOGIC_BASE.test(String((id && id.referenceRelais) || "").trim());
+// Référence complète du déclencheur (ex. « Micrologic 5.0 » + « P — puissance » → « Micrologic 5.0 P »).
+function referenceDeclencheurComplete(id) {
+  const ref = String((id && id.referenceRelais) || "").trim();
+  if (!RE_MICROLOGIC_BASE.test(ref)) return ref;
+  const m = String((id && id.mesureMicrologic) || "").match(/^([APH])\b/);
+  return m ? `${ref} ${m[1]}` : ref;
+}
 const MICROLOGIC_X = ["Micrologic 2.0 X", "Micrologic 5.0 X", "Micrologic 6.0 X", "Micrologic 7.0 X"];
 const MICROLOGIC_NSX = ["Micrologic 2.2", "Micrologic 2.3", "Micrologic 5.2 A/E", "Micrologic 5.3 A/E", "Micrologic 6.2 A/E", "Micrologic 6.3 A/E", "Micrologic 1.3 M", "Micrologic 2.2 M", "Micrologic 2.3 M", "Micrologic 2.2 G", "Micrologic 2.3 G", "Micrologic 6.2 E-M", "Micrologic 6.3 E-M"];
 const STR_COMPACT_NS = ["STR22ME", "STR22GE", "STR22SE", "STR23SE", "STR23SP", "STR43ME", "STR53UE", "STR53UP", "STR25DE", "STR35SE/GE", "STR35ME", "STR45AE", "STR45BE", "STR55UE"];
@@ -3789,6 +3802,7 @@ const SCHEMAS = {
       { key: "typeDisjoncteur", label: "Type disjoncteur", options: LISTE_TYPE_DISJONCTEUR_BT_OPTIONS },
       { key: "niveauPerformance", label: "Niveau de performance (pouvoir de coupure)", options: LISTE_NIVEAU_PERFORMANCE_BT_OPTIONS }, { key: "numeroSerieDisjoncteur", label: "Numéro de série" },
       { key: "marqueRelais", label: "Marque de l'unité de déclenchement", options: LISTE_MARQUE_RELAIS_BT }, { key: "referenceRelais", label: "Référence de l'unité de déclenchement", options: LISTE_REFERENCE_RELAIS_BT_OPTIONS },
+      { key: "mesureMicrologic", label: "Type de mesure (Micrologic)", options: LISTE_MESURE_MICROLOGIC },
       { key: "intensiteNominale", label: "Intensité nominale (A)", numeric: true }, { key: "debrochable", label: "Débrochable", options: OUI_NON_LIST },
       { key: "anneeMiseEnService", label: "Année de mise en service", numeric: true },
     ],
@@ -4582,6 +4596,16 @@ function daysUntil(dateStr) {
 // schéma (mises à jour successives de l'app) : comble les clés manquantes sans toucher aux
 // valeurs déjà saisies — évite les plantages (export Word, etc.) et rend les nouveaux champs utilisables.
 function repairEquipementControles(eq) {
+  // Micrologic : ancienne référence complète (« Micrologic 6.0 H ») séparée en référence + type de mesure.
+  if (eq && eq.identification && typeof eq.identification.referenceRelais === "string") {
+    const m = eq.identification.referenceRelais.trim().match(/^micrologic\s*([23567])\.0\s+([aph])$/i);
+    if (m) {
+      const lettre = m[2].toUpperCase();
+      eq = { ...eq, identification: { ...eq.identification, referenceRelais: `Micrologic ${m[1]}.0`, mesureMicrologic: LISTE_MESURE_MICROLOGIC.find((x) => x.startsWith(lettre + " —")) } };
+    } else if (RE_MICROLOGIC_BASE.test(eq.identification.referenceRelais.trim()) && eq.identification.mesureMicrologic === undefined) {
+      eq = { ...eq, identification: { ...eq.identification, mesureMicrologic: "Aucune" } };
+    }
+  }
   // By-pass d'un onduleur modulaire : anciens libellés repris dans la nouvelle liste.
   const ancienBypass = eq?.identification?.moduleBypass;
   if (ancienBypass === "Séparé (module dédié)" || ancienBypass === "Intégré à chaque module de puissance") {
@@ -15949,6 +15973,7 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
                   // liste générique, ils sont rendus dans un panneau dédié par type sélectionné
                   // juste en dessous (voir plus bas), au lieu d'être tous affichés en permanence.
                   if (eq.type === "Onduleur" && CHAMPS_CONFIG_SYNOPTIQUE.includes(f.key)) return null; // réglés dans le panneau « Configuration » du schéma synoptique
+                  if (f.key === "mesureMicrologic" && !estMicrologicAvecMesure(eq.identification)) return null; // type de mesure : Micrologic 2.0 à 7.0 seulement
                   if (eq.type === "Bilan de puissance" && ["transfo_id", "transfo_reference", "puissanceKVA", "disj_id", "disj_reference", "calibreDisjoncteur", "tgbt_reference", "tgbt_calibre", "tgbt_departs"].includes(f.key)) {
                     return null;
                   }
@@ -19309,7 +19334,9 @@ let DOCX = null;
 // Nombre décimal écrit à la française dans les documents Word : « 84.068 » → « 84,068 ». Les références (« 3022513.40 »),
 // versions (« V4.02 ») et suites à plusieurs points (« 1.2.3 ») ne sont pas touchées.
 function virguleDecimale(t) {
-  return String(t).replace(/(^|[^\w.,/])(\d{1,6})\.(\d+)(?![\w./])/g, "$1$2,$3");
+  const s = String(t);
+  // Références produit gardées telles quelles (« Micrologic 5.0 », « MP 2.10 », « Ekip 1.2 »…) : ce ne sont pas des nombres décimaux.
+  return s.replace(/(^|[^\w.,/])(\d{1,6})\.(\d+)(?![\w./])/g, (m, a, x, y, pos) => (/(micrologic[\s\d.,/]*|\bmp|\bekip|\bversion|\bv)\s*$/i.test(s.slice(0, pos + a.length)) ? m : `${a}${x},${y}`));
 }
 async function ensureDocx() {
   if (!DOCX) {
@@ -22626,6 +22653,7 @@ function transfoManuelActif(eq) {
 // (le drapeau « saisi manuellement » lui-même n'est jamais affiché : il se règle avec les boutons Oui / Non).
 function champIdentificationMasque(eq, key) {
   if (IDENTIFICATION_CHAMPS_TECHNIQUES.includes(key)) return true;
+  if (key === "mesureMicrologic") return !estMicrologicAvecMesure(eq.identification); // seulement pour les Micrologic 2.0 à 7.0
   if (TYPES_TRANSFO_MANUEL.includes(eq.type) && CHAMPS_TRANSFO_MANUEL.includes(key)) return key === "transfoManuel" || !transfoManuelActif(eq);
   return false;
 }
