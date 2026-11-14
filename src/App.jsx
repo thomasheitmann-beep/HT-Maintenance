@@ -1250,6 +1250,23 @@ const LISTE_PUISSANCE_ONDULEUR_SIMPLIFIE = ["0.5", "0.7", "1", "1.5", "2", "3", 
 const LISTE_REGIME_SORTIE_UPS = ["3+N", "3", "1"];
 const LISTE_TECHNO_BATTERIE = ["PE", "PO", "GEL", "Cd-Ni"];
 // Durée de vie prévue d'une batterie (ans) : sert à calculer l'échéance de remplacement dans la prévision des pièces d'usure (saisie libre possible).
+// Batteries d'onduleur données en puissance par élément (ex. 540 W/élt pendant 10 min jusqu'à 1,70 V/élt).
+const LISTE_DUREE_REFERENCE_W = ["5", "10", "15", "20", "30", "60"];
+const LISTE_TENSION_FIN_ELEMENT = ["1,60", "1,65", "1,67", "1,70", "1,75", "1,80"];
+const RENDEMENT_ONDULEUR_DEFAUT = 0.94;
+// Données « W par élément » de la fiche batterie + nombre total d'éléments (toutes branches) ; null si incomplet.
+function donneesBatterieW(eq) {
+  const f = (eq.controles && eq.controles.batterie_id && eq.controles.batterie_id.batterie_caracteristiques && eq.controles.batterie_id.batterie_caracteristiques.fields) || {};
+  const w = numOf(f.puissanceElement), t = numOf(f.dureeReferenceW) || 10, vf = numOf(String(f.tensionFinElement || "").replace(",", ".")) || 1.7;
+  if (!w || w <= 0) return null;
+  let th = null; try { th = calcTensionsBatterieTheoriques(eq); } catch (e) { th = null; }
+  const branches = Math.max(1, Math.round(numOf(f.nombreBranches) || 1));
+  const nbElements = th && th.nbElementsTotal ? th.nbElementsTotal * branches : null;
+  return { w, t, vf, nbElements, branches };
+}
+// Autonomie à une puissance par élément donnée, d'après le point constructeur (ordre de grandeur, exposant 1,15 comme les autres estimations).
+// Pas d'extrapolation au-delà d'un facteur 3 sur la puissance (null : autonomie « nettement supérieure » à la durée de référence).
+const autonomieDepuisW = (d, wDemande) => (d.w / wDemande > 3 ? null : d.t * Math.pow(d.w / wDemande, 1.15));
 const LISTE_DUREE_VIE_BATTERIE = ["4", "5", "6", "8", "10", "12", "15", "20"];
 // Durée de vie préconisée d'une batterie selon sa capacité (Ah) : appliquée tant qu'aucune durée n'est saisie.
 const PALIERS_DUREE_VIE_BATTERIE = [[12, 4], [40, 5], [75, 6], [Infinity, 8]];
@@ -3000,6 +3017,9 @@ function buildOnduleurSchema({ normalMono = false, secoursMono = false, utilisat
           { key: "marque", label: "Marque", options: LISTE_MARQUE_ELEMENT_BATTERIE }, { key: "technologie", label: "Technologie", options: LISTE_TECHNO_BATTERIE },
           { key: "typeBloc", label: "Type de bloc" }, { key: "tensionNominale", label: "Tension du bloc batterie (V)" },
           { key: "capacite", label: "Capacité par batterie (Ah)" },
+          { key: "puissanceElement", label: "Puissance par élément (W/élt) — batteries données en W", numeric: true },
+          { key: "dureeReferenceW", label: "… pendant (min)", options: LISTE_DUREE_REFERENCE_W },
+          { key: "tensionFinElement", label: "… jusqu'à (V/élt)", options: LISTE_TENSION_FIN_ELEMENT },
           { key: "regimeC", label: "Régime (autonomie nominale)", options: LISTE_REGIME_C_BATTERIE },
           { key: "nombreBranches", label: "Nombre de branches", options: LISTE_NB_BRANCHES }, { key: "nombreBlocsParBranche", label: "Nombre de blocs par branche" },
           { key: "anneeMiseEnService", label: "Année de mise en service" }, { key: "dureeVie", label: "Durée de vie prévue (ans)", options: LISTE_DUREE_VIE_BATTERIE },
@@ -3137,6 +3157,9 @@ function buildRedresseurSchema({ reseauMono = false, reseau2Mono = false, double
           { key: "marque", label: "Marque", options: LISTE_MARQUE_ELEMENT_BATTERIE }, { key: "technologie", label: "Technologie", options: LISTE_TECHNO_BATTERIE },
           { key: "typeBloc", label: "Type de bloc" }, { key: "tensionNominale", label: "Tension du bloc batterie (V)" },
           { key: "capacite", label: "Capacité par batterie (Ah)" },
+          { key: "puissanceElement", label: "Puissance par élément (W/élt) — batteries données en W", numeric: true },
+          { key: "dureeReferenceW", label: "… pendant (min)", options: LISTE_DUREE_REFERENCE_W },
+          { key: "tensionFinElement", label: "… jusqu'à (V/élt)", options: LISTE_TENSION_FIN_ELEMENT },
           { key: "regimeC", label: "Régime (autonomie nominale)", options: LISTE_REGIME_C_BATTERIE },
           { key: "nombreBranches", label: "Nombre de branches", options: LISTE_NB_BRANCHES }, { key: "nombreBlocsParBranche", label: "Nombre de blocs par branche" },
           { key: "anneeMiseEnService", label: "Année de mise en service" }, { key: "dureeVie", label: "Durée de vie prévue (ans)", options: LISTE_DUREE_VIE_BATTERIE },
@@ -4159,6 +4182,9 @@ const SCHEMAS = {
           { key: "marque", label: "Marque", options: LISTE_MARQUE_ELEMENT_BATTERIE }, { key: "technologie", label: "Technologie", options: LISTE_TECHNO_BATTERIE },
           { key: "typeBloc", label: "Type de bloc" }, { key: "tensionNominale", label: "Tension du bloc batterie (V)" },
           { key: "capacite", label: "Capacité par batterie (Ah)" },
+          { key: "puissanceElement", label: "Puissance par élément (W/élt) — batteries données en W", numeric: true },
+          { key: "dureeReferenceW", label: "… pendant (min)", options: LISTE_DUREE_REFERENCE_W },
+          { key: "tensionFinElement", label: "… jusqu'à (V/élt)", options: LISTE_TENSION_FIN_ELEMENT },
           { key: "regimeC", label: "Régime (autonomie nominale)", options: LISTE_REGIME_C_BATTERIE },
           { key: "nombreBranches", label: "Nombre de branches", options: LISTE_NB_BRANCHES }, { key: "nombreBlocsParBranche", label: "Nombre de blocs par branche" },
           { key: "anneeMiseEnService", label: "Année de mise en service" }, { key: "dureeVie", label: "Durée de vie prévue (ans)", options: LISTE_DUREE_VIE_BATTERIE },
@@ -7242,7 +7268,7 @@ const ALTERNATIVES_MESURE = {
   test_surcharge_longue: [["declenchement"]], test_cc_temporise: [["declenchement_t0"], ["declenchement_treg"]], test_instantane: [["declenchement"]],
 };
 // Cases jamais exigées (neutre, température de référence) ; la charge des thermographies est traitée à part (toutes les clés « thermo »).
-const CHAMPS_NON_EXIGES = { resistances_contacts: ["n"], resistance_jonctions: ["n"], resistance_enroulements_primaire: ["temperature"], resistance_enroulements_secondaire: ["temperature"] };
+const CHAMPS_NON_EXIGES = { batterie_caracteristiques: ["capacite", "puissanceElement", "dureeReferenceW", "tensionFinElement"], resistances_contacts: ["n"], resistance_jonctions: ["n"], resistance_enroulements_primaire: ["temperature"], resistance_enroulements_secondaire: ["temperature"] };
 // Mesure optionnelle (case « Mesure réalisée ? ») : réalisée si la case est cochée — ou, pour un relevé
 // antérieur à la case (champ absent), si des valeurs ont déjà été saisies.
 function mesureRealisee(item, value) {
@@ -10001,6 +10027,40 @@ function analyseOnduleur(eq, allSites, rapportDate) {
       out.push({ section: "essai_decharge", niveau: 2, texte: phrase, constat: { phrase, rang: 2, categorie: "batterie_capacite", sujet: "batterie" } });
     } else out.push({ section: "essai_decharge", niveau: soh < 90 ? 1 : 0, texte: `État de santé de la batterie ≈ ${Math.round(Math.min(soh, 150))} % (${v2(dMes, 0)} min mesurées pour ${v2(dRef, 0)} min ${refEstimee ? `attendues d'après l'autonomie annoncée de ${v2(annoncee, 0)} min à pleine charge` : "de référence"})${soh < 90 ? " : à surveiller, seuil de remplacement à 80 %." : "."}` });
   }
+  // Batterie donnée en W par élément : dimensionnement à la charge du jour et lecture de l'essai d'autonomie.
+  const bw = donneesBatterieW(eq);
+  if (bw && bw.nbElements) {
+    const rendement = eq.type === "Redresseur chargeur" ? 1 : RENDEMENT_ONDULEUR_DEFAUT;
+    const ref = `${v2(bw.w, 0)} W/élt pendant ${v2(bw.t, 0)} min jusqu'à ${bw.vf.toFixed(2).replace(".", ",")} V/élt`;
+    const kwCharge = eq.type === "Redresseur chargeur" ? pDC : pS.length ? pS.reduce((x, y) => x + y, 0) : (charge !== null && kwN ? (charge / 100) * kwN : null);
+    if (kwCharge && kwCharge > 0) {
+      const wElt = (kwCharge * 1000) / rendement / bw.nbElements;
+      const pct = (wElt / bw.w) * 100;
+      if (wElt > bw.w) {
+        const phrase = `Batterie sous-dimensionnée pour la charge relevée : chaque élément doit fournir ≈ ${v2(wElt, 0)} W (${v2(kwCharge, 1)} kW${rendement < 1 ? `, rendement ${v2(rendement, 2)}` : ""}, ${v2(bw.nbElements, 0)} éléments), au-delà des ${ref} donnés par le constructeur : autonomie inférieure à ${v2(bw.t, 0)} min.`;
+        out.push({ section: "essai_decharge", niveau: 1, texte: phrase, constat: { phrase, rang: 1, categorie: "batterie_dimensionnement", sujet: "batterie" } });
+      } else out.push({ section: "essai_decharge", niveau: 0, texte: `Dimensionnement batterie : à la charge relevée (≈ ${v2(kwCharge, 1)} kW${rendement < 1 ? `, rendement ${v2(rendement, 2)}` : ""}), chaque élément fournit ≈ ${v2(wElt, 0)} W, soit ${Math.round(pct)} % des ${ref} (constructeur) — ${autonomieDepuisW(bw, wElt) ? `autonomie théorique ≈ ${v2(autonomieDepuisW(bw, wElt), 0)} min (ordre de grandeur, batterie neuve)` : `autonomie théorique nettement supérieure à ${v2(bw.t, 0)} min (charge faible, pas d'estimation chiffrée fiable)`}.` });
+    }
+    const pEssaiKW = calcPuissanceDecharge(eq); // puissance réellement débitée par la batterie pendant l'essai (U × I)
+    if (pEssaiKW && pEssaiKW > 0) {
+      const wEssai = (pEssaiKW * 1000) / bw.nbElements;
+      const attendu = autonomieDepuisW(bw, wEssai);
+      if (dMes && !attendu) {
+        // Essai à faible puissance par élément : l'autonomie doit au moins dépasser nettement la durée de référence.
+        if (dMes < bw.t) {
+          const phrase = `Essai d'autonomie : ${v2(dMes, 0)} min à seulement ≈ ${v2(wEssai, 0)} W/élt, alors que le constructeur donne ${ref} : autonomie très inférieure à l'attendu, vieillissement de la batterie probable.`;
+          out.push({ section: "essai_decharge", niveau: 1, texte: phrase, constat: { phrase, rang: 1, categorie: "batterie_capacite", sujet: "batterie" } });
+        } else out.push({ section: "essai_decharge", niveau: 0, texte: `Essai d'autonomie à ≈ ${v2(wEssai, 0)} W/élt (${ref} donnés par le constructeur) : ${v2(dMes, 0)} min, cohérent avec une sollicitation faible.` });
+      } else if (dMes) {
+        const ratio = (dMes / attendu) * 100;
+        const audela = wEssai > bw.w ? ` (au-delà de la valeur constructeur : autonomie attendue inférieure à ${v2(bw.t, 0)} min)` : "";
+        if (ratio < 80) {
+          const phrase = `Essai d'autonomie : ${v2(dMes, 0)} min à ≈ ${v2(wEssai, 0)} W/élt${audela}, pour ≈ ${v2(attendu, 0)} min attendues d'après la valeur constructeur (${ref}), soit ≈ ${Math.round(ratio)} % : vieillissement de la batterie probable.`;
+          out.push({ section: "essai_decharge", niveau: 1, texte: phrase, constat: { phrase, rang: 1, categorie: "batterie_capacite", sujet: "batterie" } });
+        } else out.push({ section: "essai_decharge", niveau: 0, texte: `Essai d'autonomie à ≈ ${v2(wEssai, 0)} W/élt${audela} : ${v2(dMes, 0)} min pour ≈ ${v2(attendu, 0)} min attendues d'après la valeur constructeur (${ref}), soit ≈ ${Math.round(ratio)} %.` });
+      } else out.push({ section: "essai_decharge", niveau: 0, texte: `Puissance demandée par élément pendant l'essai : ≈ ${v2(wEssai, 0)} W/élt (${ref} donnés par le constructeur) — autonomie attendue ${attendu ? `≈ ${v2(attendu, 0)} min` : `nettement supérieure à ${v2(bw.t, 0)} min`}.` });
+    }
+  }
   const pctEssai = numOf(ed.charge_essai?.fields?.pct) ?? (numOf(ed.charge_essai?.fields?.kw) && kwN ? (numOf(ed.charge_essai.fields.kw) / kwN) * 100 : null);
   if (dMes && pctEssai && charge !== null && charge >= 5) {
     const est = Math.min(dMes * Math.pow(pctEssai / charge, 1.15), dMes * 4);
@@ -11345,7 +11405,7 @@ function piecesUsureEquipement(eq) {
           const nb = numOf(b.nombreBranches), nbl = numOf(b.nombreBlocsParBranche);
           if (!b.marque && !b.typeBloc && !b.anneeMiseEnService) return;
           ajouter({ cle: "ups:batteries:fiche", categorie: cat.label, marque: b.marque || "", reference: b.typeBloc || "",
-            description: ["Batterie", b.technologie, b.tensionNominale && `${b.tensionNominale} V`, b.capacite && `${b.capacite} Ah`, nb && nbl && `${nb} branche(s) × ${nbl} bloc(s)`].filter(Boolean).join(" · "),
+            description: ["Batterie", b.technologie, b.tensionNominale && `${b.tensionNominale} V`, b.capacite && `${b.capacite} Ah`, b.puissanceElement && `${b.puissanceElement} W/élt${b.dureeReferenceW ? ` (${b.dureeReferenceW} min${b.tensionFinElement ? `, ${b.tensionFinElement} V/élt` : ""})` : ""}`, nb && nbl && `${nb} branche(s) × ${nbl} bloc(s)`].filter(Boolean).join(" · "),
             quantite: nb !== null && nbl !== null ? nb * nbl : 1, anneeMiseEnService: b.anneeMiseEnService ?? m.anneeMiseEnService, dureeVie: b.dureeVie || m.dureeVie || dureeVieBatterieParCapacite(b.capacite) });
           return;
         }
@@ -12235,6 +12295,11 @@ function PiecesUsureUPSPanel({ eq, update, itemFicheBatterie, allSites = [] }) {
               <div style={{ marginBottom: 6 }}>
                 <div style={{ fontSize: 11.5, color: "#8B96A3", marginBottom: 4 }}>Modèle 1 — fiche batterie de l'équipement (reprise par le relevé des tensions, les branches, l'autonomie et le rapport). Un modèle différent s'ajoute avec « Ajouter un modèle ».</div>
                 <ControlRow item={itemFicheBatterie} value={valeurFiche} onChange={setFiche} idPrefix={`${eq.id}-fiche-batterie`} />
+                {/\d\s*W$/i.test(String(batterieInfo.typeBloc || "").trim()) && !String(batterieInfo.puissanceElement || "").trim() && (
+                  <div style={{ fontSize: 11.5, color: "#B5730A", background: "#FDF3E3", borderRadius: 8, padding: "6px 10px", marginTop: 6 }}>
+                    La référence « {batterieInfo.typeBloc} » se termine par W : batterie probablement donnée en puissance par élément. Reportez la valeur W/élt, la durée et la tension de fin de décharge de la fiche constructeur (la convention varie selon le fabricant).
+                  </div>
+                )}
                 {(() => {
                   const preco = dureeVieBatterieParCapacite(batterieInfo.capacite);
                   const saisie = numOf(batterieInfo.dureeVie);
@@ -15764,6 +15829,7 @@ const RECO_PAR_CATEGORIE = {
   thdi_entree: () => "Faire contrôler le filtre d'entrée et l'étage redresseur (condensateurs, selfs, carte d'absorption sinusoïdale) par le constructeur.",
   neutre_harmoniques: () => "Vérifier la section du conducteur neutre en sortie (harmoniques de rang 3) et son échauffement par thermographie.",
   surcharge_kw: () => "Réduire ou répartir la charge de sortie, ou redimensionner l'onduleur (puissance active supérieure à la puissance nominale).",
+  batterie_dimensionnement: () => "Vérifier le dimensionnement de la batterie (puissance par élément insuffisante pour la charge actuelle) : batterie de plus forte puissance ou réduction de la charge secourue.",
   batterie_capacite: () => "Remplacer la batterie (capacité mesurée inférieure à 80 % de la référence).",
   temperature_batterie: () => "Abaisser la température du local batterie (ventilation, climatisation) et anticiper le remplacement des blocs.",
   batterie_branche: (s) => `Contrôler la ou les branches concernées (${s}) : mesure bloc par bloc, résistance interne et serrage des connexions.`,
@@ -15810,7 +15876,7 @@ const RECO_PAR_CATEGORIE = {
   etat_degrade: (s) => `Surveiller à la prochaine visite : ${s}.`,
 };
 const MAX_PRECONISATIONS = 5;
-const ORDRE_RECO = ["huile_dga_critique", "huile_pcb", "huile_physique", "huile_chimique", "huile_dga", "huile_furanes", "huile_eclair", "huile_aspect", "huile_surveillance", "capacite_modules", "module", "redondance_modules", "redondance_parallele", "partage_charge", "surcharge_condensateurs", "resonance", "self_accord", "fusible_calibre", "fusible_ib", "fusible", "fusible_rechange", "securite_non_conforme", "surcharge_kw", "batterie_capacite", "batterie_branche", "thdi_entree", "neutre_harmoniques", "temperature_batterie", "ondulation_batterie", "isolement_continu", "reglage_ir", "svg_sature", "serrage", "contact", "isolement", "enroulements", "huile", "mise_terre", "protection", "disjoncteur", "batterie", "gradin", "cosphi", "usure", "proprete", "ventilation", "thermique", "mesure", "etat_defaillant", "etat_degrade"];
+const ORDRE_RECO = ["huile_dga_critique", "huile_pcb", "huile_physique", "huile_chimique", "huile_dga", "huile_furanes", "huile_eclair", "huile_aspect", "huile_surveillance", "capacite_modules", "module", "redondance_modules", "redondance_parallele", "partage_charge", "surcharge_condensateurs", "resonance", "self_accord", "fusible_calibre", "fusible_ib", "fusible", "fusible_rechange", "securite_non_conforme", "surcharge_kw", "batterie_capacite", "batterie_dimensionnement", "batterie_branche", "thdi_entree", "neutre_harmoniques", "temperature_batterie", "ondulation_batterie", "isolement_continu", "reglage_ir", "svg_sature", "serrage", "contact", "isolement", "enroulements", "huile", "mise_terre", "protection", "disjoncteur", "batterie", "gradin", "cosphi", "usure", "proprete", "ventilation", "thermique", "mesure", "etat_defaillant", "etat_degrade"];
 // Préconisations dédoublonnées, regroupées par famille, les plus urgentes en premier.
 function preconisationsDepuisConstats(constats) {
   const groupes = {};
