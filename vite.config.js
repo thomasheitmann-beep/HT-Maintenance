@@ -28,6 +28,8 @@ export default defineConfig({
         // sans ce runtimeCaching, ce module précis resterait indisponible sans connexion tant
         // qu'il n'a pas été chargé au moins une fois avec internet actif.
         globPatterns: ["**/*.{js,css,html,png,svg,ico}"],
+        // Fichier principal de l'appli > 2 Mo (limite par défaut) : relevé à 5 Mo pour qu'il reste en cache hors ligne.
+        maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
         runtimeCaching: [
           {
             urlPattern: ({ url }) => url.pathname.startsWith("/assets/"),
