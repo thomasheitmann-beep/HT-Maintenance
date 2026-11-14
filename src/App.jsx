@@ -11705,7 +11705,7 @@ function PiecesRemplaceesRI({ eqIv, siteEq, onChange, ivDate }) {
 // en service/durée de vie), avec bouton pour ajouter un modèle différent par catégorie. Usage
 // interne uniquement — seule la synthèse des échéances (calcEcheancesUsureUPS) va dans le rapport.
 // Batterie de compensation : aide au choix du ventilateur (remplit la référence de « Ventilation »).
-function VentilateursCompensation({ eq, update }) {
+function VentilateursCompensation({ eq, update, allSites = [] }) {
   const [catalogue, setCatalogue] = useState(null); // id du ventilateur à remplir depuis le catalogue
   const liste = ventilateursBatterie(eq);
   const enregistrer = (next) => {
@@ -11724,7 +11724,7 @@ function VentilateursCompensation({ eq, update }) {
   };
   return (
     <>
-    <PropositionsPiecesUsure eq={eq} categories={["ventilateurs"]} existants={{ ventilateurs: liste }} onAjouter={ajouterProposes} />
+    <PropositionsPiecesUsure eq={eq} allSites={allSites} categories={["ventilateurs"]} existants={{ ventilateurs: liste }} onAjouter={ajouterProposes} />
     <Card style={{ marginBottom: 14 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
         <SectionTitle>Ventilateurs</SectionTitle>
@@ -11947,7 +11947,7 @@ function contextePlaqueComposant(libelle) {
 }
 // Champs d'identification jamais lus sur une plaque (repère interne, liens vers d'autres équipements, choix d'app).
 const CHAMPS_IDENTIFICATION_HORS_PLAQUE = ["repere", "modulesTropic", "machinesParallele", "objectifParallele", "batteriesParallele", "voie2N", "onduleurSecours", "onduleursRaccordes", "bypassStatique", "bypassMaintenance", "transformateurAssocie", "transformateursParallele", "transfoNbParallele", "transfoManuel", "presenceRelais", "presenceTC", "transfoSnManuel", "transfoUccManuel"];
-// ===== Pièces d'usure proposées d'après le modèle (plans de maintenance PDMG 2024-2025) =====
+// ===== Pièces d'usure proposées d'après le modèle (historique des plans de maintenance 2024-2025) =====
 // Catalogue chargé à la demande (fichier séparé) : ventilateurs, condensateurs AC / DC relevés sur les mêmes marque / modèle / puissance.
 // Seules la marque et la référence constructeur sont reprises (jamais de code interne) ; le technicien choisit ce qu'il ajoute.
 const FAMILLE_CATALOGUE_USURE = { "Onduleur": "onduleur", "Onduleur simplifié": "onduleur", "Redresseur chargeur": "chargeur", "Inverseur de source": "sts", "Batterie de compensation": "compensateur" };
@@ -11979,6 +11979,61 @@ function fichesCatalogueUsure(catalogue, eq) {
   });
   return res.sort((a, b) => b.score - a.score || b.e.n - a.e.n).slice(0, 8).map((x) => x.e);
 }
+// Pièces d'usure déjà saisies dans l'appli sur les équipements de même marque / modèle (tous les sites) : une fiche
+// « Saisis dans l'appli », au même format que le catalogue, chaque pièce comptée une fois par équipement (la plus fréquente en premier).
+function ficheUsureAppli(eq, allSites) {
+  const fam = FAMILLE_CATALOGUE_USURE[eq.type];
+  if (!fam) return null;
+  const idOf = (e) => e.identification || {};
+  const marque = normCatalogueUsure(idOf(eq).marque);
+  const modeleDe = (e) => normCatalogueUsure(e.type === "Inverseur de source" ? idOf(e).materiel : idOf(e).modele);
+  const puissanceDe = (e) => numOf(e.type === "Redresseur chargeur" ? idOf(e).courantNominalSortie : e.type === "Batterie de compensation" ? idOf(e).qn : idOf(e).puissanceKVA);
+  const modele = modeleDe(eq), puissance = puissanceDe(eq);
+  if (!marque) return null;
+  if (fam !== "compensateur" && (!modele || modele.length < 3)) return null;
+  const candidats = [];
+  (allSites || []).forEach((st) => (st.equipements || []).forEach((e) => {
+    if (e.id === eq.id || (eq.lignageId && e.lignageId === eq.lignageId) || FAMILLE_CATALOGUE_USURE[e.type] !== fam) return;
+    const m = normCatalogueUsure(idOf(e).marque);
+    if (!m || !(m === marque || (marque.length >= 3 && (m.startsWith(marque) || marque.startsWith(m))))) return;
+    const pe = puissanceDe(e);
+    if (fam === "compensateur") {
+      if (puissance === null || pe === null || Math.abs(pe - puissance) > Math.max(1, puissance * 0.1)) return;
+    } else {
+      const mo = modeleDe(e);
+      if (!(mo === modele || (mo.length >= 4 && modele.length >= 4 && (mo.includes(modele) || modele.includes(mo))))) return;
+    }
+    candidats.push({ e, memePuissance: puissance !== null && pe !== null && Math.abs(pe - puissance) < 0.01 });
+  }));
+  const retenus = candidats.some((c) => c.memePuissance) ? candidats.filter((c) => c.memePuissance) : candidats;
+  const compte = new Map();
+  let nbEq = 0;
+  retenus.forEach(({ e }) => {
+    const pieces = [];
+    if (e.type === "Batterie de compensation") ventilateursBatterie(e).forEach((v) => pieces.push({ c: "V", m: v.marque, r: v.modele, d: v.description, q: v.quantite }));
+    else Object.entries(CAT_USURE_DE_CODE).forEach(([code, cat]) => ((e.controles && e.controles.pieces_usure_ups && e.controles.pieces_usure_ups[cat]) || []).forEach((x) => pieces.push({ c: code, m: x.marque, r: x.modele, d: x.description, q: x.quantite })));
+    const vus = new Set();
+    pieces.forEach((x) => {
+      const r = String(x.r || "").trim(), m = String(x.m || "").trim(), d = String(x.d || "").trim();
+      if (!r && !m) return; // pièce sans marque ni référence : ignorée
+      const cle = `${x.c}|${normCatalogueUsure(r) || normCatalogueUsure(d)}|${normCatalogueUsure(m)}`;
+      if (vus.has(cle)) return; vus.add(cle);
+      const q = numOf(x.q);
+      const cur = compte.get(cle) || { piece: { c: x.c, ...(m ? { m } : {}), ...(r ? { r } : {}), ...(d ? { d } : {}) }, n: 0, qte: new Map() };
+      cur.n += 1;
+      if (q) cur.qte.set(q, (cur.qte.get(q) || 0) + 1);
+      compte.set(cle, cur);
+    });
+    if (vus.size) nbEq += 1;
+  });
+  if (!compte.size) return null;
+  const pieces = [...compte.values()].sort((a, b) => b.n - a.n).map(({ piece, n, qte }) => {
+    const q = [...qte.entries()].sort((a, b) => b[1] - a[1])[0];
+    return { ...piece, ...(q ? { q: q[0] } : {}), nEq: n };
+  });
+  const id = idOf(eq);
+  return { source: "appli", m: id.marque || "", mo: (eq.type === "Inverseur de source" ? id.materiel : id.modele) || "", n: nbEq, v: [{ n: nbEq, p: pieces }] };
+}
 // Pièce du catalogue → champs de la fiche (description / marque / modèle), normalisés par le catalogue des composants quand la référence y figure.
 function champsPieceCatalogueUsure(p) {
   const kinds = p.c === "V" ? ["ventil"] : p.c === "AC" ? ["ac"] : ["dc", "cartes"];
@@ -11986,7 +12041,7 @@ function champsPieceCatalogueUsure(p) {
   if (hit) return { marque: hit.marque || p.m || "", modele: hit.modele || p.r, description: hit.description || p.d || "" };
   return { marque: p.m || "", modele: p.r || "", description: p.d || "" };
 }
-function PropositionsPiecesUsure({ eq, categories, existants = {}, onAjouter }) {
+function PropositionsPiecesUsure({ eq, categories, existants = {}, onAjouter, allSites = [] }) {
   const [catalogue, setCatalogue] = useState(null);
   const [ouvert, setOuvert] = useState(true);
   const [choix, setChoix] = useState(0);
@@ -11996,7 +12051,8 @@ function PropositionsPiecesUsure({ eq, categories, existants = {}, onAjouter }) 
     import("./catalogueUsureConversion.js").then((m) => { if (actif) setCatalogue(m.default || m); }).catch(() => {});
     return () => { actif = false; };
   }, []);
-  const fiches = useMemo(() => fichesCatalogueUsure(catalogue, eq), [catalogue, eq.type, eq.identification]);
+  const ficheAppli = useMemo(() => ficheUsureAppli(eq, allSites), [eq.id, eq.type, eq.identification, allSites]);
+  const fiches = useMemo(() => [...(ficheAppli ? [ficheAppli] : []), ...fichesCatalogueUsure(catalogue, eq)], [ficheAppli, catalogue, eq.type, eq.identification]);
   const signature = fiches.map((f) => `${f.mo}|${f.p}`).join(",");
   useEffect(() => { setChoix(0); setVariante(0); }, [signature]);
   if (!fiches.length) return null;
@@ -12010,14 +12066,16 @@ function PropositionsPiecesUsure({ eq, categories, existants = {}, onAjouter }) 
   });
   const aAjouter = pieces.filter((x) => !dejaLa(x));
   const fr = (n) => String(n).replace(".", ",");
-  const libFiche = (f) => `${f.mo}${f.p !== undefined ? ` — ${fr(f.p)} ${f.u || ""}`.trimEnd() : ""}`;
+  const libFiche = (f) => (f.source === "appli" ? "Saisis dans l'appli" : `Historique · ${f.mo}${f.p !== undefined ? ` — ${fr(f.p)} ${f.u || ""}`.trimEnd() : ""}`);
   const puce = (actif) => ({ padding: "4px 10px", borderRadius: 999, fontSize: 11.5, fontWeight: 600, cursor: "pointer", border: `1px solid ${actif ? "#0A5DA8" : "#D8DEE5"}`, background: actif ? "#EEF4FB" : "#fff", color: actif ? "#0A5DA8" : "#5B6B7D" });
   return (
     <Card style={{ marginBottom: 14, borderLeft: "4px solid #0A5DA8" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap", cursor: "pointer" }} onClick={() => setOuvert((o) => !o)}>
         <div>
           <div style={{ fontSize: 13.5, fontWeight: 700, color: "#1A1F26" }}>Pièces relevées sur ce modèle</div>
-          <div style={{ fontSize: 11.5, color: "#5B6B7D" }}>{normCatalogueUsure(fiche.mo).startsWith(normCatalogueUsure(fiche.m)) ? "" : fiche.m + " "}{libFiche(fiche)} · {fiche.n} relevé{fiche.n > 1 ? "s" : ""} dans les plans de maintenance</div>
+          <div style={{ fontSize: 11.5, color: "#5B6B7D" }}>{fiche.source === "appli"
+            ? `Pièces saisies sur ${fiche.n} autre${fiche.n > 1 ? "s" : ""} équipement${fiche.n > 1 ? "s" : ""} du même modèle dans l'appli`
+            : `${normCatalogueUsure(fiche.mo).startsWith(normCatalogueUsure(fiche.m)) ? "" : fiche.m + " "}${libFiche(fiche).replace(/^Historique · /, "")} · ${fiche.n} relevé${fiche.n > 1 ? "s" : ""} dans l'historique de maintenance`}</div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }} onClick={(e) => e.stopPropagation()}>
           {ouvert && aAjouter.length > 1 && <button onClick={() => onAjouter(aAjouter)} style={btnGhost(BRAND.blue)}><Plus size={13} /> Tout ajouter ({aAjouter.length})</button>}
@@ -12030,7 +12088,7 @@ function PropositionsPiecesUsure({ eq, categories, existants = {}, onAjouter }) 
         <div style={{ marginTop: 10 }}>
           {fiches.length > 1 && (
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
-              {fiches.map((f, i) => <span key={i} onClick={() => { setChoix(i); setVariante(0); }} style={puce(i === Math.min(choix, fiches.length - 1))}>{f.m !== fiche.m && i !== choix ? f.m + " " : ""}{libFiche(f)} ({f.n})</span>)}
+              {fiches.map((f, i) => <span key={i} onClick={() => { setChoix(i); setVariante(0); }} style={puce(i === Math.min(choix, fiches.length - 1))}>{f.source !== "appli" && f.m !== fiche.m && i !== choix ? f.m + " " : ""}{libFiche(f)} ({f.n})</span>)}
             </div>
           )}
           {fiche.v.length > 1 && (
@@ -12048,13 +12106,14 @@ function PropositionsPiecesUsure({ eq, categories, existants = {}, onAjouter }) 
                 <div style={{ fontSize: 12.5, fontWeight: 700, color: "#1A1F26" }}>{[x.champs.marque, x.champs.modele].filter(Boolean).join(" ") || "Référence non relevée"}</div>
                 {x.champs.description && <div style={{ fontSize: 11.5, color: "#5B6B7D" }}>{x.champs.description}</div>}
               </div>
+              {x.p.nEq ? <span style={{ fontSize: 11, color: "#8B96A3", flexShrink: 0 }}>sur {x.p.nEq} équip.</span> : null}
               {x.p.q ? <span style={{ fontSize: 12, fontWeight: 700, color: "#1A1F26", flexShrink: 0 }}>× {fr(x.p.q)}</span> : null}
               {dejaLa(x)
                 ? <span style={{ fontSize: 11.5, color: "#0F8A5F", fontWeight: 600, flexShrink: 0 }}>✓ déjà dans la liste</span>
                 : <button onClick={() => onAjouter([x])} style={{ ...btnGhost(BRAND.blue), flexShrink: 0 }}><Plus size={13} /> Ajouter</button>}
             </div>
           ))}
-          <div style={{ fontSize: 10.5, color: "#8B96A3", marginTop: 6 }}>Proposition issue des plans de maintenance : vérifier la référence et la quantité sur place. L'année de mise en service reste à saisir.</div>
+          <div style={{ fontSize: 10.5, color: "#8B96A3", marginTop: 6 }}>{fiche.source === "appli" ? "Pièces saisies par les techniciens sur d'autres équipements du même modèle" : "Proposition issue des plans de maintenance"} : vérifier la référence et la quantité sur place. L'année de mise en service reste à saisir.</div>
         </div>
       )}
     </Card>
@@ -12075,7 +12134,7 @@ function ajouterPiecesUsureUPS(data, choix, categoriesDef) {
   });
   return next;
 }
-function PiecesUsureUPSPanel({ eq, update, itemFicheBatterie }) {
+function PiecesUsureUPSPanel({ eq, update, itemFicheBatterie, allSites = [] }) {
   const [catalogueOuvert, setCatalogueOuvert] = useState(null); // id du modèle dont le catalogue est ouvert
   const valeurFiche = eq.controles.batterie_id?.batterie_caracteristiques || { fields: {} };
   const setFiche = (v) => update({ ...eq, controles: { ...eq.controles, batterie_id: { ...(eq.controles.batterie_id || {}), batterie_caracteristiques: v } } });
@@ -12089,7 +12148,7 @@ function PiecesUsureUPSPanel({ eq, update, itemFicheBatterie }) {
 
   return (
     <>
-      <PropositionsPiecesUsure eq={eq} categories={getCategoriesUsure(eq.type).map((c) => c.key)} existants={data}
+      <PropositionsPiecesUsure eq={eq} allSites={allSites} categories={getCategoriesUsure(eq.type).map((c) => c.key)} existants={data}
         onAjouter={(choix) => update({ ...eq, controles: { ...eq.controles, pieces_usure_ups: ajouterPiecesUsureUPS(data, choix, getCategoriesUsure(eq.type)) } })} />
       {getCategoriesUsure(eq.type).map((cat) => {
         const modeles = data[cat.key] || [];
@@ -16847,12 +16906,12 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
               );
             }
             if (sec.key === "pieces_usure_ups" && TYPES_AVEC_PIECES_USURE.includes(eq.type)) {
-              return <PiecesUsureUPSPanel key={sec.key} eq={eq} update={update} itemFicheBatterie={getSchema(eq).sections.find((x) => x.key === "batterie_id")?.items?.[0]} />;
+              return <PiecesUsureUPSPanel key={sec.key} eq={eq} update={update} allSites={allSites} itemFicheBatterie={getSchema(eq).sections.find((x) => x.key === "batterie_id")?.items?.[0]} />;
             }
             if (sec.key === "usure" && TYPES_AVEC_GRADINS.includes(eq.type)) {
               return (
                 <React.Fragment key={sec.key}>
-                  <VentilateursCompensation eq={eq} update={update} />
+                  <VentilateursCompensation eq={eq} update={update} allSites={allSites} />
                   {(
                     <SectionBlock
                       title="Autres pièces d'usure"
