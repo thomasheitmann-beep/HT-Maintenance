@@ -11718,7 +11718,13 @@ function VentilateursCompensation({ eq, update }) {
   const anneeCourante = new Date().getFullYear();
   const cellStyle = { ...inputStyle, width: "100%", boxSizing: "border-box", padding: "7px 9px", fontSize: 13 };
   const etiquette = (t) => <div style={{ fontSize: 10, fontWeight: 700, color: "#8B96A3", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 3 }}>{t}</div>;
+  const ajouterProposes = (choix) => {
+    const garder = liste.filter((v) => [v.marque, v.modele, v.description, v.annee].some((x) => String(x || "").trim()));
+    enregistrer([...garder, ...choix.map((x) => ({ ...nouveauVentilateur(), ...x.champs, quantite: x.p.q ? String(x.p.q) : "1" }))]);
+  };
   return (
+    <>
+    <PropositionsPiecesUsure eq={eq} categories={["ventilateurs"]} existants={{ ventilateurs: liste }} onAjouter={ajouterProposes} />
     <Card style={{ marginBottom: 14 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
         <SectionTitle>Ventilateurs</SectionTitle>
@@ -11769,6 +11775,7 @@ function VentilateursCompensation({ eq, update }) {
         }} />
       )}
     </Card>
+    </>
   );
 }
 const CATALOGUE_PAR_CATEGORIE_USURE = { condensateursAlternatifs: "ac", condensateursContinus: "dc", ventilateurs: "ventil" };
@@ -11940,6 +11947,134 @@ function contextePlaqueComposant(libelle) {
 }
 // Champs d'identification jamais lus sur une plaque (repère interne, liens vers d'autres équipements, choix d'app).
 const CHAMPS_IDENTIFICATION_HORS_PLAQUE = ["repere", "modulesTropic", "machinesParallele", "objectifParallele", "batteriesParallele", "voie2N", "onduleurSecours", "onduleursRaccordes", "bypassStatique", "bypassMaintenance", "transformateurAssocie", "transformateursParallele", "transfoNbParallele", "transfoManuel", "presenceRelais", "presenceTC", "transfoSnManuel", "transfoUccManuel"];
+// ===== Pièces d'usure proposées d'après le modèle (plans de maintenance PDMG 2024-2025) =====
+// Catalogue chargé à la demande (fichier séparé) : ventilateurs, condensateurs AC / DC relevés sur les mêmes marque / modèle / puissance.
+// Seules la marque et la référence constructeur sont reprises (jamais de code interne) ; le technicien choisit ce qu'il ajoute.
+const FAMILLE_CATALOGUE_USURE = { "Onduleur": "onduleur", "Onduleur simplifié": "onduleur", "Redresseur chargeur": "chargeur", "Inverseur de source": "sts", "Batterie de compensation": "compensateur" };
+const CAT_USURE_DE_CODE = { V: "ventilateurs", AC: "condensateursAlternatifs", DC: "condensateursContinus" };
+const LIBELLE_CODE_USURE = { V: "Ventilateur", AC: "Condensateur AC", DC: "Condensateur DC" };
+const normCatalogueUsure = (t) => String(t || "").toUpperCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^A-Z0-9]/g, "");
+function fichesCatalogueUsure(catalogue, eq) {
+  const fam = FAMILLE_CATALOGUE_USURE[eq.type];
+  if (!catalogue || !fam) return [];
+  const id = eq.identification || {};
+  const marque = normCatalogueUsure(id.marque);
+  const modele = normCatalogueUsure(eq.type === "Inverseur de source" ? id.materiel : id.modele);
+  const puissance = numOf(eq.type === "Redresseur chargeur" ? id.courantNominalSortie : eq.type === "Batterie de compensation" ? id.qn : id.puissanceKVA);
+  const res = [];
+  (catalogue[fam] || []).forEach((e) => {
+    const m = normCatalogueUsure(e.m), mo = normCatalogueUsure(e.mo);
+    const memeMarque = marque && m && (m === marque || (marque.length >= 3 && (m.startsWith(marque) || marque.startsWith(m))));
+    let score;
+    if (fam === "compensateur") {
+      if (!memeMarque) return; // pas de modèle saisi sur une batterie : marque + puissance la plus proche
+      score = puissance !== null && e.p !== undefined ? 10 - Math.min(9, Math.abs(e.p - puissance) / Math.max(puissance, 1) * 10) : 1;
+    } else {
+      if (!modele || modele.length < 3) return;
+      if (marque && m && !memeMarque) return;
+      if (mo === modele) score = 6; else if (mo.length >= 4 && modele.length >= 4 && (mo.includes(modele) || modele.includes(mo))) score = 4; else return;
+      if (puissance !== null && e.p !== undefined && Math.abs(e.p - puissance) < 0.01) score += 3;
+    }
+    res.push({ e, score });
+  });
+  return res.sort((a, b) => b.score - a.score || b.e.n - a.e.n).slice(0, 8).map((x) => x.e);
+}
+// Pièce du catalogue → champs de la fiche (description / marque / modèle), normalisés par le catalogue des composants quand la référence y figure.
+function champsPieceCatalogueUsure(p) {
+  const kinds = p.c === "V" ? ["ventil"] : p.c === "AC" ? ["ac"] : ["dc", "cartes"];
+  const hit = p.r ? pieceCatalogueParReference(p.r, kinds) : null;
+  if (hit) return { marque: hit.marque || p.m || "", modele: hit.modele || p.r, description: hit.description || p.d || "" };
+  return { marque: p.m || "", modele: p.r || "", description: p.d || "" };
+}
+function PropositionsPiecesUsure({ eq, categories, existants = {}, onAjouter }) {
+  const [catalogue, setCatalogue] = useState(null);
+  const [ouvert, setOuvert] = useState(true);
+  const [choix, setChoix] = useState(0);
+  const [variante, setVariante] = useState(0);
+  useEffect(() => {
+    let actif = true;
+    import("./catalogueUsureConversion.js").then((m) => { if (actif) setCatalogue(m.default || m); }).catch(() => {});
+    return () => { actif = false; };
+  }, []);
+  const fiches = useMemo(() => fichesCatalogueUsure(catalogue, eq), [catalogue, eq.type, eq.identification]);
+  const signature = fiches.map((f) => `${f.mo}|${f.p}`).join(",");
+  useEffect(() => { setChoix(0); setVariante(0); }, [signature]);
+  if (!fiches.length) return null;
+  const fiche = fiches[Math.min(choix, fiches.length - 1)];
+  const v = fiche.v[Math.min(variante, fiche.v.length - 1)];
+  const pieces = v.p.filter((p) => categories.includes(CAT_USURE_DE_CODE[p.c])).map((p) => ({ p, champs: champsPieceCatalogueUsure(p), cat: CAT_USURE_DE_CODE[p.c] }));
+  const dejaLa = (x) => (existants[x.cat] || []).some((m) => {
+    const a = normCatalogueUsure(m.modele), b = normCatalogueUsure(x.champs.modele);
+    if (a && b) return a === b;
+    return !b && normCatalogueUsure(m.description) && normCatalogueUsure(m.description) === normCatalogueUsure(x.champs.description);
+  });
+  const aAjouter = pieces.filter((x) => !dejaLa(x));
+  const fr = (n) => String(n).replace(".", ",");
+  const libFiche = (f) => `${f.mo}${f.p !== undefined ? ` — ${fr(f.p)} ${f.u || ""}`.trimEnd() : ""}`;
+  const puce = (actif) => ({ padding: "4px 10px", borderRadius: 999, fontSize: 11.5, fontWeight: 600, cursor: "pointer", border: `1px solid ${actif ? "#0A5DA8" : "#D8DEE5"}`, background: actif ? "#EEF4FB" : "#fff", color: actif ? "#0A5DA8" : "#5B6B7D" });
+  return (
+    <Card style={{ marginBottom: 14, borderLeft: "4px solid #0A5DA8" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap", cursor: "pointer" }} onClick={() => setOuvert((o) => !o)}>
+        <div>
+          <div style={{ fontSize: 13.5, fontWeight: 700, color: "#1A1F26" }}>Pièces relevées sur ce modèle</div>
+          <div style={{ fontSize: 11.5, color: "#5B6B7D" }}>{normCatalogueUsure(fiche.mo).startsWith(normCatalogueUsure(fiche.m)) ? "" : fiche.m + " "}{libFiche(fiche)} · {fiche.n} relevé{fiche.n > 1 ? "s" : ""} dans les plans de maintenance</div>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }} onClick={(e) => e.stopPropagation()}>
+          {ouvert && aAjouter.length > 1 && <button onClick={() => onAjouter(aAjouter)} style={btnGhost(BRAND.blue)}><Plus size={13} /> Tout ajouter ({aAjouter.length})</button>}
+          <button onClick={() => setOuvert((o) => !o)} style={{ background: "none", border: "none", color: "#5B6B7D", cursor: "pointer", padding: 4 }} title={ouvert ? "Replier" : "Déplier"}>
+            <ChevronDown size={16} style={{ transform: ouvert ? "rotate(0deg)" : "rotate(-90deg)", transition: "transform .15s" }} />
+          </button>
+        </div>
+      </div>
+      {ouvert && (
+        <div style={{ marginTop: 10 }}>
+          {fiches.length > 1 && (
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
+              {fiches.map((f, i) => <span key={i} onClick={() => { setChoix(i); setVariante(0); }} style={puce(i === Math.min(choix, fiches.length - 1))}>{f.m !== fiche.m && i !== choix ? f.m + " " : ""}{libFiche(f)} ({f.n})</span>)}
+            </div>
+          )}
+          {fiche.v.length > 1 && (
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginBottom: 8 }}>
+              <span style={{ fontSize: 11, color: "#8B96A3" }}>Relevés différents :</span>
+              {fiche.v.map((x, i) => <span key={i} onClick={() => setVariante(i)} style={puce(i === Math.min(variante, fiche.v.length - 1))}>{i === 0 ? "Le plus fréquent" : `Variante ${i + 1}`} ({x.n})</span>)}
+            </div>
+          )}
+          {pieces.length === 0 ? (
+            <div style={{ fontSize: 12, color: "#8B96A3", fontStyle: "italic" }}>Aucun ventilateur ni condensateur relevé pour ce modèle dans les catégories de cet équipement.</div>
+          ) : pieces.map((x, i) => (
+            <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 0", borderTop: i ? "1px solid #EEF1F4" : "none", flexWrap: "wrap" }}>
+              <span style={{ fontSize: 10.5, fontWeight: 700, color: "#5B6B7D", background: "#F4F6F8", borderRadius: 6, padding: "3px 7px", flexShrink: 0, minWidth: 104, textAlign: "center" }}>{LIBELLE_CODE_USURE[x.p.c]}</span>
+              <div style={{ flex: "1 1 240px", minWidth: 0 }}>
+                <div style={{ fontSize: 12.5, fontWeight: 700, color: "#1A1F26" }}>{[x.champs.marque, x.champs.modele].filter(Boolean).join(" ") || "Référence non relevée"}</div>
+                {x.champs.description && <div style={{ fontSize: 11.5, color: "#5B6B7D" }}>{x.champs.description}</div>}
+              </div>
+              {x.p.q ? <span style={{ fontSize: 12, fontWeight: 700, color: "#1A1F26", flexShrink: 0 }}>× {fr(x.p.q)}</span> : null}
+              {dejaLa(x)
+                ? <span style={{ fontSize: 11.5, color: "#0F8A5F", fontWeight: 600, flexShrink: 0 }}>✓ déjà dans la liste</span>
+                : <button onClick={() => onAjouter([x])} style={{ ...btnGhost(BRAND.blue), flexShrink: 0 }}><Plus size={13} /> Ajouter</button>}
+            </div>
+          ))}
+          <div style={{ fontSize: 10.5, color: "#8B96A3", marginTop: 6 }}>Proposition issue des plans de maintenance : vérifier la référence et la quantité sur place. L'année de mise en service reste à saisir.</div>
+        </div>
+      )}
+    </Card>
+  );
+}
+// Ajoute des pièces proposées aux listes « pièces d'usure » d'un onduleur / redresseur / inverseur (une ligne vide est réutilisée).
+function ajouterPiecesUsureUPS(data, choix, categoriesDef) {
+  const next = { ...data };
+  choix.forEach((x) => {
+    const def = categoriesDef.find((c) => c.key === x.cat);
+    if (!def) return;
+    const liste = [...(next[x.cat] || [])];
+    const vide = liste.findIndex((m) => !String(m.description || "").trim() && !String(m.marque || "").trim() && !String(m.modele || "").trim() && !String(m.anneeMiseEnService || "").trim());
+    const piece = { ...emptyModeleUsure(def.dureeDefaut), ...x.champs, quantite: x.p.q ? String(x.p.q) : "" };
+    if (vide >= 0) liste[vide] = { ...liste[vide], ...x.champs, quantite: piece.quantite };
+    else liste.push(piece);
+    next[x.cat] = liste;
+  });
+  return next;
+}
 function PiecesUsureUPSPanel({ eq, update, itemFicheBatterie }) {
   const [catalogueOuvert, setCatalogueOuvert] = useState(null); // id du modèle dont le catalogue est ouvert
   const valeurFiche = eq.controles.batterie_id?.batterie_caracteristiques || { fields: {} };
@@ -11954,6 +12089,8 @@ function PiecesUsureUPSPanel({ eq, update, itemFicheBatterie }) {
 
   return (
     <>
+      <PropositionsPiecesUsure eq={eq} categories={getCategoriesUsure(eq.type).map((c) => c.key)} existants={data}
+        onAjouter={(choix) => update({ ...eq, controles: { ...eq.controles, pieces_usure_ups: ajouterPiecesUsureUPS(data, choix, getCategoriesUsure(eq.type)) } })} />
       {getCategoriesUsure(eq.type).map((cat) => {
         const modeles = data[cat.key] || [];
         const setModele = (id, patch) => setCategorie(cat.key, modeles.map((m) => (m.id === id ? { ...m, ...patch } : m)));
