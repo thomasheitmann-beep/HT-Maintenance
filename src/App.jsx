@@ -1146,7 +1146,74 @@ const DESCRIPTION_REFROIDISSEMENT_TRANSFO = {
   ODAF: "Huile dirigée (circulation forcée guidée à travers les enroulements) et air forcé — le mode le plus performant, réservé aux très fortes puissances.",
 };
 const LISTE_TYPE_JDB = ["Jeu de barres", "Gaine à barres"];
-const LISTE_MARQUE_BATTERIE = ["ABB", "AEG", "Alpes Technologies", "Alstom", "Beluk", "Chauvin Arnoux", "Comar Condensatori", "EPCOS", "ESTA", "Fabrimex", "Frako", "Kautz", "Merlin Gerin", "Schneider Electric", "Sermes", "Socomec", "Varilec", "Vishay", "Legrand", "Circutor", "Enerlux", "ICAR", "Ducati Energia", "Zezal"];
+// ===== Modèles d'équipements de conversion d'énergie proposés selon la marque =====
+// Historique de maintenance 2024-2025 (noms nettoyés : variantes d'écriture fusionnées, puissance et références de commande retirées) :
+// { famille: { cléMarque: { nom, modeles: [[modèle, nombre d'équipements, puissances connues, unité]] } } } — les plus rencontrés en premier.
+const MODELES_HISTORIQUE = {"chargeur":{"CAHORS":{"nom":"Cahors","modeles":[["Ipower 48 7 2",1,[1.4],"A"]]},"ENAG":{"nom":"ENAG","modeles":[["ADT SB 24 10 17 Option",1,[10],"A"]]},"AEES":{"nom":"AEES","modeles":[["ENERIS3I 445",3,[10],"A"],["Enerys 445 48 05 14",3,[2,5],"A"],["Poweris ELT 270 48 2,5 07",3,[2],"A"],["Eneris",2,[5,8],"A"],["ENERIS3I",2,[5,10],"A"],["Eneris 645 48 16 24",2,[13],"A"],["Altys",1,[6],"A"],["ENERIS2I 445 24 20 24 C",1,[20],"A"],["Eneris 2I 445 48 05",1,[5],"A"],["ENERIS2I 445 48 05 14 C",1,[5],"A"],["Eneris 345",1,[1.4],"A"],["Eneris 445 48 05",1,[3],"A"],["Eneris 445 48 05 07",1,[4.3],"A"],["Eneris 645 48 16",1,[13.7],"A"],["EPP 48 2500",1,[52],"A"]]},"BENNING":{"nom":"Benning","modeles":[["DC",1,[10],"A"]]},"SLAT":{"nom":"SLAT","modeles":[["Evolution",3,[8,24,48],"A"],["Titan",2,[16,80],"A"],["Atlas",1,[4],"A"],["EV 24V 8A C85 SB",1,[8],"A"],["Evolution EV 48V 4A C48",1,[4],"A"]]},"SOCOMEC":{"nom":"Socomec","modeles":[["Sharys-ip",17,[15,20,30,45,60,100],"A"],["SLAT GEM",2,[250],"A"],["DE48V50",1,[50],"A"],["Serie D",1,[32],"A"],["Sharys",1,[120],"A"],["Sharys IP 108-20",1,[20],"A"]]},"SGTE":{"nom":"SGTE","modeles":[["Altys II 48T60",17,[60],"A"],["Altys",7,[60,100],"A"],["Altys 110M10",2,[10],"A"],["Altys II 48T100",2,[100],"A"],["Altys II",1,[100],"A"],["Altys II 110T40",1,[40],"A"]]},"HOPPECKE":{"nom":"Hoppecke","modeles":[["D400 G48/80",1,[80],"A"]]},"SGTEPOWER":{"nom":"SGTE Power","modeles":[["Altys II 48T100",1,[100],"A"]]},"CHLORIDE":{"nom":"Chloride","modeles":[["Eneris",2,[5],"A"]]},"VERTIV":{"nom":"Vertiv","modeles":[["ENERIS3I 445 48 05 14 C",2,[5],"A"],["Eneris 645P",2,[15],"A"],["ENERIS3I 445",1,[10],"A"],["EPP 110 900",1,[7.4],"A"]]},"S2S":{"nom":"S2S","modeles":[["REC DPR",1,[112],"A"]]},"LECLANCHE":{"nom":"Leclanche","modeles":[["R 04 042 9",1,[60],"A"]]},"IMPEX":{"nom":"Impex","modeles":[["AES 8 110 /1170",1,[11],"A"]]},"SAFT":{"nom":"SAFT","modeles":[["TPR",4,[50,125],"A"],["H3300",2,[6,10],"A"],["NIFE H3300",1,[100],"A"]]},"AUNILEC":{"nom":"Aunilec","modeles":[["Techni WATT",1,[18],"A"]]},"SIMPLEX":{"nom":"Simplex","modeles":[["TSRT",1,[32],"A"]]},"LEVER":{"nom":"Lever","modeles":[["AME",5,[60,100],"A"]]},"BORRI":{"nom":"Borri","modeles":[["110V",1,[40],"A"],["BORRI110V",1,[40],"A"]]},"NONCONNUE":{"nom":"NON Connue","modeles":[["110V",1,[10],"A"]]},"TELRADE":{"nom":"Telrade","modeles":[["Eltek FLATPACK2 HE",3,[10],"A"],["Telerad",2,[10],"A"]]},"ELTEK":{"nom":"Eltek","modeles":[["FLATPACK2 HE",2,[10],"A"]]},"HITRON":{"nom":"Hitron","modeles":[["24V",1,[10],"A"]]},"TELERADE":{"nom":"Telerade","modeles":[["Eltek FLATPACK2 HE",1,[10],"A"]]},"VICTRONENERGY":{"nom":"Victron Energy","modeles":[["Panneau Solaire",1,[35],"A"]]},"SFEE":{"nom":"SFEE","modeles":[["PHB 50,40 RS 25",1,[25],"A"]]},"EMERSON":{"nom":"Emerson","modeles":[["EPP",1,[50],"A"]]},"LUMINOX":{"nom":"Luminox","modeles":[["ATSP MONO TYPE B",1,[40],"A"]]},"URA":{"nom":"URA","modeles":[["SCES",1,[13.5],"A"]]}},"onduleur":{"LEGRAND":{"nom":"Legrand","modeles":[["KEOR HPE",6,[80,125,200],"kVA"],["KEOR T",5,[15,20,30,40],"kVA"],["Archimod",4,[40,60,80],"kVA"],["Trimod",3,[10,40],"kVA"],["KEOR T 1345 H1",1,[30],"kVA"],["KEOR T 1650 H3",1,[30],"kVA"],["Keort-t EVO",1,[20],"kVA"]]},"RIELLO":{"nom":"Riello","modeles":[["Multi Sentry MST",6,[10,15,20,30,40,80],"kVA"],["MPT",5,[10,40,60,80],"kVA"],["CMD MPW 300 PWC",4,[168,210,294],"kVA"],["Multisentry",4,[10,20,30],"kVA"],["SDU 10000 A5 DI",4,[10],"kVA"],["Sentinel DUAL 4000",4,[4,4000],"VA"],["Sentinel Tower",4,[3,8,10],"kVA"],["MSM",3,[10,15],"kVA"],["S3M 10XTD",3,[10],"kVA"],["S3T 20 ACT A0",3,[10,20],"kVA"],["SDU 5000",3,[5,8,6000],"kVA"],["Sentinel DUAL",3,[2,10],"kVA"],["Sentryum S3T XTD",3,[10,40],"kVA"],["SPW 6000",3,[6],"kVA"],["CMD MPX 130 PWC",2,[100],"kVA"],["Master Dialog RM",2,[15,30],"kVA"],["Master HP",2,[60,80],"kVA"],["MPM",2,[10],"kVA"],["MST 30",2,[20,30],"kVA"],["RM20",2,[20],"kVA"],["S3T 15 XTD S1",2,[15],"kVA"],["SDL 3300",2,[3,3300],"kVA"],["Sentryum",2,[15,20],"kVA"],["STW",2,[8],"kVA"],["Master MPS MPT",1,[10],"kVA"],["Master PLUS MPT",1,[30],"kVA"],["Materdialogue RM",1,[15],"kVA"],["MCT 12 S2",1,[12],"kVA"],["MDT 10 A0",1,[10],"kVA"],["MLT 40X M5",1,[40],"kVA"],["MP 130PWC",1,[50],"kVA"],["MPT 60 6P HC",1,[60],"kVA"],["MSM 10",1,[10],"kVA"],["MSM 15 S1",1,[15],"kVA"],["MSM T1 DI",1,[15],"kVA"],["MST",1,[20],"kVA"],["MST 10 31",1,[10],"kVA"],["MST 10 A0 DI",1,[10],"kVA"],["Multidialog MDM",1,[15],"kVA"],["PWP 6K",1,[6000],"VA"],["RT40",1,[40],"kVA"],["S3M 10 ACT A0",1,[10],"kVA"],["S3M 15 ACT S2",1,[15],"kVA"],["S3T 15 ACT A0",1,[15],"kVA"],["S3T 20 ACT T1",1,[20],"kVA"],["S3T 20 CPT",1,[20],"kVA"],["S3T 20 CPT S2",1,[20],"kVA"],["SDU 10000 A5",1,[10],"kVA"],["SDU 4000 A5",1,[4],"kVA"],["Sentinel Power Green SPH8",1,[8],"kVA"],["Sentineltower STW 10000",1,[10],"kVA"],["Sentryum S3M 10 CPT S1",1,[10],"kVA"],["Sentryum S3M 10 XTD",1,[10],"kVA"],["Sentryum S3M ACT",1,[15],"kVA"],["Sentryum S3T 15 ACT T4",1,[15],"kVA"],["Sentryum S3T XTD T2",1,[30],"kVA"],["SEP 2200",1,[2200],"VA"],["SEP 3000",1,[3000],"VA"],["SPT 8000",1,[8],"kVA"],["STW 10000 A5",1,[10],"kVA"],["STW 5000 A3",1,[5],"kVA"],["Vision DUAL",1,[1100],"VA"]]},"SOCOMEC":{"nom":"Socomec","modeles":[["Masterys BC",57,[8,10,12,15,20,30,40,60,80,120],"kVA"],["Masterys IP+",43,[10,15,20,30,40,60],"kVA"],["Masterys GP4",32,[10,15,20,30,40,60,80,100,160],"kVA"],["Delphys DS",24,[40,60,80,100,120,200],"kVA"],["Delphys MP Elite",23,[80,120,160,200,300,400],"kVA"],["Modulys MC 6",14,[3,6,3000],"kVA"],["Masterys EB",11,[10,15,20,30],"kVA"],["A2S 1092 E",8,[10,20],"kVA"],["Modulys EM",7,[3,4.5,6,3000,4500],"kVA"],["Delphys GP 2.0",6,[160,200,250],"kVA"],["Digys",6,[15,20,30],"kVA"],["Masterys GP 2.0",6,[10,15,20,40,80],"kVA"],["1047",5,[10,15,30],"kVA"],["Digys EVO",5,[10,15,20,30],"kVA"],["3047",4,[20,45,60,100],"kVA"],["Delphys GP",4,[80,120],"kVA"],["Modulys GP",4,[50,60,75],"kVA"],["Modulys GP 2.0",4,[50,75],"kVA"],["ITY2-TW110B+",3,[10],"kVA"],["Modulys System",3,[3,4.5,4500],"kVA"],["A2S",2,[80],"kVA"],["Delphys Elite",2,[40,60],"kVA"],["ITY3-TW060B",2,[6],"kVA"],["ITYS 2",2,[10],"kVA"],["Masterys GP4 RACK",2,[10],"kVA"],["A2S 1047",1,[5],"kVA"],["Delphys DS Protec PLUS",1,[300],"kVA"],["Delphys Green Power",1,[160],"kVA"],["Delphys Green Power 2,0",1,[320],"kVA"],["Delphys MP Emergency",1,[80],"kVA"],["Digys 30",1,[30],"kVA"],["Digys EVO 30",1,[30],"kVA"],["ITY2",1,[10],"kVA"],["ITY2-TW",1,[2000],"VA"],["ITYS",1,[6],"kVA"],["Masterys BC 15",1,[15],"kVA"],["Masterys BC 20",1,[20],"kVA"],["Masterys EB 2 X 15",1,[15],"kVA"],["Modulys",1,[6],"kVA"],["Modulys EM 160TIG2",1,[6],"kVA"],["Modulys GP M4-S",1,[50],"kVA"],["Modulys System MC9",1,[12],"kVA"],["Modulys Système MC9",1,[18],"kVA"],["Modulys TW",1,[6],"kVA"],["Modulys TW45",1,[4.5],"KVA"],["Netys RT 5",1,[5],"kVA"],["Netys RT 6000",1,[6],"kVA"],["NRT2-JU000",1,[7],"kVA"]]},"APSFRANCE":{"nom":"APS France","modeles":[["SEA",1,[4],"kVA"]]},"ERREPI":{"nom":"Errepi","modeles":[["MTX10/A0",1,[10],"kVA"]]},"APC":{"nom":"APC","modeles":[["Galaxy 5500",8,[30,40,60],"kVA"],["Galaxy 7000",4,[250],"kVA"],["Galaxy 300",2,[20,40],"kVA"],["MGE Galaxy 300",2,[15,30],"kVA"],["Smart UPS VT",2,[15],"kVA"],["STR6KRMXLI",1,[6],"kVA"],["SUVT",1,[40],"kVA"]]},"AEES":{"nom":"AEES","modeles":[["PCC 10 D",5,[1,2,15,2100],"kVA"],["PCC06 - D",3,[0.6,1.4,600],"kVA"],["Pcc-d",2,[3],"kVA"],["PCC 100-C SP",1,[10],"kVA"],["PCC120-C SP 12 31",1,[12],"kVA"],["PCC 30",1,[3],"kVA"],["PCC55-D",1,[5],"kVA"]]},"EATON":{"nom":"Eaton","modeles":[["PW9355",15,[8,10,15,40],"kVA"],["9155",10,[8,10,12,15,20,30],"kVA"],["9355",5,[8,10,15],"kVA"],["93PM",5,[30,50,60,120],"kVA"],["93PS",4,[15,40],"kVA"],["9130",3,[5],"kVA"],["9PX",3,[5,6,8],"kVA"],["5PX 2200 IRT",2,[2],"kVA"],["91PS-10",2,[10],"kVA"],["9PX 6000",2,[6,8],"kVA"],["9SX5KIRT",2,[5],"kVA"],["9SX8KIPM",2,[8],"kVA"],["EX 3000 RT",2,[3000],"VA"],["91PS-8",1,[8],"kVA"],["93E",1,[80],"kVA"],["93 Series",1,[40],"kVA"],["9E10KI",1,[10],"kVA"],["9PX 11000",1,[11],"kVA"],["9PX5KI",1,[5],"kVA"],["9SX",1,[5],"kVA"],["Blade UPS",1,[12],"kVA"],["Central AC4",1,[4.4],"kVA"],["EX 7 RT",1,[7],"kVA"]]},"AUNILEC":{"nom":"Aunilec","modeles":[["ARES 1000",1,[1],"kVA"],["IRIS 1000 T",1,[10],"kVA"],["MLT15",1,[15],"kVA"],["RT30",1,[30],"kVA"]]},"BLUEWALKER":{"nom":"Bluewalker","modeles":[["Powerwalker",2,[10],"kVA"],["VF1 10000 TGB PF1",1,[10],"kVA"]]},"TECO":{"nom":"TECO","modeles":[["Indus",12,[6,10],"kVA"],["Innova",7,[3,10,20],"kVA"],["Business 3000L",2,[3],"kVA"],["Buisness 3000L",1,[3],"kVA"]]},"EFFEKTA":{"nom":"Effekta","modeles":[["Triton M1",1,[30],"kVA"]]},"MGE":{"nom":"MGE UPS","modeles":[["Comet S11",24,[7,7.5,10,15,20],"kVA"],["Galaxy PW",13,[20,40,60,80,100,120],"kVA"],["Galaxy 5000",7,[40,60,100],"kVA"],["Comet",4,[7,7.5,20],"kVA"],["EX 11 RT",2,[11],"kVA"],["Comet EX7 RT",1,[7000],"VA"],["Comet Extreme 6",1,[6],"KVA"],["EX 7 RT",1,[7],"kVA"],["Galaxy 300",1,[20],"kVA"]]},"S2S":{"nom":"S2S","modeles":[["Syrius DPA Upscale",5,[20,40,80],"kVA"],["Syrius SPW",4,[10,100,250],"kVA"],["MSII06KCP",3,[5,6],"kVA"],["MSII 10000",2,[10],"kVA"],["DPA Upscale ST120",1,[100],"kVA"],["MS3KRTPROLCDP",1,[3],"kVA"],["MSII",1,[20],"kVA"],["MSII 6000",1,[6],"kVA"],["Syrius",1,[10],"kVA"],["Syrius MSII",1,[10],"kVA"],["Syrius MSII 6000",1,[6],"kVA"],["Upscale",1,[40],"kVA"]]},"NITRAM":{"nom":"Nitram","modeles":[["OLS6000E",1,[6],"kVA"]]},"S2SSYRIUS":{"nom":"S2S Syrius","modeles":[["MS II 10000",1,[10],"kVA"]]},"MERLINGERIN":{"nom":"Merlin Gerin","modeles":[["Galaxy PW",2,[80,200],"kVA"],["Comet S31",1,[5],"kVA"]]},"POWERWALKER":{"nom":"Powerwalker","modeles":[["VFI 1000 TGB",3,[1,3,1000],"kVA"],["VFI 6000 TGB PF1",3,[6],"kVA"]]},"SCHNEIDERELECTRIC":{"nom":"Schneider","modeles":[["EASY UPS 3S",4,[20,30],"kVA"],["Galaxy 5500",3,[80,100],"kVA"],["Galaxy 300",2,[15,60],"kVA"],["Smart UPS RT 3000",1,[3],"kVA"],["Source Centralise",1,[1250],"VA"]]},"SYRIUS":{"nom":"Syrius","modeles":[["MS II 10000P",1,[10],"kVA"],["SPS",1,[15],"kVA"]]},"LIEBERT":{"nom":"Liebert","modeles":[["AP 415",1,[15],"kVA"]]},"DELTAUPS":{"nom":"Delta UPS","modeles":[["EH-10K",1,[10],"kVA"]]},"EATONPOWERWARE":{"nom":"Eaton Powerware","modeles":[["9355",1,[15],"kVA"]]},"SA3I":{"nom":"SA3I","modeles":[["Helios",1,[15],"kVA"]]},"INVERTOMATIC":{"nom":"Invertomatic","modeles":[["RT6000",2,[60],"kVA"]]},"CHLORIDE":{"nom":"Chloride","modeles":[["Linear PLUS",3,[6,10],"kVA"],["EDP",2,[120],"kVA"],["90NET 12 STEP",1,[80],"kVA"],["EDP70",1,[60],"kVA"]]},"URA":{"nom":"URA","modeles":[["SCES",2,[1,5],"kVA"]]},"APS":{"nom":"APS","modeles":[["Systems Chrank THOR 60",2,[40],"kVA"]]},"LUMINOX":{"nom":"Luminox","modeles":[["CBO",2,[2],"kVA"],["CBO 1000",2,[1,4],"kVA"],["CB0",1,[2],"kVA"]]},"EMERSON":{"nom":"Emerson","modeles":[["Chloride NXC",1,[60],"kVA"],["Liebert EXS",1,[10],"kVA"],["PCC20 -D",1,[2],"kVA"]]},"BORRI":{"nom":"Borri","modeles":[["B4033",1,[40],"kVA"]]},"SERVICENETAG":{"nom":"Service NET AG","modeles":[["Conceptpower",1,[100],"kVA"]]},"APCBYSCNEIDER":{"nom":"APC BY Scneider","modeles":[["Galaxy 5500",1,[30],"kVA"]]},"HUAWEI":{"nom":"Huawei","modeles":[["UPS2000",1,[10],"kVA"],["UPS2000-G 10KRTL",1,[10],"kVA"],["UPS2000G 6KRTL",1,[6],"kVA"]]},"VERTIV":{"nom":"Vertiv","modeles":[["PCC 20",1,[4.3],"kVA"],["PCC 30-D",1,[3],"kVA"],["PCC45",1,[4.5],"kVA"]]},"KAUFFEL":{"nom":"Kauffel","modeles":[["SCA",1,[3],"kVA"]]},"SHNEIDER":{"nom":"Shneider","modeles":[["EASY UPS 3M",1,[10],"kVA"]]},"SAEI":{"nom":"SAEI","modeles":[["TSTT",1,[200],"kVA"]]},"BEHAR":{"nom":"Behar","modeles":[["OND",1,[600],"VA"],["OND ARMA2PL",1,[1500],"VA"]]},"PCC":{"nom":"PCC","modeles":[["10D 11",1,[1],"kVA"],["150/C SP",1,[15],"kVA"]]}},"sts":{"SOCOMEC":{"nom":"Socomec","modeles":[["Statys",15,[63,100,200,300],"A"],["MTC",5,[288,433],"A"],["MTC 3G",4,[87,300,433],"A"],["BY PASS Centralise",1,[1200],"KVA"],["Delphys MX Elite",1,[600],"KVA"]]},"APC":{"nom":"APC BY Schneider","modeles":[["Upsilon",7,[30,100,400],"A"],["Upsilon STS",6,[60,100],"A"],["Upsilon STS60",1,[60],"A"]]},"MGE":{"nom":"MGE UPS","modeles":[["STS",3,[60],"A"],["Upsilon",2,[100],"A"],["Upsilon STS 160",1,[160],"A"]]},"S2S":{"nom":"S2S","modeles":[["Syrius STC",1,[100],"A"]]}},"compensateur":{"ALPESTECHNOLOGIES":{"nom":"Alpes Technologies","modeles":[["Alpimatic",11,[120,200,250,280,300,445.3,470,477.7,956.6],"kVAR"],["M40040",2,[400],"kVAR"],["Alpibloc",1,[72],"kVAR"],["Alpimatic SAH 0150",1,[150],"kVAR"],["Alptec",1,[240],"kVAR"],["DCRE",1,[400],"kVAR"]]},"COMARCONDENSATORI":{"nom":"Comar Condensatori","modeles":[["G5E",3,[399.7],"kVAR"],["G5T-B50",2,[399.7,499.3],"kVAR"],["G4RM",1,[209],"kVAR"],["G6E-AAR/138",1,[249.7],"kVAR"]]},"MERLINGERIN":{"nom":"Merlin Gerin","modeles":[["Varset",4,[300],"kVAR"],["Rectiphase",3,[100,300,378],"kVAR"],["FIXE",1,[65],"kVAR"],["Rectimat +",1,[104],"kVAR"],["Rectiphase Varplus",1,[100],"kVAR"],["Varilec",1,[67.4],"kVAR"],["Varset 105",1,[105],"kVAR"]]},"SOCOMEC":{"nom":"Socomec","modeles":[["Cosys",10,[140,148.6,155.6,173.70000000000002,282,300.4,325,618.7,726],"kVAR"],["Cosys 41",1,[300],"kVAR"],["Cosys P6/P12",1,[175],"kVAR"],["Cosys PFC",1,[40],"kVAR"]]},"SERMES":{"nom":"Sermes","modeles":[["Bamps",4,[215.6,302],"kVAR"],["LSF",2,[374,397],"kVAR"],["BAM",1,[400.5],"kVAR"],["BAMS",1,[300.4],"kVAR"],["BAS",1,[115.5],"kVAR"],["Multicomp",1,[300.4],"kVAR"]]},"RITTAL":{"nom":"Rittal","modeles":[["Sermes",1,[150],"kVAR"]]},"SCHNEIDERELECTRIC":{"nom":"Schneider Electric","modeles":[["Varset",14,[40.5,75,100,189,200.29999999999998,238,250,400,450,472,500,566.4],"kVAR"],["CMF",2,[240],"kVAR"],["Varset Direct",1,[105],"kVAR"]]},"LEGRAND":{"nom":"Legrand","modeles":[["Alpivar 3",2,[40,80],"kVAR"],["ALPE Techno",1,[320.3],"kVAR"]]},"VAREL":{"nom":"Varel","modeles":[["Tetris T2L02G",1,[375],"kVAR"]]},"ALSTOM":{"nom":"Alstom","modeles":[["Fimat 2",1,[200],"kVAR"],["Novar 304",1,[245],"kVAR"]]},"HAGER":{"nom":"Hager","modeles":[["SPC",2,[300],"kVAR"]]},"CEGELEC":{"nom":"Cegelec","modeles":[["BAMS 400",1,[345],"kVAR"]]},"ALSTHOM":{"nom":"Alsthom","modeles":[["Fimat V",2,[100],"kVAR"]]},"CIRCUTOR":{"nom":"Circutor","modeles":[["Optim P&P",1,[105],"kVAR"]]},"ICAR":{"nom":"ICAR","modeles":[["Minimatic HP10",1,[161],"kVAR"]]}}};
+const FAMILLE_MODELES = { "Onduleur": "onduleur", "Onduleur simplifié": "onduleur", "Redresseur chargeur": "chargeur", "Inverseur de source": "sts", "Batterie de compensation": "compensateur" };
+const UNITE_PUISSANCE_FAMILLE = { onduleur: "kVA", chargeur: "A", compensateur: "kVAR" };
+const normModeleEq = (t) => String(t || "").toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^A-Z0-9+]/g, "");
+// Clé de marque : regroupe les écritures d'un même fabricant (Riello / Riello UPS, MGE / MGE UPS, APC by Schneider…).
+function cleMarqueModeles(m) {
+  const k = normModeleEq(m).replace(/\+/g, "");
+  const ALIAS = { RIELLOUPS: "RIELLO", MGEUPS: "MGE", MGEUPSSYSTEMS: "MGE", APCBYSCHNEIDER: "APC", APCSCHNEIDER: "APC", APCSCHNEIDERELECTRIC: "APC", SCHNEIDER: "SCHNEIDERELECTRIC", MERLINGERINMGE: "MERLINGERIN", CHLORIDEVERTIV: "CHLORIDE", EMERSONNETWORKPOWER: "EMERSON", LIEBERTVERTIV: "LIEBERT", SOCOMECSICON: "SOCOMEC" };
+  return ALIAS[k] || k;
+}
+const champModeleType = (type) => (type === "Inverseur de source" ? "materiel" : "modele");
+const champPuissanceType = (type) => (type === "Redresseur chargeur" ? "courantNominalSortie" : type === "Batterie de compensation" ? "qn" : "puissanceKVA");
+// Équipements de même famille et de même marque déjà saisis dans l'appli (tous les sites), hors l'équipement en cours.
+function equipementsMemeMarque(ctx, fam, marque) {
+  const km = cleMarqueModeles(marque);
+  const out = [];
+  if (!km || !ctx || !ctx.allSites) return out;
+  ctx.allSites.forEach((st) => (st.equipements || []).forEach((e) => {
+    if (e.id === ctx.id || FAMILLE_MODELES[e.type] !== fam) return;
+    if (cleMarqueModeles(e.identification && e.identification.marque) === km) out.push(e);
+  }));
+  return out;
+}
+// Liste des modèles proposés : saisis dans l'appli, puis historique de maintenance, puis liste de base — sans doublon.
+function optionsModelesEquipement(type, statique) {
+  return (identification, ctx) => {
+    const id = identification || {};
+    const base = typeof statique === "function" ? statique(id) || [] : statique || [];
+    if (!String(id.marque || "").trim()) return base;
+    const fam = FAMILLE_MODELES[type];
+    const champ = champModeleType(type);
+    const compte = new Map();
+    equipementsMemeMarque(ctx, fam, id.marque).forEach((e) => { const v = String((e.identification || {})[champ] || "").trim(); if (v) compte.set(v, (compte.get(v) || 0) + 1); });
+    const appli = [...compte.entries()].sort((a, b) => b[1] - a[1]).map(([v]) => v);
+    const hist = ((MODELES_HISTORIQUE[fam] || {})[cleMarqueModeles(id.marque)] || { modeles: [] }).modeles.map((m) => m[0]);
+    const vus = new Set(), out = [];
+    [...appli, ...hist, ...base].forEach((v) => { const k = normModeleEq(v); if (k && !vus.has(k)) { vus.add(k); out.push(v); } });
+    return out;
+  };
+}
+// Puissances connues pour la marque + le modèle choisis (historique + appli) ; null si rien de connu (champ numérique classique).
+function optionsPuissanceModele(type) {
+  return (identification, ctx) => {
+    const id = identification || {};
+    const fam = FAMILLE_MODELES[type];
+    const champ = champModeleType(type), champP = champPuissanceType(type);
+    const modele = normModeleEq(id[champ]);
+    if (!String(id.marque || "").trim() || (fam !== "compensateur" && !modele)) return null;
+    const memeModele = (m) => { const k = normModeleEq(m); return !modele || (k && (k === modele || (k.length >= 4 && modele.length >= 4 && (k.startsWith(modele) || modele.startsWith(k))))); };
+    const valeurs = new Set();
+    ((MODELES_HISTORIQUE[fam] || {})[cleMarqueModeles(id.marque)] || { modeles: [] }).modeles.forEach(([m, , ps, u]) => {
+      if (u === UNITE_PUISSANCE_FAMILLE[fam] && memeModele(m)) (ps || []).forEach((p) => valeurs.add(Number(p)));
+    });
+    equipementsMemeMarque(ctx, fam, id.marque).forEach((e) => { const ie = e.identification || {}; const v = numOf(ie[champP]); if (v !== null && v > 0 && memeModele(ie[champ])) valeurs.add(v); });
+    const liste = [...valeurs].filter((v) => isFinite(v)).sort((a, b) => a - b).map((v) => String(v));
+    return liste.length ? liste : null;
+  };
+}
+// Marques de l'historique ajoutées aux listes de base (sans doublon d'écriture).
+function marquesAvecHistorique(liste, fam) {
+  const cles = new Set(liste.map(cleMarqueModeles));
+  const ajout = Object.values(MODELES_HISTORIQUE[fam] || {}).map((x) => x.nom).filter((n) => !cles.has(cleMarqueModeles(n))).sort((a, b) => a.localeCompare(b, "fr"));
+  return [...liste, ...ajout];
+}
+const LISTE_MARQUE_BATTERIE = marquesAvecHistorique(["ABB", "AEG", "Alpes Technologies", "Alstom", "Beluk", "Chauvin Arnoux", "Comar Condensatori", "EPCOS", "ESTA", "Fabrimex", "Frako", "Kautz", "Merlin Gerin", "Schneider Electric", "Sermes", "Socomec", "Varilec", "Vishay", "Legrand", "Circutor", "Enerlux", "ICAR", "Ducati Energia", "Zezal"], "compensateur");
 const LISTE_TYPE_COMPENSATION = ["Compensateur d'énergie réactive", "Power Factor Correction"];
 const LISTE_TYPE_REGULATEUR = ["Statique", "Électromécanique"];
 const LISTE_ACCESSIBILITE = ["Conforme", "Difficile", "Très difficile"];
@@ -1305,9 +1372,9 @@ const LISTE_MARQUE_TDY = ["ABB", "ALSTOM", "AREVA", "CAHORS", "CONTI TRANSFO", "
 const LISTE_MARQUE_CELLULE_HTA = ["Schneider Electric", "Merlin Gerin", "ABB", "Siemens", "Areva", "Alstom", "GEC Alsthom", "Alstom Grid", "Cahors", "Pommier", "CEM", "GE Grid Solutions", "Nexans", "CG Power", "Ormazabal", "Eaton", "Ensto", "Normelec", "SM6", "Fuji Electric"];
 const LISTE_MARQUE_APPAREILLAGE_BT = ["Schneider Electric", "Merlin Gerin", "ABB", "Siemens", "Legrand", "Eaton", "General Electric", "Hager", "Socomec", "Moeller", "Terasaki", "Chint"];
 const LISTE_MARQUE_ELEMENT_BATTERIE = ["EnerSys", "Yuasa", "Hoppecke", "Saft", "FIAMM", "CEAC", "Exide", "Alcad", "Oldham", "Sonnenschein", "Powersafe", "HAZE", "Panasonic", "C&D Technologies", "Fulmen"];
-const LISTE_MARQUE_ONDULEUR = ["Schneider Electric", "APC", "MGE UPS", "Eaton", "Riello UPS", "Socomec", "Vertiv", "Emerson", "Liebert", "Legrand", "ABB", "General Electric", "Delta", "Chloride", "Borri", "Piller", "Newave"];
-const LISTE_MARQUE_REDRESSEUR = ["Benning", "AEG Power Solutions", "EnerSys", "Delta", "Chloride", "Socomec", "Schneider Electric", "France Chargeurs", "Newave", "Total Energie", "Riello UPS"];
-const LISTE_MARQUE_INVERSEUR = ["Socomec", "Eaton", "ABB", "Schneider Electric", "GE Digital Energy", "Chloride", "Kohler", "ASCO Power", "Legrand", "Merlin Gerin"];
+const LISTE_MARQUE_ONDULEUR = marquesAvecHistorique(["Schneider Electric", "APC", "MGE UPS", "Eaton", "Riello UPS", "Socomec", "Vertiv", "Emerson", "Liebert", "Legrand", "ABB", "General Electric", "Delta", "Chloride", "Borri", "Piller", "Newave"], "onduleur");
+const LISTE_MARQUE_REDRESSEUR = marquesAvecHistorique(["Benning", "AEG Power Solutions", "EnerSys", "Delta", "Chloride", "Socomec", "Schneider Electric", "France Chargeurs", "Newave", "Total Energie", "Riello UPS"], "chargeur");
+const LISTE_MARQUE_INVERSEUR = marquesAvecHistorique(["Socomec", "Eaton", "ABB", "Schneider Electric", "GE Digital Energy", "Chloride", "Kohler", "ASCO Power", "Legrand", "Merlin Gerin"], "sts");
 const LISTE_MARQUE_JDB = ["Schneider Electric", "Canalis", "Zucchini", "Legrand", "LEGA", "Rittal", "Nexans", "GAM"];
 
 // Correspondance marque → gamme/modèle : le champ Type/Modèle propose la gamme du constructeur
@@ -1580,7 +1647,7 @@ const MARQUE_MODELE_ONDULEUR = {
   "Legrand": ["Keor", "Daker"],
   "General Electric": ["LanPro", "SitePro"],
 };
-const LISTE_MODELE_ONDULEUR_OPTIONS = optionsParMarque(MARQUE_MODELE_ONDULEUR, combineValues(MARQUE_MODELE_ONDULEUR));
+const LISTE_MODELE_ONDULEUR_OPTIONS = optionsModelesEquipement("Onduleur", optionsParMarque(MARQUE_MODELE_ONDULEUR, combineValues(MARQUE_MODELE_ONDULEUR)));
 const MARQUE_MODELE_REDRESSEUR = {
   "Benning": ["MC 3", "MPS RCT"],
   "AEG Power Solutions": ["Protect D."],
@@ -1590,7 +1657,7 @@ const MARQUE_MODELE_REDRESSEUR = {
   "Delta": ["Ultron DC"],
   "EnerSys": ["Alber BCS"],
 };
-const LISTE_MODELE_REDRESSEUR_OPTIONS = optionsParMarque(MARQUE_MODELE_REDRESSEUR, combineValues(MARQUE_MODELE_REDRESSEUR));
+const LISTE_MODELE_REDRESSEUR_OPTIONS = optionsModelesEquipement("Redresseur chargeur", optionsParMarque(MARQUE_MODELE_REDRESSEUR, combineValues(MARQUE_MODELE_REDRESSEUR)));
 const MARQUE_MATERIEL_INVERSEUR = {
   "Socomec": ["ATyS 6", "ATyS 8", "ATyS M", "ATyS P", "STS COMPACT"],
   "Eaton": ["ATC-300", "SC Series"],
@@ -1600,7 +1667,7 @@ const MARQUE_MATERIEL_INVERSEUR = {
   "Kohler": ["KSS ATS"],
   "GE Digital Energy": ["Sure Source"],
 };
-const LISTE_MATERIEL_INVERSEUR_OPTIONS = optionsParMarque(MARQUE_MATERIEL_INVERSEUR, combineValues(MARQUE_MATERIEL_INVERSEUR));
+const LISTE_MATERIEL_INVERSEUR_OPTIONS = optionsModelesEquipement("Inverseur de source", optionsParMarque(MARQUE_MATERIEL_INVERSEUR, combineValues(MARQUE_MATERIEL_INVERSEUR)));
 const LISTE_COUPLAGE_TDY = ["Yzn11", "Dyn11", "Dzn10", "Dzn6", "Yyn6", "Yzn5", "Dyn5", "Yyn0", "Yz11", "Yd11", "Dy11", "Dz10", "Dz6", "Yy6", "Dd6", "Yz5", "Yd5", "Dy5", "Yy0", "Dd0"];
 const OUI_NON_LIST = ["OUI", "NON"];
 const TENSION_ISOLEMENT = ["200", "500", "1000", "2500", "5000", "10000", "15000"];
@@ -2920,7 +2987,7 @@ function buildOnduleurSchema({ normalMono = false, secoursMono = false, utilisat
       { key: "configuration", label: "Configuration", options: LISTE_CONFIG_UPS },
       { key: "bypassStatique", label: "By-pass statique", options: LISTE_BYPASS_STATIQUE },
       { key: "bypassMaintenance", label: "By-pass de maintenance", options: LISTE_BYPASS_MAINTENANCE },
-      { key: "puissanceKVA", label: "Puissance (kVA)", numeric: true }, { key: "puissanceKW", label: "Puissance (kW)", numeric: true },
+      { key: "puissanceKVA", label: "Puissance (kVA)", numeric: true, options: optionsPuissanceModele("Onduleur") }, { key: "puissanceKW", label: "Puissance (kW)", numeric: true },
       { key: "tensionEntreeSortie", label: "Tension entrée / sortie", options: LISTE_TENSION_ENTREE_SORTIE },
       { key: "regimeSortie", label: "Régime de sortie", options: LISTE_REGIME_SORTIE_UPS },
       { key: "typeRedresseur", label: "Type de redresseur (interprétation du ThdI d'entrée)", options: LISTE_TYPE_REDRESSEUR },
@@ -3058,7 +3125,7 @@ function buildRedresseurSchema({ reseauMono = false, reseau2Mono = false, double
     identification: [
       { key: "repere", label: "Repère / Nom de l'équipement" },
       { key: "marque", label: "Marque", options: LISTE_MARQUE_REDRESSEUR }, { key: "modele", label: "Modèle", options: LISTE_MODELE_REDRESSEUR_OPTIONS },
-      { key: "courantNominalSortie", label: "Courant nominal de sortie (A)", numeric: true }, { key: "puissanceKW", label: "Puissance (kW)", numeric: true },
+      { key: "courantNominalSortie", label: "Courant nominal de sortie (A)", numeric: true, options: optionsPuissanceModele("Redresseur chargeur") }, { key: "puissanceKW", label: "Puissance (kW)", numeric: true },
       { key: "tensionEntree", label: "Tension d'entrée (V)" }, { key: "tensionSortieContinue", label: "Tension de sortie continue (V)" },
       { key: "configuration", label: "Configuration", options: LISTE_CONFIG_REDRESSEUR },
       { key: "typeRedresseur", label: "Type de redresseur (interprétation du ThdI d'entrée)", options: LISTE_TYPE_REDRESSEUR },
@@ -3960,10 +4027,11 @@ const SCHEMAS = {
     identification: [
       { key: "repere", label: "Repère / Nom de l'équipement" },
       { key: "marque", label: "Marque", options: LISTE_MARQUE_BATTERIE },
+      { key: "modele", label: "Gamme / modèle", options: optionsModelesEquipement("Batterie de compensation", []) },
       { key: "technologieCompensation", label: "Technologie", options: LISTE_TECHNO_COMPENSATION },
       { key: "tensionCondensateurs", label: "Tension assignée des condensateurs (V)", options: ["400", "415", "440", "460", "480", "525"] },
       { key: "selfsBatterie", label: "Selfs anti-harmoniques", options: LISTE_SELFS_BATTERIE },
-      { key: "qn", label: "Qn (kVAR)", numeric: true }, { key: "triphase", label: "Régime", options: ["Triphasé", "Monophasé"] },
+      { key: "qn", label: "Qn (kVAR)", numeric: true, options: optionsPuissanceModele("Batterie de compensation") }, { key: "triphase", label: "Régime", options: ["Triphasé", "Monophasé"] },
       { key: "nombreGradins", label: "Nombre total de gradins", numeric: true }, { key: "anneeMiseEnService", label: "Année de mise en service", numeric: true },
       { key: "transformateurAssocie", label: "Transformateur associé (repère, pour le calcul de résonance)" },
       { key: "transformateursParallele", label: "Autres transformateurs en parallèle (même jeu de barres BT)", multi: true },
@@ -11967,8 +12035,9 @@ function fichesCatalogueUsure(catalogue, eq) {
     const memeMarque = marque && m && (m === marque || (marque.length >= 3 && (m.startsWith(marque) || marque.startsWith(m))));
     let score;
     if (fam === "compensateur") {
-      if (!memeMarque) return; // pas de modèle saisi sur une batterie : marque + puissance la plus proche
+      if (!memeMarque) return; // batterie : marque + gamme (si renseignée) + puissance la plus proche
       score = puissance !== null && e.p !== undefined ? 10 - Math.min(9, Math.abs(e.p - puissance) / Math.max(puissance, 1) * 10) : 1;
+      if (modele && modele.length >= 3 && (mo === modele || (mo.length >= 4 && (mo.includes(modele) || modele.includes(mo))))) score += 10;
     } else {
       if (!modele || modele.length < 3) return;
       if (marque && m && !memeMarque) return;
@@ -16077,13 +16146,13 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
       if (!f.options) return;
       // Certains champs (ex. "Modèle" filtré selon la marque choisie) définissent leurs options
       // comme une fonction plutôt qu'un tableau fixe — il faut la résoudre avant toute fusion.
-      const optsResolues = typeof f.options === "function" ? f.options(eq.identification) : f.options;
+      const optsResolues = typeof f.options === "function" ? f.options(eq.identification, { allSites, id: eq.id, type: eq.type }) : f.options;
       if (!optsResolues) return;
       const apprises = (bibliothequePourType && bibliothequePourType[f.key]) || [];
       map[f.key] = apprises.length ? Array.from(new Set([...optsResolues, ...apprises])) : optsResolues;
     });
     return map;
-  }, [schema, bibliothequePourType, eq.identification]);
+  }, [schema, bibliothequePourType, eq.identification, allSites]);
 
   return (
     <Card>
