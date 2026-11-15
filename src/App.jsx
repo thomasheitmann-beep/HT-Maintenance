@@ -13663,27 +13663,47 @@ function ParametrageRelaisPanel({ eq, update, idPrefix, locaux = [], allSites = 
 const LISTE_MESURE_TEMPS_ESSAI = ["Contacts du disjoncteur", "Contact de sortie du relais"];
 function configEssaisRelais(eq) {
   const c = (eq.controles && eq.controles.config_essais_relais) || {};
-  return { mesureSur: c.mesureSur || "Contacts du disjoncteur", tempsOuverture: c.tempsOuverture === undefined || c.tempsOuverture === null ? "" : String(c.tempsOuverture), prise: c.prise || "Prise Essailec" };
+  return { mesureSur: c.mesureSur || "Contacts du disjoncteur", tempsOuverture: c.tempsOuverture === undefined || c.tempsOuverture === null ? "" : String(c.tempsOuverture), prise: c.prise || "Prise Essailec", bornes: c.bornes || LISTE_AFFECTATION_BORNES[0] };
 }
+// Affectation des bornes de la prise d'essai : varie selon le câblage de la cellule (à vérifier sur le schéma).
+const LISTE_AFFECTATION_BORNES = ["01/02/03 = L1/L2/L3 · 04 = commun", "01 = commun · 02/03/04 = L1/L2/L3"];
+const communEnPremier = (bornes) => String(bornes || "").startsWith("01 = commun");
+// Cordon (côté relais) correspondant à une phase : "L1" | "L2" | "L3" | "N".
+function cordonPhase(ph, bornes) {
+  const ordre = communEnPremier(bornes) ? ["N", "L1", "L2", "L3"] : ["L1", "L2", "L3", "N"];
+  return "0" + (ordre.indexOf(ph) + 1);
+}
+// Fiches et cordons à utiliser pour un seuil (sert au texte et au schéma) ; null si non déterminé.
+function fichesEssai(s) {
+  const fam = ansiFamily(s.label), u = uniteReglageSeuil(s);
+  if (sansInjectionCalculee(s)) return null;
+  const F = (fiche, a, b, note) => ({ fiche, actifs: [a, b], note });
+  if (FAMILLES_TIERS_TENSION.includes(fam)) return [F("tension", "L1", "N", "une seule phase injectée, les deux autres à 0 V")];
+  if (["50N", "51N", "50G", "51G"].includes(fam)) return estTerreCalculee(s) ? [F("courant", "L1", "N", "une seule phase injectée (somme des 3I)")] : [F("tore", "L1", "N", "fiche dédiée du tore homopolaire, seule la première voie est câblée")];
+  if (fam === "67") return [F("courant", "L1", "N", "I1"), F("tension", "L2", "L3", "Ubc, polarisation")];
+  if (fam === "67N" || fam === "32N") return [F("courant", "L1", "N", "I0"), { fiche: "tension", actifs: [], note: "tension résiduelle U0 selon le câblage du relais" }];
+  if (["32P", "32Q", "37P", "37Q"].includes(fam)) return [F("courant", "L1", "N", "Ia"), F("tension", "L1", "N", "Va, même phase")];
+  if (u === "A" || fam === "46") return [F("courant", "L1", "N", "puis L2 et L3 de la même façon")];
+  if (u === "V") return fam === "59N" ? [F("tension", "L1", "N")] : [F("tension", "L1", "L2", "U12 pour une tension composée ; L1 → commun pour une tension simple")];
+  if (u === "Hz" || u === "Hz/s") return [F("tension", "L1", "L2", "tension nominale à fréquence variable")];
+  return null;
+}
+const NOM_FICHE_ESSAI = { courant: "Fiche courant", tension: "Fiche tension", tore: "Fiche du tore homopolaire" };
 // Injection secondaire : prises d'essai Essailec (fiche verte = courant, fiche blanche = tension ; cordons 1, 2, 3 = phases,
 // 4 = commun). Les fiches ne servent qu'à injecter : le temps est pris à part (entrée binaire de la valise).
 const LISTE_PRISE_ESSAI = ["Prise Essailec", "Bornier d'essai"];
 const estTerreCalculee = (s) => ["50N", "51N"].includes(ansiFamily(s.label)) && s.fields.modeDetection === "Somme des 3I (calculée)";
 function raccordementEssai(eq, s, mode) {
-  if (mode === "Injection primaire" || configEssaisRelais(eq).prise !== "Prise Essailec") return null;
-  const fam = ansiFamily(s.label), u = uniteReglageSeuil(s);
-  if (sansInjectionCalculee(s)) return null;
-  if (FAMILLES_TIERS_TENSION.includes(fam)) return "Fiche blanche (tension) : cordon 1 → commun 4 — une seule phase injectée, les deux autres à 0 V";
-  if (["50N", "51N", "50G", "51G"].includes(fam)) return estTerreCalculee(s)
-    ? "Fiche verte (courant) : cordon 1 → commun 4 — une seule phase injectée (somme des 3I)"
-    : "Fiche verte du tore homopolaire (fiche dédiée, seule la borne 1 câblée) : cordon 1 → commun 4";
-  if (fam === "67") return "Fiche verte : cordon 1 → 4 (I1) + fiche blanche : cordons 2 → 3 (Ubc, polarisation)";
-  if (fam === "67N" || fam === "32N") return "Fiche verte : cordon 1 → 4 (I0) + fiche blanche : tension résiduelle U0 selon le câblage du relais";
-  if (["32P", "32Q", "37P", "37Q"].includes(fam)) return "Fiche verte : cordon 1 → 4 (Ia) + fiche blanche : cordon 1 → 4 (Va, même phase)";
-  if (u === "A" || fam === "46") return "Fiche verte (courant) : cordon 1 → commun 4 pour L1, puis 2 → 4 et 3 → 4 pour L2 et L3";
-  if (u === "V") return fam === "59N" ? "Fiche blanche (tension) : cordon 1 → commun 4" : "Fiche blanche (tension) : cordons 1 → 2 (U12) pour une tension composée, 1 → 4 pour une tension simple";
-  if (u === "Hz" || u === "Hz/s") return "Fiche blanche (tension) : cordons 1 → 2, tension nominale à fréquence variable";
-  return null;
+  const cfg = configEssaisRelais(eq);
+  if (mode === "Injection primaire" || cfg.prise !== "Prise Essailec") return null;
+  const fs = fichesEssai(s);
+  if (!fs) return null;
+  const nomPh = (ph) => (ph === "N" ? "commun" : ph);
+  return fs.map((f) => {
+    if (!f.actifs.length) return `${NOM_FICHE_ESSAI[f.fiche]} : ${f.note}`;
+    const [a, b] = f.actifs;
+    return `${NOM_FICHE_ESSAI[f.fiche]} : cordon ${cordonPhase(a, cfg.bornes)} (${nomPh(a)}) → cordon ${cordonPhase(b, cfg.bornes)} (${nomPh(b)})${f.note ? ` — ${f.note}` : ""}`;
+  }).join(" + ");
 }
 // Temps d'ouverture du disjoncteur (ms) : valeur saisie dans la configuration des essais, sinon moyenne de la
 // mesure du temps d'ouverture (L1/L2/L3) faite sur ce disjoncteur, sinon inconnu (marge générique).
@@ -14016,18 +14036,20 @@ function ficheMethodeRelais(eq) {
   return FICHES_METHODE_RELAIS.find((f) => f.re.test(txt)) || FICHE_METHODE_GENERIQUE;
 }
 // ----- Listes de contrôle de l'assistant (cases facultatives, jamais bloquantes) -----
-function checklistPreparation(mode, mesureSur, prise = "Prise Essailec") {
+function checklistPreparation(mode, mesureSur, prise = "Prise Essailec", bornes = LISTE_AFFECTATION_BORNES[0]) {
   const essailec = prise === "Prise Essailec" && mode !== "Injection primaire";
   return [
     "Autorisation de travail / consignation de la cellule selon les règles de l'exploitant",
     "Paramétrage relevé (photo ou export) avant toute modification",
-    mode === "Injection primaire" ? "Fil d'essai passé dans le tore / le primaire du TC (un seul conducteur)" : essailec ? "Fiche verte (courant) insérée dans la prise Essailec : TC court-circuités par la prise — à vérifier selon le modèle" : "Secondaires TC court-circuités côté TC et ouverts côté relais (bornier d'essai) — jamais de secondaire TC ouvert",
-    essailec ? "Fiche blanche (tension) insérée si un essai en tension est prévu : TP isolés côté ligne" : "Circuits TP isolés côté TP avant d'injecter une tension",
+    mode === "Injection primaire" ? "Fil d'essai passé dans le tore / le primaire du TC (un seul conducteur)" : essailec ? "Fiche courant : vérifier son court-circuit interne (cordons 1 à 4 reliés entre eux) avant de l'insérer — à l'insertion, les TC sont court-circuités avant que la liaison vers le relais s'ouvre" : "Secondaires TC court-circuités côté TC et ouverts côté relais (bornier d'essai) — jamais de secondaire TC ouvert",
+    essailec ? "Fiche tension (si essai en tension) : cordons 1 à 4 côté TT laissés isolés — ne jamais y raccorder la valise (le TT serait alimenté à l'envers : tension HTA au primaire)" : "Circuits TP isolés côté TP avant d'injecter une tension",
+    ...(essailec ? [`Valise raccordée uniquement sur les cordons 01 à 04 (côté relais) — affectation : ${bornes} (à vérifier sur le schéma de la cellule)`] : []),
     "Déclenchements vers l'extérieur inhibés si nécessaire (amont, téléconduite, découplage)",
     mesureSur === "Contact de sortie du relais" ? "Entrée binaire de la valise sur le contact de déclenchement du relais" : "Disjoncteur fermé en position essai, ressorts armés — entrée binaire de la valise sur un pôle du disjoncteur (sans tension)",
   ];
 }
 const CHECKLIST_REMISE_SERVICE = [
+  "Injection coupée AVANT de retirer les fiches d'essai",
   "Valise débranchée, fiches d'essai retirées (capots des prises Essailec remis) ou bornes d'essai refermées",
   "Circuits TP rétablis",
   "Inhibitions levées, déclenchements vers l'extérieur rétablis",
@@ -14035,9 +14057,9 @@ const CHECKLIST_REMISE_SERVICE = [
   "Alarmes, voyants et enregistrements acquittés ; relais en service sans défaut",
   "Disjoncteur remis dans l'état demandé par l'exploitant",
 ];
-function texteCablageEssai(mode, mesureSur, prise = "Prise Essailec") {
+function texteCablageEssai(mode, mesureSur, prise = "Prise Essailec", bornes = LISTE_AFFECTATION_BORNES[0]) {
   const sortie = mode === "Injection primaire" ? "Sortie courant de la valise → fil d'essai passé dans le tore / le TC."
-    : prise === "Prise Essailec" ? "Injection par la prise Essailec : fiche verte = courant, fiche blanche = tension ; cordons 1, 2, 3 = phases L1, L2, L3, cordon 4 = commun. Les fiches servent uniquement à injecter, pas au chronométrage."
+    : prise === "Prise Essailec" ? `Injection par la prise Essailec, toujours sur les cordons 01 à 04 (côté relais) : fiche courant (verte) ou fiche tension (blanche) ; ${communEnPremier(bornes) ? "cordon 01 = commun, cordons 02, 03, 04 = L1, L2, L3" : "cordons 01, 02, 03 = L1, L2, L3, cordon 04 = commun"}. Les fiches servent uniquement à injecter, pas au chronométrage.`
     : "Sortie de la valise → entrées du relais pour la phase testée (bornier d'essai).";
   const chrono = mesureSur === "Contact de sortie du relais"
     ? "Entrée binaire → contact de sortie de déclenchement du relais : le temps mesuré est celui du relais seul."
@@ -14333,6 +14355,72 @@ function genererCourbeFamilleRelais(eq, groupe) {
     return null;
   }
 }
+// Schéma de raccordement d'une prise d'essai (aide au technicien, jamais imprimé dans le rapport).
+// fiche : "courant" | "tension" | "tore" ; actifs : [sortie, retour] en phases ("L1", "L2", "L3", "N").
+function SchemaPriseEssai({ fiche, actifs, bornes, titre }) {
+  const ordre = communEnPremier(bornes) ? ["N", "L1", "L2", "L3"] : ["L1", "L2", "L3", "N"];
+  const Y = [130, 190, 250, 310];
+  const nom = (ph) => (ph === "N" ? "commun" : ph);
+  const relais = (ph) => (ph === "N" ? "commun" : fiche === "tore" ? (ph === "L1" ? "Io" : "—") : (fiche === "tension" ? "V" : "I") + ph.slice(1));
+  const tension = fiche === "tension", tore = fiche === "tore";
+  const iA = ordre.indexOf(actifs[0]), iB = ordre.indexOf(actifs[1]);
+  const gris = "#5B6B7D", vert = "#0A8754", rouge = "#C0392B", orange = "#E67E22";
+  const yN = Y[ordre.indexOf("N")];
+  return (
+    <div style={{ marginTop: 8, border: "1px solid #E2E6EB", borderRadius: 8, background: "#fff", padding: 6 }}>
+      <svg viewBox="0 0 1000 500" style={{ width: "100%", height: "auto", display: "block" }} fontFamily="Arial">
+        <text x="20" y="28" fontSize="18" fontWeight="700" fill="#1A1F26">{titre}</text>
+        <text x="20" y="50" fontSize="13" fill="#3E4A5C">Affectation : {bornes}</text>
+        <text x="30" y="95" fontSize="13" fontWeight="700" fill={tension ? rouge : "#3E4A5C"}>{tension ? "Côté TT — ne pas raccorder" : tore ? "Côté tore" : "Côté TC"}</text>
+        {ordre.map((ph, i) => {
+          const y = Y[i];
+          if (ph === "N") return <path key={i} d={`M${tension ? 120 : 70} ${y} H300`} stroke={gris} strokeWidth="2" fill="none" />;
+          if (tore && ph !== "L1") return <text key={i} x="120" y={y + 4} fontSize="12" fill="#8B96A3">non câblée</text>;
+          return (
+            <g key={i}>
+              <text x="20" y={y + 5} fontSize="13" fill="#3E4A5C">{tore ? "Io" : ph}</text>
+              {tension ? <g><circle cx="80" cy={y - 6} r="12" stroke={gris} strokeWidth="2" fill="none" /><circle cx="80" cy={y + 6} r="12" stroke={gris} strokeWidth="2" fill="none" /></g>
+                : <circle cx="70" cy={y} r="16" stroke={gris} strokeWidth="2" fill="none" />}
+              <path d={`M${tension ? 92 : 86} ${y} H300`} stroke={gris} strokeWidth="2" fill="none" />
+              {!tension && <path d={`M70 ${yN < y ? y - 16 : y + 16} V${yN}`} stroke={gris} strokeWidth="2" fill="none" />}
+            </g>
+          );
+        })}
+        {(() => { const x = tension ? 120 : 70, haut = yN === Y[0]; const xt = haut ? x + 60 : x, yt = haut ? yN - 22 : yN + 30;
+          return <path d={`${haut ? `M${xt} ${yN} V${yt}` : `M${x} ${yN} V${yt}`} M${xt - 10} ${yt} h20 M${xt - 7} ${yt + 6} h14 M${xt - 4} ${yt + 12} h8`} stroke={gris} strokeWidth="2" fill="none" />; })()}
+        {tension && Y.map((y, i) => <path key={i} d={`M200 ${y - 9} l16 18 M216 ${y - 9} l-16 18`} stroke={rouge} strokeWidth="2.5" />)}
+        <rect x="290" y="80" width="240" height="270" rx="10" fill="#F5F7FA" stroke="#8B96A3" strokeWidth="1.5" />
+        <text x="320" y="100" fontSize="13" fontWeight="700" fill="#3E4A5C">Prise d'essai (fiche insérée)</text>
+        {Y.map((y, i) => (
+          <g key={i}>
+            <text x="308" y={y - 6} fontSize="12" fill="#3E4A5C">{i + 1}</text>
+            <text x="492" y={y - 6} fontSize="12" fill="#3E4A5C">0{i + 1}</text>
+            <circle cx="300" cy={y} r="5" fill="#fff" stroke={gris} strokeWidth="2" />
+            <circle cx="520" cy={y} r="5" fill="#fff" stroke={gris} strokeWidth="2" />
+            <path d={`M396 ${y - 8} l12 16 M408 ${y - 8} l-12 16`} stroke={rouge} strokeWidth="2" />
+            {!tension && <path d={`M305 ${y} H340`} stroke={vert} strokeWidth="2.5" />}
+            {!tension && <circle cx="340" cy={y} r="4" fill={vert} />}
+          </g>
+        ))}
+        {!tension && <line x1="340" y1={Y[0]} x2="340" y2={Y[3]} stroke={vert} strokeWidth="4" />}
+        <text x="300" y="340" fontSize="12" fontWeight="700" fill={tension ? rouge : vert}>{tension ? "Cordons 1 à 4 isolés (côté TT)" : "TC court-circuités par la fiche"}</text>
+        <text x="420" y={(Y[0] + Y[1]) / 2 + 4} fontSize="11" fill={rouge}>liaison ouverte</text>
+        <rect x="800" y="95" width="150" height="240" rx="10" fill="#F5F7FA" stroke="#8B96A3" strokeWidth="1.5" />
+        {ordre.map((ph, i) => <g key={i}><path d={`M525 ${Y[i]} H800`} stroke={gris} strokeWidth="2" fill="none" /><text x="815" y={Y[i] + 5} fontSize="13" fill="#3E4A5C">{relais(ph)}</text></g>)}
+        <text x="840" y="115" fontSize="13" fontWeight="700" fill="#3E4A5C">Relais</text>
+        {iA >= 0 && <path d={`M520 ${Y[iA]} C575 ${Y[iA]} 560 410 600 425`} stroke={orange} strokeWidth="3.5" fill="none" />}
+        {iB >= 0 && <path d={`M520 ${Y[iB]} C550 ${Y[iB]} 545 440 600 450`} stroke={orange} strokeWidth="3.5" fill="none" />}
+        <rect x="600" y="400" width="250" height="72" rx="10" fill="#FFF4E6" stroke={orange} strokeWidth="1.5" />
+        <text x="618" y="424" fontSize="13" fontWeight="700" fill="#3E4A5C">Valise d'injection</text>
+        <text x="618" y="444" fontSize="13" fill="#3E4A5C">{tension ? "sortie U" : "sortie I"} → cordon {cordonPhase(actifs[0], bornes)} ({nom(actifs[0])})</text>
+        <text x="618" y="462" fontSize="13" fill="#3E4A5C">retour → cordon {cordonPhase(actifs[1], bornes)} ({nom(actifs[1])})</text>
+        <line x1="20" y1="405" x2="50" y2="405" stroke={orange} strokeWidth="3.5" /><text x="58" y="409" fontSize="12" fill="#3E4A5C">cordons à brancher pour ce seuil</text>
+        {!tension && <><line x1="20" y1="428" x2="50" y2="428" stroke={vert} strokeWidth="4" /><text x="58" y="432" fontSize="12" fill="#3E4A5C">court-circuit interne de la fiche</text></>}
+        <text x="20" y="462" fontSize="12.5" fontWeight="700" fill={rouge}>Fin d'essai : couper l'injection AVANT de retirer la fiche.</text>
+      </svg>
+    </div>
+  );
+}
 // ----- Assistant d'essai pas à pas (facultatif) -----
 function AssistantEssaiSeuil({ eq, seuils, s, onFermer, onEnregistrer }) {
   const a = (s.essai && s.essai.assistant) || {};
@@ -14344,6 +14432,7 @@ function AssistantEssaiSeuil({ eq, seuils, s, onFermer, onEnregistrer }) {
   const [mesureSur, setMesureSur] = useState(cfg0.mesureSur);
   const [tOuv, setTOuv] = useState(cfg0.tempsOuverture);
   const [prise, setPrise] = useState(cfg0.prise);
+  const [bornes, setBornes] = useState(cfg0.bornes);
   const [prep, setPrep] = useState(a.prep || {});
   const [fin, setFin] = useState(a.fin || {});
   const [seuil, setSeuil] = useState(a.seuil || { nonDeclenche: "", declenche: "" });
@@ -14353,7 +14442,7 @@ function AssistantEssaiSeuil({ eq, seuils, s, onFermer, onEnregistrer }) {
     return pts0.map((p, i) => ({ M: p.M, l1: i === 0 ? f.l1 || "" : "", l2: i === 0 ? f.l2 || "" : "", l3: i === 0 ? f.l3 || "" : "" }));
   });
   const [action, setAction] = useState(s.essai.action || "");
-  const eqCfg = { ...eq, controles: { ...eq.controles, config_essais_relais: { mesureSur, tempsOuverture: tOuv, prise } } };
+  const eqCfg = { ...eq, controles: { ...eq.controles, config_essais_relais: { mesureSur, tempsOuverture: tOuv, prise, bornes } } };
   const raccord = raccordementEssai(eqCfg, s, mode);
   const alerteTerre = alerteTerreCalculee(seuils, s);
   const blocRaccord = raccord ? <div style={{ fontSize: 12, color: "#3E4A5C", marginTop: 2 }}>Raccordement : <b>{raccord}</b></div> : null;
@@ -14423,7 +14512,7 @@ function AssistantEssaiSeuil({ eq, seuils, s, onFermer, onEnregistrer }) {
     if (v0 && v0.valeur !== null && v0.unite === u) fields.courant_injecte = String(v0.valeur);
     onEnregistrer({
       essai: { ...s.essai, fields, etat: etatFinal, action, assistant: { date: todayISO(), prep, fin, seuil, points, mode } },
-      config: { mesureSur, tempsOuverture: tOuv, prise },
+      config: { mesureSur, tempsOuverture: tOuv, prise, bornes },
     });
   }
   const pastilleEtape = (i) => (
@@ -14448,6 +14537,7 @@ function AssistantEssaiSeuil({ eq, seuils, s, onFermer, onEnregistrer }) {
               <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
                 <MiniSelect label="Mode d'injection" options={LISTE_MODE_INJECTION} value={mode} onChange={setMode} width={160} />
                 {mode !== "Injection primaire" && <MiniSelect label="Prise d'essai" options={LISTE_PRISE_ESSAI} value={prise} onChange={setPrise} width={150} />}
+                {mode !== "Injection primaire" && prise === "Prise Essailec" && <MiniSelect label="Affectation des bornes" options={LISTE_AFFECTATION_BORNES} value={bornes} onChange={setBornes} width={250} />}
                 <MiniSelect label="Temps mesuré sur" options={LISTE_MESURE_TEMPS_ESSAI} value={mesureSur} onChange={setMesureSur} width={190} />
                 {mesureSur === "Contacts du disjoncteur" && <MiniInput label="Ouverture disjoncteur" unit="ms" value={tOuv} onChange={setTOuv} />}
               </div>
@@ -14458,15 +14548,16 @@ function AssistantEssaiSeuil({ eq, seuils, s, onFermer, onEnregistrer }) {
               )}
               <div style={carte}>
                 <div style={{ fontSize: 12, fontWeight: 700, color: "#1A1F26", marginBottom: 6 }}>Câblage de la valise (Compano 100)</div>
-                <div style={{ fontSize: 12.5, color: "#3E4A5C", lineHeight: 1.5 }}>{texteCablageEssai(mode, mesureSur, prise)}</div>
+                <div style={{ fontSize: 12.5, color: "#3E4A5C", lineHeight: 1.5 }}>{texteCablageEssai(mode, mesureSur, prise, bornes)}</div>
                 {blocRaccord}
+                {raccord && (fichesEssai(s) || []).filter((f) => f.actifs.length).map((f, i) => <SchemaPriseEssai key={i} fiche={f.fiche} actifs={f.actifs} bornes={bornes} titre={`${NOM_FICHE_ESSAI[f.fiche]} — ${s.label.split(" — ")[0]}`} />)}
                 {methodeAnsi(s) && <div style={{ fontSize: 12, color: "#B5730A", lineHeight: 1.5, marginTop: 6 }}>Méthode : {methodeAnsi(s).texte}</div>}
                 <div style={{ fontSize: 12.5, color: "#3E4A5C", lineHeight: 1.5, marginTop: 6 }}>Réglage : <b>{s.fields.reglage || "—"} {uniteReglageSeuil(s) || ""}</b>{cei ? <> · courbe <b>{s.fields.courbe}</b>, TMS <b>{texteTmsSeuil(s)}</b></> : s.fields.temporisation ? <> · temporisation <b>{s.fields.temporisation} {s.fields.temporisation_unite}</b></> : null}</div>
               </div>
               <div style={carte}>
                 <div style={{ fontSize: 12, fontWeight: 700, color: "#1A1F26", marginBottom: 6 }}>Avant l'essai <span style={{ fontWeight: 500, color: "#8B96A3" }}>(repères, rien n'est obligatoire)</span></div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                  {checklistPreparation(mode, mesureSur, prise).map((t, i) => <Case key={i} coche={prep[i]} onChange={(v) => setPrep({ ...prep, [i]: v })}>{t}</Case>)}
+                  {checklistPreparation(mode, mesureSur, prise, bornes).map((t, i) => <Case key={i} coche={prep[i]} onChange={(v) => setPrep({ ...prep, [i]: v })}>{t}</Case>)}
                 </div>
               </div>
               <div style={{ ...carte, background: "rgba(10,93,168,0.04)" }}>
@@ -14581,7 +14672,7 @@ async function genererPlanEssaiRelais(eq) {
   children.push(docxHeading(`Fiche méthode — ${fiche.nom}`, 200, 100));
   fiche.lignes.forEach((l) => children.push(P(`• ${l}`)));
   children.push(docxHeading("Avant l'essai", 240, 100));
-  checklistPreparation("Injection secondaire", cfg.mesureSur, cfg.prise).forEach((l) => children.push(P(`☐  ${l}`)));
+  checklistPreparation("Injection secondaire", cfg.mesureSur, cfg.prise, cfg.bornes).forEach((l) => children.push(P(`☐  ${l}`)));
   children.push(docxHeading("Points d'essai", 240, 120));
   const L = [2600, 1500, 2300, 1700, 1500];
   const ent = (t, i) => new DOCX.TableCell({ width: { size: L[i], type: DOCX.WidthType.DXA }, margins: CELL_MARGINS_ENTETE, shading: { type: DOCX.ShadingType.CLEAR, fill: DOCX_ENTETE }, children: [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: t, bold: true, size: 15, color: DOCX_WHITE })] })] });
@@ -15123,6 +15214,7 @@ function DisjoncteurRelaisPanel({ eq, update, custom, onAddCustom, onChangeCusto
       </div>
       <div className="config-essais-relais" style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end", padding: "8px 10px", margin: "4px 0 10px", border: "1px solid #E2E6EB", borderRadius: 8, background: "#FAFBFC" }}>
         <MiniSelect label="Prise d'essai" options={LISTE_PRISE_ESSAI} value={cfgEssais.prise} onChange={(v) => setCfgEssais({ prise: v })} width={150} />
+        {cfgEssais.prise === "Prise Essailec" && <MiniSelect label="Affectation des bornes" options={LISTE_AFFECTATION_BORNES} value={cfgEssais.bornes} onChange={(v) => setCfgEssais({ bornes: v })} width={250} />}
         <MiniSelect label="Temps mesuré sur" options={LISTE_MESURE_TEMPS_ESSAI} value={cfgEssais.mesureSur} onChange={(v) => setCfgEssais({ mesureSur: v })} width={190} />
         {cfgEssais.mesureSur === "Contacts du disjoncteur" && <MiniInput label="Ouverture disjoncteur" unit="ms" value={cfgEssais.tempsOuverture} onChange={(v) => setCfgEssais({ tempsOuverture: v })} />}
         <span style={{ fontSize: 11, color: cfgEssais.mesureSur === "Contacts du disjoncteur" && !cfgEssais.tempsOuverture && !ouvAuto ? "#B5730A" : "#8B96A3", lineHeight: 1.4, flex: "1 1 220px" }}>
