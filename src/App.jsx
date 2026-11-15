@@ -14835,10 +14835,177 @@ const CHECKLIST_ISOLEMENT_REMISE = [
   "Câbles HTA et BT reconnectés et serrés au couple",
   "Mises à la terre d'intervention retirées avant la remise sous tension",
 ];
-// Schéma de montage (SVG) : HTA, BT (BT1/BT2), masse — borne du MIT520 ou liaison à la terre sur chaque élément.
+// ===== Schémas transformateur dessinés d'après le couplage (mesures d'isolement, fiche du rapport) =====
+// « Dyn11 » → { hta: "D", bt: "y", neutreBT: true, neutreHTA: false, indice: 11 } ; null si illisible.
+function lireCouplage(c) {
+  const m = String(c || "").trim().match(/^([DYZ])(N?)([dyz])(n?)\s*(\d{1,2})$/i);
+  if (!m) return null;
+  return { hta: m[1].toUpperCase(), neutreHTA: !!m[2], bt: m[3].toLowerCase(), neutreBT: !!m[4], indice: Number(m[5]) % 12, texte: String(c).trim() };
+}
+const NOM_ENROULEMENT = { D: "triangle", Y: "étoile", Z: "zigzag", d: "triangle", y: "étoile", z: "zigzag" };
+const COUL_ROLE_ISO = { "−": "#E67E22", "+": "#1A1F26", G: "#0A5DA8", terre: "#0A8754" };
+// Enroulements d'un côté. T = abscisse des bornes, dir = +1 (bornes à gauche) ou −1 (bornes à droite).
+function dessinerEnroulements(ctx, { T, dir, type, neutre, noms, Y, yN }) {
+  const X = (d) => T + dir * d;
+  const bobine = (d0, d1, y, n) => {
+    const xa = Math.min(X(d0), X(d1)), xb = Math.max(X(d0), X(d1)), r = (xb - xa) / (2 * n);
+    ctx.beginPath(); ctx.moveTo(xa, y);
+    for (let i = 0; i < n; i++) ctx.arc(xa + r + 2 * r * i, y, r, Math.PI, 0);
+    ctx.stroke();
+  };
+  const ligne = (pts) => { ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1]); pts.slice(1).forEach(([x, y]) => ctx.lineTo(x, y)); ctx.stroke(); };
+  const point = (x, y) => { ctx.beginPath(); ctx.arc(x, y, 3, 0, 2 * Math.PI); ctx.fill(); };
+  ctx.save(); ctx.strokeStyle = SCHEMA_TRAIT; ctx.fillStyle = SCHEMA_TRAIT; ctx.lineWidth = 2;
+  const t = type.toUpperCase();
+  let ie = 120;
+  if (t === "Z") {
+    Y.forEach((y, k) => { ligne([[X(0), y], [X(40), y]]); bobine(40, 80, y, 2); bobine(95, 135, y, 2); });
+    Y.forEach((y, k) => { const y2 = Y[(k + 1) % 3]; ligne(k < 2 ? [[X(80), y], [X(95), y2]] : [[X(80), y], [X(88), y - 22], [X(88), Y[0] - 22], [X(95), Y[0]]]); });
+    ie = 135;
+  } else {
+    Y.forEach((y) => { ligne([[X(0), y], [X(40), y]]); bobine(40, 120, y, 4); });
+  }
+  if (t === "D") {
+    Y.forEach((y, k) => {
+      if (k < 2) { ligne([[X(ie), y], [X(ie + 10), y], [X(ie + 10), y + 35], [X(20), y + 35], [X(20), Y[k + 1]]]); point(X(20), Y[k + 1]); }
+      else { ligne([[X(ie), y], [X(ie + 28), y], [X(ie + 28), Y[0] - 22], [X(20), Y[0] - 22], [X(20), Y[0]]]); point(X(20), Y[0]); }
+    });
+  } else {
+    const xb = X(ie + 18);
+    Y.forEach((y) => ligne([[X(ie), y], [xb, y]]));
+    ligne([[xb, Y[0]], [xb, Y[2]]]);
+    if (neutre) { ligne([[xb, Y[2]], [xb, yN], [X(0), yN]]); }
+  }
+  // bornes
+  ctx.font = `bold 12px ${SCHEMA_POLICE}`; ctx.textBaseline = "bottom"; ctx.textAlign = dir > 0 ? "right" : "left";
+  [...Y.map((y, i) => [y, noms[i]]), ...(neutre && t !== "D" ? [[yN, noms[3]]] : [])].forEach(([y, nom]) => {
+    ctx.fillStyle = "#FFFFFF"; ctx.beginPath(); ctx.arc(T, y, 4.5, 0, 2 * Math.PI); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = SCHEMA_MARINE; ctx.fillText(nom, T - dir * 4, y - 5);
+  });
+  ctx.restore();
+}
+// Dessin commun : cuve, enroulements HTA (gauche) et BT (droite). Renvoie la géométrie pour les raccordements.
+function dessinerTransfoCouplage(ctx, cp, { libBT = "BT", y0 = 70 } = {}) {
+  const Y = [y0 + 50, y0 + 120, y0 + 190], yN = y0 + 250;
+  ctx.save();
+  ctx.fillStyle = "#F5F7FA"; ctx.strokeStyle = "#8B96A3"; ctx.lineWidth = 1.2; ctx.setLineDash([6, 4]);
+  ctx.beginPath(); ctx.roundRect ? ctx.roundRect(135, y0, 490, 280, 12) : ctx.rect(135, y0, 490, 280); ctx.fill(); ctx.stroke(); ctx.setLineDash([]);
+  ctx.font = `11px ${SCHEMA_POLICE}`; ctx.fillStyle = "#8B96A3"; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic"; ctx.fillText("cuve / masse", 145, y0 + 272);
+  ctx.font = `bold 12.5px ${SCHEMA_POLICE}`; ctx.fillStyle = SCHEMA_SYMBOLE; ctx.textAlign = "center";
+  ctx.fillText(`HTA — ${NOM_ENROULEMENT[cp.hta]} (${cp.hta}${cp.neutreHTA ? "N" : ""})`, 245, y0 + 15);
+  ctx.fillText(`${libBT} — ${NOM_ENROULEMENT[cp.bt]} (${cp.bt}${cp.neutreBT ? "n" : ""})`, 515, y0 + 15);
+  ctx.restore();
+  dessinerEnroulements(ctx, { T: 150, dir: 1, type: cp.hta, neutre: cp.neutreHTA, noms: ["A", "B", "C", "N"], Y, yN });
+  dessinerEnroulements(ctx, { T: 610, dir: -1, type: cp.bt, neutre: cp.neutreBT, noms: ["a", "b", "c", "n"], Y, yN });
+  return { Y, yN, bas: y0 + 280 };
+}
+// Schéma de branchement d'une mesure d'isolement (PNG) — null si couplage non renseigné / illisible.
+function genererSchemaIsolementTransfo(eq, cle) {
+  if (typeof document === "undefined" || !document.createElement) return null;
+  const cp = lireCouplage(eq.identification && eq.identification.couplage);
+  const m = MONTAGES_ISOLEMENT_TRANSFO[cle];
+  if (!cp || !m || cle === "bt_bt2") return null;
+  try {
+    const deux = deuxSecondairesTransfo(eq), surBT2 = cle === "bt2_terre" || cle === "hta_bt2";
+    const role = { HTA: m.c.HTA, BT: surBT2 ? m.c.BT2 : m.c.BT, Masse: m.c.Masse };
+    const W = 760, H = 480;
+    const { canvas, ctx } = canevasSchema(W, H);
+    ctx.font = `bold 15px ${SCHEMA_POLICE}`; ctx.fillStyle = SCHEMA_MARINE; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+    ctx.fillText(`Isolement ${m.nom} · couplage ${cp.texte}`, 16, 26);
+    ctx.font = `11.5px ${SCHEMA_POLICE}`; ctx.fillStyle = "#3E4A5C";
+    const sous = texteMontageIsolement(cle, eq);
+    ctx.fillText(sous.length > 120 ? sous.slice(0, 118) + "…" : sous, 16, 46);
+    const g = dessinerTransfoCouplage(ctx, cp, { libBT: deux ? (surBT2 ? "BT2" : "BT1") : "BT" });
+    const { Y, yN } = g;
+    const xE = 380, yE = 400; // prise de terre
+    const megDroite = role.BT === "−";
+    const MB = megDroite ? { x: 530, y: 372, w: 220, h: 56, moins: [720, 372], plus: [530, 390], garde: [530, 414] } : { x: 10, y: 372, w: 220, h: 56, moins: [40, 372], plus: [230, 390], garde: [230, 414] };
+    const trait = (pts, c, ep = 2.6, tir) => { ctx.save(); ctx.strokeStyle = c; ctx.lineWidth = ep; if (tir) ctx.setLineDash(tir); ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1]); pts.slice(1).forEach(([x, y]) => ctx.lineTo(x, y)); ctx.stroke(); ctx.restore(); };
+    const pt = (x, y, c) => { ctx.save(); ctx.fillStyle = c; ctx.beginPath(); ctx.arc(x, y, 3.5, 0, 2 * Math.PI); ctx.fill(); ctx.restore(); };
+    // cuve → terre
+    trait([[xE, g.bas], [xE, yE]], COUL_ROLE_ISO.terre);
+    ctx.save(); ctx.strokeStyle = SCHEMA_TRAIT; ctx.lineWidth = 2; ctx.beginPath(); [[14, 0], [9, 6], [4, 12]].forEach(([d, dy]) => { ctx.moveTo(xE - d, yE + dy); ctx.lineTo(xE + d, yE + dy); }); ctx.stroke(); ctx.restore();
+    // court-circuit de chaque enroulement (barre extérieure)
+    const barre = (cote) => {
+      const r = role[cote]; if (!r) return;
+      const c = COUL_ROLE_ISO[r] || SCHEMA_TRAIT;
+      const T = cote === "HTA" ? 150 : 610, xb = cote === "HTA" ? 95 : 665;
+      const lignes = [...Y, ...((cote === "HTA" ? cp.neutreHTA && cp.hta !== "D" : cp.neutreBT && cp.bt !== "d") ? [yN] : [])];
+      lignes.forEach((y) => { trait([[T + (cote === "HTA" ? -5 : 5), y], [xb, y]], c); pt(xb, y, c); });
+      const yBas = Math.max(...lignes);
+      trait([[xb, Y[0]], [xb, yBas]], c, 3.5);
+      if (r === "terre") { trait([[xb, yBas], [xb, 385], [xE, 385]], c); pt(xE, 385, c); }
+      else if (r === "−") trait([[xb, yBas], [xb, 352], [MB.moins[0], 352], [MB.moins[0], MB.moins[1]]], c);
+      else if (r === "+") trait([[xb, yBas], [xb, 442], [MB.plus[0] + (megDroite ? -15 : 15), 442], [MB.plus[0] + (megDroite ? -15 : 15), MB.plus[1]], MB.plus], c);
+    };
+    barre("HTA"); barre("BT");
+    if (role.Masse === "+") { trait([MB.plus, [xE, MB.plus[1]]], COUL_ROLE_ISO["+"]); pt(xE, MB.plus[1], COUL_ROLE_ISO["+"]); }
+    if (role.Masse === "G") { const xg = megDroite ? 430 : 330; trait([MB.garde, [xg, MB.garde[1]], [xg, g.bas]], COUL_ROLE_ISO.G, 2.4, [6, 4]); pt(xg, g.bas, COUL_ROLE_ISO.G); }
+    // mégohmmètre
+    ctx.save(); ctx.fillStyle = "#FFF4E6"; ctx.strokeStyle = "#E67E22"; ctx.lineWidth = 1.4;
+    ctx.beginPath(); ctx.roundRect ? ctx.roundRect(MB.x, MB.y, MB.w, MB.h, 10) : ctx.rect(MB.x, MB.y, MB.w, MB.h); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = SCHEMA_MARINE; ctx.font = `bold 12.5px ${SCHEMA_POLICE}`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText("Mégohmmètre", MB.x + MB.w / 2, MB.y + 20);
+    ctx.font = `11px ${SCHEMA_POLICE}`; ctx.fillStyle = "#5B6B7D";
+    ctx.fillText("borne − : élément testé", MB.x + MB.w / 2, MB.y + 38);
+    [["−", MB.moins, role.HTA === "−" || role.BT === "−"], ["+", MB.plus, Object.values(role).includes("+")], ["G", MB.garde, role.Masse === "G"]].forEach(([n, [x, y], actif]) => {
+      ctx.fillStyle = "#FFFFFF"; ctx.strokeStyle = actif ? COUL_ROLE_ISO[n] : "#B0B8C1"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, y, 5, 0, 2 * Math.PI); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = actif ? COUL_ROLE_ISO[n] : "#B0B8C1"; ctx.font = `bold 11px ${SCHEMA_POLICE}`;
+      const dx = y === MB.y ? 12 : megDroite ? 12 : -12; ctx.fillText(n, x + dx, y + (y === MB.y ? 12 : 0));
+    });
+    ctx.restore();
+    // légende + consigne
+    ctx.save(); ctx.font = `10.5px ${SCHEMA_POLICE}`; ctx.textBaseline = "middle"; ctx.textAlign = "left";
+    let lx = 420;
+    [["−", "tension d'essai"], ["+", "retour"], ["G", "garde"], ["terre", "à la terre"]].forEach(([k, t]) => {
+      trait([[lx, 466], [lx + 18, 466]], COUL_ROLE_ISO[k], 3, k === "G" ? [5, 3] : null); ctx.fillStyle = "#3E4A5C"; ctx.fillText(t, lx + 23, 466); lx += 30 + ctx.measureText(t).width + 12;
+    });
+    ctx.font = `bold 11px ${SCHEMA_POLICE}`; ctx.fillStyle = "#C0392B"; ctx.fillText("Après la mesure : décharger à la terre avant de toucher.", 16, 466);
+    ctx.restore();
+    return canvas.toDataURL("image/png");
+  } catch (e) { return null; }
+}
+// Schéma de couplage seul (enroulements + diagramme des tensions) pour la fiche du transformateur.
+function genererSchemaCouplageTransfo(eq) {
+  if (typeof document === "undefined" || !document.createElement) return null;
+  const cp = lireCouplage(eq.identification && eq.identification.couplage);
+  if (!cp) return null;
+  try {
+    const W = 760, H = 380;
+    const { canvas, ctx } = canevasSchema(W, H);
+    ctx.font = `bold 15px ${SCHEMA_POLICE}`; ctx.fillStyle = SCHEMA_MARINE; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+    ctx.fillText(`Couplage ${cp.texte}`, 16, 26);
+    ctx.font = `11.5px ${SCHEMA_POLICE}`; ctx.fillStyle = "#3E4A5C";
+    ctx.fillText(`HTA en ${NOM_ENROULEMENT[cp.hta]}, BT en ${NOM_ENROULEMENT[cp.bt]}${cp.neutreBT ? " avec neutre sorti" : ""} — indice horaire ${cp.indice} : tension BT ${cp.indice === 0 ? "en phase avec la HTA" : cp.indice * 30 > 180 ? `en avance de ${360 - cp.indice * 30}° sur la HTA` : `en retard de ${cp.indice * 30}° sur la HTA`}.`, 16, 46);
+    dessinerTransfoCouplage(ctx, cp, { y0: 70 });
+    // diagramme des tensions (horloge)
+    const diag = (cx, cy, rayon, type, decal, noms, coul) => {
+      const ang = (k) => ((decal + k * 120 - 90) * Math.PI) / 180;
+      const P = [0, 1, 2].map((k) => [cx + rayon * Math.cos(ang(k)), cy + rayon * Math.sin(ang(k))]);
+      ctx.save(); ctx.strokeStyle = coul; ctx.fillStyle = coul; ctx.lineWidth = 2.2;
+      if (type.toUpperCase() === "D") { ctx.beginPath(); ctx.moveTo(...P[0]); ctx.lineTo(...P[1]); ctx.lineTo(...P[2]); ctx.closePath(); ctx.stroke(); }
+      else P.forEach(([x, y]) => { ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(x, y); ctx.stroke(); });
+      ctx.font = `bold 11.5px ${SCHEMA_POLICE}`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      P.forEach(([x, y], k) => ctx.fillText(noms[k], cx + (x - cx) * 1.28, cy + (y - cy) * 1.28));
+      ctx.restore();
+    };
+    ctx.save(); ctx.strokeStyle = "#D8DEE5"; ctx.lineWidth = 1;
+    [[690, 150], [690, 290]].forEach(([cx, cy]) => { ctx.beginPath(); ctx.arc(cx, cy, 50, 0, 2 * Math.PI); ctx.stroke(); for (let h = 0; h < 12; h++) { const a = ((h * 30 - 90) * Math.PI) / 180; ctx.beginPath(); ctx.moveTo(cx + 46 * Math.cos(a), cy + 46 * Math.sin(a)); ctx.lineTo(cx + 50 * Math.cos(a), cy + 50 * Math.sin(a)); ctx.stroke(); } });
+    ctx.restore();
+    diag(690, 150, 36, cp.hta, 0, ["A", "B", "C"], SCHEMA_SYMBOLE);
+    diag(690, 290, 36, cp.bt, cp.indice * 30, ["a", "b", "c"], "#C0392B");
+    ctx.save(); ctx.font = `11px ${SCHEMA_POLICE}`; ctx.fillStyle = "#5B6B7D"; ctx.textAlign = "center";
+    ctx.fillText("HTA", 690, 90); ctx.fillText(`BT · ${cp.indice} h`, 690, 352); ctx.restore();
+    return canvas.toDataURL("image/png");
+  } catch (e) { return null; }
+}
+// Schéma de montage : dessin complet d'après le couplage quand il est connu, sinon schéma simplifié
+// (HTA, BT (BT1/BT2), masse — borne du MIT520 ou liaison à la terre sur chaque élément).
 function SchemaMontageIsolement({ cle, eq }) {
   const m = MONTAGES_ISOLEMENT_TRANSFO[cle];
+  const img = useMemo(() => genererSchemaIsolementTransfo(eq, cle), [cle, eq.identification && eq.identification.couplage, eq.identification && eq.identification.deuxEnroulementsSecondaires]);
   if (!m) return null;
+  if (img) return <img src={img} alt={`Schéma ${m.nom}`} style={{ width: "100%", height: "auto", display: "block", borderRadius: 8 }} />;
   const deux = deuxSecondairesTransfo(eq);
   const blocs = [["HTA", "HTA"], ["BT", deux ? "BT1" : "BT"], ...(deux ? [["BT2", "BT2"]] : []), ["Masse", "Masse / cuve"]];
   const couleur = { "−": "#C0392B", "+": "#1A1F26", G: "#0A5DA8", terre: "#0F8A5F" };
@@ -15122,6 +15289,9 @@ function AideIsolementTransfo({ eq, update, allSites = [], rapportDate = "" }) {
   const precedent = useMemo(() => equipementPrecedent(allSites, eq, rapportDate), [allSites, eq.lignageId, eq.id, rapportDate]);
   const alertes = alertesIsolementTransfo(eq, precedent);
   const courbe = genererCourbeAbsorptionIsolement(eq);
+  const [zoom, setZoom] = useState(null);
+  const couplageEq = eq.identification && eq.identification.couplage;
+  const schemas = useMemo(() => itemsIsolementTransfo(eq).map((k) => ({ k, img: genererSchemaIsolementTransfo(eq, k) })).filter((x) => x.img), [couplageEq, eq.identification && eq.identification.deuxEnroulementsSecondaires]);
   async function telechargerPlan() {
     setPlan(true);
     try { downloadBlob(await genererPlanIsolementTransfo(eq, precedent), `Plan_isolement_${morceauNomFichier(eq.identification?.repere || "transformateur")}_${todayISO()}.docx`); }
@@ -15139,6 +15309,18 @@ function AideIsolementTransfo({ eq, update, allSites = [], rapportDate = "" }) {
           {alertes.map((a, i) => <div key={i} style={{ color: "#B5730A" }}>⚠ {a}</div>)}
         </div>
       )}
+      {schemas.length > 0 ? (
+        <div style={{ marginTop: 8 }}>
+          <div style={{ fontSize: 11.5, fontWeight: 700, color: "#5B6B7D", marginBottom: 4 }}>Schémas de branchement — couplage {couplageEq} <span style={{ fontWeight: 500, color: "#8B96A3" }}>(appuyer pour agrandir)</span></div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {schemas.map(({ k, img }) => (
+              <button key={k} type="button" onClick={() => setZoom(zoom === k ? null : k)} style={{ flex: zoom === k ? "1 1 100%" : "1 1 200px", maxWidth: zoom === k ? 760 : 260, padding: 0, border: `1px solid ${zoom === k ? "#0A5DA8" : "#E2E6EB"}`, borderRadius: 8, background: "#fff", cursor: zoom === k ? "zoom-out" : "zoom-in", overflow: "hidden" }} title={MONTAGES_ISOLEMENT_TRANSFO[k].nom}>
+                <img src={img} alt={MONTAGES_ISOLEMENT_TRANSFO[k].nom} style={{ width: "100%", height: "auto", display: "block" }} />
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : !lireCouplage(couplageEq) ? <div style={{ fontSize: 11.5, color: "#8B96A3", marginTop: 6 }}>Renseigner le couplage (identification) pour afficher les schémas de branchement.</div> : null}
       {courbe && <img src={courbe} alt="Courbe d'absorption" style={{ maxWidth: "100%", height: "auto", display: "block", marginTop: 8 }} onLoad={(e) => { e.currentTarget.style.width = `${e.currentTarget.naturalWidth / SCHEMA_ECHELLE}px`; }} />}
       {ouvert && <AssistantIsolementTransfo eq={eq} onFermer={() => setOuvert(false)} onEnregistrer={(patch) => { update({ ...eq, controles: { ...eq.controles, mesure_isolement: { ...eq.controles.mesure_isolement, ...patch } } }); setOuvert(false); }} />}
     </div>
@@ -23670,6 +23852,11 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
     }
   } else if (libelleLocal) lignesId = [["Local", libelleLocal]];
   const elements = [docxFicheIdentite(eq.type + (nomEquipementSite(eq, { locaux }) ? " — " + nomEquipementSite(eq, { locaux }) : ""), docxBookmarkId(eq), eq.etatFinal, eq.type, lignesId, eq.photoEquipement), docxSpacer(TYPES_RAPPORT_COMPACT.includes(eq.type) ? 60 : 160)];
+  if (eq.type === "Transformateur") {
+    const sc = genererSchemaCouplageTransfo(eq);
+    const im = sc ? docxImage(sc, 520, 260) : null;
+    if (im) elements.push(docxBlocInsecable([new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, spacing: { before: 0, after: 120 }, children: [im] })]));
+  }
   if (eq.type === "Transformateur" && eq.identification?.typeRefroidissement && DESCRIPTION_REFROIDISSEMENT_TRANSFO[eq.identification.typeRefroidissement]) {
     elements.push(docxNormeNote(`${eq.identification.typeRefroidissement} (CEI 60076-2) — ${DESCRIPTION_REFROIDISSEMENT_TRANSFO[eq.identification.typeRefroidissement]}`));
   }
@@ -24349,6 +24536,20 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
       if (galerie) elements.push(docxBlocInsecable([new DOCX.Paragraph({ keepNext: true, spacing: { before: 120, after: 40 }, children: [new DOCX.TextRun({ text: it.label, bold: true, size: 16, color: "555555" })] }), galerie]));
     });
     if (sec.key === "mesure_isolement" && eq.type === "Transformateur") {
+      {
+        const vI = (eq.controles && eq.controles.mesure_isolement) || {};
+        const faits = itemsIsolementTransfo(eq).filter((k) => vI[k] && vI[k].fields && (vI[k].fields.realise === "OUI" || numOf(vI[k].fields.valeur) !== null));
+        const imgs = faits.map((k) => genererSchemaIsolementTransfo(eq, k)).filter(Boolean);
+        if (imgs.length) {
+          const blocs = [new DOCX.Paragraph({ keepNext: true, spacing: { before: 160, after: 60 }, children: [new DOCX.TextRun({ text: "Schémas de mesure", bold: true, size: 17, color: DOCX_BLUE })] })];
+          for (let i = 0; i < imgs.length; i += 2) {
+            const runs = [];
+            imgs.slice(i, i + 2).forEach((u, j) => { const im = docxImage(u, 310, 196); if (im) { if (j) runs.push(new DOCX.TextRun({ text: "  " })); runs.push(im); } });
+            if (runs.length) blocs.push(new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, spacing: { after: 60 }, children: runs }));
+          }
+          elements.push(docxBlocInsecable(blocs));
+        }
+      }
       const img = genererCourbeAbsorptionIsolement(eq);
       const dims = img ? dimensionsPng(img) : null;
       const im = img ? docxImage(img, 480, dims && dims.w ? Math.round((480 * dims.h) / dims.w) : 257) : null;
