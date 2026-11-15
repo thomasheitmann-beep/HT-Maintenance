@@ -2162,6 +2162,11 @@ function alertesUsureEquipement(eq, anneeRef = new Date().getFullYear()) {
     }));
 }
 function lignesEcheancesRemplacement(eq) {
+  if (TYPES_AVEC_RELAIS.includes(eq.type) && estSepam80(eq.identification)) {
+    const p = ((((eq.controles || {}).maintenance_relais || {}).pile_relais) || {}).fields || {};
+    const a = p.remplacee === "OUI" ? new Date().getFullYear() : numOf(p.anneePose);
+    return a ? [{ type: "Pile lithium du relais de protection", annee: Math.round(a) + DUREE_VIE_PILE_RELAIS_ANS, client: "Pile du relais de protection", famille: "Pile du relais", cle: "relais:pile" }] : [];
+  }
   if (TYPES_AVEC_PIECES_USURE.includes(eq.type)) return calcEcheancesUsureUPS(eq);
   if (TYPES_AVEC_GRADINS.includes(eq.type)) return calcPiecesUsure(eq);
   return [];
@@ -2865,6 +2870,167 @@ function calcInjectionAide(reglagePrimaire, unite, eq, ansiCode, modeDetection, 
 }
 // Contrôle du relais de protection non lié à un seuil précis (toujours affiché)
 const CIRCUIT_MESURES_COMMANDE = C("circuit_mesures_commande", "Contrôle du circuit de mesures et commande");
+// ===== Maintenance du relais de protection (recommandations constructeur, Sepam et relais numériques) =====
+// Contrôle complet (injection secondaire, entrées / sorties logiques, chaîne complète) : tous les 3 ans.
+const PERIODICITE_CONTROLE_RELAIS_ANS = 3;
+const DUREE_VIE_PILE_RELAIS_ANS = 6;
+const estSepam80 = (id) => /sepam\s*(s[ée]rie\s*)?80|\b[SGTMBC]8\d\b/i.test(String((id && id.referenceRelais) || ""));
+const LISTE_ACTIONNEUR_DECLENCHEMENT = ["Bobine à émission", "Bobine à manque (sécurité positive)", "Déclencheur Mitop (autonome)"];
+const LISTE_SURVEILLANCE_DECLENCHEMENT = ["Active", "Non active", "Non applicable"];
+const LISTE_CAPTEUR_TERRE = ["Tore CSH120 / CSH200", "TC 1 A / 5 A + adaptateur CSH30", "Somme des 3 TC de phase", "Tore homopolaire + adaptateur ACE990", "Autre"];
+const LISTE_TENSION_AUX_RELAIS = ["24 VDC", "48 VDC", "110 VDC", "125 VDC", "220 VDC", "250 VDC", "110 VAC", "230 VAC"];
+// Aide au diagnostic d'un relais en défaut (voyant, code erreur) : causes probables et vérifications.
+function diagnosticRelais(f) {
+  const code = String(f.codeErreur || "").trim(), v = String(f.voyant || ""), d = String(f.defaut || "");
+  const CODES = {
+    "1": "configuration matérielle différente de celle paramétrée, ou connecteur des courants débranché ; sur Sepam 80, cartouche mémoire mal embrochée ou de version incompatible : vérifier connecteurs, modules et cartouche, puis faire le diagnostic avec le logiciel de paramétrage",
+    "2": "défaut de liaison entre les modules (Sepam 80) : vérifier les cordons RJ45 et leur raccordement",
+    "3": "défaut du module de sondes de température : raccordement, ordre dans la chaîne (3 modules au plus, un seul module de sondes), cavalier de fin de ligne",
+    "4": "défaut du module de sortie analogique : ordre dans la chaîne (3 modules au plus, un seul module analogique), cavalier de fin de ligne",
+    "5": "défaut d'un module de couplage, d'une IHM déportée ou de l'IHM du relais : vérifier connecteurs et cordons RJ45",
+    "10": "surcharge du processeur : réduire le programme d'équations logiques ou désactiver les protections inutilisées",
+  };
+  if (/pas d'affichage/i.test(v)) return "🔴 Pas d'affichage : vérifier l'embrochage des connecteurs (alimentation et entrées non inversées), la tension et la polarité de l'alimentation auxiliaire ; en dernier recours, remplacer le relais (non réparable).";
+  if (CODES[code]) return `${/majeur/i.test(d) || /fixe/i.test(v) ? "🔴" : "⚠"} Code erreur ${code} : ${CODES[code]}. En dernier recours, remplacer le module ou le relais (non réparables).`;
+  if (/majeur/i.test(d) || /fixe/i.test(v)) return "🔴 Défaut majeur : le relais s'est mis en position de repli — vérifier connecteurs, modules et alimentation, faire le diagnostic avec le logiciel de paramétrage ; en dernier recours, remplacer le relais.";
+  if (/mineur/i.test(d) || /clignotant/i.test(v)) return "⚠ Défaut mineur : vérifier les modules optionnels et leurs cordons (le relais reste en service).";
+  return "";
+}
+function plageAlimentationRelais(f) {
+  const m = String(f.nominale || "").match(/(\d+)\s*V(AC|DC)/i);
+  if (!m) return null;
+  const un = Number(m[1]);
+  return { un, alternatif: /AC/i.test(m[2]), min: un * 0.8, max: un * 1.1 };
+}
+function verifAlimentationRelais(f) {
+  const pl = plageAlimentationRelais(f);
+  if (!pl) return "";
+  const fr = (x) => String(Math.round(x * 10) / 10).replace(".", ",");
+  const plage = `${fr(pl.min)} – ${fr(pl.max)} V (−20 / +10 % de ${pl.un} V)`;
+  const u = numOf(f.mesure);
+  const conseil = pl.alternatif ? "" : " Alimentation continue : pas de source simplement filtrée (ondulation 12 % au plus).";
+  if (u === null) return `Plage admise : ${plage}.${conseil}`;
+  return u < pl.min || u > pl.max ? `🔴 Tension hors de la plage admise ${plage} : fonctionnement du relais non garanti.${conseil}` : `✓ Tension dans la plage admise ${plage}.${conseil}`;
+}
+function repliCircuitDeclenchement(f) {
+  const a = String(f.actionneur || ""), sv = String(f.surveillance || "");
+  if (/mitop/i.test(a)) return "✓ Déclencheur Mitop : énergie fournie par les TC, fonctionne sans alimentation auxiliaire.";
+  if (/manque/i.test(a)) return "✓ Bobine à manque à sécurité positive : une perte de l'alimentation auxiliaire ou une défaillance du relais ouvre le disjoncteur — l'installation reste en sécurité, mais n'est plus disponible jusqu'à intervention.";
+  if (/émission/i.test(a) && /^Non active/.test(sv)) return "⚠ Bobine à émission sans surveillance du circuit de déclenchement : en cas de défaillance du relais, de perte de l'alimentation auxiliaire ou de rupture du circuit, le disjoncteur ne peut plus déclencher — l'installation reste en service mais n'est plus protégée jusqu'à intervention. Activer la surveillance (ANSI 74) et reporter l'alarme « chien de garde » du relais.";
+  if (/émission/i.test(a) && /^Active/.test(sv)) return `✓ Circuit de déclenchement surveillé (ANSI 74) : une rupture du circuit ou une perte d'alimentation est signalée.${f.testee === "NON" ? " Test de la surveillance à réaliser." : ""}`;
+  if (/émission/i.test(a)) return "Bobine à émission : préciser si la surveillance du circuit de déclenchement (ANSI 74) est active.";
+  return "";
+}
+// Seuil minimal conseillé pour la protection terre selon le capteur (null si non déterminé).
+function seuilTerreMinimal(capteur, inTC) {
+  const c = String(capteur || "");
+  if (/CSH120|CSH200/i.test(c)) return { valeur: 1, texte: "plus de 1 A (tore CSH120 / CSH200)" };
+  if (/CSH30|Somme/i.test(c)) return inTC ? { valeur: 0.1 * inTC, texte: `0,10 × In du TC, soit ${String(Math.round(inTC * 0.1 * 10) / 10).replace(".", ",")} A (courbe à temps indépendant)` } : { valeur: null, texte: "0,10 × In du TC de phase (courbe à temps indépendant)" };
+  return null;
+}
+function texteSeuilTerreCapteur(f) {
+  const m = seuilTerreMinimal(f.capteur, numOf(f.inTC));
+  return m ? `Seuil Io minimal conseillé : ${m.texte}. En dessous, risque de déclenchements intempestifs (erreurs des capteurs).` : "";
+}
+const ITEMS_MAINTENANCE_RELAIS = [
+  C("etat_relais", "État du relais (autotest, voyants, défauts)", [
+    F("defaut", "Défaut signalé", null, ["Aucun", "Défaut mineur", "Défaut majeur"]),
+    F("voyant", "Voyant / affichage", null, ["Normal", "Voyant rouge fixe", "Voyant rouge clignotant", "Pas d'affichage"]),
+    F("codeErreur", "Code erreur", null, ["1", "2", "3", "4", "5", "10"]),
+    { key: "diagnostic", label: "Aide au diagnostic", longText: true, compute: diagnosticRelais },
+  ]),
+  C("injection_entrees", "Contrôle des entrées courant / tension par injection au secondaire", [F("realise", "Réalisé", null, OUI_NON_LIST)]),
+  C("entrees_sorties_logiques", "Contrôle des entrées / sorties logiques par forçage", [F("realise", "Réalisé", null, OUI_NON_LIST)]),
+  C("chaine_complete", "Essai de la chaîne complète (injection jusqu'au déclenchement du disjoncteur)", [F("realise", "Réalisé", null, OUI_NON_LIST)]),
+  { ...S("dernier_controle_complet", "Dernier contrôle complet du relais avant cette visite (si connu)", [F("date", "Date (mm/aaaa)")]), champsFacultatifs: true },
+  C("date_heure_relais", "Date et heure du relais", [F("misAHeure", "Remis à l'heure", null, OUI_NON_LIST)]),
+  C("sauvegarde_parametrage", "Sauvegarde du paramétrage", [F("fichier", "Fichier de paramétrage récupéré", null, OUI_NON_LIST)]),
+  { ...S("pile_relais", "Pile lithium du relais (Sepam 80 — 3,6 V, durée de vie ≈ 6 ans)", [F("anneePose", "Année de pose de la pile"), F("remplacee", "Remplacée ce jour", null, OUI_NON_LIST)]), champsFacultatifs: true },
+  { ...C("alimentation_auxiliaire", "Alimentation auxiliaire du relais", [F("nominale", "Tension nominale", null, LISTE_TENSION_AUX_RELAIS), F("mesure", "Tension mesurée", "V"), { key: "verif", label: "Contrôle de la plage", longText: true, compute: verifAlimentationRelais }]), champsFacultatifs: true },
+  C("circuit_declenchement_relais", "Circuit de déclenchement et sécurité en cas de repli", [
+    F("actionneur", "Actionneur", null, LISTE_ACTIONNEUR_DECLENCHEMENT),
+    F("surveillance", "Surveillance du circuit (ANSI 74)", null, LISTE_SURVEILLANCE_DECLENCHEMENT),
+    F("testee", "Surveillance testée", null, OUI_NON_LIST),
+    { key: "repli", label: "Comportement en cas de repli", longText: true, compute: repliCircuitDeclenchement },
+  ]),
+  { ...S("capteur_terre", "Capteur du courant de terre (Io)", [F("capteur", "Capteur", null, LISTE_CAPTEUR_TERRE), F("inTC", "Calibre primaire du TC de phase (A)"), { key: "seuilMini", label: "Seuil minimal conseillé", longText: true, compute: texteSeuilTerreCapteur }]), champsFacultatifs: true },
+];
+const SECTION_MAINTENANCE_RELAIS = { key: "maintenance_relais", title: "Maintenance du relais de protection", items: ITEMS_MAINTENANCE_RELAIS };
+const moisAnneeRelais = (iso) => (/^\d{4}-\d{2}/.test(iso || "") ? `${iso.slice(5, 7)}/${iso.slice(0, 4)}` : String(iso || ""));
+// « 03/2023 », « 2023 » ou « 2023-03-15 » → date ISO (1er du mois) ; null si illisible.
+function dateRelaisISO(t) {
+  const x = String(t || "").trim();
+  let m = x.match(/^(\d{4})-(\d{2})/); if (m) return `${m[1]}-${m[2]}-01`;
+  m = x.match(/^(\d{1,2})[/.-](\d{4})$/); if (m) return `${m[2]}-${String(m[1]).padStart(2, "0")}-01`;
+  m = x.match(/^(\d{4})$/); if (m) return `${m[1]}-01-01`;
+  return null;
+}
+const controleRelaisComplet = (eqX) => ["injection_entrees", "entrees_sorties_logiques", "chaine_complete"].every((k) => (((eqX.controles || {}).maintenance_relais || {})[k] || {}).fields?.realise === "OUI");
+// Notes et constats de la section « Maintenance du relais » (même format que l'analyse onduleur).
+function analyseMaintenanceRelais(eq, allSites, rapportDate) {
+  const out = [];
+  const S0 = "maintenance_relais";
+  const m = (eq.controles || {})[S0];
+  if (!m) return out;
+  const f = (k) => ((m[k] || {}).fields) || {};
+  const id = eq.identification || {};
+  const dateVisite = String(rapportDate || todayISO()).slice(0, 10);
+  const plusAns = (iso, n) => `${Number(iso.slice(0, 4)) + n}${iso.slice(4, 10)}`;
+  // 1. Contrôle complet tous les 3 ans
+  if (controleRelaisComplet(eq)) {
+    out.push({ section: S0, niveau: 0, texte: `Contrôle complet du relais réalisé ce jour (injection au secondaire, entrées / sorties logiques, chaîne complète) — prochain contrôle complet avant ${moisAnneeRelais(plusAns(dateVisite, PERIODICITE_CONTROLE_RELAIS_ANS))} (tous les ${PERIODICITE_CONTROLE_RELAIS_ANS} ans).` });
+  } else {
+    let dernier = dateRelaisISO(f("dernier_controle_complet").date);
+    // Visites précédentes du même équipement (même lignage) où le contrôle complet a été réalisé.
+    const lig = eq.lignageId || eq.id;
+    (allSites || []).forEach((st) => (st.equipements || []).forEach((e) => {
+      const d = (st.rapport && st.rapport.date) || "";
+      if (e.id === eq.id || (e.lignageId || e.id) !== lig || !d || d >= dateVisite) return;
+      if (controleRelaisComplet(e) && (!dernier || d > dernier)) dernier = d.slice(0, 10);
+    }));
+    if (dernier) {
+      const echeance = plusAns(dernier, PERIODICITE_CONTROLE_RELAIS_ANS);
+      if (dateVisite >= echeance) {
+        const phrase = `Contrôle complet du relais de protection à réaliser : le dernier date de ${moisAnneeRelais(dernier)}, soit plus de ${PERIODICITE_CONTROLE_RELAIS_ANS} ans (injection au secondaire, entrées / sorties logiques, essai de la chaîne complète jusqu'au déclenchement).`;
+        out.push({ section: S0, niveau: 1, texte: phrase, constat: { phrase, rang: 1, categorie: "maintenance_relais", sujet: "relais de protection" } });
+      } else out.push({ section: S0, niveau: 0, texte: `Dernier contrôle complet du relais : ${moisAnneeRelais(dernier)} — prochain avant ${moisAnneeRelais(echeance)} (tous les ${PERIODICITE_CONTROLE_RELAIS_ANS} ans).` });
+    } else out.push({ section: S0, niveau: 0, texte: `Contrôle complet du relais (injection au secondaire, entrées / sorties logiques, chaîne complète) recommandé tous les ${PERIODICITE_CONTROLE_RELAIS_ANS} ans — date du dernier contrôle non renseignée.` });
+  }
+  // 2. Pile du Sepam 80
+  if (estSepam80(id)) {
+    const p = f("pile_relais");
+    const annee = p.remplacee === "OUI" ? Number(dateVisite.slice(0, 4)) : numOf(p.anneePose);
+    if (annee) out.push({ section: S0, niveau: 0, texte: `Pile lithium du relais ${p.remplacee === "OUI" ? "remplacée ce jour" : `posée en ${annee}`} — remplacement conseillé en ${annee + DUREE_VIE_PILE_RELAIS_ANS}.` });
+    else out.push({ section: S0, niveau: 0, texte: "Pile lithium du relais (Sepam 80) : année de pose non renseignée — durée de vie ≈ 6 ans." });
+  }
+  // 3. Alimentation auxiliaire
+  const al = f("alimentation_auxiliaire"), pl = plageAlimentationRelais(al), u = numOf(al.mesure);
+  if (pl && u !== null && (u < pl.min || u > pl.max)) {
+    const phrase = `Tension d'alimentation auxiliaire du relais hors de la plage admise : ${String(u).replace(".", ",")} V mesurés pour ${pl.un} V nominaux (−20 / +10 %).`;
+    out.push({ section: S0, niveau: 1, texte: phrase, constat: { phrase, rang: 1, categorie: "alimentation_auxiliaire_relais", sujet: "alimentation auxiliaire du relais" } });
+  }
+  if (pl && pl.alternatif && estSepam80(id)) out.push({ section: S0, niveau: 1, texte: "Alimentation alternative déclarée : les Sepam des séries 60 et 80 s'alimentent uniquement en continu — vérifier la tension nominale saisie." });
+  // 4. Circuit de déclenchement et repli
+  const cd = f("circuit_declenchement_relais");
+  if (/émission/i.test(cd.actionneur || "") && /^Non active/.test(cd.surveillance || "")) {
+    const phrase = "Bobine de déclenchement à émission sans surveillance du circuit : une défaillance du relais, une perte de l'alimentation auxiliaire ou une rupture du circuit ne seraient pas signalées, et l'installation ne serait plus protégée jusqu'à intervention.";
+    out.push({ section: S0, niveau: 1, texte: phrase, constat: { phrase, rang: 1, categorie: "surveillance_declenchement", sujet: "circuit de déclenchement" } });
+  }
+  // 5. Seuil de terre et capteur
+  const ct = f("capteur_terre");
+  let inTC = numOf(ct.inTC);
+  if (!inTC) { const tc = ((eq.controles || {}).tc_dynamique || []).find((t) => t && t.fields && /protection/i.test(t.fields.fonction || "")); if (tc) inTC = numOf(String(tc.fields.rapportPrimaire || "").split("/")[0]); }
+  const mini = seuilTerreMinimal(ct.capteur, inTC);
+  if (mini && mini.valeur) {
+    ((eq.controles || {}).parametrage_relais_seuils || []).filter((x) => x && /^(50N|51N|67N|50G|51G)/.test(ansiFamily(x.label) || "")).forEach((x) => {
+      const r = numOf((x.fields || {}).reglage);
+      if (r === null || r >= mini.valeur - 1e-9) return;
+      const phrase = `Seuil de terre « ${String(x.label).split(" — ")[0]} » réglé à ${String(r).replace(".", ",")} A, sous le minimum conseillé pour le capteur utilisé (${mini.texte}) : risque de déclenchements intempestifs.`;
+      out.push({ section: S0, niveau: 1, texte: phrase, constat: { phrase, rang: 1, categorie: "seuil_terre_capteur", sujet: "réglage de la protection terre" } });
+    });
+  }
+  return out;
+}
 const TYPES_AVEC_RELAIS = ["Disjoncteur HTA", "Contacteur HTA", "Interrupteur HTA", "Interrupteur Fusible HTA"];
 // Reproduit fidèlement le fichier Excel : seuls les 1er et 2ème seuils de courant de phase ont une
 // formule de tolérance qui s'adapte à l'unité choisie (s/ms) ; le 3ème seuil de phase et les 3 seuils
@@ -3777,7 +3943,7 @@ function buildInterrupteurHTASchema({ avecRelais = false } = {}) {
       { key: "securite", title: "Contrôles de sécurité", items: SECURITE_CELLULE },
       ...(avecRelais ? [
         { key: "parametrage_relais", title: "Paramétrage du relais de protection", items: [] },
-        { key: "controles_relais", title: "Contrôles du relais de protection", items: [CIRCUIT_MESURES_COMMANDE] },
+        { key: "controles_relais", title: "Contrôles du relais de protection", items: [CIRCUIT_MESURES_COMMANDE] }, SECTION_MAINTENANCE_RELAIS,
       ] : []),
       { key: "mesure_isolement", title: "Mesure d'isolement (optionnelle)", items: MESURE_ISOLEMENT_CELLULE },
     ],
@@ -3818,7 +3984,7 @@ function buildInterrupteurFusibleHTASchema({ avecRelais = false } = {}) {
       { key: "securite", title: "Contrôles de sécurité", items: SECURITE_CELLULE },
       ...(avecRelais ? [
         { key: "parametrage_relais", title: "Paramétrage du relais de protection", items: [] },
-        { key: "controles_relais", title: "Contrôles du relais de protection", items: [CIRCUIT_MESURES_COMMANDE] },
+        { key: "controles_relais", title: "Contrôles du relais de protection", items: [CIRCUIT_MESURES_COMMANDE] }, SECTION_MAINTENANCE_RELAIS,
       ] : []),
       { key: "mesure_isolement", title: "Mesure d'isolement (optionnelle)", items: MESURE_ISOLEMENT_CELLULE },
     ],
@@ -3873,7 +4039,7 @@ const SCHEMAS = {
       ]},
       { key: "parametrage_relais", title: "Paramétrage du relais de protection", items: [] },
       { key: "controles_disjoncteur", title: "Contrôles du disjoncteur", items: CONTROLES_DISJONCTEUR },
-      { key: "controles_relais", title: "Contrôles du relais de protection", items: [CIRCUIT_MESURES_COMMANDE] },
+      { key: "controles_relais", title: "Contrôles du relais de protection", items: [CIRCUIT_MESURES_COMMANDE] }, SECTION_MAINTENANCE_RELAIS,
       { key: "mesure_isolement", title: "Mesure d'isolement (optionnelle)", items: MESURE_ISOLEMENT_CELLULE },
     ],
   },
@@ -3903,7 +4069,7 @@ const SCHEMAS = {
       ]},
       { key: "parametrage_relais", title: "Paramétrage du relais de protection", items: [] },
       { key: "controles_disjoncteur", title: "Contrôles du contacteur", items: CONTROLES_DISJONCTEUR },
-      { key: "controles_relais", title: "Contrôles du relais de protection", items: [CIRCUIT_MESURES_COMMANDE] },
+      { key: "controles_relais", title: "Contrôles du relais de protection", items: [CIRCUIT_MESURES_COMMANDE] }, SECTION_MAINTENANCE_RELAIS,
       { key: "mesure_isolement", title: "Mesure d'isolement (optionnelle)", items: MESURE_ISOLEMENT_CELLULE },
     ],
   },
@@ -4429,6 +4595,9 @@ function getSchema(eq) {
   if (base0 && TYPES_AVEC_RELAIS.includes(eq.type) && estRelaisTropic(eq.identification) && base0.identification.some((f) => f.key === "referenceRelais") && !base0.identification.some((f) => f.key === "modulesTropic")) {
     const i = base0.identification.findIndex((f) => f.key === "referenceRelais");
     base = { ...base0, identification: [...base0.identification.slice(0, i + 1), { key: "modulesTropic", label: "Modules TROPIC du rack", multi: true }, ...base0.identification.slice(i + 1)] };
+  }
+  if (base && TYPES_AVEC_RELAIS.includes(eq.type) && !estSepam80(eq.identification) && base.sections.some((x) => x.key === "maintenance_relais")) {
+    base = { ...base, sections: base.sections.map((x) => (x.key === "maintenance_relais" ? { ...x, items: x.items.filter((it) => it.key !== "pile_relais") } : x)) };
   }
   if (!base || eq.type !== "Batterie de compensation" || !avecSVG(eq)) return base;
   const idx = base.identification.findIndex((f) => f.key === "technologieCompensation");
@@ -9869,6 +10038,7 @@ function calcPiecesUsure(eq) {
 // sont repris dans les remarques ; les comparaisons avec la visite précédente restent des notes « à surveiller ».
 function analyseOnduleur(eq, allSites, rapportDate) {
   const out = [];
+  if (eq && TYPES_AVEC_RELAIS.includes(eq.type)) { try { return analyseMaintenanceRelais(eq, allSites, rapportDate); } catch (e) { return out; } }
   if (!eq || !TYPES_AVEC_BRANCHES_UPS.includes(eq.type)) return out;
   const c = eq.controles || {}, id = eq.identification || {};
   const v2 = (x, d = 1) => String(Math.round(x * Math.pow(10, d)) / Math.pow(10, d)).replace(".", ",");
@@ -15874,6 +16044,10 @@ const RECO_PAR_CATEGORIE = {
   thdi_entree: () => "Faire contrôler le filtre d'entrée et l'étage redresseur (condensateurs, selfs, carte d'absorption sinusoïdale) par le constructeur.",
   neutre_harmoniques: () => "Vérifier la section du conducteur neutre en sortie (harmoniques de rang 3) et son échauffement par thermographie.",
   surcharge_kw: () => "Réduire ou répartir la charge de sortie, ou redimensionner l'onduleur (puissance active supérieure à la puissance nominale).",
+  maintenance_relais: () => "Réaliser le contrôle complet du relais de protection (injection au secondaire, entrées / sorties logiques, essai de la chaîne complète) — à renouveler tous les 3 ans.",
+  surveillance_declenchement: () => "Activer la surveillance du circuit de déclenchement (ANSI 74) et reporter l'alarme « chien de garde » du relais, ou passer en bobine à manque à sécurité positive.",
+  alimentation_auxiliaire_relais: () => "Rechercher la cause de l'écart de tension de l'alimentation auxiliaire du relais (chargeur, batterie, câblage) et la ramener dans la plage admise.",
+  seuil_terre_capteur: () => "Relever le seuil de la protection terre au minimum conseillé pour le capteur utilisé, en cohérence avec l'étude de sélectivité.",
   batterie_dimensionnement: () => "Vérifier le dimensionnement de la batterie (puissance par élément insuffisante pour la charge actuelle) : batterie de plus forte puissance ou réduction de la charge secourue.",
   batterie_capacite: () => "Remplacer la batterie (capacité mesurée inférieure à 80 % de la référence).",
   temperature_batterie: () => "Abaisser la température du local batterie (ventilation, climatisation) et anticiper le remplacement des blocs.",
@@ -15921,7 +16095,7 @@ const RECO_PAR_CATEGORIE = {
   etat_degrade: (s) => `Surveiller à la prochaine visite : ${s}.`,
 };
 const MAX_PRECONISATIONS = 5;
-const ORDRE_RECO = ["huile_dga_critique", "huile_pcb", "huile_physique", "huile_chimique", "huile_dga", "huile_furanes", "huile_eclair", "huile_aspect", "huile_surveillance", "capacite_modules", "module", "redondance_modules", "redondance_parallele", "partage_charge", "surcharge_condensateurs", "resonance", "self_accord", "fusible_calibre", "fusible_ib", "fusible", "fusible_rechange", "securite_non_conforme", "surcharge_kw", "batterie_capacite", "batterie_dimensionnement", "batterie_branche", "thdi_entree", "neutre_harmoniques", "temperature_batterie", "ondulation_batterie", "isolement_continu", "reglage_ir", "svg_sature", "serrage", "contact", "isolement", "enroulements", "huile", "mise_terre", "protection", "disjoncteur", "batterie", "gradin", "cosphi", "usure", "proprete", "ventilation", "thermique", "mesure", "etat_defaillant", "etat_degrade"];
+const ORDRE_RECO = ["huile_dga_critique", "huile_pcb", "huile_physique", "huile_chimique", "huile_dga", "huile_furanes", "huile_eclair", "huile_aspect", "huile_surveillance", "capacite_modules", "module", "redondance_modules", "redondance_parallele", "partage_charge", "surcharge_condensateurs", "resonance", "self_accord", "fusible_calibre", "fusible_ib", "fusible", "fusible_rechange", "securite_non_conforme", "surcharge_kw", "batterie_capacite", "batterie_dimensionnement", "batterie_branche", "surveillance_declenchement", "alimentation_auxiliaire_relais", "seuil_terre_capteur", "maintenance_relais", "thdi_entree", "neutre_harmoniques", "temperature_batterie", "ondulation_batterie", "isolement_continu", "reglage_ir", "svg_sature", "serrage", "contact", "isolement", "enroulements", "huile", "mise_terre", "protection", "disjoncteur", "batterie", "gradin", "cosphi", "usure", "proprete", "ventilation", "thermique", "mesure", "etat_defaillant", "etat_degrade"];
 // Préconisations dédoublonnées, regroupées par famille, les plus urgentes en premier.
 function preconisationsDepuisConstats(constats) {
   const groupes = {};
@@ -17423,7 +17597,7 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
                 </React.Fragment>
               );
             }
-            if (TYPES_AVEC_BRANCHES_UPS.includes(eq.type) && ["mesures_continu", "redresseur_chargeur"].includes(sec.key)) {
+            if ((TYPES_AVEC_BRANCHES_UPS.includes(eq.type) && ["mesures_continu", "redresseur_chargeur"].includes(sec.key)) || sec.key === "maintenance_relais") {
               return (
                 <React.Fragment key={sec.key}>
                   <SectionBlock
@@ -24088,7 +24262,7 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
       const im = img ? docxImage(img, 480, dims && dims.w ? Math.round((480 * dims.h) / dims.w) : 257) : null;
       if (im) elements.push(docxBlocInsecable([new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, spacing: { before: 160, after: 80 }, children: [im] })]));
     }
-    if (TYPES_AVEC_BRANCHES_UPS.includes(eq.type) && ["mesures_continu", "redresseur_chargeur"].includes(sec.key)) elements.push(...docxNotesOnduleur(eq, allSites, rapportDate, sec.key));
+    if ((TYPES_AVEC_BRANCHES_UPS.includes(eq.type) && ["mesures_continu", "redresseur_chargeur"].includes(sec.key)) || sec.key === "maintenance_relais") elements.push(...docxNotesOnduleur(eq, allSites, rapportDate, sec.key));
     if (sec.key === "module_svg") { try { analyseModuleSVG(eq).forEach((l) => { elements.push(docxNormeNote((l.niveau >= 1 ? "⚠ " : "") + l.texte)); elements.push(docxSpacer(40)); }); } catch (e) { /* facultatif */ } }
     if (sec.key === "analyse_harmonique" && eq.type === "Batterie de compensation") elements.push(...docxAnalyseResonance(analyseResonanceBatterie(eq, equipementsDuSiteDe(eq, allSites)), eq));
     if (sec.key === "reglage_disjoncteur" && eq.type === "Disjoncteur BT") {
