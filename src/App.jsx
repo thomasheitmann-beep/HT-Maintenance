@@ -7947,6 +7947,12 @@ function ControlRow({ item, value, onChange, idPrefix, toleranceOverride, valeur
                   return u ? <span>{u}</span> : null;
                 })()}
               </label>
+            ) : f.longText ? (
+              <div key={f.key} style={{ width: "100%", marginTop: 4 }}>
+                <div style={{ fontSize: 11, color: "#8B96A3", marginBottom: 3 }}>{f.label}</div>
+                <textarea value={fields[f.key] ?? ""} onChange={(e) => setField(f.key, e.target.value)} rows={4}
+                  style={{ ...inputStyle, width: "100%", boxSizing: "border-box", minHeight: 90, padding: "8px 10px", fontSize: 13, lineHeight: 1.45, resize: "vertical", fontFamily: "inherit" }} />
+              </div>
             ) : f.key === "realise" && f.options ? (
               <label key={f.key} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#3E4A5C", cursor: "pointer" }}>
                 <input
@@ -16454,14 +16460,6 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
                 </Select>
               </Field>
             </div>
-            <div style={{ maxWidth: 260 }}>
-              <Field label="Délai conseillé (plan d'actions)">
-                <Select value={eq.delaiConseille || ""} onChange={(e) => update({ ...eq, delaiConseille: e.target.value })}>
-                  <option value="">Automatique (selon l'état)</option>
-                  {DELAIS_CONSEILLES.map((d) => <option key={d} value={d}>{d}</option>)}
-                </Select>
-              </Field>
-            </div>
           </div>
           {schema.identification.length > 0 && (
             <div style={{ marginBottom: 16 }} onPaste={(e) => { const f = imageDuPressePapiers(e); if (f) { e.preventDefault(); photoEquipementDepuisFichier(f).then((p) => update({ ...eq, photoEquipement: p })).catch(() => {}); } }}>
@@ -17497,6 +17495,19 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
               <Field label="Synthèse de l'état — à l'issue de la maintenance">
                 <EtatRapide grand value={eq.etatFinal} onChange={(v) => { const { etatFinalAuto, ...reste } = eq; update({ ...reste, etatFinal: v }); }} accord={(s) => agree(s, equipGender(eq.type), false)} />
               </Field>
+              <div style={{ display: "flex", alignItems: "flex-end", gap: 12, flexWrap: "wrap" }}>
+                <div style={{ width: 260 }}>
+                  <Field label="Délai conseillé (plan d'actions)">
+                    <Select value={eq.delaiConseille || ""} onChange={(e) => update({ ...eq, delaiConseille: e.target.value })}>
+                      <option value="">Automatique (selon l'état)</option>
+                      {DELAIS_CONSEILLES.map((d) => <option key={d} value={d}>{d}</option>)}
+                    </Select>
+                  </Field>
+                </div>
+                <div style={{ fontSize: 11.5, color: "#8B96A3", paddingBottom: 10, flex: "1 1 220px" }}>
+                  {eq.delaiConseille ? "Délai imposé pour toutes les préconisations de cet équipement dans le plan d'actions." : "Automatique : défaillant → immédiat, dégradé → sous 3 mois, point à surveiller → prochaine visite."}
+                </div>
+              </div>
               {remplacementsDuRapport(eq, rapportDate).length > 0 && (
                 <div style={{ border: "1.5px solid #0F8A5F", background: "#EAF7F1", borderRadius: 10, padding: "10px 12px", fontSize: 12.5, color: "#1A1F26" }}>
                   <div style={{ fontWeight: 700, color: "#0F8A5F", marginBottom: 4 }}>Pièces d'usure remplacées (repris dans le rapport)</div>
