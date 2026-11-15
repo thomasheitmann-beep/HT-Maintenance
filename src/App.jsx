@@ -2630,6 +2630,9 @@ function ansiFamily(label) {
 // Détection terre (50N/51N) : soit via un TC homopolaire dédié, soit calculée par le relais à
 // partir de la somme vectorielle des 3 courants de phase (pas de TC dédié dans ce cas).
 const LISTE_MODE_DETECTION_TERRE = ["TC homopolaire dédié", "Somme des 3I (calculée)"];
+// Origine de la tension résiduelle U0 vue par le relais (sert au raccordement de la fiche tension).
+const LISTE_MESURE_U0 = ["Calculée (somme des 3 TT)", "TT en triangle ouvert (entrée dédiée)"];
+const CHAMP_MESURE_U0 = { key: "mesureU0", label: "Mesure de U0", options: LISTE_MESURE_U0 };
 // Types de protection de découplage HTA (guide UTE/NF C15-400) — pour un poste de livraison HTA
 // avec producteur. Les types B1/B2/F1/F2/F4/F5 (BT) ne sont pas proposés ici : cette liste est
 // utilisée sur le relais de protection HTA (Disjoncteur HTA / Interrupteur HTA), pas côté BT.
@@ -2640,16 +2643,16 @@ const ANSI_REGLAGE_FIELDS = {
   "50N": [{ key: "courbe", label: "Courbe à temps", options: LISTE_COURBE_RELAIS }, { key: "reglage", label: "Réglage", unit: "A" }, { key: "modeDetection", label: "Mode de détection", options: LISTE_MODE_DETECTION_TERRE }, { key: "tms", label: "Multiplicateur de temps (TMS)" }],
   "46": [{ key: "reglage", label: "Réglage", unit: "%" }],
   "67": [{ key: "courbe", label: "Courbe à temps", options: LISTE_COURBE_RELAIS }, { key: "reglage", label: "Réglage", unit: "A" }, { key: "angle", label: "Angle caractéristique", unit: "°" }, { key: "tms", label: "Multiplicateur de temps (TMS)" }, { key: "sens", label: "Sens de détection", options: ["Amont", "Aval"] }, { key: "zoneMin", label: "Zone de déclenchement — borne basse", unit: "°" }, { key: "zoneMax", label: "Zone de déclenchement — borne haute", unit: "°" }],
-  "67N": [{ key: "courbe", label: "Courbe à temps", options: LISTE_COURBE_RELAIS }, { key: "reglage", label: "Réglage", unit: "A" }, { key: "angle", label: "Angle caractéristique", unit: "°" }, { key: "tms", label: "Multiplicateur de temps (TMS)" }, { key: "sens", label: "Sens de détection", options: ["Amont", "Aval"] }, { key: "zoneMin", label: "Zone de déclenchement — borne basse", unit: "°" }, { key: "zoneMax", label: "Zone de déclenchement — borne haute", unit: "°" }],
+  "67N": [{ key: "courbe", label: "Courbe à temps", options: LISTE_COURBE_RELAIS }, { key: "reglage", label: "Réglage", unit: "A" }, { key: "angle", label: "Angle caractéristique", unit: "°" }, { key: "tms", label: "Multiplicateur de temps (TMS)" }, { key: "sens", label: "Sens de détection", options: ["Amont", "Aval"] }, { key: "zoneMin", label: "Zone de déclenchement — borne basse", unit: "°" }, { key: "zoneMax", label: "Zone de déclenchement — borne haute", unit: "°" }, CHAMP_MESURE_U0],
   "27": [{ key: "reglage", label: "Réglage", unit: "V" }],
   "59": [{ key: "reglage", label: "Réglage", unit: "V" }],
-  "59N": [{ key: "reglage", label: "Réglage", unit: "V" }],
+  "59N": [{ key: "reglage", label: "Réglage", unit: "V" }, CHAMP_MESURE_U0],
   // 32N (wattmétrique homopolaire terre) : seuil de puissance résiduelle U0×I0 (simplifié en kW,
   // comme 32P/32Q, plutôt qu'en % de Sn comme l'exprime le manuel Easergy P5 — même logique que le
   // reste de l'app). Deux zones (aval = défaut en aval, amont = défaut en amont), chacune définie
   // par un secteur d'activation (zoneMin/zoneMax) centré sur l'axe P0 (0° pour aval, 180° pour
   // amont) — pas de valeur par défaut universelle trouvée dans le manuel pour ce secteur.
-  "32N": [{ key: "reglage", label: "Réglage (U0×I0)", unit: "kW" }, { key: "sens", label: "Sens de détection", options: ["Amont", "Aval"] }, { key: "zoneMin", label: "Secteur d'activation — borne basse", unit: "°" }, { key: "zoneMax", label: "Secteur d'activation — borne haute", unit: "°" }],
+  "32N": [{ key: "reglage", label: "Réglage (U0×I0)", unit: "kW" }, { key: "sens", label: "Sens de détection", options: ["Amont", "Aval"] }, { key: "zoneMin", label: "Secteur d'activation — borne basse", unit: "°" }, { key: "zoneMax", label: "Secteur d'activation — borne haute", unit: "°" }, CHAMP_MESURE_U0],
   "32P": [{ key: "reglage", label: "Réglage", unit: "kW" }, { key: "sens", label: "Sens de détection", options: ["Amont", "Aval"] }, { key: "zoneMin", label: "Zone de déclenchement — borne basse", unit: "°" }, { key: "zoneMax", label: "Zone de déclenchement — borne haute", unit: "°" }],
   "32Q": [{ key: "reglage", label: "Réglage", unit: "kVAR" }, { key: "sens", label: "Sens de détection", options: ["Amont", "Aval"] }, { key: "zoneMin", label: "Zone de déclenchement — borne basse", unit: "°" }, { key: "zoneMax", label: "Zone de déclenchement — borne haute", unit: "°" }],
   "37P": [{ key: "reglage", label: "Réglage", unit: "kW" }, { key: "sens", label: "Sens de détection", options: ["Amont", "Aval"] }, { key: "zoneMin", label: "Zone de déclenchement — borne basse", unit: "°" }, { key: "zoneMax", label: "Zone de déclenchement — borne haute", unit: "°" }],
@@ -13678,13 +13681,17 @@ function fichesEssai(s) {
   const fam = ansiFamily(s.label), u = uniteReglageSeuil(s);
   if (sansInjectionCalculee(s)) return null;
   const F = (fiche, a, b, note) => ({ fiche, actifs: [a, b], note });
+  const mU0 = (s.fields && s.fields.mesureU0) || "";
+  const ficheU0 = () => (/triangle/i.test(mU0) ? F("tension", "DA", "DN", "entrée U0 dédiée du relais (triangle ouvert) — bornes à confirmer sur le schéma de la cellule")
+    : /calcul/i.test(mU0) ? F("tension", "L1", "N", "U0 calculée : une seule phase injectée, les deux autres à 0 V, cellule consignée — vérifier sur la notice si le seuil est réglé en V0 ou en 3V0")
+    : { fiche: "tension", actifs: [], note: "tension résiduelle U0 : préciser « Mesure de U0 » dans le réglage du seuil (calculée ou triangle ouvert)" });
   if (FAMILLES_TIERS_TENSION.includes(fam)) return [F("tension", "L1", "N", "une seule phase injectée, les deux autres à 0 V")];
   if (["50N", "51N", "50G", "51G"].includes(fam)) return estTerreCalculee(s) ? [F("courant", "L1", "N", "une seule phase injectée (somme des 3I)")] : [F("tore", "L1", "N", "fiche dédiée du tore homopolaire, seule la première voie est câblée")];
   if (fam === "67") return [F("courant", "L1", "N", "I1"), F("tension", "L2", "L3", "Ubc, polarisation")];
-  if (fam === "67N" || fam === "32N") return [F("courant", "L1", "N", "I0"), { fiche: "tension", actifs: [], note: "tension résiduelle U0 selon le câblage du relais" }];
+  if (fam === "67N" || fam === "32N") return [F("courant", "L1", "N", "I0"), ficheU0()];
   if (["32P", "32Q", "37P", "37Q"].includes(fam)) return [F("courant", "L1", "N", "Ia"), F("tension", "L1", "N", "Va, même phase")];
   if (u === "A" || fam === "46") return [F("courant", "L1", "N", "puis L2 et L3 de la même façon")];
-  if (u === "V") return fam === "59N" ? [F("tension", "L1", "N")] : [F("tension", "L1", "L2", "U12 pour une tension composée ; L1 → commun pour une tension simple")];
+  if (u === "V") return fam === "59N" ? [mU0 ? ficheU0() : F("tension", "L1", "N")] : [F("tension", "L1", "L2", "U12 pour une tension composée ; L1 → commun pour une tension simple")];
   if (u === "Hz" || u === "Hz/s") return [F("tension", "L1", "L2", "tension nominale à fréquence variable")];
   return null;
 }
@@ -13702,6 +13709,7 @@ function raccordementEssai(eq, s, mode) {
   return fs.map((f) => {
     if (!f.actifs.length) return `${NOM_FICHE_ESSAI[f.fiche]} : ${f.note}`;
     const [a, b] = f.actifs;
+    if (a === "DA") return `${NOM_FICHE_ESSAI[f.fiche]} : borne da → borne dn — ${f.note}`;
     return `${NOM_FICHE_ESSAI[f.fiche]} : cordon ${cordonPhase(a, cfg.bornes)} (${nomPh(a)}) → cordon ${cordonPhase(b, cfg.bornes)} (${nomPh(b)})${f.note ? ` — ${f.note}` : ""}`;
   }).join(" + ");
 }
@@ -14355,9 +14363,54 @@ function genererCourbeFamilleRelais(eq, groupe) {
     return null;
   }
 }
+// U0 par TT en triangle ouvert : injection directe sur l'entrée U0 du relais (da – dn), côté TT isolé.
+function SchemaU0TriangleOuvert({ titre }) {
+  const gris = "#5B6B7D", rouge = "#C0392B", orange = "#E67E22", txt = "#3E4A5C";
+  return (
+    <div style={{ marginTop: 8, border: "1px solid #E2E6EB", borderRadius: 8, background: "#fff", padding: 6 }}>
+      <svg viewBox="0 0 1000 520" style={{ width: "100%", height: "auto", display: "block" }} fontFamily="Arial">
+        <text x="20" y="28" fontSize="18" fontWeight="700" fill="#1A1F26">{titre} — U0 par TT en triangle ouvert</text>
+        <text x="20" y="50" fontSize="13" fill={txt}>Enroulements résiduels des 3 TT en série → entrée U0 du relais (bornes à confirmer sur le schéma de la cellule)</text>
+        <g stroke={gris} strokeWidth="2" fill="none">
+          {[80, 160, 240].map((x) => <g key={x}><circle cx={x} cy="120" r="12" /><circle cx={x} cy="140" r="12" /></g>)}
+          <path d="M90 152 V190 H150 V152" /><path d="M170 152 V190 H230 V152" />
+          <path d="M70 152 V200 H40 V280 H262 a8 8 0 0 1 16 0 H300" />
+          <path d="M250 152 V200 H270 V330 H300" />
+        </g>
+        <g fontSize="12" fill={txt}><text x="40" y="100">L1</text><text x="120" y="100">L2</text><text x="200" y="100">L3</text><text x="46" y="272">da</text><text x="250" y="320">dn</text></g>
+        <text x="95" y="225" fontSize="12" fill="#8B96A3">triangle ouvert</text>
+        <g stroke={rouge} strokeWidth="2.5"><path d="M180 272 l16 16 M196 272 l-16 16" /><path d="M276 322 l16 16 M292 322 l-16 16" /></g>
+        <text x="40" y="365" fontSize="12.5" fontWeight="700" fill={rouge}>Côté TT — ne pas raccorder</text>
+        <rect x="290" y="240" width="240" height="130" rx="10" fill="#F5F7FA" stroke="#8B96A3" strokeWidth="1.5" />
+        <text x="315" y="260" fontSize="13" fontWeight="700" fill={txt}>Prise d'essai — entrée U0</text>
+        {[280, 330].map((y) => (
+          <g key={y}>
+            <circle cx="300" cy={y} r="5" fill="#fff" stroke={gris} strokeWidth="2" /><circle cx="520" cy={y} r="5" fill="#fff" stroke={gris} strokeWidth="2" />
+            <path d={`M396 ${y - 8} l12 16 M408 ${y - 8} l-12 16`} stroke={rouge} strokeWidth="2" />
+            <path d={`M525 ${y} H800`} stroke={gris} strokeWidth="2" />
+          </g>
+        ))}
+        <text x="420" y="308" fontSize="11" fill={rouge}>liaison ouverte</text>
+        <rect x="800" y="240" width="150" height="120" rx="10" fill="#F5F7FA" stroke="#8B96A3" strokeWidth="1.5" />
+        <text x="830" y="262" fontSize="13" fontWeight="700" fill={txt}>Relais</text>
+        <text x="815" y="285" fontSize="13" fill={txt}>U0 (da)</text><text x="815" y="335" fontSize="13" fill={txt}>U0 (dn)</text>
+        <path d="M520 280 C575 280 560 420 600 435" stroke={orange} strokeWidth="3.5" fill="none" />
+        <path d="M520 330 C550 330 545 450 600 460" stroke={orange} strokeWidth="3.5" fill="none" />
+        <rect x="600" y="410" width="300" height="72" rx="10" fill="#FFF4E6" stroke={orange} strokeWidth="1.5" />
+        <text x="618" y="434" fontSize="13" fontWeight="700" fill={txt}>Valise — sortie tension</text>
+        <text x="618" y="454" fontSize="13" fill={txt}>sortie U → da · retour → dn</text>
+        <text x="618" y="472" fontSize="13" fill={txt}>U injectée = U0 vue par le relais</text>
+        <text x="20" y="420" fontSize="12.5" fill={txt}>Pour une 67N / 32N : I0 sur la fiche courant,</text>
+        <text x="20" y="440" fontSize="12.5" fill={txt}>avec le déphasage entre I0 et U0.</text>
+        <text x="20" y="500" fontSize="12.5" fontWeight="700" fill={rouge}>Fin d'essai : couper l'injection AVANT de retirer la fiche.</text>
+      </svg>
+    </div>
+  );
+}
 // Schéma de raccordement d'une prise d'essai (aide au technicien, jamais imprimé dans le rapport).
 // fiche : "courant" | "tension" | "tore" ; actifs : [sortie, retour] en phases ("L1", "L2", "L3", "N").
 function SchemaPriseEssai({ fiche, actifs, bornes, titre }) {
+  if (actifs[0] === "DA") return <SchemaU0TriangleOuvert titre={titre} />;
   const ordre = communEnPremier(bornes) ? ["N", "L1", "L2", "L3"] : ["L1", "L2", "L3", "N"];
   const Y = [130, 190, 250, 310];
   const nom = (ph) => (ph === "N" ? "commun" : ph);
