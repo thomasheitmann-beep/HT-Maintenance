@@ -1973,6 +1973,12 @@ function equipementAvecTC(eq) {
 const LISTE_SORTIE_CELLULE = ["Câble", "Jeu de barres aval (cellules suivantes)"];
 const LISTE_FONCTION_APPAREIL_BT = ["Arrivée", "Départ", "Couplage"];
 const LISTE_PROTECTION_GRADINS = ["Fusibles", "Disjoncteurs"];
+// Schéma : nature exacte de l'appareil et position des sectionneurs / sectionneurs de terre (vide = selon le type de cellule).
+const LISTE_APPAREIL_MANOEUVRE = ["Interrupteur-sectionneur", "Interrupteur", "Sectionneur"];
+const LISTE_EXECUTION_DISJ_HTA = ["Disjoncteur fixe + sectionneur", "Disjoncteur débrochable"];
+const LISTE_POSITION_ORGANE = ["Aucun", "Amont", "Aval", "Amont et aval"];
+const CHAMP_APPAREIL_MANOEUVRE = { key: "appareilManoeuvre", label: "Appareil de manœuvre (schéma)", options: LISTE_APPAREIL_MANOEUVRE };
+const CHAMP_SECT_TERRE = { key: "sectionneursTerre", label: "Sectionneur(s) de terre (vide = selon type)", options: LISTE_POSITION_ORGANE };
 const CHAMPS_CELLULE_HTA = [
   { key: "tensionAssignee", label: "Tension assignée (kV)", options: ["7,2", "12", "17,5", "24", "36"] },
   { key: "courantAssigne", label: "Courant assigné (A)", options: ["200", "400", "630", "800", "1250"] },
@@ -3945,7 +3951,7 @@ function buildInterrupteurHTASchema({ avecRelais = false } = {}) {
   return {
     identification: [
       { key: "repere", label: "Repère / Nom de l'équipement" }, { key: "marque", label: "Marque", options: LISTE_MARQUE_CELLULE_HTA }, { key: "modele", label: "Modèle", options: LISTE_MODELE_CELLULE_HTA_OPTIONS },
-      { key: "typeCellule", label: "Type de cellule", options: typeCelluleParGamme("Interrupteur HTA") }, { key: "numeroSerie", label: "Numéro de série" }, ...CHAMPS_CELLULE_HTA,
+      { key: "typeCellule", label: "Type de cellule", options: typeCelluleParGamme("Interrupteur HTA") }, { key: "numeroSerie", label: "Numéro de série" }, ...CHAMPS_CELLULE_HTA, CHAMP_APPAREIL_MANOEUVRE, CHAMP_SECT_TERRE,
       { key: "presenceRelais", label: "Présence d'un relais de protection", options: ["Non", "Oui"] },
       ...(avecRelais ? [
         { key: "marqueRelais", label: "Marque du relais de protection", options: LISTE_MARQUE_RELAIS_HTA }, { key: "referenceRelais", label: "Référence du relais", options: LISTE_REFERENCE_RELAIS_HTA_OPTIONS }, { key: "numeroSerieRelais", label: "Numéro de série (relais)" },
@@ -3981,7 +3987,7 @@ function buildInterrupteurFusibleHTASchema({ avecRelais = false } = {}) {
   return {
     identification: [
       { key: "repere", label: "Repère / Nom de l'équipement" }, { key: "marque", label: "Marque", options: LISTE_MARQUE_CELLULE_HTA }, { key: "modele", label: "Modèle", options: LISTE_MODELE_CELLULE_HTA_OPTIONS },
-      { key: "typeCellule", label: "Type de cellule", options: typeCelluleParGamme("Interrupteur Fusible HTA") }, { key: "numeroSerie", label: "Numéro de série" }, ...CHAMPS_CELLULE_HTA,
+      { key: "typeCellule", label: "Type de cellule", options: typeCelluleParGamme("Interrupteur Fusible HTA") }, { key: "numeroSerie", label: "Numéro de série" }, ...CHAMPS_CELLULE_HTA, CHAMP_APPAREIL_MANOEUVRE, CHAMP_SECT_TERRE,
       { key: "presenceRelais", label: "Présence d'un relais de protection", options: ["Non", "Oui"] },
       ...(avecRelais ? [
         { key: "marqueRelais", label: "Marque du relais de protection", options: LISTE_MARQUE_RELAIS_HTA }, { key: "referenceRelais", label: "Référence du relais", options: LISTE_REFERENCE_RELAIS_HTA_OPTIONS }, { key: "numeroSerieRelais", label: "Numéro de série (relais)" },
@@ -4045,6 +4051,7 @@ const SCHEMAS = {
       { key: "marque", label: "Marque", options: LISTE_MARQUE_CELLULE_HTA },
       { key: "modele", label: "Modèle", options: LISTE_MODELE_CELLULE_HTA_OPTIONS },
       { key: "typeCellule", label: "Type de cellule", options: typeCelluleParGamme("Disjoncteur HTA") }, { key: "numeroSerie", label: "Numéro de série" }, ...CHAMPS_CELLULE_HTA,
+      { key: "executionDisjoncteur", label: "Exécution du disjoncteur (vide = selon type)", options: LISTE_EXECUTION_DISJ_HTA }, { key: "sectionneursCellule", label: "Sectionneur(s) (vide = selon type)", options: LISTE_POSITION_ORGANE }, CHAMP_SECT_TERRE,
       { key: "referenceDisjoncteur", label: "Référence du disjoncteur", options: referencesDisjoncteurHTA }, { key: "numeroSerieDisjoncteur", label: "Numéro de série (disjoncteur)" },
       { key: "marqueRelais", label: "Marque du relais de protection", options: LISTE_MARQUE_RELAIS_HTA }, { key: "referenceRelais", label: "Référence du relais", options: LISTE_REFERENCE_RELAIS_HTA_OPTIONS }, { key: "numeroSerieRelais", label: "Numéro de série (relais)" },
       { key: "rapportTPProtection", label: "Rapport TP de protection", options: LISTE_RAPPORT_TP },
@@ -4181,7 +4188,7 @@ const SCHEMAS = {
       { key: "marque", label: "Marque", options: LISTE_MARQUE_APPAREILLAGE_BT },
       { key: "modele", label: "Modèle", options: LISTE_MODELE_BT_OPTIONS },
       { key: "nomTGBT", label: "Nom du TGBT" }, { key: "utilisation", label: "Utilisation" },
-      { key: "fonctionBT", label: "Fonction", options: LISTE_FONCTION_APPAREIL_BT }, { key: "sectionsCouplees", label: "Sections couplées (couplage) — ex. A / B" },
+      { key: "fonctionBT", label: "Fonction", options: LISTE_FONCTION_APPAREIL_BT }, { key: "sectionsCouplees", label: "Sections couplées (couplage) — ex. A / B" }, CHAMP_APPAREIL_MANOEUVRE,
       { key: "typeDisjoncteur", label: "Type", options: LISTE_TYPE_DISJONCTEUR_BT_OPTIONS }, { key: "numeroSerieDisjoncteur", label: "Numéro de série" },
       { key: "intensiteNominale", label: "Intensité nominale (A)", numeric: true }, { key: "debrochable", label: "Débrochable", options: OUI_NON_LIST },
       { key: "anneeMiseEnService", label: "Année de mise en service", numeric: true },
@@ -15562,7 +15569,9 @@ function topologieCellule(eq) {
     if (C === "QMB") sortie = "barres";
   } else if (eq.type === "Disjoncteur HTA") {
     const double = ["DM2", "D2S"].includes(C);
-    org = [/DM1-W|DM1-Z/.test(C) ? "DISJ_DEB" : "SECT", ...(/DM1-W|DM1-Z/.test(C) ? [] : ["DISJ"]), "TC", ...(avecTore ? ["TORE"] : []), ...(double ? ["SECT"] : []), "ST"];
+    const deb = id.executionDisjoncteur ? /débrochable/i.test(id.executionDisjoncteur) : /DM1-W|DM1-Z/.test(C);
+    const sect = id.sectionneursCellule || (double ? "Amont et aval" : deb ? "Aucun" : "Amont");
+    org = [...(/amont/i.test(sect) ? ["SECT"] : []), deb ? "DISJ_DEB" : "DISJ", "TC", ...(avecTore ? ["TORE"] : []), ...(/aval/i.test(sect) ? ["SECT"] : []), "ST"];
     if (["DM2", "D2G", "PGB", "PGC + LR"].includes(C)) sortie = "barres";
   } else if (eq.type === "Contacteur HTA") {
     org = ["CONT", "FUS", ...(avecTC ? ["TC"] : []), ...(avecTore ? ["TORE"] : []), "ST"];
@@ -15572,6 +15581,20 @@ function topologieCellule(eq) {
   }
   if (id.sortieCellule) sortie = /barres/i.test(id.sortieCellule) ? "barres" : "cable";
   if (sortie === "comptage" && !org.includes("TT")) org.push("TT");
+  // Nature de l'appareil (interrupteur-sectionneur par défaut sur les interrupteurs HTA)
+  if (eq.type === "Interrupteur HTA" || eq.type === "Interrupteur Fusible HTA") {
+    const app = id.appareilManoeuvre || "Interrupteur-sectionneur";
+    const k = app === "Sectionneur" ? "SECT" : app === "Interrupteur" ? "INT" : "ISECT";
+    org = org.map((o) => (o === "INT" || (o === "SECT" && id.appareilManoeuvre) ? k : o));
+  }
+  // Sectionneurs de terre : amont = juste avant l'appareil principal (après un éventuel sectionneur amont), aval = en bout de cellule
+  const principaux = ["DISJ", "DISJ_DEB", "ISECT", "INT", "CONT"];
+  const terre = id.sectionneursTerre || (eq.type === "Disjoncteur HTA" && ["DM2", "D2S"].includes(C) ? "Amont et aval" : "");
+  if (terre && org.some((o) => principaux.includes(o) || o === "SECT")) {
+    org = org.filter((o) => o !== "ST");
+    if (/aval/i.test(terre)) { const iTT = org.indexOf("TT"); if (iTT >= 0) org.splice(iTT, 0, "ST"); else org.push("ST"); }
+    if (/amont/i.test(terre)) { let iP = org.findIndex((o) => principaux.includes(o)); if (iP < 0) iP = 0; org.splice(iP, 0, "ST_AM"); }
+  }
   return { code, org, sortie, note };
 }
 // Valeurs affichées à côté de chaque organe (courtes en vue « poste », complètes sur la fiche).
@@ -15593,7 +15616,7 @@ function valeursCellule(eq) {
     relais, fonctions,
   };
 }
-const NOM_ORGANE_CELLULE = { INT: "interrupteur", SECT: "sectionneur", DISJ: "disjoncteur", DISJ_DEB: "disjoncteur débrochable", CONT: "contacteur", FUS: "fusibles", TC: "TC", TORE: "tore homopolaire", ST: "sect. de terre", TT: "TT" };
+const NOM_ORGANE_CELLULE = { INT: "interrupteur", ISECT: "interr.-sectionneur", ST_AM: "sect. de terre amont", SECT: "sectionneur", DISJ: "disjoncteur", DISJ_DEB: "disjoncteur débrochable", CONT: "contacteur", FUS: "fusibles", TC: "TC", TORE: "tore homopolaire", ST: "sect. de terre", TT: "TT" };
 // Dessine une cellule verticale à partir de (x, y) ; renvoie l'ordonnée basse. o.complet : libellés complets (fiche) ou valeurs seules (poste).
 function dessinerCelluleHTA(ctx, x, y, eq, o = {}) {
   const topo = topologieCellule(eq), val = valeursCellule(eq);
@@ -15606,10 +15629,11 @@ function dessinerCelluleHTA(ctx, x, y, eq, o = {}) {
     let s = String(t); while (s.length > 1 && ctx.measureText(s).width > lw) s = s.slice(0, -2) + "…";
     ctx.fillText(s, x + 15, yy); ctx.restore();
   };
-  const texteOrgane = (k, v) => (o.complet ? [NOM_ORGANE_CELLULE[k], v].filter(Boolean).join(" ") : v || (k === "ST" ? "" : NOM_ORGANE_CELLULE[k]));
+  const texteOrgane = (k, v) => (o.complet ? [NOM_ORGANE_CELLULE[k], v].filter(Boolean).join(" ") : v || (k === "ST" || k === "ST_AM" ? "" : NOM_ORGANE_CELLULE[k]));
   const coupure = (k, yy) => { // contact fixe en haut avec repère, lame articulée en bas (ouverte)
     ligne([[x, yy], [x, yy + 8]]);
     if (k === "INT") { ctx.save(); ctx.strokeStyle = T; ctx.lineWidth = 1.6; ctx.beginPath(); ctx.arc(x, yy + 11, 3, 0, 2 * Math.PI); ctx.stroke(); ctx.restore(); }
+    else if (k === "ISECT") { ligne([[x - 5, yy + 8], [x + 5, yy + 8]], T, 1.8); ctx.save(); ctx.strokeStyle = T; ctx.lineWidth = 1.6; ctx.beginPath(); ctx.arc(x, yy + 12, 3, 0, 2 * Math.PI); ctx.stroke(); ctx.restore(); }
     else if (k === "DISJ" || k === "DISJ_DEB") { ligne([[x - 4, yy + 4], [x + 4, yy + 12]], T, 1.6); ligne([[x + 4, yy + 4], [x - 4, yy + 12]], T, 1.6); }
     else if (k === "SECT") ligne([[x - 5, yy + 8], [x + 5, yy + 8]], T, 1.8);
     else if (k === "CONT") { ctx.save(); ctx.strokeStyle = T; ctx.lineWidth = 1.6; ctx.beginPath(); ctx.arc(x, yy + 11, 3.2, Math.PI / 2, (3 * Math.PI) / 2); ctx.stroke(); ctx.restore(); }
@@ -15618,16 +15642,18 @@ function dessinerCelluleHTA(ctx, x, y, eq, o = {}) {
   };
   let yy = y;
   const pos = {};
+  const nbSect = topo.org.filter((k) => k === "SECT").length;
+  let iSect = 0;
   topo.org.forEach((k) => {
     pos[k] = yy;
-    if (["INT", "SECT", "DISJ", "DISJ_DEB", "CONT"].includes(k)) { coupure(k, yy); lib(texteOrgane(k, k.startsWith("DISJ") ? val.DISJ : ""), yy + 22); yy += 44; }
+    if (["INT", "ISECT", "SECT", "DISJ", "DISJ_DEB", "CONT"].includes(k)) { coupure(k, yy); lib(k === "SECT" && nbSect > 1 && o.complet ? (iSect++ === 0 ? "sectionneur amont" : "sectionneur aval") : texteOrgane(k, k.startsWith("DISJ") ? val.DISJ : ""), yy + 22); yy += 44; }
     else if (k === "FUS") { ctx.save(); ctx.strokeStyle = T; ctx.lineWidth = 1.6; ctx.fillStyle = "#fff"; ctx.fillRect(x - 6, yy + 6, 12, 26); ctx.strokeRect(x - 6, yy + 6, 12, 26); ctx.fillStyle = T; ctx.fillRect(x - 6, yy + 6, 12, 5); ctx.restore(); ligne([[x, yy], [x, yy + 6]]); ligne([[x, yy + 6], [x, yy + 32]], T, 1); ligne([[x, yy + 32], [x, yy + 38]]); lib(texteOrgane("FUS", val.FUS), yy + 19, val.FUS ? "#5B6B7D" : GRIS); yy += 38; }
     else if (k === "TC" || k === "TORE") { ligne([[x, yy], [x, yy + 30]]); ctx.save(); ctx.strokeStyle = (k === "TC" ? val.TC : val.TORE) ? T : GRIS; ctx.lineWidth = 1.8; ctx.beginPath(); ctx.arc(x, yy + 15, k === "TORE" ? 10 : 8, 0, 2 * Math.PI); ctx.stroke(); ctx.restore(); lib(texteOrgane(k, k === "TC" ? val.TC : val.TORE), yy + 15, (k === "TC" ? val.TC : val.TORE) ? "#5B6B7D" : GRIS); yy += 30; }
-    else if (k === "ST") { // sectionneur de terre à gauche de l'axe
+    else if (k === "ST" || k === "ST_AM") { // sectionneur de terre à gauche de l'axe
       ligne([[x, yy], [x, yy + 46]]); ligne([[x, yy + 8], [x - 26, yy + 8], [x - 26, yy + 13]]);
       ligne([[x - 26, yy + 36], [x - 36, yy + 15]]); ligne([[x - 26, yy + 36], [x - 26, yy + 40]]);
       [[10, 40], [7, 44], [4, 48]].forEach(([d, h]) => ligne([[x - 26 - d, yy + h], [x - 26 + d, yy + h]], T, 1.6));
-      if (o.complet) lib("sect. de terre", yy + 26);
+      if (o.complet) lib(k === "ST_AM" ? "sect. de terre amont" : topo.org.includes("ST_AM") ? "sect. de terre aval" : "sect. de terre", yy + 26);
       yy += 46;
     } else if (k === "TT") { ligne([[x, yy], [x, yy + 6]]); ctx.save(); ctx.strokeStyle = val.TT ? T : GRIS; ctx.lineWidth = 1.8; [yy + 15, yy + 27].forEach((cy) => { ctx.beginPath(); ctx.arc(x, cy, 9, 0, 2 * Math.PI); ctx.stroke(); }); ctx.restore(); lib(texteOrgane("TT", val.TT), yy + 21, val.TT ? "#5B6B7D" : GRIS); yy += 36; if (topo.sortie !== "comptage") { ligne([[x, yy], [x, yy + 6]]); yy += 6; } }
   });
@@ -15849,6 +15875,8 @@ function genererSchemaAppareilBT(eq) {
     const id = eq.identification || {};
     const disj = eq.type === "Disjoncteur BT";
     const deb = id.debrochable === "OUI" || id.debrochable === "Oui";
+    const natBT = id.appareilManoeuvre || "Interrupteur-sectionneur";
+    const nomBT = disj ? "disjoncteur" : natBT.toLowerCase();
     // Réglages saisis : une ligne par réglage renseigné, libellés repris du schéma de la fiche.
     const lignesReglage = [];
     if (disj) {
@@ -15872,10 +15900,10 @@ function genererSchemaAppareilBT(eq) {
     // appareil : contact fixe en haut (croix / rond), lame articulée en bas, fermé ; repères si débrochable
     const appareilV = (xa, y0) => {
       if (disj) { ligne([[xa - 5, y0 + 3], [xa + 5, y0 + 13]], undefined, 1.8); ligne([[xa + 5, y0 + 3], [xa - 5, y0 + 13]], undefined, 1.8); }
-      else { ctx.save(); ctx.strokeStyle = SCHEMA_TRAIT; ctx.lineWidth = 1.6; ctx.beginPath(); ctx.arc(xa, y0 + 7, 3.5, 0, 2 * Math.PI); ctx.stroke(); ctx.restore(); }
+      else { if (natBT !== "Interrupteur") ligne([[xa - 5, y0 + 8], [xa + 5, y0 + 8]], undefined, 1.8); if (natBT !== "Sectionneur") { ctx.save(); ctx.strokeStyle = SCHEMA_TRAIT; ctx.lineWidth = 1.6; ctx.beginPath(); ctx.arc(xa, y0 + (natBT === "Interrupteur" ? 7 : 12), 3.5, 0, 2 * Math.PI); ctx.stroke(); ctx.restore(); } }
       ligne([[xa, y0], [xa, y0 + 8]]); ligne([[xa, y0 + 38], [xa - 12, y0 + 12]]); ligne([[xa, y0 + 38], [xa, y0 + 54]]);
       if (deb) { ligne([[xa - 7, y0 - 6], [xa, y0 - 1], [xa + 7, y0 - 6]], undefined, 1.4); ligne([[xa - 7, y0 + 60], [xa, y0 + 55], [xa + 7, y0 + 60]], undefined, 1.4); }
-      texte(disj ? "disjoncteur" : "interrupteur", xa - 20, y0 + 26, { align: "right", taille: 10 });
+      texte(disj ? "disjoncteur" : natBT === "Interrupteur-sectionneur" ? "interr.-sect." : nomBT, xa - 20, y0 + 26, { align: "right", taille: 10 });
     };
     if (fonction === "Arrivée") {
       ctx.save(); ctx.strokeStyle = SCHEMA_TRAIT; ctx.lineWidth = 2; [78, 96].forEach((cy) => { ctx.beginPath(); ctx.arc(x, cy, 12, 0, 2 * Math.PI); ctx.stroke(); }); ctx.restore();
@@ -15889,10 +15917,10 @@ function genererSchemaAppareilBT(eq) {
       texte(`${tgbt} — ${sec[0] || "A"}`, 16, 88, { taille: 10, max: 150 }); texte(`${sec[1] || "B"}`, 164, 88, { align: "right", taille: 10 });
       // appareil horizontal entre les deux sections : contact fixe à gauche (repère), lame articulée à droite
       ligne([[60, 101], [60, 140], [72, 140]]);
-      if (disj) { ligne([[72, 135], [82, 145]], undefined, 1.8); ligne([[82, 135], [72, 145]], undefined, 1.8); } else { ctx.save(); ctx.strokeStyle = SCHEMA_TRAIT; ctx.lineWidth = 1.6; ctx.beginPath(); ctx.arc(77, 140, 3.5, 0, 2 * Math.PI); ctx.stroke(); ctx.restore(); }
+      if (disj) { ligne([[72, 135], [82, 145]], undefined, 1.8); ligne([[82, 135], [72, 145]], undefined, 1.8); } else { if (natBT !== "Interrupteur") ligne([[72, 135], [72, 145]], undefined, 1.8); if (natBT !== "Sectionneur") { ctx.save(); ctx.strokeStyle = SCHEMA_TRAIT; ctx.lineWidth = 1.6; ctx.beginPath(); ctx.arc(77.5, 140, 3.5, 0, 2 * Math.PI); ctx.stroke(); ctx.restore(); } }
       ligne([[104, 140], [83, 129]]); ligne([[104, 140], [120, 140], [120, 101]]); // lame articulée à droite, contact fixe (repère) à gauche
       if (deb) { ligne([[66, 133], [71, 140], [66, 147]], undefined, 1.4); ligne([[114, 133], [109, 140], [114, 147]], undefined, 1.4); }
-      texte(disj ? "disjoncteur de couplage" : "interrupteur de couplage", x, 178, { align: "center", taille: 10 });
+      texte(`${natBT === "Interrupteur-sectionneur" && !disj ? "interr.-sectionneur" : nomBT} de couplage`, x, 178, { align: "center", taille: 10 });
       texte(`section ${sec[0] || "A"} ↔ section ${sec[1] || "B"}`, x, 196, { align: "center", taille: 10, c: "#3E4A5C" });
     } else {
       ctx.fillStyle = SCHEMA_MARINE; ctx.fillRect(30, 66, 130, 5); texte(tgbt, 30, 61, { taille: 10, max: 130 });
@@ -15910,7 +15938,7 @@ function genererSchemaAppareilBT(eq) {
       if (lignesReglage.length) lignesReglage.forEach((l, i) => texte(l, xB + 10, yB + 38 + i * 16, { taille: 10, c: "#3E4A5C", max: wB - 20 }));
       else texte("Réglages non renseignés", xB + 10, yB + 38, { taille: 10, c: "#B0B8C1" });
     } else {
-      texte("Interrupteur-sectionneur : sans déclencheur", 190, 120, { taille: 10.5, c: "#3E4A5C", max: W - 206 });
+      texte(`${natBT} : sans déclencheur`, 190, 120, { taille: 10.5, c: "#3E4A5C", max: W - 206 });
       texte("(pas de protection propre).", 190, 136, { taille: 10.5, c: "#3E4A5C", max: W - 206 });
     }
     return rognerSchema(canvas, Math.max(246, 90 + 40 + Math.max(1, lignesReglage.length) * 16 + 12));
