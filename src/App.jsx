@@ -15581,19 +15581,26 @@ function topologieCellule(eq) {
   }
   if (id.sortieCellule) sortie = /barres/i.test(id.sortieCellule) ? "barres" : "cable";
   if (sortie === "comptage" && !org.includes("TT")) org.push("TT");
+  // Liste « Manœuvre » des contrôles (priorité : champ d'identification > liste Manœuvre > type de cellule).
+  // « Interrupteur » seul n'est pas décisif : c'est la ligne pré-remplie à la création de l'équipement.
+  const manoeuvres = ((eq.controles && eq.controles.manoeuvre_dynamique) || []).map((m) => String(m.label || "").trim()).filter(Boolean);
+  const listeISect = manoeuvres.includes("Interrupteur-sectionneur");
+  const listeSect = manoeuvres.includes("Sectionneur") && !manoeuvres.includes("Interrupteur") && !listeISect;
+  const nbTerreListe = manoeuvres.filter((l) => l === "Sectionneur de terre").length;
+  if (eq.type === "Disjoncteur HTA" && listeISect) org = org.map((o) => (o === "SECT" ? "ISECT" : o));
   // Nature de l'appareil (interrupteur-sectionneur par défaut sur les interrupteurs HTA)
   if (eq.type === "Interrupteur HTA" || eq.type === "Interrupteur Fusible HTA") {
-    const app = id.appareilManoeuvre || "Interrupteur-sectionneur";
+    const app = id.appareilManoeuvre || (listeISect ? "Interrupteur-sectionneur" : listeSect ? "Sectionneur" : "Interrupteur-sectionneur");
     const k = app === "Sectionneur" ? "SECT" : app === "Interrupteur" ? "INT" : "ISECT";
-    org = org.map((o) => (o === "INT" || (o === "SECT" && id.appareilManoeuvre) ? k : o));
+    org = org.map((o) => (o === "INT" || (o === "SECT" && (id.appareilManoeuvre || listeISect || listeSect)) ? k : o));
   }
   // Sectionneurs de terre : amont = juste avant l'appareil principal (après un éventuel sectionneur amont), aval = en bout de cellule
   const principaux = ["DISJ", "DISJ_DEB", "ISECT", "INT", "CONT"];
-  const terre = id.sectionneursTerre || (eq.type === "Disjoncteur HTA" && ["DM2", "D2S"].includes(C) ? "Amont et aval" : "");
+  const terre = id.sectionneursTerre || (nbTerreListe >= 2 ? "Amont et aval" : nbTerreListe === 1 ? "Aval" : eq.type === "Disjoncteur HTA" && ["DM2", "D2S"].includes(C) ? "Amont et aval" : "");
   if (terre && org.some((o) => principaux.includes(o) || o === "SECT")) {
     org = org.filter((o) => o !== "ST");
     if (/aval/i.test(terre)) { const iTT = org.indexOf("TT"); if (iTT >= 0) org.splice(iTT, 0, "ST"); else org.push("ST"); }
-    if (/amont/i.test(terre)) { let iP = org.findIndex((o) => principaux.includes(o)); if (iP < 0) iP = 0; org.splice(iP, 0, "ST_AM"); }
+    if (/amont/i.test(terre)) { let iP = org.findIndex((o) => o === "DISJ" || o === "DISJ_DEB"); if (iP < 0) iP = org.findIndex((o) => principaux.includes(o)); if (iP < 0) iP = 0; org.splice(iP, 0, "ST_AM"); }
   }
   return { code, org, sortie, note };
 }
@@ -15642,11 +15649,11 @@ function dessinerCelluleHTA(ctx, x, y, eq, o = {}) {
   };
   let yy = y;
   const pos = {};
-  const nbSect = topo.org.filter((k) => k === "SECT").length;
-  let iSect = 0;
+  const nbSect = { SECT: topo.org.filter((k) => k === "SECT").length, ISECT: topo.org.filter((k) => k === "ISECT").length };
+  const iSect = { SECT: 0, ISECT: 0 };
   topo.org.forEach((k) => {
     pos[k] = yy;
-    if (["INT", "ISECT", "SECT", "DISJ", "DISJ_DEB", "CONT"].includes(k)) { coupure(k, yy); lib(k === "SECT" && nbSect > 1 && o.complet ? (iSect++ === 0 ? "sectionneur amont" : "sectionneur aval") : texteOrgane(k, k.startsWith("DISJ") ? val.DISJ : ""), yy + 22); yy += 44; }
+    if (["INT", "ISECT", "SECT", "DISJ", "DISJ_DEB", "CONT"].includes(k)) { coupure(k, yy); lib(nbSect[k] > 1 && o.complet ? NOM_ORGANE_CELLULE[k] + (iSect[k]++ === 0 ? " amont" : " aval") : texteOrgane(k, k.startsWith("DISJ") ? val.DISJ : ""), yy + 22); yy += 44; }
     else if (k === "FUS") { ctx.save(); ctx.strokeStyle = T; ctx.lineWidth = 1.6; ctx.fillStyle = "#fff"; ctx.fillRect(x - 6, yy + 6, 12, 26); ctx.strokeRect(x - 6, yy + 6, 12, 26); ctx.fillStyle = T; ctx.fillRect(x - 6, yy + 6, 12, 5); ctx.restore(); ligne([[x, yy], [x, yy + 6]]); ligne([[x, yy + 6], [x, yy + 32]], T, 1); ligne([[x, yy + 32], [x, yy + 38]]); lib(texteOrgane("FUS", val.FUS), yy + 19, val.FUS ? "#5B6B7D" : GRIS); yy += 38; }
     else if (k === "TC" || k === "TORE") { ligne([[x, yy], [x, yy + 30]]); ctx.save(); ctx.strokeStyle = (k === "TC" ? val.TC : val.TORE) ? T : GRIS; ctx.lineWidth = 1.8; ctx.beginPath(); ctx.arc(x, yy + 15, k === "TORE" ? 10 : 8, 0, 2 * Math.PI); ctx.stroke(); ctx.restore(); lib(texteOrgane(k, k === "TC" ? val.TC : val.TORE), yy + 15, (k === "TC" ? val.TC : val.TORE) ? "#5B6B7D" : GRIS); yy += 30; }
     else if (k === "ST" || k === "ST_AM") { // sectionneur de terre à gauche de l'axe
