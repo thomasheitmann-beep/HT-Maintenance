@@ -1261,6 +1261,42 @@ const LISTE_PROTECTION_BATTERIE = ["Disjoncteur", "Interrupteur-sectionneur", "I
 const LISTE_EMPLACEMENT_PROTECTION_BATTERIE = ["Interne à l'onduleur", "Dans l'armoire batteries", "Coffret / armoire de protection séparé"];
 const LISTE_TAILLE_FUSIBLE_BATTERIE = ["10×38", "14×51", "22×58", "NH000", "NH00", "NH1", "NH2", "NH3", "Autre"];
 const avecFusiblesBatterie = (f) => /fusible/i.test(String((f && f.protectionType) || ""));
+// Raccordement de la batterie : + / − (2 fils), point milieu relié au neutre (3 fils), ou deux demi-branches séparées
+// (4 fils, un chargeur / booster par demi-branche — ex. Socomec Masterys). Valeur absente = + / −.
+const LISTE_CONFIG_BATTERIE = ["+ / − (2 fils)", "+ / N / − — point milieu (3 fils)", "Deux demi-branches séparées (4 fils, un chargeur / booster par demi-branche)"];
+const CHAMP_CONFIG_BATTERIE = { key: "configurationBatterie", label: "Raccordement de la batterie", options: LISTE_CONFIG_BATTERIE };
+function configBatterie(eq) {
+  const v = String(eq?.controles?.batterie_id?.batterie_caracteristiques?.fields?.configurationBatterie || "");
+  return /demi-branches/i.test(v) ? "demi" : /point milieu/i.test(v) ? "milieu" : "bipolaire";
+}
+const ITEMS_BATTERIE_MILIEU = ["tension_plus_milieu", "tension_milieu_moins", "milieu_terre"];
+const ITEMS_BATTERIE_DEMI = ["floating_demi_plus", "floating_demi_moins", "chargeur_demi_plus", "chargeur_demi_moins"];
+function itemsMesuresConfigBatterie() {
+  return [
+    C("tension_plus_milieu", "Tension + / point milieu", [F("v", "Valeur", "V")]),
+    C("tension_milieu_moins", "Tension point milieu / −", [F("v", "Valeur", "V")]),
+    C("milieu_terre", "Point milieu / terre", [F("v", "Valeur", "V")]),
+    C("floating_demi_plus", "Tension de floating — demi-branche +", [F("v", "Valeur", "V")]),
+    C("floating_demi_moins", "Tension de floating — demi-branche −", [F("v", "Valeur", "V")]),
+    C("chargeur_demi_plus", "Chargeur / booster de la demi-branche + (essai, alarme)"),
+    C("chargeur_demi_moins", "Chargeur / booster de la demi-branche − (essai, alarme)"),
+  ];
+}
+// Schéma adapté au raccordement : seuls les relevés correspondants sont proposés (et imprimés).
+function filtrerConfigBatterie(eq, schema) {
+  if (!schema || !schema.sections) return schema;
+  const cfg = configBatterie(eq);
+  const masquer = cfg === "milieu" ? ITEMS_BATTERIE_DEMI : cfg === "demi" ? ITEMS_BATTERIE_MILIEU : [...ITEMS_BATTERIE_MILIEU, ...ITEMS_BATTERIE_DEMI];
+  return { ...schema, sections: schema.sections.map((sec) => {
+    if (!sec.items || !sec.items.some((it) => masquer.includes(it.key) || it.key === "tension_floating" || it.key === "mesures_batterie")) return sec;
+    return { ...sec, items: sec.items.filter((it) => !masquer.includes(it.key)).map((it) => {
+      if (it.key === "tension_floating" && cfg === "demi") return { ...it, label: "Tension de floating totale (deux demi-branches en série, si accessible — facultatif)" };
+      if (it.key === "mesures_batterie" && cfg !== "bipolaire") // onduleur simplifié : relevé par moitié dans le même contrôle
+        return { ...it, fields: [...it.fields, ...(cfg === "demi" ? [F("floatingDemiPlus", "Floating demi-branche +", "V"), F("floatingDemiMoins", "Floating demi-branche −", "V")] : [F("tensionPlusMilieu", "+ / point milieu", "V"), F("tensionMilieuMoins", "Point milieu / −", "V")])] };
+      return it;
+    }) };
+  }) };
+}
 const ITEM_INSTALLATION_BATTERIE = { ...I("batterie_installation", "Installation et protection de la batterie", [
   { key: "emplacement", label: "Emplacement des batteries", options: LISTE_EMPLACEMENT_BATTERIE },
   { key: "nombreArmoires", label: "Nombre d'armoires / racks", visibleSi: (f) => /armoire|chantier|module/i.test(String(f.emplacement || "")) },
@@ -3247,7 +3283,7 @@ function buildOnduleurSchema({ normalMono = false, secoursMono = false, utilisat
           { key: "dureeReferenceW", label: "… pendant (min)", options: LISTE_DUREE_REFERENCE_W },
           { key: "tensionFinElement", label: "… jusqu'à (V/élt)", options: LISTE_TENSION_FIN_ELEMENT },
           { key: "regimeC", label: "Régime (autonomie nominale)", options: LISTE_REGIME_C_BATTERIE },
-          { key: "nombreBranches", label: "Nombre de branches", options: LISTE_NB_BRANCHES }, { key: "nombreBlocsParBranche", label: "Nombre de blocs par branche" },
+          { key: "nombreBranches", label: "Nombre de branches", options: LISTE_NB_BRANCHES }, { key: "nombreBlocsParBranche", label: "Nombre de blocs par branche" }, CHAMP_CONFIG_BATTERIE,
           { key: "anneeMiseEnService", label: "Année de mise en service" }, { key: "dureeVie", label: "Durée de vie prévue (ans)", options: LISTE_DUREE_VIE_BATTERIE },
         ]),
         ITEM_INSTALLATION_BATTERIE, ITEM_REMPLACEMENT_BATTERIE,
@@ -3334,6 +3370,7 @@ function buildOnduleurSchema({ normalMono = false, secoursMono = false, utilisat
         C("tension_egalisation", "Tension d'égalisation", [F("v", "Valeur", "V")]),
         C("pole_plus_terre", "Pôle \"+\" batterie / terre", [F("v", "Valeur", "V")]),
         C("pole_moins_terre", "Pôle \"-\" batterie / terre", [F("v", "Valeur", "V")]),
+        ...itemsMesuresConfigBatterie(),
         { ...C("ondulation_batterie", "Ondulation alternative aux bornes batterie (facultatif)", [F("mv", "Valeur efficace", "mV")]), optionnel: true },
       ]},
       { key: "defauts_apparence", title: "Défauts d'apparence", items: [
@@ -3388,7 +3425,7 @@ function buildRedresseurSchema({ reseauMono = false, reseau2Mono = false, double
           { key: "dureeReferenceW", label: "… pendant (min)", options: LISTE_DUREE_REFERENCE_W },
           { key: "tensionFinElement", label: "… jusqu'à (V/élt)", options: LISTE_TENSION_FIN_ELEMENT },
           { key: "regimeC", label: "Régime (autonomie nominale)", options: LISTE_REGIME_C_BATTERIE },
-          { key: "nombreBranches", label: "Nombre de branches", options: LISTE_NB_BRANCHES }, { key: "nombreBlocsParBranche", label: "Nombre de blocs par branche" },
+          { key: "nombreBranches", label: "Nombre de branches", options: LISTE_NB_BRANCHES }, { key: "nombreBlocsParBranche", label: "Nombre de blocs par branche" }, CHAMP_CONFIG_BATTERIE,
           { key: "anneeMiseEnService", label: "Année de mise en service" }, { key: "dureeVie", label: "Durée de vie prévue (ans)", options: LISTE_DUREE_VIE_BATTERIE },
         ]),
         ITEM_INSTALLATION_BATTERIE, ITEM_REMPLACEMENT_BATTERIE,
@@ -3448,6 +3485,7 @@ function buildRedresseurSchema({ reseauMono = false, reseau2Mono = false, double
         C("tension_egalisation", "Tension d'égalisation", [F("v", "Valeur", "V")]),
         C("pole_plus_terre", "Pôle \"+\" batterie / terre", [F("v", "Valeur", "V")]),
         C("pole_moins_terre", "Pôle \"-\" batterie / terre", [F("v", "Valeur", "V")]),
+        ...itemsMesuresConfigBatterie(),
         { ...C("ondulation_batterie", "Ondulation alternative aux bornes batterie (facultatif)", [F("mv", "Valeur efficace", "mV")]), optionnel: true },
       ]},
       { key: "defauts_apparence", title: "Défauts d'apparence", items: [
@@ -4417,7 +4455,7 @@ const SCHEMAS = {
           { key: "dureeReferenceW", label: "… pendant (min)", options: LISTE_DUREE_REFERENCE_W },
           { key: "tensionFinElement", label: "… jusqu'à (V/élt)", options: LISTE_TENSION_FIN_ELEMENT },
           { key: "regimeC", label: "Régime (autonomie nominale)", options: LISTE_REGIME_C_BATTERIE },
-          { key: "nombreBranches", label: "Nombre de branches", options: LISTE_NB_BRANCHES }, { key: "nombreBlocsParBranche", label: "Nombre de blocs par branche" },
+          { key: "nombreBranches", label: "Nombre de branches", options: LISTE_NB_BRANCHES }, { key: "nombreBlocsParBranche", label: "Nombre de blocs par branche" }, CHAMP_CONFIG_BATTERIE,
           { key: "anneeMiseEnService", label: "Année de mise en service" }, { key: "dureeVie", label: "Durée de vie prévue (ans)", options: LISTE_DUREE_VIE_BATTERIE },
         ]),
         ITEM_INSTALLATION_BATTERIE, ITEM_REMPLACEMENT_BATTERIE,
@@ -4624,7 +4662,8 @@ function getSchemaOrganesBT(eq, base) {
   if (!orgs.length) return base;
   return { ...base, sections: base.sections.map((sec) => (sec.key !== "manoeuvre_electrique" ? sec : { ...sec, items: orgs.map((o) => ({ ...C(cleFonctionnementOrgane(o), libelleFonctionnementOrgane(o)), organeId: o.id })) })) };
 }
-function getSchema(eq) {
+function getSchema(eq) { return filtrerConfigBatterie(eq, getSchemaAvantBatterie(eq)); }
+function getSchemaAvantBatterie(eq) {
   const base0 = getSchemaOrganesBT(eq, getSchemaOrganes(eq, getSchemaBase(eq)));
   // Relais TROPIC (rack de modules) : choix des modules installés, juste après la référence du relais.
   let base = base0;
@@ -7631,26 +7670,71 @@ function commandeDictee(texte) {
   return null;
 }
 // Écoute continue : chaque phrase reconnue est transmise à onPhrase ; relance automatique après un silence.
+// Safari arrête la reconnaissance après chaque silence ou erreur : la relance est différée (0,4 s) et coupée après
+// 5 arrêts rapides consécutifs sans résultat (évite une boucle démarrer / arrêter qui fige l'écran).
+const MESSAGES_ERREUR_DICTEE = {
+  "not-allowed": "Accès au micro refusé : autorisez le micro pour ce site (Safari > Réglages pour ce site, ou Réglages > Safari > Microphone sur iPhone).",
+  "service-not-allowed": "Dictée indisponible : activez « Dictée » dans Réglages > Général > Clavier (et Siri si nécessaire), puis rechargez la page.",
+  "audio-capture": "Micro indisponible : il est peut-être utilisé par une autre application (appel, enregistrement…).",
+  "network": "La reconnaissance vocale de Safari a besoin d'une connexion Internet : vérifiez le réseau puis relancez la dictée.",
+  "language-not-supported": "Le français n'est pas disponible pour la dictée sur cet appareil.",
+};
 function useDictee(onPhrase, { continu = true } = {}) {
   const [actif, setActif] = useState(false);
   const [erreur, setErreur] = useState("");
-  const recoRef = useRef(null), actifRef = useRef(false), cbRef = useRef(onPhrase);
+  const [statut, setStatut] = useState(""); // "ecoute" | "pause" | ""
+  const recoRef = useRef(null), actifRef = useRef(false), cbRef = useRef(onPhrase), timerRef = useRef(null), echecsRef = useRef(0), debutRef = useRef(0), entenduRef = useRef(false);
   cbRef.current = onPhrase;
-  const arreter = () => { actifRef.current = false; setActif(false); try { recoRef.current && recoRef.current.stop(); } catch (e) { /* déjà arrêtée */ } };
+  const annulerRelance = () => { if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; } };
+  const arreter = (message) => {
+    actifRef.current = false; annulerRelance(); setActif(false); setStatut("");
+    if (typeof message === "string") setErreur(message);
+    const r = recoRef.current; recoRef.current = null;
+    if (r) { r.onend = null; r.onresult = null; r.onerror = null; try { r.abort ? r.abort() : r.stop(); } catch (e) { /* déjà arrêtée */ } }
+  };
+  const lancerSession = () => {
+    const R = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!R || !actifRef.current) return;
+    const reco = new R();
+    reco.lang = "fr-FR"; reco.continuous = continu; reco.interimResults = false; reco.maxAlternatives = 1;
+    const traites = new Set(); // anti-doublon : Safari iOS peut renvoyer les mêmes résultats finaux
+    reco.onstart = () => { if (recoRef.current === reco) setStatut("ecoute"); };
+    reco.onresult = (e) => {
+      if (recoRef.current !== reco) return;
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        if (!e.results[i].isFinal || traites.has(i)) continue;
+        traites.add(i); entenduRef.current = true; echecsRef.current = 0;
+        try { cbRef.current(e.results[i][0].transcript); } catch (x) { /* une phrase mal interprétée ne bloque pas la dictée */ }
+      }
+    };
+    reco.onerror = (e) => {
+      if (recoRef.current !== reco) return;
+      const msg = MESSAGES_ERREUR_DICTEE[e.error];
+      if (msg) arreter(msg); // erreurs définitives : pas de relance
+      // « no-speech » / « aborted » : simple silence, la relance différée s'en charge
+    };
+    reco.onend = () => {
+      if (recoRef.current !== reco || !actifRef.current) return;
+      if (!continu) { arreter(); return; }
+      const rapide = Date.now() - debutRef.current < 1500 && !entenduRef.current;
+      echecsRef.current = rapide ? echecsRef.current + 1 : 0;
+      if (echecsRef.current >= 5) { arreter("La dictée s'arrête sans rien entendre : vérifiez le micro (autorisation, autre application) puis relancez."); return; }
+      setStatut("pause");
+      annulerRelance();
+      timerRef.current = setTimeout(() => { timerRef.current = null; if (actifRef.current) lancerSession(); }, 400);
+    };
+    recoRef.current = reco; debutRef.current = Date.now(); entenduRef.current = false;
+    try { reco.start(); } catch (e) { arreter("Impossible de démarrer la dictée : relancez-la dans quelques secondes."); }
+  };
   const demarrer = () => {
     const R = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!R) { setErreur("La dictée n'est pas disponible sur ce navigateur (utilisez Safari ou Chrome)."); return; }
-    setErreur("");
-    const reco = new R();
-    reco.lang = "fr-FR"; reco.continuous = continu; reco.interimResults = false; reco.maxAlternatives = 1;
-    reco.onresult = (e) => { for (let i = e.resultIndex; i < e.results.length; i++) if (e.results[i].isFinal) cbRef.current(e.results[i][0].transcript); };
-    reco.onerror = (e) => { if (e.error === "not-allowed" || e.error === "service-not-allowed") { setErreur("Accès au micro refusé : autorisez le micro pour ce site dans les réglages du navigateur."); arreter(); } };
-    reco.onend = () => { if (actifRef.current && continu) { try { reco.start(); } catch (e) { arreter(); } } else { actifRef.current = false; setActif(false); } };
-    recoRef.current = reco; actifRef.current = true; setActif(true);
-    try { reco.start(); } catch (e) { arreter(); }
+    if (actifRef.current) return;
+    setErreur(""); echecsRef.current = 0; actifRef.current = true; setActif(true); setStatut("pause");
+    lancerSession();
   };
-  useEffect(() => () => { actifRef.current = false; try { recoRef.current && recoRef.current.stop(); } catch (e) { /* rien */ } }, []);
-  return { actif, erreur, demarrer, arreter };
+  useEffect(() => () => { actifRef.current = false; annulerRelance(); const r = recoRef.current; recoRef.current = null; if (r) { r.onend = null; try { r.abort ? r.abort() : r.stop(); } catch (e) { /* rien */ } } }, []);
+  return { actif, erreur, statut, demarrer, arreter };
 }
 function IconeMicro({ taille = 14 }) {
   return <svg width={taille} height={taille} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5 11a7 7 0 0 0 14 0" /><path d="M12 18v3" /></svg>;
@@ -7854,10 +7938,35 @@ function verificationsCoherenceEquipement(eq, site) {
         if (parElt < mn || parElt > mx) push("mesures_batterie_ups", `tension de ${lib} ${fmtV(v)} V, soit ${fmtV(Math.round(parElt * 1000) / 1000)} V par élément (${fmtV(th.nbElementsTotal)} éléments) pour une plage usuelle de ${fmtV(mn)} – ${fmtV(mx)} V/élt${cdni ? " (Cd-Ni)" : " (plomb étanche)"} — valeur ou nombre de blocs à vérifier, à confirmer sur la notice`);
       });
     }
+    // Raccordement point milieu / demi-branches : nombre de blocs pair, équilibre des deux moitiés, plages par élément de chaque demi-branche.
+    const cfgB = configBatterie(eq);
+    if (cfgB !== "bipolaire") {
+      const nbBlocsB = numOf(eq.controles?.batterie_id?.batterie_caracteristiques?.fields?.nombreBlocsParBranche);
+      if (nbBlocsB && Math.round(nbBlocsB) % 2 === 1) push("mesures_batterie_ups", `${fmtV(nbBlocsB)} blocs par branche : nombre impair, incompatible avec un raccordement ${cfgB === "demi" ? "en deux demi-branches" : "à point milieu"} — vérifier le nombre de blocs ou le raccordement déclaré`);
+      const [kP, kM, lib] = cfgB === "demi" ? ["floating_demi_plus", "floating_demi_moins", "floatings des demi-branches"] : ["tension_plus_milieu", "tension_milieu_moins", "tensions + / point milieu et point milieu / −"];
+      const a = vOf(kP), b = vOf(kM);
+      if (a !== null && b !== null && a > 0 && b > 0) {
+        const ecart = Math.abs(a - b) / ((a + b) / 2) * 100;
+        if (ecart > 2) push("mesures_batterie_ups", `${lib} ${cfgB === "demi" ? "déséquilibrés" : "déséquilibrées"} : ${fmtV(a)} V (+) et ${fmtV(b)} V (−), soit ${fmtV(Math.round(ecart * 10) / 10)} % d'écart (au-delà de 2 %)${cfgB === "demi" ? " — contrôler le réglage du chargeur / booster de chaque demi-branche" : " — contrôler l'équilibrage de la batterie et le raccordement du point milieu"}`);
+      }
+      if (cfgB === "demi" && th && th.nbElementsTotal > 0) {
+        const [mn, mx, libF] = PLAGES.tension_floating;
+        [[a, "+"], [b, "−"]].forEach(([v, sg]) => {
+          if (v === null || v <= 0) return;
+          const parElt = v / (th.nbElementsTotal / 2);
+          if (parElt < mn || parElt > mx) push("mesures_batterie_ups", `demi-branche ${sg} : tension de ${libF} ${fmtV(v)} V, soit ${fmtV(Math.round(parElt * 1000) / 1000)} V par élément (${fmtV(th.nbElementsTotal / 2)} éléments) pour une plage usuelle de ${fmtV(mn)} – ${fmtV(mx)} V/élt — contrôler le chargeur / booster de cette demi-branche (la notice du fabricant fait foi)`);
+        });
+      }
+    }
     // Pôle à 0 V par rapport à la terre pendant que l'autre est à pleine tension : polarité reliée à la terre ou défaut d'isolement franc.
     const pPlus = vOf("pole_plus_terre"), pMoins = vOf("pole_moins_terre");
     const ref = vOf("tension_floating") ?? numOf(eq.controles?.mesures_continu?.tension_continue?.fields?.v) ?? (th ? th.nominale : null);
-    if (pPlus !== null && pMoins !== null && ref) {
+    if (cfgB === "milieu" && pPlus !== null && pMoins !== null && ref) {
+      // Point milieu relié au neutre : chaque pôle est attendu vers ±U/2 par rapport à la terre.
+      const demi = ref / 2, aP = Math.abs(pPlus), aM = Math.abs(pMoins);
+      if (aP < 0.2 * demi || aM < 0.2 * demi) push("mesures_batterie_ups", `pôle « ${aP < aM ? "+" : "−"} » à ${fmtV(aP < aM ? pPlus : pMoins)} V / terre alors qu'environ ${fmtV(Math.round(demi))} V sont attendus avec un point milieu au neutre : défaut d'isolement franc probable sur cette polarité`);
+      else if (Math.abs(aP - aM) > 0.2 * demi) push("mesures_batterie_ups", `pôles / terre dissymétriques (${fmtV(pPlus)} V et ${fmtV(pMoins)} V pour environ ±${fmtV(Math.round(demi))} V attendus avec un point milieu au neutre) : défaut d'isolement partiel ou point milieu non relié — contrôler l'isolement`);
+    } else if (cfgB === "bipolaire" && pPlus !== null && pMoins !== null && ref) {
       const [zero, plein, nomZero] = Math.abs(pMoins) < 1 && Math.abs(pPlus) > 0.8 * ref ? ["−", "+", true] : Math.abs(pPlus) < 1 && Math.abs(pMoins) > 0.8 * ref ? ["+", "−", true] : [null, null, false];
       if (nomZero) push("mesures_batterie_ups", `pôle « ${zero} » à ${fmtV(zero === "−" ? pMoins : pPlus)} V / terre et pôle « ${plein} » à ${fmtV(zero === "−" ? pPlus : pMoins)} V : soit la polarité ${zero} est volontairement reliée à la terre (schéma à vérifier), soit il y a un défaut d'isolement franc sur ce pôle — à confirmer avant édition`);
     }
@@ -9591,12 +9700,14 @@ function regenererElementsBatterie(eq) {
   const cfg = eq.controles.releve_config || {};
   const taille = cfg.saisieParGroupe ? Math.max(1, Math.round(numOf(cfg.tailleGroupe) || 1)) : 1;
   const nbParBranche = Math.ceil(nbBlocs / taille);
+  const moitie = configBatterie(eq) !== "bipolaire" ? Math.ceil(nbBlocs / 2) : null; // point milieu / demi-branches : blocs 1…n/2 côté +, la suite côté −
   const entries = [];
   for (let b = 1; b <= nbBranches; b++) {
     for (let g = 1; g <= nbParBranche; g++) {
+      const br = moitie ? `Branche ${b} ${(g - 1) * taille + 1 <= moitie ? "+" : "−"}` : `Branche ${b}`;
       const label = taille > 1
-        ? `Branche ${b} — Groupe ${g} (élts ${(g - 1) * taille + 1}-${Math.min(g * taille, nbBlocs)})`
-        : `Branche ${b} — Élément ${g}`;
+        ? `${br} — Groupe ${g} (élts ${(g - 1) * taille + 1}-${Math.min(g * taille, nbBlocs)})`
+        : `${br} — Élément ${g}`;
       entries.push(emptyDynamicEntry(label, ELEMENT_FIELD_DEFS, false));
     }
   }
@@ -9701,7 +9812,8 @@ function ElementsBatteriePanel({ eq, update, idPrefix }) {
       {dictee.erreur && <div style={{ fontSize: 12, color: "#C0392B", marginBottom: 8 }}>{dictee.erreur}</div>}
       {dictee.actif && entries[curseur] && (
         <div style={{ position: "sticky", top: 52, zIndex: 15, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", background: "#1A1F26", color: "#fff", borderRadius: 10, padding: "9px 12px", marginBottom: 10, boxShadow: "0 6px 16px rgba(0,0,0,0.18)" }}>
-          <span style={{ width: 10, height: 10, borderRadius: "50%", background: "#E74C3C", boxShadow: "0 0 0 4px rgba(231,76,60,0.3)" }} />
+          <span style={{ width: 10, height: 10, borderRadius: "50%", background: dictee.statut === "ecoute" ? "#2ECC71" : "#F39C12", boxShadow: `0 0 0 4px ${dictee.statut === "ecoute" ? "rgba(46,204,113,0.3)" : "rgba(243,156,18,0.3)"}` }} />
+          <span style={{ fontSize: 12, color: dictee.statut === "ecoute" ? "#7EE2A8" : "#F8C471" }}>{dictee.statut === "ecoute" ? "J'écoute…" : "micro en pause, relance…"}</span>
           <span style={{ fontWeight: 700, fontSize: 13 }}>{entries[curseur].label} ({curseur + 1}/{entries.length}) — dites la tension</span>
           {entendu && <span style={{ fontSize: 12, color: "#C9D1DA" }}>entendu : « {entendu} »</span>}
           <span style={{ fontSize: 11, color: "#9AA5B1", flex: "1 1 100%" }}>« retour » pour corriger · « suivant » pour passer · « stop » pour finir · dites « virgule » : « douze virgule soixante-dix »</span>
@@ -10004,12 +10116,17 @@ function calcTensionsBatterieTheoriques(eq) {
     nbElementsTotal,
     nominale: Math.round(nbElementsTotal * tensionCellule * 100) / 100,
     finDecharge: Math.round(nbElementsTotal * finDechargeCoef * 100) / 100,
+    // point milieu / demi-branches : valeurs attendues par moitié
+    parMoitie: configBatterie(eq) !== "bipolaire" ? { nominale: Math.round(nbElementsTotal * tensionCellule * 50) / 100, finDecharge: Math.round(nbElementsTotal * finDechargeCoef * 50) / 100, demi: configBatterie(eq) === "demi" } : null,
   };
 }
 // Tension par cellule (floating) = tension de floating mesurée ÷ nombre d'éléments (cellules) total.
 function calcTensionParCellule(eq) {
   const t = calcTensionsBatterieTheoriques(eq);
-  const vFloating = numOf(eq.controles.mesures_batterie_ups?.tension_floating?.fields?.v);
+  const mbu = eq.controles.mesures_batterie_ups || {};
+  const dP = numOf(mbu.floating_demi_plus?.fields?.v), dM = numOf(mbu.floating_demi_moins?.fields?.v);
+  // Deux demi-branches : moyenne des deux floatings rapportée à la moitié des éléments (à défaut de tension totale)
+  const vFloating = configBatterie(eq) === "demi" && dP !== null && dM !== null ? dP + dM : numOf(mbu.tension_floating?.fields?.v);
   if (!t || vFloating === null || !t.nbElementsTotal) return null;
   return Math.round((vFloating / t.nbElementsTotal) * 1000) / 1000;
 }
@@ -11463,6 +11580,7 @@ function TensionsBatterieTheoriques({ eq }) {
       <div style={{ display: "flex", gap: 16, flexWrap: "wrap", fontSize: 12.5 }}>
         <span style={{ color: "#5B6B7D" }}>Tension nominale : <b style={{ color: "#1A1F26" }}>{t.nominale} V</b></span>
         <span style={{ color: "#5B6B7D" }}>Seuil de fin de décharge (critique) : <b style={{ color: "#1A1F26" }}>{t.finDecharge} V</b></span>
+        {t.parMoitie && <span style={{ color: "#5B6B7D" }}>Par {t.parMoitie.demi ? "demi-branche" : "moitié (+ / point milieu)"} : <b style={{ color: "#1A1F26" }}>{t.parMoitie.nominale} V</b> nominale · fin de décharge <b style={{ color: "#1A1F26" }}>{t.parMoitie.finDecharge} V</b></span>}
         {vCellule !== null && <span style={{ color: "#5B6B7D" }}>Tension par cellule (floating) : <b style={{ color: "#1A1F26" }}>{vCellule} V</b></span>}
         {dr && <span style={{ color: "#5B6B7D" }}>Durée de décharge théorique (au régime nominal) : <b style={{ color: "#1A1F26" }}>{dr.dureeDechargeTheorique} h</b></span>}
         {dr && <span style={{ color: "#5B6B7D" }}>Courant de recharge indicatif : <b style={{ color: "#1A1F26" }}>{dr.courantRechargeIndicatif} A</b></span>}
@@ -15782,7 +15900,7 @@ function genererSchemaCelluleHTA(eq) {
 function genererSchemaPosteHTA(cellules, titre, opts = {}) {
   if (typeof document === "undefined" || !document.createElement || !cellules || cellules.length < (opts.min ?? 2)) return null;
   try {
-    const COL = 150, PAD = 30, W = Math.max(640, PAD * 2 + cellules.length * COL), H = 560;
+    const COL = 150, PAD = 30, W = Math.max(480, PAD * 2 + cellules.length * COL + 40), H = 560; // largeur ajustée au nombre de cellules : schéma centré dans le rapport
     const { canvas, ctx } = canevasSchema(W, H);
     ctx.font = `bold 14px ${SCHEMA_POLICE}`; ctx.fillStyle = SCHEMA_MARINE; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
     ctx.fillText(titre || "Poste HTA", 16, 24);
@@ -17703,8 +17821,8 @@ function genererSyntheseSite(site) {
       if (compteur.nonRealise) parts.push(compteur.nonRealise > 1 ? `${compteur.nonRealise} n'ont pas pu être contrôlés` : "1 n'a pas pu être contrôlé");
       phrases.push(`Parmi eux, ${listeFr(parts)}.`);
     }
-    if (compteur.defaillant) phrases.push("Des défaillances ont été constatées : une remise en conformité rapide est à prévoir sur les équipements concernés (voir le détail ci-dessous).");
-    else if (compteur.degrade) phrases.push("Aucune défaillance n'a été constatée, mais certains équipements présentent une dégradation qu'il convient de surveiller ou de corriger (voir le détail ci-dessous).");
+    if (compteur.defaillant) phrases.push("Des défaillances ont été constatées : une remise en conformité rapide est à prévoir sur les équipements concernés (voir le plan d'actions et la fiche de chaque équipement).");
+    else if (compteur.degrade) phrases.push("Aucune défaillance n'a été constatée, mais certains équipements présentent une dégradation qu'il convient de surveiller ou de corriger (voir le plan d'actions et la fiche de chaque équipement).");
     else if (rangInstallation >= 2) phrases.push("Les équipements ne présentent pas d'anomalie, mais l'environnement ou le fonctionnement de l'installation présente une défaillance nécessitant une action rapide (voir le rapport ci-dessus).");
     else if (rangInstallation === 1) phrases.push("Les équipements ne présentent pas d'anomalie, mais l'environnement ou le fonctionnement de l'installation présente une dégradation qu'il convient de surveiller ou de corriger (voir le rapport ci-dessus).");
     else if (compteur.nonRealise) phrases.push("Aucune anomalie n'a été relevée sur les équipements contrôlés.");
@@ -18800,9 +18918,11 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
             }
             if (sec.key === "branches_batterie" && TYPES_AVEC_BRANCHES_UPS.includes(eq.type)) {
               const nbBranchesDeclare = numOf(eq.controles.batterie_id?.batterie_caracteristiques?.fields?.nombreBranches);
+              const demiB = configBatterie(eq) === "demi";
+              const nomsBranches = demiB ? Array.from({ length: Math.max(1, Math.round(nbBranchesDeclare || 1)) }, (_, i) => [`Branche ${i + 1} +`, `Branche ${i + 1} −`]).flat() : LISTE_NOM_BRANCHE;
               const regenererBranches = () => {
                 const n = Math.max(1, Math.round(nbBranchesDeclare || 1));
-                const next = Array.from({ length: n }, (_, i) => emptyDynamicEntry(LISTE_NOM_BRANCHE[i] || `Branche ${i + 1}`, BRANCHE_FIELD_DEFS, true));
+                const next = demiB ? nomsBranches.map((nm) => emptyDynamicEntry(nm, BRANCHE_FIELD_DEFS, true)) : Array.from({ length: n }, (_, i) => emptyDynamicEntry(LISTE_NOM_BRANCHE[i] || `Branche ${i + 1}`, BRANCHE_FIELD_DEFS, true));
                 update({ ...eq, controles: { ...eq.controles, branches_dynamique: next } });
               };
               return (
@@ -18810,15 +18930,15 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
                   {nbBranchesDeclare !== null && (
                     <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: -6 }}>
                       <button onClick={regenererBranches} style={btnGhost(BRAND.blue)} title="Génère automatiquement le nombre de branches déclaré dans la fiche Batterie">
-                        <RefreshCw size={13} /> Régénérer selon l'installation ({nbBranchesDeclare} branche{nbBranchesDeclare > 1 ? "s" : ""})
+                        <RefreshCw size={13} /> Régénérer selon l'installation ({nbBranchesDeclare} branche{nbBranchesDeclare > 1 ? "s" : ""}{demiB ? ", demi-branches + et −" : ""})
                       </button>
                     </div>
                   )}
                   <DynamicListPanel
-                    title="Branches batterie"
+                    title={demiB ? "Demi-branches batterie (courants par demi-branche)" : "Branches batterie"}
                     entries={eq.controles.branches_dynamique || []}
                     onChange={(entries) => update({ ...eq, controles: { ...eq.controles, branches_dynamique: entries } })}
-                    typeOptions={LISTE_NOM_BRANCHE}
+                    typeOptions={nomsBranches}
                     fieldDefs={[{ key: "recharge", label: "Courant de recharge", unit: "A" }, { key: "residuel", label: "Courant résiduel", unit: "A" }]}
                     withActionEtat={true}
                     idPrefix={`${eq.id}-branches`}
@@ -21857,7 +21977,7 @@ function docxCommentLire(site, donnees) {
   if (lignesGlossaire.length) out.push(sousTitre("Termes techniques employés dans ce rapport"), tableau(lignesGlossaire));
   return out;
 }
-function docxSyntheseSiteStructuree(texte, site, donneesCalculees) {
+function docxSyntheseSiteStructuree(texte, site, donneesCalculees, { sansDetail = false } = {}) {
   const out = [];
   const equipements = (site && site.equipements) || [];
   const { generale, blocs } = donneesCalculees || donneesSyntheseSite(texte, site);
@@ -21866,7 +21986,7 @@ function docxSyntheseSiteStructuree(texte, site, donneesCalculees) {
     out.push(docxEncartSynthese(generale, teinteSyntheseRang(rangGlobal)));
     out.push(docxSpacer(200));
   }
-  if (blocs.length || equipements.length) {
+  if (!sansDetail && (blocs.length || equipements.length)) {
     out.push(new DOCX.Paragraph({ keepNext: true, spacing: { before: 160, after: 120 }, children: [new DOCX.TextRun({ text: "Détail par équipement", bold: true, size: 24, color: DOCX_BLUE })] }));
     // Une carte par équipement AYANT des remarques (du plus critique au conforme), nom cliquable vers sa fiche.
     // Les équipements conformes sans aucune remarque sont regroupés sur une seule ligne verte.
@@ -24727,7 +24847,7 @@ function docxPhotosCoteACote(photos, maxLargeur, maxHauteur) {
     if (img) { runs.push(img); runs.push(new DOCX.TextRun({ text: "   " })); }
   });
   if (!runs.length) return null;
-  return new DOCX.Paragraph({ spacing: { after: 60 }, children: runs });
+  return new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, spacing: { after: 60 }, children: runs });
 }
 
 // Photos tension/courant par phase (L1/L2/L3) posées côte à côte dans un tableau 3 colonnes plutôt
@@ -24852,11 +24972,7 @@ function docxCourbeDeclenchement(eq, titre) {
   const paragraphePhrase = new DOCX.Paragraph({ spacing: { after: 80 }, children: [new DOCX.TextRun({ text: phrase, bold: true, size: 18, color: !essaye ? "8B96A3" : nonConformes.length === 0 ? DOCX_GREEN : DOCX_RED })] });
   // Le titre, la première image et (s'il n'y en a qu'une) la phrase de conformité forment un seul bloc.
   const enTete = titre ? [docxHeading(titre, 480, 160)] : [];
-  if (contenus.length <= 1) {
-    elements.push(docxBlocInsecable([...enTete, ...contenus, paragraphePhrase]));
-  } else {
-    elements.push(docxBlocInsecable([...enTete, contenus[0]]), ...contenus.slice(1), paragraphePhrase);
-  }
+  elements.push(...enTete, ...contenus, paragraphePhrase); // images centrées hors tableau (Pages les cale à gauche dans une cellule)
   return elements;
 }
 
@@ -24880,7 +24996,7 @@ function docxCourbeDecharge(eq) {
   ];
   if (!contenus.length) return elements;
   // Le titre et la première image ne forment qu'un bloc : le titre ne peut pas rester seul en bas de page.
-  elements.push(docxBlocInsecable([docxHeading("Courbe de décharge batterie", 480, 160), contenus[0]]), ...contenus.slice(1));
+  elements.push(docxHeading("Courbe de décharge batterie", 480, 160), ...contenus);
   return elements;
 }
 // Saut de page : un vrai saut dans un paragraphe minuscule (Pages ignore la propriété « saut de page avant » d'un paragraphe).
@@ -24989,7 +25105,7 @@ function docxEquipementSecurite(eq, schema, locaux, allSites, rapportDate) {
   elements.push(...docxRemarquesEquipement(texteRemarquesRapport(eq, { allEquipements: equipementsDuSiteDe(eq, allSites), locaux, rapportDate }), eq.etatFinal, docxEncartEtat("Synthèse de l'état — à l'issue de la maintenance", eq.etatFinal)));
   const photos = (eq.photos || []).filter((p) => p && p.dataUrl);
   if (photos.length) {
-    const grille = docxGrillePhotos(photos.slice(0, 4), { colonnes: 4, largeur: 140, hauteur: 105, serre: true });
+    const grille = docxGrillePhotos(photos.slice(0, 4), { colonnes: photos.length === 4 ? 2 : 3, largeur: 190, hauteur: 143, serre: true, centre: true });
     if (grille) {
       elements.push(new DOCX.Paragraph({ keepNext: true, spacing: { before: 60, after: 60 }, children: [new DOCX.TextRun({ text: "Photos", bold: true, size: 18, color: DOCX_BLUE }),
         ...(photos.length > 4 ? [new DOCX.TextRun({ text: `   (+ ${photos.length - 4} photo${photos.length - 4 > 1 ? "s" : ""} dans l'annexe photos)`, size: 15, italics: true, color: "5A6573" })] : [])] }));
@@ -25027,24 +25143,24 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
     const sc = eq.type === "By-pass externe" ? genererSchemaBypassExterne(eq, siteBP ? siteBP.equipements : []) : eq.type === "Onduleur simplifié" ? genererSchemaOnduleurSimplifie(eq) : genererSchemaAppareilBT(eq);
     const dims = sc ? dimensionsPng(sc) : null;
     const larg = eq.type === "By-pass externe" ? 400 : eq.type === "Onduleur simplifié" ? 320 : 360, im = sc ? docxImage(sc, larg, dims && dims.w ? Math.round((larg * dims.h) / dims.w) : 260) : null;
-    if (im) elements.push(docxBlocInsecable([new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, spacing: { before: 0, after: 100 }, children: [im] })]));
+    if (im) elements.push(new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, spacing: { before: 0, after: 100 }, children: [im] }));
   }
   if (TYPES_CELLULES_HTA.includes(eq.type)) {
     const sc = genererSchemaCelluleHTA(eq);
     const dims = sc ? dimensionsPng(sc) : null;
     const larg = 250, im = sc ? docxImage(sc, larg, dims && dims.w ? Math.round((larg * dims.h) / dims.w) : 300) : null;
-    if (im) elements.push(docxBlocInsecable([new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, spacing: { before: 0, after: 80 }, children: [im] })]));
+    if (im) elements.push(new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, spacing: { before: 0, after: 80 }, children: [im] }));
   }
   if (eq.type === "Batterie de compensation") {
     const syn = genererSynoptiqueBatterie(eq, equipementsDuSiteDe(eq, allSites || []));
     const dims = syn ? dimensionsPng(syn) : null;
     const im = syn ? docxImage(syn, 520, dims && dims.w ? Math.round((520 * dims.h) / dims.w) : 380) : null;
-    if (im) elements.push(docxBlocInsecable([new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, spacing: { before: 0, after: 120 }, children: [im] })]));
+    if (im) elements.push(new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, spacing: { before: 0, after: 120 }, children: [im] }));
   }
   if (eq.type === "Transformateur") {
     const sc = genererSchemaCouplageTransfo(eq);
     const im = sc ? docxImage(sc, 520, 260) : null;
-    if (im) elements.push(docxBlocInsecable([new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, spacing: { before: 0, after: 120 }, children: [im] })]));
+    if (im) elements.push(new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, spacing: { before: 0, after: 120 }, children: [im] }));
   }
   if (eq.type === "Transformateur" && eq.identification?.typeRefroidissement && DESCRIPTION_REFROIDISSEMENT_TRANSFO[eq.identification.typeRefroidissement]) {
     elements.push(docxNormeNote(`${eq.identification.typeRefroidissement} (CEI 60076-2) — ${DESCRIPTION_REFROIDISSEMENT_TRANSFO[eq.identification.typeRefroidissement]}`));
@@ -25063,7 +25179,7 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
       const imgH = dims && dims.w ? Math.round((imgW * dims.h) / dims.w) : Math.round(imgW * 0.8);
       const img = docxImage(schemaImg, imgW, imgH);
       if (img) {
-        elements.push(docxBlocInsecable([docxHeading("Schéma synoptique", 480, 160), new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, spacing: { after: 100 }, children: [img] })]));
+        elements.push(docxHeading("Schéma synoptique", 480, 160), new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, spacing: { after: 100 }, children: [img] }));
       }
     }
     const tableModules = docxTableauModules(eq);
@@ -25165,9 +25281,9 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
         const dims = img ? dimensionsPng(img) : null;
         const im = img ? docxImage(img, 430, dims && dims.w ? Math.round((430 * dims.h) / dims.w) : 330) : null;
         const blocs = [];
-        if (im) blocs.push(new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, spacing: { before: 160, after: 60 }, children: [im] }));
+        if (im) blocs.push(new DOCX.Paragraph({ keepNext: true, alignment: DOCX.AlignmentType.CENTER, spacing: { before: 160, after: 60 }, children: [im] }));
         if (ev && ev.phrase) blocs.push(new DOCX.Paragraph({ spacing: { after: 80 }, children: [new DOCX.TextRun({ text: (ev.nonConforme ? "⚠ " : "") + ev.phrase, size: 17, bold: ev.nonConforme, color: ev.nonConforme ? "B5730A" : DOCX_DARK })] }));
-        if (blocs.length) elements.push(docxBlocInsecable(blocs));
+        if (blocs.length) elements.push(...blocs);
       });
       // Courbes de déclenchement : une par fonction (phase, terre) dès qu'un de ses seuils a été mesuré — seuils réunis en escalier,
       // tolérance et points mesurés (temps constant comme temps inverse).
@@ -25175,7 +25291,7 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
         const img = genererCourbeFamilleRelais(eq, g);
         const dims = img ? dimensionsPng(img) : null;
         const im = img ? docxImage(img, 500, dims && dims.w ? Math.round((500 * dims.h) / dims.w) : 283) : null;
-        if (im) elements.push(docxBlocInsecable([new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, spacing: { before: 160, after: 80 }, children: [im] })]));
+        if (im) elements.push(new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, spacing: { before: 160, after: 80 }, children: [im] }));
       });
       elements.push(docxSpacer());
       return;
@@ -25506,6 +25622,7 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
         const vCellule = calcTensionParCellule(eq);
         const dr = calcDechargeRechargeBatterie(eq);
         const parts = [`Nominale : ${th.nominale} V`, `Seuil fin de décharge : ${th.finDecharge} V`];
+        if (th.parMoitie) parts.push(`Par ${th.parMoitie.demi ? "demi-branche" : "moitié"} : ${th.parMoitie.nominale} V (fin de décharge ${th.parMoitie.finDecharge} V)`);
         if (vCellule !== null) parts.push(`Tension par cellule (floating) : ${vCellule} V`);
         if (dr) parts.push(`Durée de décharge théorique : ${dr.dureeDechargeTheorique} h`, `Courant de recharge indicatif : ${dr.courantRechargeIndicatif} A`);
         elements.push(new DOCX.Paragraph({ spacing: { before: 60, after: 20 }, children: [new DOCX.TextRun({ text: `Valeurs théoriques calculées — ${parts.join(" · ")}`, bold: true, size: 17, color: DOCX_DARK })] }));
@@ -25734,15 +25851,15 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
           for (let i = 0; i < imgs.length; i += 2) {
             const runs = [];
             imgs.slice(i, i + 2).forEach((u, j) => { const im = docxImage(u, 310, 196); if (im) { if (j) runs.push(new DOCX.TextRun({ text: "  " })); runs.push(im); } });
-            if (runs.length) blocs.push(new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, spacing: { after: 60 }, children: runs }));
+            if (runs.length) blocs.push(new DOCX.Paragraph({ keepNext: i + 2 < imgs.length, alignment: DOCX.AlignmentType.CENTER, spacing: { after: 60 }, children: runs }));
           }
-          elements.push(docxBlocInsecable(blocs));
+          elements.push(...blocs);
         }
       }
       const img = genererCourbeAbsorptionIsolement(eq);
       const dims = img ? dimensionsPng(img) : null;
       const im = img ? docxImage(img, 480, dims && dims.w ? Math.round((480 * dims.h) / dims.w) : 257) : null;
-      if (im) elements.push(docxBlocInsecable([new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, spacing: { before: 160, after: 80 }, children: [im] })]));
+      if (im) elements.push(new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, spacing: { before: 160, after: 80 }, children: [im] }));
     }
     if ((TYPES_AVEC_BRANCHES_UPS.includes(eq.type) && ["mesures_continu", "redresseur_chargeur"].includes(sec.key)) || sec.key === "maintenance_relais") elements.push(...docxNotesOnduleur(eq, allSites, rapportDate, sec.key));
     if (sec.key === "module_svg") { try { analyseModuleSVG(eq).forEach((l) => { elements.push(docxNormeNote((l.niveau >= 1 ? "⚠ " : "") + l.texte)); elements.push(docxSpacer(40)); }); } catch (e) { /* facultatif */ } }
@@ -25783,12 +25900,12 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
     : docxRemarquesEquipement(texteRemarquesRapport(eq, { allEquipements: equipementsDuSiteDe(eq, allSites), locaux, rapportDate }), eq.etatFinal, docxEncartEtat("Synthèse de l'état — à l'issue de la maintenance", eq.etatFinal))));
   if (compact) {
     const photos = (eq.photos || []).filter((p) => p && p.dataUrl);
-    const grille = photos.length ? docxGrillePhotos(photos.slice(0, 4), { colonnes: 4, largeur: 112, hauteur: 84, serre: true }) : null;
+    const grille = photos.length ? docxGrillePhotos(photos.slice(0, 4), { colonnes: photos.length === 4 ? 2 : 3, largeur: 150, hauteur: 113, serre: true, centre: true }) : null;
     if (grille) {
       elements.push(grille);
       if (photos.length > 4) elements.push(new DOCX.Paragraph({ spacing: { before: 20, after: 0 }, children: [new DOCX.TextRun({ text: `+ ${photos.length - 4} photo${photos.length - 4 > 1 ? "s" : ""} dans l'annexe photos`, size: 14, italics: true, color: "5A6573" })] }));
     }
-  } else { const grille = docxGrillePhotos(eq.photos, { legendeDefaut: "" }); if (grille) { elements.push(docxSpacer(160)); elements.push(new DOCX.Paragraph({ keepNext: true, spacing: { before: 0, after: 80 }, children: [new DOCX.TextRun({ text: "Photos", bold: true, size: 18, color: DOCX_BLUE })] })); elements.push(grille); } }
+  } else { const grille = docxGrillePhotos(eq.photos, { legendeDefaut: "", centre: true }); if (grille) { elements.push(docxSpacer(160)); elements.push(new DOCX.Paragraph({ keepNext: true, spacing: { before: 0, after: 80 }, children: [new DOCX.TextRun({ text: "Photos", bold: true, size: 18, color: DOCX_BLUE })] })); elements.push(grille); } }
 
   // Courbe de déclenchement (Disjoncteur BT) : normalement insérée dans sa propre section (voir la boucle
   // des sections ci-dessus). Repli : si cette section n'a pas été affichée (ex. niveau de maintenance qui
@@ -25905,6 +26022,13 @@ function chargerDimensionsImage(dataUrl) {
     } catch (e) { resolve(null); }
   });
 }
+// Progression de la génération d'un document (barre affichée par l'application) : pourcentage + étape en cours.
+let suiviGenerationRapport = null;
+async function etapeRapport(pct, texte) {
+  if (!suiviGenerationRapport) return;
+  try { suiviGenerationRapport(pct, texte); } catch (e) { /* affichage seulement */ }
+  await new Promise((r) => setTimeout(r, 0)); // laisse l'écran se mettre à jour entre deux étapes
+}
 async function resolvePhotosForDocx(obj) {
   const clone = JSON.parse(JSON.stringify(obj));
   const httpNodes = [];
@@ -25919,10 +26043,15 @@ async function resolvePhotosForDocx(obj) {
       Object.values(node).forEach(walk);
     }
   })(clone);
+  let faites = 0;
+  if (httpNodes.length) await etapeRapport(10, `Récupération des photos (0 / ${httpNodes.length})…`);
   await Promise.all(httpNodes.map(async (node) => {
     try { node.dataUrl = await urlToDataUrl(node.dataUrl); }
     catch (e) { console.error("[Word] Photo introuvable, ignorée :", e); node.dataUrl = null; }
+    faites++;
+    if (suiviGenerationRapport) { try { suiviGenerationRapport(10 + Math.round((25 * faites) / httpNodes.length), `Récupération des photos (${faites} / ${httpNodes.length})…`); } catch (e) { /* affichage */ } }
   }));
+  await etapeRapport(36, "Préparation des photos…");
   // Dimensions naturelles de chaque photo (une fois l'URL résolue en base64 ci-dessus) — utilisées
   // par docxPhotosCoteACote pour garder le format portrait/paysage d'origine.
   await Promise.all(imgNodes.map(async (node) => {
@@ -25941,11 +26070,14 @@ function docxAncre(id) {
   return new DOCX.Paragraph({ keepNext: true, spacing: { before: 0, after: 0, line: 20, lineRule: DOCX.LineRuleType ? DOCX.LineRuleType.EXACT : "exact" }, children: [new DOCX.BookmarkStart(id, n), new DOCX.TextRun({ text: "", size: 2 }), new DOCX.BookmarkEnd(n)] });
 }
 // Photos en grille deux colonnes : plus grandes, légendées, une rangée insécable par paire.
-function docxGrillePhotos(photos, { largeur = 300, hauteur = 225, legendeDefaut = "", colonnes = 2, serre = false } = {}) {
+function docxGrillePhotos(photos, { largeur = 300, hauteur = 225, legendeDefaut = "", colonnes = 2, serre = false, centre = false } = {}) {
   const liste = (photos || []).filter((p) => p && p.dataUrl);
   if (!liste.length) return null;
   const a = docxAucuneBordure();
-  const L = Array.from({ length: colonnes }, () => Math.floor(TABLE_WIDTH / colonnes));
+  // centre : autant de colonnes que de photos (dans la limite donnée), largeur de colonne fixe, tableau centré sur la page
+  const largeurCol = Math.floor(TABLE_WIDTH / colonnes);
+  if (centre) colonnes = Math.min(colonnes, liste.length);
+  const L = Array.from({ length: colonnes }, () => (centre ? largeurCol : Math.floor(TABLE_WIDTH / colonnes)));
   const cellule = (p) => {
     if (!p) return new DOCX.TableCell({ width: { size: L[0], type: DOCX.WidthType.DXA }, borders: { top: a, bottom: a, left: a, right: a }, children: [docxMiniParagraphe()] });
     const { w, h } = dimensionsAdaptees(p, largeur, hauteur);
@@ -25958,7 +26090,8 @@ function docxGrillePhotos(photos, { largeur = 300, hauteur = 225, legendeDefaut 
   };
   const rows = [];
   for (let i = 0; i < liste.length; i += colonnes) rows.push(new DOCX.TableRow({ cantSplit: true, children: L.map((_, k) => cellule(liste[i + k])) }));
-  return docxTable({ width: { size: TABLE_WIDTH, type: DOCX.WidthType.DXA }, columnWidths: L, borders: { ...docxToutesAucune(), insideHorizontal: a, insideVertical: a }, rows });
+  const largeurT = L.reduce((x, y) => x + y, 0);
+  return docxTable({ width: { size: largeurT, type: DOCX.WidthType.DXA }, columnWidths: L, ...(centre ? { alignment: DOCX.AlignmentType.CENTER } : {}), borders: { ...docxToutesAucune(), insideHorizontal: a, insideVertical: a }, rows });
 }
 // Évolution depuis la dernière visite : changements d'état (équipement et contrôles) et écarts de mesure importants.
 function lignesEvolutionSite(site, allSites) {
@@ -26217,7 +26350,7 @@ function docxSynoptiqueInstallation(site) {
     if (!p || !d) return;
     const w = Math.min(640, Math.round(d.w / SCHEMA_ECHELLE)), h = Math.round((w * d.h) / d.w);
     const im = docxImage(p.dataUrl, w, h);
-    if (im) postes.push(docxBlocInsecable([new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, spacing: { before: 160, after: 80 }, children: [im] })]));
+    if (im) postes.push(new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, spacing: { before: 160, after: 80 }, children: [im] }));
   }));
   if (!syn) return postes.length ? [docxAncre("som_synoptique"), docxHeading("Synoptique de l'installation", 0, 160), ...postes] : [];
   const largeur = 640, hauteurMax = 860;
@@ -26398,6 +26531,7 @@ function docxBandeauEtat(site, rankLabel, rank, compteur, nbPrioritaires = 0) {
   return [bandeau, docxSpacer(160), cartes, ...docxBarreRepartition(compteur)];
 }
 async function generateSiteDocx(site, allSites) {
+  await etapeRapport(3, "Préparation du rapport…");
   await ensureDocx();
   bookmarkIdCounter = 0; // repart de zéro à chaque génération, pour des ID propres et prévisibles
   site = await resolvePhotosForDocx(site);
@@ -26469,22 +26603,21 @@ async function generateSiteDocx(site, allSites) {
   children.push(...docxPlanActions(donneesSynthese, site), docxSpacer(120));
   const evolution = docxEvolution(site, allSites);
   if (evolution.length) children.push(...evolution, docxSpacer(120));
-  if (syntheseTable) {
-    children.push(docxHeading("Synthèse des équipements"));
-    children.push(syntheseTable); children.push(docxSpacer());
-  }
+  // Synthèse générale (texte), puis sommaire cliquable avec l'état de chaque équipement (remplace la « Synthèse des équipements »),
+  // puis le tableau « Rapport ». Le détail par équipement (constats / préconisations) n'est plus répété ici : il figure à la fin de chaque fiche.
+  children.push(docxAncre("som_remarques"), docxHeading("Synthèse générale"));
+  children.push(...docxSyntheseSiteStructuree(null, site, donneesSynthese, { sansDetail: true }));
   children.push(docxHeading("Rapport"));
   const rapportTable = docxFieldTable(rapportRows);
   if (rapportTable) children.push(rapportTable);
   // Synthèse toujours générée à partir des équipements (plus de bouton « compiler ») + complément du technicien.
-  children.push(docxAncre("som_remarques"), docxHeading("Synthèse des remarques et préconisations"));
-  children.push(...docxSyntheseSiteStructuree(null, site, donneesSynthese));
+
   // Photos générales du site (ajoutées depuis l'onglet Rapport) — absentes du rapport principal
   // jusqu'ici, elles n'étaient reprises que dans le document séparé "Annexe photos".
   const photosSiteRapport = (site.rapport && site.rapport.photos) || [];
   if (photosSiteRapport.length) {
     children.push(new DOCX.Paragraph({ keepNext: true, spacing: { before: 360, after: 80 }, children: [new DOCX.TextRun({ text: "Photos générales du site", bold: true, size: 20, color: DOCX_BLUE })] }));
-    const grilleSite = docxGrillePhotos(photosSiteRapport);
+    const grilleSite = docxGrillePhotos(photosSiteRapport, { centre: true });
     if (grilleSite) children.push(grilleSite);
   }
 
@@ -26494,16 +26627,29 @@ async function generateSiteDocx(site, allSites) {
     children.push(docxHeading("Locaux")); children.push(locauxTable); children.push(docxSpacer());
   }
 
-  equipementsOrdreRapport(site.equipements).forEach(({ eq, rattache }, rangEq) => {
+  // Sommaire (après les locaux) : en haut de page, avec l'état de chaque équipement.
+  const synoptique = docxSynoptiqueInstallation(site);
+  { const der = children[children.length - 1]; if (der instanceof DOCX.Paragraph) der.addChildElement(new DOCX.PageBreak()); else children.push(docxDebutPage()); } // sommaire en haut de page
+  children.push(...docxSommaire(site, [
+    { id: "som_synthese", titre: "État global et plan d'actions", avant: true },
+    ...(evolution.length ? [{ id: "som_evolution", titre: "Évolution depuis la dernière visite", avant: true }] : []),
+    ...(synoptique.length ? [{ id: "som_synoptique", titre: "Synoptique de l'installation", avant: true }] : []),
+    { id: "som_lire", titre: "Comment lire ce rapport" },
+  ]));
+  await etapeRapport(38, "Synthèse et plan d'actions…");
+  const ordreEqs = equipementsOrdreRapport(site.equipements);
+  for (let rangEq = 0; rangEq < ordreEqs.length; rangEq++) {
+    const { eq, rattache } = ordreEqs[rangEq];
+    await etapeRapport(40 + Math.round((50 * rangEq) / Math.max(1, ordreEqs.length)), `Équipement ${rangEq + 1} / ${ordreEqs.length} — ${eq.identification?.repere || eq.type}`);
     // Un équipement par page. Exception : un équipement rattaché (analyse d'huile, jeu de barre, by-pass externe, bilan de puissance)
     // suit son parent sur la même page s'il reste de la place — sa fiche d'identité est une seule rangée de tableau, jamais coupée (Pages compris).
-    if (rangEq > 0 && rattache) { children.push(new DOCX.Paragraph({ spacing: { before: 520, after: 0 }, children: [] })); children.push(...docxEquipementElements(eq, site.locaux, allSites, site.rapport?.date || "")); return; }
+    if (rangEq > 0 && rattache) { children.push(new DOCX.Paragraph({ spacing: { before: 520, after: 0 }, children: [] })); children.push(...docxEquipementElements(eq, site.locaux, allSites, site.rapport?.date || "")); continue; }
     if (rangEq > 0) {
       const dernierEq = children[children.length - 1];
       if (dernierEq instanceof DOCX.Paragraph) dernierEq.addChildElement(new DOCX.PageBreak());
       else children.push(docxDebutPage());
       children.push(...docxEquipementElements(eq, site.locaux, allSites, site.rapport?.date || ""));
-      return;
+      continue;
     }
     // Le premier équipement commence sur une nouvelle page. Le saut est porté par le DERNIER PARAGRAPHE qui précède (et non par un paragraphe isolé) :
     // si le contenu précédent remplit exactement la page, un paragraphe isolé passerait sur la page suivante et y créerait une page blanche.
@@ -26511,18 +26657,10 @@ async function generateSiteDocx(site, allSites) {
     if (dernier instanceof DOCX.Paragraph) dernier.addChildElement(new DOCX.PageBreak());
     else children.push(docxDebutPage());
     // Sommaire cliquable (page dédiée), synoptique de l'installation (page suivante), puis le détail des équipements.
-    const synoptique = docxSynoptiqueInstallation(site);
-    children.push(...docxSommaire(site, [
-      { id: "som_synthese", titre: "Synthèse et plan d'actions", avant: true },
-      ...(evolution.length ? [{ id: "som_evolution", titre: "Évolution depuis la dernière visite", avant: true }] : []),
-      { id: "som_remarques", titre: "Synthèse des remarques et préconisations", avant: true },
-      ...(synoptique.length ? [{ id: "som_synoptique", titre: "Synoptique de l'installation", avant: true }] : []),
-      { id: "som_lire", titre: "Comment lire ce rapport" },
-    ]));
-    if (synoptique.length) { children.push(docxDebutPage()); children.push(...synoptique); }
+    if (synoptique.length) { children.push(...synoptique); }
     children.push(docxDebutPage());
     children.push(...docxEquipementElements(eq, site.locaux, allSites, site.rapport?.date || ""));
-  });
+  }
   // « Comment lire ce rapport » (légende des états + glossaire des termes employés) : en fin de rapport.
   children.push(docxSpacer(240), docxAncre("som_lire"), ...docxCommentLire(site, donneesSynthese));
 
@@ -26532,6 +26670,7 @@ async function generateSiteDocx(site, allSites) {
   const doc = new DOCX.Document({ styles: DOCX_STYLES, features: { updateFields: true }, sections: [
     { properties: { titlePage: true, page: PAGE_CORPS }, footers: { default: docxFooterPagination(mentionProprieteRapport(site)), first: new DOCX.Footer({ children: [new DOCX.Paragraph("")] }) }, children: [...couverture, ...children] },
   ] });
+  await etapeRapport(92, "Assemblage du document Word…");
   return DOCX.Packer.toBlob(doc);
 }
 
@@ -27887,6 +28026,7 @@ function AppPrincipale({ currentUser, onLogout }) {
   const [printSite, setPrintSite] = useState(null);
   const [printAnnexeSite, setPrintAnnexeSite] = useState(null);
   const [exportConfirm, setExportConfirm] = useState(null);
+  const [generation, setGeneration] = useState(null); // { pct, texte, erreur } pendant la génération d'un document Word
   const saveTimer = useRef(null);
   const lastSyncedSites = useRef(null); // dernier contenu (JSON) connu comme synchronisé avec le serveur
   const writeInFlight = useRef(false); // verrou dur : empêche toute nouvelle écriture tant que la précédente n'est pas terminée
@@ -28568,7 +28708,12 @@ function AppPrincipale({ currentUser, onLogout }) {
   useEffect(() => {
     if (!printSite && !printIv && !printAnnexeSite) return;
     let cancelled = false;
+    let dernierPct = 0;
+    const libelleDoc = printSite ? "rapport de maintenance" : printIv ? "compte rendu d'intervention" : "annexe photos";
+    setGeneration({ pct: 2, texte: "Préparation…", titre: `Génération du ${libelleDoc}` });
+    suiviGenerationRapport = (pct, texte) => { dernierPct = Math.max(dernierPct, pct); if (!cancelled) setGeneration((g) => ({ ...(g || {}), pct: dernierPct, texte })); };
     (async () => {
+      let reussi = false, erreurTexte = "";
       try {
         if (printSite) {
           const blob = await generateSiteDocx(printSite, sites);
@@ -28580,20 +28725,29 @@ function AppPrincipale({ currentUser, onLogout }) {
           const blob = await generateAnnexePhotosDocx(printAnnexeSite);
           if (!cancelled) downloadBlob(blob, `Annexe_photos_${(printAnnexeSite.nom || printAnnexeSite.local || "site").replace(/[^a-z0-9]+/gi, "_")}.docx`);
         }
+        reussi = true;
       } catch (e) {
-        // best effort — génération impossible (ex. données incomplètes)
+        console.error("[Word] Génération impossible :", e);
+        erreurTexte = (e && e.message) ? String(e.message) : "erreur inconnue";
       }
-      if (!cancelled) { setPrintSite(null); setPrintIv(null); setPrintAnnexeSite(null); }
+      suiviGenerationRapport = null;
+      if (!cancelled) {
+        setPrintSite(null); setPrintIv(null); setPrintAnnexeSite(null);
+        if (reussi) { setGeneration((g) => ({ ...(g || {}), pct: 100, texte: "Document prêt — ouverture…" })); setTimeout(() => setGeneration(null), 1500); }
+        else setGeneration((g) => ({ ...(g || {}), erreur: `La génération a échoué (${erreurTexte}). Vos données ne sont pas perdues : réessayez, et si l'erreur persiste, envoyez-moi ce message.` }));
+      }
     })();
     return () => { cancelled = true; };
   }, [printSite, printIv, printAnnexeSite]);
 
   function requestPrintSite(site) {
+    if (generation && !generation.erreur) return; // génération déjà en cours
     const warnings = [...siteExportWarnings(site), ...verificationsControlesSite(site)];
     if (warnings.length) setExportConfirm({ kind: "site", data: site, warnings });
     else setPrintSite(site);
   }
   function requestPrintIv(iv) {
+    if (generation && !generation.erreur) return;
     const warnings = ivExportWarnings(iv, sites);
     if (warnings.length) setExportConfirm({ kind: "iv", data: iv, warnings });
     else setPrintIv(iv);
@@ -29038,6 +29192,28 @@ function AppPrincipale({ currentUser, onLogout }) {
         </nav>
       </div>
 
+      {generation && (
+        <div role="dialog" aria-live="polite" style={{ position: "fixed", inset: 0, zIndex: 3000, background: "rgba(26,31,38,0.55)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <div style={{ background: "#fff", borderRadius: 14, padding: "20px 22px", width: "min(420px, 100%)", boxShadow: "0 18px 40px rgba(0,0,0,0.25)" }}>
+            <div style={{ fontWeight: 700, fontSize: 15, color: "#1A1F26", marginBottom: 12 }}>{generation.titre || "Génération du document"}</div>
+            <div style={{ height: 10, borderRadius: 6, background: "#E2E6EB", overflow: "hidden" }}>
+              <div style={{ height: "100%", width: `${Math.min(100, Math.max(2, generation.pct || 0))}%`, background: generation.erreur ? "#C0392B" : generation.pct >= 100 ? "#1E8449" : BRAND.blue, transition: "width 0.3s ease" }} />
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 10, marginTop: 8, fontSize: 12.5, color: "#5B6B7D" }}>
+              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{generation.texte}</span>
+              <b style={{ color: "#1A1F26" }}>{Math.round(generation.pct || 0)} %</b>
+            </div>
+            {generation.erreur ? (
+              <>
+                <div style={{ marginTop: 12, fontSize: 12.5, color: "#C0392B" }}>{generation.erreur}</div>
+                <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12 }}><button onClick={() => setGeneration(null)} style={btnPrimary()}>Fermer</button></div>
+              </>
+            ) : (
+              <div style={{ marginTop: 10, fontSize: 11.5, color: "#8B96A3" }}>Commande prise en compte — patientez, le document s'ouvrira automatiquement.</div>
+            )}
+          </div>
+        </div>
+      )}
       {donneesOuvert && (
         <DonneesModal
           user={currentUser} onFermer={() => setDonneesOuvert(false)} onExporter={exportData} derniereSauvegarde={derniereSauvegarde}
