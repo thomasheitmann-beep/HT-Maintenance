@@ -2006,6 +2006,51 @@ function equipementAvecTC(eq) {
   return true;
 }
 // Cellules HTA : caractéristiques assignées et année (âge, obsolescence, cohérence fusibles / transformateur).
+// Charge alimentée par une cellule de départ (unifilaire prolongé) : transformateur suivi, ou charge saisie (moteur, génératrice, compensateur HTA…).
+const LISTE_DEPART_CELLULE = ["Transformateur", "Poste satellite", "Compensateur HTA", "Moteur HTA", "Génératrice / groupe HTA", "Autre départ"];
+const TYPES_CELLULE_DEPART = ["Disjoncteur HTA", "Contacteur HTA", "Interrupteur Fusible HTA", "Interrupteur HTA"];
+const POSTE_SATELLITE_LIBRE = "Autre poste (nom libre)";
+function departCellule(eq) {
+  if (!eq || !TYPES_CELLULE_DEPART.includes(eq.type)) return "";
+  const id = eq.identification || {};
+  if (eq.type === "Interrupteur HTA") return id.departVers || "";
+  return id.departVers || (String(id.transformateurAssocie || "").trim() || (eq.type === "Interrupteur Fusible HTA" && id.transfoManuel === "Oui") ? "Transformateur" : "");
+}
+function chargeCellule(eq, eqs) {
+  const t = departCellule(eq);
+  if (!t) return null;
+  const id = eq.identification || {};
+  if (t === "Transformateur") {
+    const rep = String(id.transformateurAssocie || "").trim();
+    const tr = rep ? (eqs || []).find((e) => e.type === "Transformateur" && String(e.identification?.repere || "").trim() === rep) : null;
+    if (tr) return { type: t, repere: rep, eq: tr, puissance: tr.identification?.puissance ? `${tr.identification.puissance} kVA` : "", couplage: tr.identification?.couplage || "" };
+    if (id.transfoManuel === "Oui") return { type: t, repere: "transformateur", puissance: id.transfoSnManuel ? `${id.transfoSnManuel} kVA` : "", couplage: "" };
+    return { type: t, repere: rep || "transformateur", puissance: "", couplage: "" };
+  }
+  if (t === "Poste satellite") {
+    const nom = id.posteSatellite === POSTE_SATELLITE_LIBRE ? String(id.posteSatelliteLibre || "").trim() : String(id.posteSatellite || "").trim();
+    return { type: t, repere: nom, puissance: String(id.liaisonCable || "").trim(), local: id.posteSatellite && id.posteSatellite !== POSTE_SATELLITE_LIBRE ? nom : "" };
+  }
+  return { type: t, repere: String(id.chargeRepere || "").trim(), puissance: String(id.chargePuissance || "").trim() };
+}
+// Champs « Départ vers » ajoutés à l'identification des cellules de départ (selon la charge choisie).
+function ajouterDepartCellule(eq, schema) {
+  if (!schema || !schema.identification || !TYPES_CELLULE_DEPART.includes(eq.type)) return schema;
+  const t = departCellule(eq);
+  const ifu = eq.type === "Interrupteur Fusible HTA";
+  const champsTransfo = ["transformateurAssocie", "transfoManuel", "transfoSnManuel", "transfoU1Manuel"];
+  let ident = schema.identification.filter((f) => !(ifu && champsTransfo.includes(f.key) && t && t !== "Transformateur"));
+  const ajout = [{ key: "departVers", label: "Départ vers (charge alimentée)", options: LISTE_DEPART_CELLULE }];
+  if (t === "Transformateur" && !ifu) ajout.push({ key: "transformateurAssocie", label: "Transformateur alimenté (repère)" });
+  if (t === "Poste satellite") {
+    ajout.push({ key: "posteSatellite", label: "Poste satellite alimenté" });
+    if ((eq.identification || {}).posteSatellite === POSTE_SATELLITE_LIBRE) ajout.push({ key: "posteSatelliteLibre", label: "Nom du poste satellite" });
+    ajout.push({ key: "liaisonCable", label: "Liaison (câble, section, longueur) — facultatif" });
+  } else if (t && t !== "Transformateur") ajout.push({ key: "chargeRepere", label: t === "Autre départ" ? "Départ vers (poste aval, boucle…)" : `Repère / nom (${t.toLowerCase()})` }, { key: "chargePuissance", label: t === "Compensateur HTA" ? "Puissance (kvar)" : t === "Autre départ" ? "Précision (facultatif)" : "Puissance (kW / kVA)" });
+  const iT = ifu ? ident.findIndex((f) => f.key === "transformateurAssocie") : -1;
+  ident = iT >= 0 ? [...ident.slice(0, iT), ajout[0], ...ident.slice(iT)] : [...ident, ...ajout];
+  return { ...schema, identification: ident };
+}
 const LISTE_SORTIE_CELLULE = ["Câble", "Jeu de barres aval (cellules suivantes)"];
 const LISTE_FONCTION_APPAREIL_BT = ["Arrivée", "Départ", "Couplage"];
 const LISTE_PROTECTION_GRADINS = ["Fusibles", "Disjoncteurs"];
@@ -4662,7 +4707,7 @@ function getSchemaOrganesBT(eq, base) {
   if (!orgs.length) return base;
   return { ...base, sections: base.sections.map((sec) => (sec.key !== "manoeuvre_electrique" ? sec : { ...sec, items: orgs.map((o) => ({ ...C(cleFonctionnementOrgane(o), libelleFonctionnementOrgane(o)), organeId: o.id })) })) };
 }
-function getSchema(eq) { return filtrerConfigBatterie(eq, getSchemaAvantBatterie(eq)); }
+function getSchema(eq) { return ajouterDepartCellule(eq, filtrerConfigBatterie(eq, getSchemaAvantBatterie(eq))); }
 function getSchemaAvantBatterie(eq) {
   const base0 = getSchemaOrganesBT(eq, getSchemaOrganes(eq, getSchemaBase(eq)));
   // Relais TROPIC (rack de modules) : choix des modules installés, juste après la référence du relais.
@@ -15855,6 +15900,89 @@ function dessinerCelluleHTA(ctx, x, y, eq, o = {}) {
   }
   return { yBas: yy, topo, val, relaisBas: pos.relaisBas };
 }
+// Charge alimentée sous la sortie câble d'une cellule (unifilaire prolongé) : transformateur → (gaine) → disjoncteur d'arrivée BT → TGBT
+// (compensation BT, nombre de départs), ou moteur / génératrice / compensateur HTA / autre départ. Renvoie l'ordonnée basse.
+// Rien n'est inventé : seuls les liens saisis (transformateur associé / amont, nom du TGBT) sont dessinés.
+function chaineChargeCellule(eq, eqs) {
+  const ch = chargeCellule(eq, eqs);
+  if (!ch) return null;
+  if (ch.type !== "Transformateur" || !ch.eq) return { ch, h: ch.type === "Transformateur" ? 60 : 50 };
+  const rep = ch.repere;
+  const lie = (e) => String(e.identification?.transformateurAssocie || "").trim() === rep;
+  const gaine = eqs.find((e) => e.type === "Jeu de barre / Gaine à barre" && lie(e));
+  const djs = eqs.filter((e) => e.type === "Disjoncteur BT" && lie(e));
+  const arrivee = djs.find((e) => e.identification?.fonctionBT === "Arrivée") || djs.find((e) => !e.identification?.fonctionBT);
+  const tgbt = String(arrivee?.identification?.nomTGBT || "").trim();
+  const compBT = eqs.filter((e) => e.type === "Batterie de compensation" && lie(e));
+  const departs = eqs.filter((e) => (e.type === "Disjoncteur BT" || e.type === "Interrupteur BT") && e !== arrivee
+    && ((tgbt && String(e.identification?.nomTGBT || "").trim() === tgbt && e.identification?.fonctionBT === "Départ") || (lie(e) && e.identification?.fonctionBT === "Départ")));
+  const h = 60 + (gaine ? 26 : 0) + (arrivee ? 62 : 0) + (arrivee ? 22 + (compBT.length ? 44 : 0) + (departs.length ? 16 : 0) : 0);
+  return { ch, gaine, arrivee, tgbt, compBT, departs, h };
+}
+function dessinerChargeCellule(ctx, x, y, c, o = {}) {
+  const T = SCHEMA_TRAIT, G = "#5B6B7D";
+  const ligne = (pts, ep = 2, col = T, tir) => { ctx.save(); ctx.strokeStyle = col; ctx.lineWidth = ep; if (tir) ctx.setLineDash(tir); ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1]); pts.slice(1).forEach(([a, b]) => ctx.lineTo(a, b)); ctx.stroke(); ctx.restore(); };
+  const lw = o.largeurLibelle || 80, taille = o.taille || 9.5;
+  const lib = (t, yy, gras, col = G, dx = 15) => { if (!t) return; ctx.save(); ctx.font = `${gras ? "bold " : ""}${taille}px ${SCHEMA_POLICE}`; ctx.fillStyle = col; ctx.textAlign = "left"; ctx.textBaseline = "middle"; let s = String(t); while (s.length > 1 && ctx.measureText(s).width > lw) s = s.slice(0, -2) + "…"; ctx.fillText(s, x + dx, yy); ctx.restore(); };
+  const cercle = (cx, cy, r, ep = 1.8) => { ctx.save(); ctx.strokeStyle = T; ctx.lineWidth = ep; ctx.beginPath(); ctx.arc(cx, cy, r, 0, 2 * Math.PI); ctx.stroke(); ctx.restore(); };
+  const lettre = (t, cx, cy) => { ctx.save(); ctx.font = `bold 12px ${SCHEMA_POLICE}`; ctx.fillStyle = T; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(t, cx, cy); ctx.restore(); };
+  const { ch } = c;
+  let yy = y;
+  ligne([[x, yy], [x, yy + 8]]); yy += 8;
+  if (ch.type === "Transformateur") {
+    cercle(x, yy + 11, 11); cercle(x, yy + 27, 11);
+    lib(ch.repere, yy + 12, true, T); lib([ch.puissance, ch.couplage].filter(Boolean).join(" · "), yy + 26);
+    yy += 38;
+    if (!c.arrivee) { ligne([[x, yy], [x, yy + 14]]); ctx.save(); ctx.fillStyle = T; ctx.beginPath(); ctx.moveTo(x - 6, yy + 14); ctx.lineTo(x + 6, yy + 14); ctx.lineTo(x, yy + 24); ctx.closePath(); ctx.fill(); ctx.restore(); lib(ch.eq ? "BT" : "", yy + 18); return yy + 24; }
+    ligne([[x, yy], [x, yy + 4]]); yy += 4;
+    if (c.gaine) { ligne([[x, yy], [x, yy + 22]], 5); lib(`gaine ${c.gaine.identification?.repere || ""}`.trim(), yy + 11); yy += 22; }
+    // disjoncteur d'arrivée BT (contact fixe en haut avec croix, lame articulée en bas)
+    const d = c.arrivee, idd = d.identification || {};
+    ligne([[x, yy], [x, yy + 10]]); ligne([[x - 4, yy + 6], [x + 4, yy + 14]], 1.6); ligne([[x + 4, yy + 6], [x - 4, yy + 14]], 1.6);
+    ligne([[x, yy + 36], [x - 11, yy + 14]]); ligne([[x, yy + 36], [x, yy + 58]]);
+    if (String(idd.debrochable || "").toUpperCase() === "OUI") { ligne([[x - 6, yy], [x, yy + 5], [x + 6, yy]], 1.3); ligne([[x - 6, yy + 48], [x, yy + 43], [x + 6, yy + 48]], 1.3); }
+    lib(idd.repere || "disjoncteur BT", yy + 20, true, T); lib(idd.intensiteNominale ? `In ${idd.intensiteNominale} A` : "arrivée", yy + 33);
+    yy += 58;
+    // jeu de barres du TGBT
+    const bw = Math.min(o.largeurBarre || 110, 140);
+    ctx.save(); ctx.fillStyle = SCHEMA_MARINE; ctx.fillRect(x - 20, yy, bw, 4); ctx.restore();
+    lib(c.tgbt ? `TGBT ${c.tgbt}` : "TGBT", yy + 13, false, G, -18);
+    yy += 22;
+    if (c.compBT.length) { // compensation BT : dérivation vers un condensateur
+      const xc = x + bw - 40;
+      ligne([[xc, yy - 18], [xc, yy + 4]], 1.6); ligne([[xc - 8, yy + 4], [xc + 8, yy + 4]], 2); ligne([[xc - 8, yy + 9], [xc + 8, yy + 9]], 2); ligne([[xc, yy + 9], [xc, yy + 14]], 1.6);
+      ctx.save(); ctx.font = `${taille}px ${SCHEMA_POLICE}`; ctx.fillStyle = G; ctx.textAlign = "right"; ctx.textBaseline = "middle"; ctx.fillText(`${c.compBT[0].identification?.repere || "compensation"}${c.compBT[0].identification?.qn ? " · " + c.compBT[0].identification.qn + " kvar" : ""}`, xc - 12, yy + 7); ctx.restore();
+      yy += 44;
+    }
+    if (c.departs.length) { lib(`+ ${c.departs.length} départ${c.departs.length > 1 ? "s" : ""} BT`, yy, false, G, -18); yy += 16; }
+    return yy;
+  }
+  // autres charges
+  const nom = ch.repere || ch.type.toLowerCase();
+  if (ch.type === "Poste satellite") {
+    ligne([[x, yy], [x, yy + 14]]); ctx.save(); ctx.fillStyle = "#0A5DA8"; ctx.beginPath(); ctx.moveTo(x - 7, yy + 14); ctx.lineTo(x + 7, yy + 14); ctx.lineTo(x, yy + 26); ctx.closePath(); ctx.fill(); ctx.restore();
+    // nom sur deux lignes si besoin (colonnes étroites du poste)
+    ctx.save(); ctx.font = `bold ${taille}px ${SCHEMA_POLICE}`;
+    const mots = `→ ${ch.repere || "poste satellite"}`.split(" "); const l1 = []; let i = 0;
+    while (i < mots.length && ctx.measureText([...l1, mots[i]].join(" ")).width <= lw) l1.push(mots[i++]);
+    if (!l1.length) l1.push(mots[i++]);
+    const l2 = mots.slice(i).join(" "); ctx.restore();
+    lib(l1.join(" "), yy + 8, true, "#0A5DA8"); if (l2) lib(l2, yy + 20, true, "#0A5DA8");
+    lib(ch.puissance, yy + (l2 ? 32 : 21)); return yy + (l2 ? 40 : 30);
+  }
+  if (ch.type === "Moteur HTA" || ch.type === "Génératrice / groupe HTA") {
+    ligne([[x, yy], [x, yy + 6]]); cercle(x, yy + 20, 14); lettre(ch.type === "Moteur HTA" ? "M" : "G", x, yy + (ch.type === "Moteur HTA" ? 20 : 17));
+    if (ch.type !== "Moteur HTA") { ctx.save(); ctx.strokeStyle = T; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(x - 6, yy + 27); ctx.bezierCurveTo(x - 3, yy + 23, x, yy + 31, x + 6, yy + 26); ctx.stroke(); ctx.restore(); }
+    lib(nom, yy + 14, true, T, 20); lib(ch.puissance, yy + 27, false, G, 20); return yy + 36;
+  }
+  if (ch.type === "Compensateur HTA") {
+    ligne([[x, yy], [x, yy + 12]]); ligne([[x - 10, yy + 12], [x + 10, yy + 12]], 2.4); ligne([[x - 10, yy + 18], [x + 10, yy + 18]], 2.4); ligne([[x, yy + 18], [x, yy + 26]]);
+    [[10, 26], [7, 30], [4, 34]].forEach(([dd, hh]) => ligne([[x - dd, yy + hh], [x + dd, yy + hh]], 1.4));
+    lib(nom, yy + 10, true, T); lib(ch.puissance ? (/kvar/i.test(ch.puissance) ? ch.puissance : `${ch.puissance} kvar`) : "", yy + 23); return yy + 38;
+  }
+  ligne([[x, yy], [x, yy + 12]]); ctx.save(); ctx.fillStyle = T; ctx.beginPath(); ctx.moveTo(x - 6, yy + 12); ctx.lineTo(x + 6, yy + 12); ctx.lineTo(x, yy + 22); ctx.closePath(); ctx.fill(); ctx.restore();
+  lib(nom, yy + 8, true, T); lib(ch.puissance, yy + 20); return yy + 26;
+}
 const HAUTEUR_ORGANE_CELLULE = { INT: 44, ISECT: 44, SECT: 44, DISJ: 44, DISJ_DEB: 44, CONT: 44, FUS: 38, TC: 30, TORE: 30, ST: 46, ST_AM: 46, TT: 36, VPIS: 24 };
 const hauteurOrganesCellule = (liste) => liste.reduce((h, k) => h + (HAUTEUR_ORGANE_CELLULE[k] || 30), 0);
 const nomCelluleHTA = (eq) => { const t = topologieCellule(eq); return [eq.identification?.repere, t.code].filter(Boolean).join(" · ") || eq.type; };
@@ -15888,7 +16016,7 @@ function genererSchemaCelluleHTA(eq) {
     let yb = Math.max(r.yBas, r.relaisBas || 0);
     ctx.strokeStyle = SCHEMA_TRAIT; ctx.lineWidth = 2;
     if (r.relaisBas && topo.sortie !== "comptage") { ctx.beginPath(); ctx.moveTo(x, r.yBas); ctx.lineTo(x, r.relaisBas + 4); ctx.stroke(); r.yBas = r.relaisBas + 4; }
-    if (topo.sortie === "cable") { ctx.beginPath(); ctx.moveTo(x, r.yBas); ctx.lineTo(x, r.yBas + 16); ctx.stroke(); ctx.fillStyle = SCHEMA_TRAIT; ctx.beginPath(); ctx.moveTo(x - 7, r.yBas + 16); ctx.lineTo(x + 7, r.yBas + 16); ctx.lineTo(x, r.yBas + 28); ctx.closePath(); ctx.fill(); ctx.font = `10.5px ${SCHEMA_POLICE}`; ctx.fillStyle = "#5B6B7D"; ctx.textAlign = "left"; ctx.fillText("câble", x + 14, r.yBas + 24); yb = Math.max(yb, r.yBas + 30); }
+    if (topo.sortie === "cable") { ctx.beginPath(); ctx.moveTo(x, r.yBas); ctx.lineTo(x, r.yBas + 16); ctx.stroke(); ctx.fillStyle = SCHEMA_TRAIT; ctx.beginPath(); ctx.moveTo(x - 7, r.yBas + 16); ctx.lineTo(x + 7, r.yBas + 16); ctx.lineTo(x, r.yBas + 28); ctx.closePath(); ctx.fill(); ctx.font = `10.5px ${SCHEMA_POLICE}`; ctx.fillStyle = "#5B6B7D"; ctx.textAlign = "left"; const chF = chargeCellule(eq, []); ctx.fillText(chF ? `câble → ${chF.type === "Transformateur" ? "transformateur " + (chF.repere !== "transformateur" ? chF.repere : "") : ({ "Compensateur HTA": "compensateur HTA", "Moteur HTA": "moteur HTA", "Génératrice / groupe HTA": "génératrice", "Autre départ": "" }[chF.type] ?? "") + (chF.repere ? " " + chF.repere : "")}`.trim() : "câble", x + 14, r.yBas + 24); yb = Math.max(yb, r.yBas + 30); }
     else if (topo.sortie === "barres") { ctx.beginPath(); ctx.moveTo(x, r.yBas); ctx.lineTo(x, r.yBas + 14); ctx.lineTo(x + 120, r.yBas + 14); ctx.stroke(); ctx.font = `10.5px ${SCHEMA_POLICE}`; ctx.fillStyle = "#5B6B7D"; ctx.textAlign = "left"; ctx.fillText("→ jeu de barres aval (cellules suivantes)", x + 14, r.yBas + 30); yb = Math.max(yb, r.yBas + 36); }
     else if (topo.sortie === "comptage") { ctx.font = `10.5px ${SCHEMA_POLICE}`; ctx.fillStyle = "#5B6B7D"; ctx.textAlign = "left"; ctx.fillText("vers le comptage", x + 14, r.yBas + 10); yb = Math.max(yb, r.yBas + 16); }
     ctx.font = `9.5px ${SCHEMA_POLICE}`; ctx.fillStyle = "#8B96A3"; ctx.textAlign = "left"; ctx.fillText("Organe en gris : valeur non renseignée dans la fiche.", 14, yb + 18);
@@ -15900,10 +16028,23 @@ function genererSchemaCelluleHTA(eq) {
 function genererSchemaPosteHTA(cellules, titre, opts = {}) {
   if (typeof document === "undefined" || !document.createElement || !cellules || cellules.length < (opts.min ?? 2)) return null;
   try {
-    const COL = 150, PAD = 30, W = Math.max(480, PAD * 2 + cellules.length * COL + 40), H = 560; // largeur ajustée au nombre de cellules : schéma centré dans le rapport
+    const eqsSite = opts.eqsSite || cellules;
+    let sourcesSat = [], texteSat = "";
+    if (opts.nomPoste && opts.eqsSite) { // poste satellite : cellules d'autres postes qui l'alimentent
+      const nomP = String(opts.nomPoste).trim().toLowerCase(), locs = opts.locaux || [];
+      sourcesSat = opts.eqsSite.filter((e) => departCellule(e) === "Poste satellite" && String(chargeCellule(e, []).local || "").trim().toLowerCase() === nomP);
+      if (sourcesSat.length) texteSat = "alimenté depuis : " + sourcesSat.map((e) => [(locs.find((l) => l.id === e.localId) || {}).nom, e.identification?.repere || e.type].filter(Boolean).join(" — cellule ")).join(" · ");
+    }
+    const chaines = cellules.map((eq) => { try { return chaineChargeCellule(eq, eqsSite); } catch (e) { return null; } });
+    const hChaine = Math.max(0, ...chaines.map((c) => (c ? c.h : 0)));
+    const COL = 150, PAD = 30, W = Math.max(480, PAD * 2 + cellules.length * COL + 40, texteSat ? 16 + String(titre || "").length * 8.5 + texteSat.length * 6.2 + 40 : 0), H = 560 + hChaine; // largeur ajustée au nombre de cellules : schéma centré dans le rapport
     const { canvas, ctx } = canevasSchema(W, H);
     ctx.font = `bold 14px ${SCHEMA_POLICE}`; ctx.fillStyle = SCHEMA_MARINE; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
     ctx.fillText(titre || "Poste HTA", 16, 24);
+    if (texteSat) {
+      const wT = ctx.measureText(titre || "Poste HTA").width;
+      ctx.save(); ctx.font = `bold 10.5px ${SCHEMA_POLICE}`; ctx.fillStyle = "#0A5DA8"; let t = texteSat; while (t.length > 1 && ctx.measureText(t).width > W - wT - 50) t = t.slice(0, -2) + "…"; ctx.fillText(t, 16 + wT + 14, 24); ctx.restore();
+    }
     const yBus = 84, xs = cellules.map((_, i) => PAD + COL * i + 48);
     let debut = 0, yMax = 0;
     const troncons = [];
@@ -15934,12 +16075,20 @@ function genererSchemaPosteHTA(cellules, titre, opts = {}) {
     });
     if (opts.suiteApres) { const xf = xs[cellules.length - 1] + 46; ctx.save(); ctx.font = `bold 10px ${SCHEMA_POLICE}`; ctx.fillStyle = "#0A5DA8"; ctx.textAlign = "left"; ctx.textBaseline = "middle"; ctx.fillText("suite →", xf, yBus); ctx.restore(); }
     // sorties
+    let yChaineMax = 0;
     cellules.forEach((eq, i) => {
       const x = xs[i], r = bas[i];
       ctx.strokeStyle = SCHEMA_TRAIT; ctx.lineWidth = 2;
-      if (r.topo.sortie === "cable") {
+      if (r.topo.sortie === "cable" && chaines[i]) {
+        ctx.beginPath(); ctx.moveTo(x, r.yBas); ctx.lineTo(x, ySortie); ctx.stroke();
+        yChaineMax = Math.max(yChaineMax, dessinerChargeCellule(ctx, x, ySortie, chaines[i], { largeurLibelle: COL - 70, taille: 9.5, largeurBarre: COL - 24 }));
+      } else if (r.topo.sortie === "cable") {
         ctx.beginPath(); ctx.moveTo(x, r.yBas); ctx.lineTo(x, ySortie); ctx.stroke();
         ctx.fillStyle = SCHEMA_TRAIT; ctx.beginPath(); ctx.moveTo(x - 6, ySortie); ctx.lineTo(x + 6, ySortie); ctx.lineTo(x, ySortie + 11); ctx.closePath(); ctx.fill();
+        if (sourcesSat.length && eq === cellules.find((c) => c.type === "Interrupteur HTA")) { // cellule d'arrivée du poste satellite
+          const src = sourcesSat[0], nomSrc = ((opts.locaux || []).find((l) => l.id === src.localId) || {}).nom || "poste amont";
+          ctx.save(); ctx.font = `bold 9.5px ${SCHEMA_POLICE}`; ctx.fillStyle = "#0A5DA8"; ctx.textAlign = "left"; ctx.textBaseline = "middle"; let t = `← ${nomSrc}`; while (t.length > 1 && ctx.measureText(t).width > COL - 30) t = t.slice(0, -2) + "…"; ctx.fillText(t, x + 12, ySortie + 6); ctx.restore();
+        }
       } else if (r.topo.sortie === "barres" && i === cellules.length - 1 && opts.suiteApres) {
         ctx.beginPath(); ctx.moveTo(x, r.yBas); ctx.lineTo(x, ySortie); ctx.lineTo(x + 70, ySortie); ctx.stroke();
         ctx.save(); ctx.font = `9.5px ${SCHEMA_POLICE}`; ctx.fillStyle = "#5B6B7D"; ctx.textAlign = "left"; ctx.fillText("→ jeu de barres aval (suite)", x + 8, ySortie + 14); ctx.restore();
@@ -15959,9 +16108,9 @@ function genererSchemaPosteHTA(cellules, titre, opts = {}) {
         ctx.save(); ctx.font = `9.5px ${SCHEMA_POLICE}`; ctx.fillStyle = "#5B6B7D"; ctx.textAlign = "center"; ctx.fillText("comptage", x, r.yBas + 12); ctx.restore();
       }
     });
-    const yFin = ySortie + 30;
+    const yFin = Math.max(ySortie + 30, yChaineMax + 22);
     ctx.save(); ctx.font = `9.5px ${SCHEMA_POLICE}`; ctx.fillStyle = "#8B96A3"; ctx.textAlign = "left";
-    ctx.fillText("Ordre de saisie · « sortie barres » : alimente le tronçon suivant · gris : non renseigné.", 16, yFin);
+    ctx.fillText(chaines.some(Boolean) ? "Sous chaque départ : la charge alimentée (liens des fiches) · gris : non renseigné." : "Ordre de saisie · « sortie barres » : alimente le tronçon suivant · gris : non renseigné.", 16, yFin);
     ctx.restore();
     return { dataUrl: rognerSchema(canvas, yFin + 10), w: W };
   } catch (e) { return null; }
@@ -15972,7 +16121,7 @@ function imagesPosteHTA(g, max = 6) {
   let aval = false;
   for (let k = 0; k < n; k++) {
     const part = eqs.slice(k * max, (k + 1) * max);
-    const img = genererSchemaPosteHTA(part, `Poste HTA — ${g.nom}${n > 1 ? ` (${k + 1}/${n})` : ""}`, { min: n > 1 ? 1 : 2, avalDepart: aval, suiteAvant: k > 0, suiteApres: k < n - 1 });
+    const img = genererSchemaPosteHTA(part, `Poste HTA — ${g.nom}${n > 1 ? ` (${k + 1}/${n})` : ""}`, { min: n > 1 ? 1 : 2, avalDepart: aval, suiteAvant: k > 0, suiteApres: k < n - 1, eqsSite: g.eqsSite, nomPoste: g.nom, locaux: g.locaux });
     if (img) out.push(img);
     if (part.some((e) => topologieCellule(e).sortie === "barres")) aval = true;
   }
@@ -15983,7 +16132,7 @@ function postesHTASite(site) {
   const eqs = equipementsTries(site.equipements || []).filter((e) => TYPES_CELLULES_HTA.includes(e.type));
   const groupes = [];
   eqs.forEach((e) => { const k = e.localId || "__sans__"; let g = groupes.find((x) => x.k === k); if (!g) { const loc = (site.locaux || []).find((l) => l.id === e.localId); g = { k, nom: loc ? loc.nom || "Poste" : "Poste HTA", eqs: [] }; groupes.push(g); } g.eqs.push(e); });
-  return groupes.filter((g) => g.eqs.length >= 2);
+  return groupes.filter((g) => g.eqs.length >= 2).map((g) => ({ ...g, eqsSite: site.equipements || [], locaux: site.locaux || [] }));
 }
 function SchemaCelluleHTA({ eq }) {
   const img = useMemo(() => genererSchemaCelluleHTA(eq), [eq]);
@@ -18324,6 +18473,29 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
                             Reprendre {rapportComptage} depuis la cellule Comptage HTA ({comptageAvecTP.identification.repere || "sans repère"})
                           </div>
                         )}
+                      </Field>
+                    );
+                  }
+                  if (f.key === "posteSatellite") {
+                    const autres = (locaux || []).filter((l) => l.id !== eq.localId && (l.nom || "").trim());
+                    return (
+                      <Field key={f.key} label={f.label}>
+                        <Select value={eq.identification[f.key] || ""} onChange={(e2) => setIdentification(f.key, e2.target.value)}>
+                          <option value="">— Choisir un poste du site —</option>
+                          {autres.map((l) => <option key={l.id} value={l.nom.trim()}>{l.nom.trim()}</option>)}
+                          <option value={POSTE_SATELLITE_LIBRE}>{POSTE_SATELLITE_LIBRE}</option>
+                        </Select>
+                      </Field>
+                    );
+                  }
+                  if ((eq.type === "Disjoncteur HTA" || eq.type === "Contacteur HTA" || eq.type === "Interrupteur HTA") && f.key === "transformateurAssocie") {
+                    const transfosDj = allEquipements.filter((e) => e.type === "Transformateur" && e.id !== eq.id);
+                    return (
+                      <Field key={f.key} label={f.label}>
+                        <Select value={eq.identification[f.key] || ""} onChange={(e2) => setIdentification(f.key, e2.target.value)}>
+                          <option value="">— Choisir un transformateur —</option>
+                          {transfosDj.map((t) => <option key={t.id} value={t.identification.repere || t.id}>{t.identification.repere || "Transformateur sans repère"}</option>)}
+                        </Select>
                       </Field>
                     );
                   }
@@ -26216,7 +26388,7 @@ const NIVEAU_SYNOPTIQUE = {
   "Jeu de barre / Gaine à barre": 3, "Disjoncteur BT": 4, "Interrupteur BT": 4, "Batterie de compensation": 4, "Bilan de puissance": 4, "Inverseur de source": 4,
   "Onduleur": 5, "By-pass externe": 5, "Onduleur simplifié": 5, "Redresseur chargeur": 5, "Sécurité": 6,
 };
-function liensSynoptique(eqs) {
+function liensSynoptique(eqs, locaux = []) {
   const parRepere = (r) => { const k = String(r || "").trim().toLowerCase(); return k ? eqs.find((e) => repereNorm(e) === k) : null; };
   const liens = [];
   const ajoute = (a, b, pointille) => { if (a && b && a !== b && !liens.some((l) => (l.a === a && l.b === b) || (l.a === b && l.b === a))) liens.push({ a, b, pointille }); };
@@ -26224,11 +26396,18 @@ function liensSynoptique(eqs) {
     const id = e.identification || {};
     if (id.transformateurAssocie) {
       const tr = parRepere(id.transformateurAssocie);
-      if (tr) { if (e.type === "Interrupteur Fusible HTA") ajoute(e, tr, false); else ajoute(tr, e, e.type === "Analyse d'huile"); }
+      if (tr) { if (TYPES_CELLULE_DEPART.includes(e.type)) ajoute(e, tr, false); else ajoute(tr, e, e.type === "Analyse d'huile"); }
     }
     if (e.type === "Bilan de puissance") {
       const tr = eqs.find((x) => x.id === id.transfo_id), dj = eqs.find((x) => x.id === id.disj_id);
       if (dj) ajoute(dj, e, true); else if (tr) ajoute(tr, e, true);
+    }
+    if (departCellule(e) === "Poste satellite") {
+      const nomL = String(chargeCellule(e, []).local || "").trim().toLowerCase();
+      const loc = nomL ? locaux.find((l) => String(l.nom || "").trim().toLowerCase() === nomL) : null;
+      const dansLoc = loc ? eqs.filter((x) => x.localId === loc.id) : [];
+      const cible = dansLoc.find((x) => x.type === "Interrupteur HTA") || dansLoc.find((x) => TYPES_CELLULES_HTA.includes(x.type)) || dansLoc[0];
+      if (cible) ajoute(e, cible, false);
     }
     if (e.type === "By-pass externe") listeRepere(id.onduleursRaccordes).forEach((r) => ajoute(parRepere(r), e, true));
     if (/^Onduleur/.test(e.type)) listeRepere(id.machinesParallele).forEach((r) => ajoute(e, parRepere(r), true));
@@ -26292,7 +26471,7 @@ function genererSynoptiqueInstallation(site) {
       g.fillText(String(f.nom).toUpperCase().split("").join(String.fromCharCode(8202)), PAD + 14, f.y + 17);
     });
     // Liens (sous les cases)
-    const liens = liensSynoptique(eqs);
+    const liens = liensSynoptique(eqs, site.locaux || []);
     liens.forEach((l) => {
       const a = pos.get(l.a.id), b = pos.get(l.b.id);
       if (!a || !b) return;
