@@ -20461,6 +20461,161 @@ function BandeauArchives({ archives, compact = false }) {
     </div>
   );
 }
+// ===== Parc en maintenance : synthèse de tous les sites (lecture seule) =====
+// Regroupe les équipements par type → marque → gamme / modèle → type de cellule, pour une année de rapport
+// (« Toutes » : dernière visite de chaque site, pour ne pas compter deux fois un site repris d'une année sur l'autre).
+const TYPES_HORS_PARC = ["Sécurité", "Bilan de puissance", "Analyse d'huile"];
+const DOMAINES_PARC = {
+  HTA: ["Interrupteur HTA", "Interrupteur Fusible HTA", "Disjoncteur HTA", "Contacteur HTA", "Comptage HTA", "Transformateur"],
+  BT: ["Disjoncteur BT", "Interrupteur BT", "Jeu de barre / Gaine à barre", "Batterie de compensation"],
+  Conversion: EQUIPMENT_TYPES_CONVERSION,
+};
+const cleTexteParc = (t) => String(t || "").trim().toUpperCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^A-Z0-9]+/g, " ").trim();
+function anneeRapportSite(site) { const d = String(site?.rapport?.date || ""); return /^\d{4}/.test(d) ? d.slice(0, 4) : ""; }
+function sitesParcRetenus(sites, annee) {
+  const avecDate = (sites || []).filter((s) => anneeRapportSite(s));
+  if (annee !== "toutes") return avecDate.filter((s) => anneeRapportSite(s) === annee);
+  const derniers = new Map(); // même client + même nom de site : dernière visite seulement
+  avecDate.forEach((s) => { const k = `${cleTexteParc(s.client)}|${cleTexteParc(s.nom)}`; const p = derniers.get(k); if (!p || String(s.rapport.date) > String(p.rapport.date)) derniers.set(k, s); });
+  return [...derniers.values()];
+}
+function syntheseParc(sites, { annee = "toutes", client = "", domaine = "" } = {}) {
+  const retenus = sitesParcRetenus(sites, annee).filter((s) => !client || cleTexteParc(s.client) === cleTexteParc(client));
+  const refAnnee = annee === "toutes" ? new Date().getFullYear() : Number(annee);
+  const racine = new Map();
+  const noeud = (map, cle, libelle) => { if (!map.has(cle)) map.set(cle, { libelle, nb: 0, sites: new Map(), etats: [0, 0, 0, 0], ages: [], enfants: new Map() }); return map.get(cle); };
+  const compter = (n, site, eq) => {
+    n.nb++; n.sites.set(site.id, site);
+    const r = RANK_OF[eq.etatFinal] ?? 0; n.etats[r >= 2 ? 2 : r === 1 ? 1 : r < 0 ? 3 : 0]++;
+    const a = numOf(eq.identification?.anneeMiseEnService); if (a && a > 1950 && a <= refAnnee) n.ages.push(refAnnee - a);
+  };
+  let total = 0; const etats = [0, 0, 0, 0];
+  retenus.forEach((site) => (site.equipements || []).forEach((eq) => {
+    if (TYPES_HORS_PARC.includes(eq.type)) return;
+    if (domaine && !(DOMAINES_PARC[domaine] || []).includes(eq.type)) return;
+    const id = eq.identification || {};
+    const marque = String(id.marque || "").trim(), gamme = String((eq.type === "Inverseur de source" ? id.materiel : id.modele) || "").trim();
+    const code = TYPES_CELLULES_HTA.includes(eq.type) ? (String(id.typeCellule || "").split(" - ").slice(1).join(" - ").trim()) : "";
+    const n1 = noeud(racine, eq.type, eq.type);
+    const n2 = noeud(n1.enfants, cleTexteParc(marque) || "?", marque || "Marque non renseignée");
+    const n3 = noeud(n2.enfants, cleTexteParc(gamme) || "?", gamme || "Modèle non renseigné");
+    [n1, n2, n3].forEach((n) => compter(n, site, eq));
+    if (code) compter(noeud(n3.enfants, cleTexteParc(code), code), site, eq);
+    total++; const r = RANK_OF[eq.etatFinal] ?? 0; etats[r >= 2 ? 2 : r === 1 ? 1 : r < 0 ? 3 : 0]++;
+  }));
+  const trier = (map) => [...map.values()].sort((a, b) => b.nb - a.nb || a.libelle.localeCompare(b.libelle)).map((n) => ({ ...n, enfants: trier(n.enfants) }));
+  return { sites: retenus, total, etats, lignes: trier(racine) };
+}
+function ParcView({ sites, onOpenSite }) {
+  const annees = useMemo(() => [...new Set((sites || []).map(anneeRapportSite).filter(Boolean))].sort().reverse(), [sites]);
+  const clients = useMemo(() => [...new Map((sites || []).filter((s) => String(s.client || "").trim()).map((s) => [cleTexteParc(s.client), String(s.client).trim()])).values()].sort((a, b) => a.localeCompare(b)), [sites]);
+  const [annee, setAnnee] = useState(() => annees[0] || "toutes");
+  const [client, setClient] = useState("");
+  const [domaine, setDomaine] = useState("");
+  const [ouverts, setOuverts] = useState({});
+  const [sitesDe, setSitesDe] = useState(null);
+  const syn = useMemo(() => syntheseParc(sites, { annee, client, domaine }), [sites, annee, client, domaine]);
+  const bascule = (k) => setOuverts((o) => ({ ...o, [k]: !o[k] }));
+  const age = (n) => (n.ages.length ? `${Math.round(n.ages.reduce((a, b) => a + b, 0) / n.ages.length)} ans` : "—");
+  const COUL = ["#1E8449", "#B5730A", "#C0392B", "#8B96A3"];
+  const lignes = [];
+  const parcourir = (liste, niveau, prefixe) => liste.forEach((n) => {
+    const k = `${prefixe}/${n.libelle}`; const deplie = !!ouverts[k];
+    lignes.push({ n, niveau, k, deplie, aEnfants: n.enfants.length > 0 });
+    if (deplie) parcourir(n.enfants, niveau + 1, k);
+  });
+  parcourir(syn.lignes, 0, "");
+  const exporter = async () => {
+    try {
+      const mod = await import("xlsx"); const XLSX = mod.utils ? mod : mod.default;
+      const rows = [];
+      const tout = (liste, chemin) => liste.forEach((n) => {
+        const c = [...chemin, n.libelle];
+        rows.push({ "Type": c[0] || "", "Marque": c[1] || "", "Gamme / modèle": c[2] || "", "Type de cellule": c[3] || "", "Nombre": n.nb, "Sites": n.sites.size, "Conformes": n.etats[0], "Dégradés": n.etats[1], "Défaillants": n.etats[2], "Non réalisés": n.etats[3], "Âge moyen (ans)": n.ages.length ? Math.round(n.ages.reduce((a, b) => a + b, 0) / n.ages.length) : "" });
+        tout(n.enfants, c);
+      });
+      tout(syn.lignes, []);
+      const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), "Parc");
+      XLSX.writeFile(wb, `Parc_maintenance_${annee === "toutes" ? "derniere_visite" : annee}${client ? "_" + client.replace(/[^a-z0-9]+/gi, "_") : ""}.xlsx`);
+    } catch (e) { console.error("[Parc] Export impossible :", e); }
+  };
+  const tuile = (titre, valeur, couleur) => (
+    <div style={{ flex: "1 1 120px", background: "#fff", border: "1px solid #E2E6EB", borderTop: `3px solid ${couleur}`, borderRadius: 10, padding: "10px 12px" }}>
+      <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: 0.6, color: "#5B6B7D", textTransform: "uppercase" }}>{titre}</div>
+      <div style={{ fontSize: 24, fontWeight: 700, color: "#1A1F26", marginTop: 2 }}>{valeur}</div>
+    </div>
+  );
+  const th = { textAlign: "right", fontSize: 10.5, fontWeight: 700, color: "#5B6B7D", textTransform: "uppercase", letterSpacing: 0.4, padding: "8px 8px", borderBottom: "1px solid #E2E6EB", whiteSpace: "nowrap" };
+  const td = { textAlign: "right", fontSize: 12.5, padding: "7px 8px", borderBottom: "1px solid #EEF1F5", whiteSpace: "nowrap" };
+  return (
+    <div>
+      <Card style={{ marginBottom: 14 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
+          <SectionTitle>Parc en maintenance</SectionTitle>
+          <button onClick={exporter} style={btnGhost(BRAND.blue)} disabled={!syn.total}><Download size={13} /> Exporter (Excel)</button>
+        </div>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <div style={{ flex: "1 1 150px" }}><div style={{ fontSize: 11, color: "#5B6B7D", marginBottom: 4 }}>Année du rapport</div>
+            <Select value={annee} onChange={(e) => setAnnee(e.target.value)}>{annees.map((a) => <option key={a} value={a}>{a}</option>)}<option value="toutes">Toutes (dernière visite de chaque site)</option></Select></div>
+          <div style={{ flex: "1 1 180px" }}><div style={{ fontSize: 11, color: "#5B6B7D", marginBottom: 4 }}>Client</div>
+            <Select value={client} onChange={(e) => setClient(e.target.value)}><option value="">Tous les clients</option>{clients.map((c) => <option key={c} value={c}>{c}</option>)}</Select></div>
+          <div style={{ flex: "1 1 150px" }}><div style={{ fontSize: 11, color: "#5B6B7D", marginBottom: 4 }}>Domaine</div>
+            <Select value={domaine} onChange={(e) => setDomaine(e.target.value)}><option value="">Tout</option><option value="HTA">HTA</option><option value="BT">BT</option><option value="Conversion">Conversion d'énergie</option></Select></div>
+        </div>
+      </Card>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
+        {tuile("Sites", syn.sites.length, BRAND.blue)}
+        {tuile("Équipements", syn.total, "#1A1F26")}
+        {tuile("Conformes", syn.etats[0], COUL[0])}
+        {tuile("Dégradés", syn.etats[1], COUL[1])}
+        {tuile("Défaillants", syn.etats[2], COUL[2])}
+      </div>
+      <Card>
+        {!syn.total ? <div style={{ color: "#8B96A3", fontSize: 13, padding: 20, textAlign: "center" }}>Aucun équipement pour ces filtres.</div> : (
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 620 }}>
+              <thead><tr>
+                <th style={{ ...th, textAlign: "left" }}>Équipement</th><th style={th}>Nb</th><th style={th}>Sites</th>
+                <th style={{ ...th, color: COUL[0] }}>Conf.</th><th style={{ ...th, color: COUL[1] }}>Dégr.</th><th style={{ ...th, color: COUL[2] }}>Défail.</th><th style={th}>Âge moyen</th>
+              </tr></thead>
+              <tbody>
+                {lignes.map(({ n, niveau, k, deplie, aEnfants }) => (
+                  <tr key={k} style={{ background: niveau === 0 ? "#F4F6F9" : "transparent" }}>
+                    <td style={{ ...td, textAlign: "left", paddingLeft: 8 + niveau * 18, fontWeight: niveau === 0 ? 700 : niveau === 1 ? 600 : 400, color: "#1A1F26", whiteSpace: "normal" }}>
+                      <span onClick={() => aEnfants && bascule(k)} style={{ cursor: aEnfants ? "pointer" : "default", display: "inline-flex", alignItems: "center", gap: 6 }}>
+                        <span style={{ width: 12, color: "#8B96A3" }}>{aEnfants ? (deplie ? "▾" : "▸") : ""}</span>{n.libelle}
+                      </span>
+                    </td>
+                    <td style={{ ...td, fontWeight: 700 }}>{n.nb}</td>
+                    <td style={td}><button onClick={() => setSitesDe({ titre: n.libelle, sites: [...n.sites.values()] })} style={{ background: "none", border: "none", color: BRAND.blue, textDecoration: "underline", cursor: "pointer", fontSize: 12.5, padding: 0 }}>{n.sites.size}</button></td>
+                    <td style={{ ...td, color: n.etats[0] ? COUL[0] : "#C9D1DA" }}>{n.etats[0]}</td>
+                    <td style={{ ...td, color: n.etats[1] ? COUL[1] : "#C9D1DA" }}>{n.etats[1]}</td>
+                    <td style={{ ...td, color: n.etats[2] ? COUL[2] : "#C9D1DA", fontWeight: n.etats[2] ? 700 : 400 }}>{n.etats[2]}</td>
+                    <td style={{ ...td, color: "#5B6B7D" }}>{age(n)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div style={{ fontSize: 11, color: "#8B96A3", marginTop: 8 }}>▸ pour détailler (marque → gamme → type de cellule) · nombre de sites cliquable · âge moyen d'après l'année de mise en service saisie.</div>
+          </div>
+        )}
+      </Card>
+      {sitesDe && (
+        <div onClick={() => setSitesDe(null)} style={{ position: "fixed", inset: 0, zIndex: 2000, background: "rgba(26,31,38,0.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 14, padding: 18, width: "min(460px, 100%)", maxHeight: "80vh", overflowY: "auto" }}>
+            <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 10 }}>{sitesDe.titre} — {sitesDe.sites.length} site{sitesDe.sites.length > 1 ? "s" : ""}</div>
+            {sitesDe.sites.sort((a, b) => String(a.nom || "").localeCompare(String(b.nom || ""))).map((s) => (
+              <button key={s.id} onClick={() => { setSitesDe(null); onOpenSite && onOpenSite(s.id); }} style={{ display: "block", width: "100%", textAlign: "left", background: "#F4F6F9", border: "1px solid #E2E6EB", borderRadius: 8, padding: "8px 10px", marginBottom: 6, cursor: "pointer", fontSize: 12.5 }}>
+                <b>{s.nom || "Site sans nom"}</b><span style={{ color: "#5B6B7D" }}> · {s.client || "—"} · {dateFrIso(s.rapport?.date)}</span>
+              </button>
+            ))}
+            <div style={{ textAlign: "right" }}><button onClick={() => setSitesDe(null)} style={btnPrimary()}>Fermer</button></div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 function RapportsView({ sites, archives = null, interventions, onOpenSite, onOpenIntervention, onPrintSite, onPrintAnnexe, ficheInitiale = null }) {
   const [vue, setVue] = useState(ficheInitiale ? "equipements" : "rmp");
   const [f, setF] = useState({ client: "", site: "", annee: "", mois: "", type: "", etat: "", q: "" });
@@ -29332,6 +29487,13 @@ function AppPrincipale({ currentUser, onLogout }) {
               }}>
                 <FileText size={13} /> Rapports
               </button>
+              <button onClick={() => setView("parc")} style={{
+                display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: 999,
+                border: view === "parc" ? "1px solid #FFC10755" : "1px solid #D8DEE5", background: view === "parc" ? "rgba(255,193,7,0.12)" : "transparent",
+                color: view === "parc" ? BRAND.amber : "#5B6B7D", fontSize: 12.5, fontWeight: 600, cursor: "pointer",
+              }}>
+                <Layers size={13} /> Parc
+              </button>
             </div>
           )}
 
@@ -29352,6 +29514,8 @@ function AppPrincipale({ currentUser, onLogout }) {
             !loaded ? <div style={{ textAlign: "center", padding: 60, color: "#8B96A3", fontSize: 13 }}>{enLigne ? "Chargement…" : "Hors connexion — les données se chargeront dès le retour du réseau."}</div> : <Overview sites={sites} interventions={interventions} onOpen={(id, eqId) => { setOngletSiteInitial(eqId || null); setSelectedId(id); }} onNew={addSite} onOpenIntervention={setSelectedIvId} />
           ) : view === "interventions" ? (
             !ivLoaded ? <div style={{ textAlign: "center", padding: 60, color: "#8B96A3", fontSize: 13 }}>{enLigne ? "Chargement…" : "Hors connexion — les données se chargeront dès le retour du réseau."}</div> : <InterventionsOverview interventions={interventions} sites={sites} onOpen={setSelectedIvId} onCreate={createIntervention} onPlanifier={planifierIntervention} />
+          ) : view === "parc" ? (
+            !loaded ? <div style={{ textAlign: "center", padding: 60, color: "#8B96A3", fontSize: 13 }}>{enLigne ? "Chargement…" : "Hors connexion — les données se chargeront dès le retour du réseau."}</div> : <ParcView sites={sitesConsultation} onOpenSite={ouvrirSite} />
           ) : view === "rapports" ? (
             !loaded || !ivLoaded ? <div style={{ textAlign: "center", padding: 60, color: "#8B96A3", fontSize: 13 }}>{enLigne ? "Chargement…" : "Hors connexion — les données se chargeront dès le retour du réseau."}</div> : (
               <RapportsView key={ficheInitiale || "rapports"} ficheInitiale={ficheInitiale} sites={sitesConsultation} archives={infoArchives} interventions={interventions} onOpenSite={ouvrirSite} onOpenIntervention={setSelectedIvId} onPrintSite={requestPrintSite} onPrintAnnexe={setPrintAnnexeSite} />
@@ -29371,7 +29535,7 @@ function AppPrincipale({ currentUser, onLogout }) {
         {conditionsOuvertes && <ConditionsUtilisation user={currentUser} forcer onFermer={() => setConditionsOuvertes(false)} />}
         {/* Navigation au pouce sur téléphone */}
         <nav className="nav-mobile" aria-label="Navigation principale">
-          {[["sites", "Interventions", Building2], ["interventions", "CRI", ClipboardList], ["calendrier", "Calendrier", Clock], ["rapports", "Rapports", FileText], ["scanner", "Scanner", QrCode]].map(([k, libelle, Icone]) => {
+          {[["sites", "Interventions", Building2], ["interventions", "CRI", ClipboardList], ["calendrier", "Calendrier", Clock], ["rapports", "Rapports", FileText], ["parc", "Parc", Layers], ["scanner", "Scanner", QrCode]].map(([k, libelle, Icone]) => {
             const actif = k !== "scanner" && !selected && !selectedIv && view === k;
             return (
               <button key={k} onClick={() => { if (k === "scanner") { setScannerOuvert(true); return; } setSelectedId(null); setSelectedIvId(null); setView(k); window.scrollTo(0, 0); }}
