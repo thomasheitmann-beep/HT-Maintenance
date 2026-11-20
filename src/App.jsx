@@ -15750,6 +15750,11 @@ function topologieCellule(eq) {
   const tcs = (eq.controles && eq.controles.tc_dynamique) || [];
   const avecTore = tcs.some((t) => t.label === "Homopolaire (terre)" || /homopolaire/i.test((t.fields || {}).fonction || ""));
   const avecTC = equipementAvecTC(eq) && tcs.some((t) => !(t.label === "Homopolaire (terre)" || /homopolaire/i.test((t.fields || {}).fonction || "")));
+  // TC de mesure renseigné en plus d'un TC de protection : dessiné à part ; tore homopolaire renseigné : dessiné sur le câble
+  const homoT = (t) => t.label === "Homopolaire (terre)" || /homopolaire/i.test((t.fields || {}).fonction || "");
+  const renseigne = (t) => !!String((t.fields || {}).rapportPrimaire || (t.fields || {}).modeleTore || "").trim();
+  const avecTCMesure = tcs.some((t) => t.label === "Mesure" && renseigne(t)) && tcs.some((t) => !homoT(t) && t.label !== "Mesure" && renseigne(t));
+  const toreRenseigne = tcs.some((t) => homoT(t) && renseigne(t));
   let org = [], sortie = "cable", note = "", sect = "", deb = false;
   const fam = familleCellule(eq.type, C, id.modele);
   const tcCode = ["IMC", "N1CG", "QMC", "P3CG"].includes(C) || avecTC;
@@ -15805,6 +15810,11 @@ function topologieCellule(eq) {
     // amont : avant le disjoncteur ; sur un interrupteur-fusible, entre l'interrupteur et les fusibles
     if (/amont/i.test(terre)) { let iP = org.findIndex((o) => o === "DISJ" || o === "DISJ_DEB"); if (iP < 0 && eq.type === "Interrupteur Fusible HTA") iP = org.indexOf("FUS"); if (iP < 0) iP = org.findIndex((o) => principaux.includes(o)); if (iP < 0) iP = 0; org.splice(iP, 0, "ST_AM"); }
   }
+  if (avecTCMesure && org.includes("TC")) org.splice(org.indexOf("TC") + 1, 0, "TCM");
+  // Tore homopolaire : sur le câble de sortie (après la terre aval) ; sur les interrupteurs, seulement s'il est renseigné
+  const aTore = org.includes("TORE") || (toreRenseigne && ["INTER", "IF_COMBINE", "IF_ASSOCIE"].includes(fam));
+  if (aTore && sortie === "cable") { org = org.filter((o) => o !== "TORE"); org.push("TORE"); }
+  else if (aTore && !org.includes("TORE")) { const iT = org.lastIndexOf("TC"); org.splice(iT >= 0 ? iT + 1 : org.length, 0, "TORE"); }
   // Voyant de présence tension (VPIS) côté câble
   if (sortie === "cable" && eq.type !== "Comptage HTA") org.push("VPIS");
   // Interrupteur-fusibles combiné : le percuteur des fusibles ouvre l'interrupteur
@@ -15814,7 +15824,7 @@ function topologieCellule(eq) {
   const iD = org.findIndex((o) => o === "DISJ" || o === "DISJ_DEB");
   if (["DISJ_DOUBLE", "DISJ_SIMPLE", "DISJ_COUPLAGE"].includes(fam) && sortie === "barres" && iD >= 0) {
     const apres = org.slice(iD + 1);
-    remontee = { gauche: org.slice(0, iD + 1), droite: [...apres.filter((o) => o === "SECT" || o === "ISECT"), ...apres.filter((o) => o === "ST"), ...apres.filter((o) => o === "TORE"), ...apres.filter((o) => o === "TC")] };
+    remontee = { gauche: org.slice(0, iD + 1), droite: [...apres.filter((o) => o === "SECT" || o === "ISECT"), ...apres.filter((o) => o === "ST"), ...apres.filter((o) => o === "TORE"), ...apres.filter((o) => o === "TC"), ...apres.filter((o) => o === "TCM")] };
   }
   return { code, org, sortie, note, combine, remontee, famille: fam };
 }
@@ -15824,20 +15834,22 @@ function valeursCellule(eq) {
   const f = (c.electriques && c.electriques.fusibles_installes && c.electriques.fusibles_installes.fields) || (c.fusibles && c.fusibles.fusibles_installes && c.fusibles.fusibles_installes.fields) || {};
   const tcs = c.tc_dynamique || [];
   const homo = (t) => t.label === "Homopolaire (terre)" || /homopolaire/i.test((t.fields || {}).fonction || "");
-  const tcP = tcs.find((t) => !homo(t) && t.fields && t.fields.rapportPrimaire), tcH = tcs.find((t) => homo(t));
+  const tcP = tcs.find((t) => !homo(t) && t.label !== "Mesure" && t.fields && t.fields.rapportPrimaire) || tcs.find((t) => !homo(t) && t.fields && t.fields.rapportPrimaire), tcH = tcs.find((t) => homo(t));
+  const tcM = tcs.find((t) => t.label === "Mesure" && t !== tcP && t.fields && t.fields.rapportPrimaire);
   const tp = (c.electriques && c.electriques.tp && c.electriques.tp.fields && c.electriques.tp.fields.rapport) || id.rapportTPProtection || "";
   const relais = TYPES_AVEC_RELAIS.includes(eq.type) && (eq.type !== "Interrupteur HTA" && eq.type !== "Interrupteur Fusible HTA" || id.presenceRelais === "Oui") ? [id.marqueRelais, id.referenceRelais].filter(Boolean).join(" ") : "";
   const fonctions = [...new Set(((c.parametrage_relais_seuils || []).filter((s) => s && s.label).map((s) => ansiFamily(s.label)).filter(Boolean)))].slice(0, 5);
   return {
     FUS: f.in ? `${String(f.in).replace(".", ",")} A` : "",
     TC: tcP ? `${tcP.fields.rapportPrimaire}/${tcP.fields.secondaire || "?"}` : "",
+    TCM: tcM ? `${tcM.fields.rapportPrimaire}/${tcM.fields.secondaire || "?"}${tcM.fields.classe ? " cl. " + tcM.fields.classe : ""}` : "",
     TORE: tcH ? (tcH.fields.modeleTore || tcH.fields.rapportPrimaire || "tore") : "",
     TT: tp,
     DISJ: id.referenceDisjoncteur || "",
     relais, fonctions,
   };
 }
-const NOM_ORGANE_CELLULE = { VPIS: "VPIS (présence tension)", INT: "interrupteur", ISECT: "interr.-sectionneur", ST_AM: "sect. de terre amont", SECT: "sectionneur", DISJ: "disjoncteur", DISJ_DEB: "disjoncteur débrochable", CONT: "contacteur", FUS: "fusibles", TC: "TC", TORE: "tore homopolaire", ST: "sect. de terre", TT: "TT" };
+const NOM_ORGANE_CELLULE = { VPIS: "VPIS (présence tension)", INT: "interrupteur", ISECT: "interr.-sectionneur", ST_AM: "sect. de terre amont", SECT: "sectionneur", DISJ: "disjoncteur", DISJ_DEB: "disjoncteur débrochable", CONT: "contacteur", FUS: "fusibles", TC: "TC", TCM: "TC mesure", TORE: "tore homopolaire", ST: "sect. de terre", TT: "TT" };
 // Dessine une cellule verticale à partir de (x, y) ; renvoie l'ordonnée basse. o.complet : libellés complets (fiche) ou valeurs seules (poste).
 function dessinerCelluleHTA(ctx, x, y, eq, o = {}) {
   const topo = topologieCellule(eq), val = valeursCellule(eq);
@@ -15876,7 +15888,7 @@ function dessinerCelluleHTA(ctx, x, y, eq, o = {}) {
       if (o.complet) lib(NOM_ORGANE_CELLULE.VPIS, yy + 12);
       yy += 24;
     }
-    else if (k === "TC" || k === "TORE") { ligne([[x, yy], [x, yy + 30]]); ctx.save(); ctx.strokeStyle = (k === "TC" ? val.TC : val.TORE) ? T : GRIS; ctx.lineWidth = 1.8; ctx.beginPath(); ctx.arc(x, yy + 15, k === "TORE" ? 10 : 8, 0, 2 * Math.PI); ctx.stroke(); ctx.restore(); lib(texteOrgane(k, k === "TC" ? val.TC : val.TORE), yy + 15, (k === "TC" ? val.TC : val.TORE) ? "#5B6B7D" : GRIS); yy += 30; }
+    else if (k === "TC" || k === "TCM" || k === "TORE") { const vT = val[k]; ligne([[x, yy], [x, yy + 30]]); ctx.save(); ctx.strokeStyle = vT ? T : GRIS; ctx.lineWidth = 1.8; ctx.beginPath(); ctx.arc(x, yy + 15, k === "TORE" ? 10 : 8, 0, 2 * Math.PI); ctx.stroke(); ctx.restore(); lib(k === "TCM" && !o.complet ? (vT ? `mes. ${vT.split(" cl.")[0]}` : "TC mesure") : texteOrgane(k, vT), yy + 15, vT ? "#5B6B7D" : GRIS); yy += 30; }
     else if (k === "ST" || k === "ST_AM") { // sectionneur de terre à gauche de l'axe
       ligne([[x, yy], [x, yy + 46]]); ligne([[x, yy + 8], [x - 26, yy + 8], [x - 26, yy + 13]]);
       ligne([[x - 26, yy + 36], [x - 36, yy + 15]]); ligne([[x - 26, yy + 36], [x - 26, yy + 40]]);
@@ -15983,7 +15995,7 @@ function dessinerChargeCellule(ctx, x, y, c, o = {}) {
   ligne([[x, yy], [x, yy + 12]]); ctx.save(); ctx.fillStyle = T; ctx.beginPath(); ctx.moveTo(x - 6, yy + 12); ctx.lineTo(x + 6, yy + 12); ctx.lineTo(x, yy + 22); ctx.closePath(); ctx.fill(); ctx.restore();
   lib(nom, yy + 8, true, T); lib(ch.puissance, yy + 20); return yy + 26;
 }
-const HAUTEUR_ORGANE_CELLULE = { INT: 44, ISECT: 44, SECT: 44, DISJ: 44, DISJ_DEB: 44, CONT: 44, FUS: 38, TC: 30, TORE: 30, ST: 46, ST_AM: 46, TT: 36, VPIS: 24 };
+const HAUTEUR_ORGANE_CELLULE = { INT: 44, ISECT: 44, SECT: 44, DISJ: 44, DISJ_DEB: 44, CONT: 44, FUS: 38, TC: 30, TCM: 30, TORE: 30, ST: 46, ST_AM: 46, TT: 36, VPIS: 24 };
 const hauteurOrganesCellule = (liste) => liste.reduce((h, k) => h + (HAUTEUR_ORGANE_CELLULE[k] || 30), 0);
 const nomCelluleHTA = (eq) => { const t = topologieCellule(eq); return [eq.identification?.repere, t.code].filter(Boolean).join(" · ") || eq.type; };
 // Schéma d'une cellule (fiche équipement).
@@ -16002,7 +16014,7 @@ function genererSchemaCelluleHTA(eq) {
       ctx.font = `10px ${SCHEMA_POLICE}`; ctx.fillStyle = gris; ctx.fillText("jeu de barres", 30, 54); ctx.fillText("jeu de barres aval", 240, 54);
       ctx.strokeStyle = SCHEMA_TRAIT; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(xL, 63); ctx.lineTo(xL, 76); ctx.moveTo(xR, 63); ctx.lineTo(xR, 76); ctx.stroke();
       const rL = dessinerCelluleHTA(ctx, xL, 76, eq, { complet: true, largeurLibelle: 118, taille: 10.5, org: topo.remontee.gauche, cote: "amont", sansRelais: true });
-      const rR = dessinerCelluleHTA(ctx, xR, 76, eq, { complet: true, largeurLibelle: 120, taille: 10.5, org: topo.remontee.droite, cote: "aval" });
+      const rR = dessinerCelluleHTA(ctx, xR, 76, eq, { complet: true, largeurLibelle: 132, taille: 10.5, org: topo.remontee.droite, cote: "aval" });
       const yLow = Math.max(rL.yBas, rR.yBas, rR.relaisBas || 0) + 16;
       ctx.strokeStyle = SCHEMA_TRAIT; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(xL, rL.yBas); ctx.lineTo(xL, yLow); ctx.lineTo(xR, yLow); ctx.lineTo(xR, rR.yBas); ctx.stroke();
       ctx.font = `10.5px ${SCHEMA_POLICE}`; ctx.fillStyle = gris; ctx.textAlign = "center"; ctx.fillText("remontée vers le jeu de barres aval", (xL + xR) / 2, yLow + 16); ctx.textAlign = "left";
@@ -16059,8 +16071,8 @@ function genererSchemaPosteHTA(cellules, titre, opts = {}) {
       ctx.strokeStyle = SCHEMA_TRAIT; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(x, yBus); ctx.lineTo(x, yBus + 14); ctx.stroke();
       const tp = topologieCellule(eq);
       const split = tp.remontee && i < cellules.length - 1;
-      const droiteP = split ? tp.remontee.droite.filter((k) => k !== "TC" && k !== "TORE") : [];
-      const gaucheP = split ? [...tp.remontee.gauche, ...tp.remontee.droite.filter((k) => k === "TC"), ...tp.remontee.droite.filter((k) => k === "TORE")] : null;
+      const droiteP = split ? tp.remontee.droite.filter((k) => k !== "TC" && k !== "TCM" && k !== "TORE") : [];
+      const gaucheP = split ? [...tp.remontee.gauche, ...tp.remontee.droite.filter((k) => k === "TC"), ...tp.remontee.droite.filter((k) => k === "TCM"), ...tp.remontee.droite.filter((k) => k === "TORE")] : null;
       const r = dessinerCelluleHTA(ctx, x, yBus + 14, eq, { complet: false, largeurLibelle: COL - 70, taille: 10, ...(gaucheP ? { org: gaucheP } : {}) });
       r.droiteP = droiteP; r.debutDroite = Math.max(r.yBas, r.relaisBas || 0) + 6;
       bas.push(r); yMax = Math.max(yMax, r.yBas, r.relaisBas || 0, droiteP.length ? r.debutDroite + hauteurOrganesCellule(droiteP) : 0);
