@@ -7709,6 +7709,8 @@ function nombresDictes(texte) {
 }
 function commandeDictee(texte) {
   const t = String(texte || "").toLowerCase();
+  // Une phrase qui contient des valeurs n'est pas une commande : « 12,42 suivant 10,27 » = deux valeurs (« suivant » sert de séparateur).
+  if (nombresDictes(t).length) return null;
   if (/\b(stop|terminé|termine|fin de la dictée|arrête)\b/.test(t)) return "stop";
   if (/\b(retour|annule|annuler|efface|effacer|corrige|corriger)\b/.test(t)) return "retour";
   if (/\b(suivant|passe|passer)\b/.test(t)) return "suivant";
@@ -7728,11 +7730,12 @@ function useDictee(onPhrase, { continu = true } = {}) {
   const [actif, setActif] = useState(false);
   const [erreur, setErreur] = useState("");
   const [statut, setStatut] = useState(""); // "ecoute" | "pause" | ""
+  const [provisoire, setProvisoire] = useState(""); // texte entendu, pas encore validé
   const recoRef = useRef(null), actifRef = useRef(false), cbRef = useRef(onPhrase), timerRef = useRef(null), echecsRef = useRef(0), debutRef = useRef(0), entenduRef = useRef(false);
   cbRef.current = onPhrase;
   const annulerRelance = () => { if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; } };
   const arreter = (message) => {
-    actifRef.current = false; annulerRelance(); setActif(false); setStatut("");
+    actifRef.current = false; annulerRelance(); setActif(false); setStatut(""); setProvisoire("");
     if (typeof message === "string") setErreur(message);
     const r = recoRef.current; recoRef.current = null;
     if (r) { r.onend = null; r.onresult = null; r.onerror = null; try { r.abort ? r.abort() : r.stop(); } catch (e) { /* déjà arrêtée */ } }
@@ -7741,15 +7744,31 @@ function useDictee(onPhrase, { continu = true } = {}) {
     const R = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!R || !actifRef.current) return;
     const reco = new R();
-    reco.lang = "fr-FR"; reco.continuous = continu; reco.interimResults = false; reco.maxAlternatives = 1;
-    const traites = new Set(); // anti-doublon : Safari iOS peut renvoyer les mêmes résultats finaux
+    reco.lang = "fr-FR"; reco.continuous = continu; reco.interimResults = true; reco.maxAlternatives = 1;
+    // Safari (surtout sur Mac) peut ne jamais déclarer « définitive » une phrase en écoute continue : les résultats provisoires
+    // sont aussi lus, et validés après ~1 s sans changement. Seuls les mots nouveaux d'un résultat sont transmis (pas de doublon
+    // quand Safari confirme ou rallonge ensuite la même phrase).
+    const motsValides = new Map(); // index du résultat → nombre de mots déjà transmis
+    let enAttente = null, minuterie = null;
+    const valider = (i, texte) => {
+      const mots = String(texte || "").trim().split(/\s+/).filter(Boolean);
+      const deja = motsValides.get(i) || 0;
+      if (mots.length <= deja) return;
+      motsValides.set(i, mots.length);
+      entenduRef.current = true; echecsRef.current = 0; setProvisoire("");
+      try { cbRef.current(mots.slice(deja).join(" ")); } catch (x) { /* une phrase mal interprétée ne bloque pas la dictée */ }
+    };
+    const viderAttente = () => { if (minuterie) { clearTimeout(minuterie); minuterie = null; } if (enAttente) { const a = enAttente; enAttente = null; valider(a.i, a.t); } };
     reco.onstart = () => { if (recoRef.current === reco) setStatut("ecoute"); };
     reco.onresult = (e) => {
       if (recoRef.current !== reco) return;
       for (let i = e.resultIndex; i < e.results.length; i++) {
-        if (!e.results[i].isFinal || traites.has(i)) continue;
-        traites.add(i); entenduRef.current = true; echecsRef.current = 0;
-        try { cbRef.current(e.results[i][0].transcript); } catch (x) { /* une phrase mal interprétée ne bloque pas la dictée */ }
+        const t = e.results[i][0].transcript;
+        if (e.results[i].isFinal) { if (enAttente && enAttente.i === i) { enAttente = null; if (minuterie) { clearTimeout(minuterie); minuterie = null; } } valider(i, t); continue; }
+        setProvisoire(String(t || "").trim());
+        if (minuterie) clearTimeout(minuterie);
+        enAttente = { i, t };
+        minuterie = setTimeout(() => { minuterie = null; if (enAttente && recoRef.current === reco) { const a = enAttente; enAttente = null; valider(a.i, a.t); } }, 1000);
       }
     };
     reco.onerror = (e) => {
@@ -7759,6 +7778,7 @@ function useDictee(onPhrase, { continu = true } = {}) {
       // « no-speech » / « aborted » : simple silence, la relance différée s'en charge
     };
     reco.onend = () => {
+      if (recoRef.current === reco) viderAttente(); // phrase en attente : validée avant la relance
       if (recoRef.current !== reco || !actifRef.current) return;
       if (!continu) { arreter(); return; }
       const rapide = Date.now() - debutRef.current < 1500 && !entenduRef.current;
@@ -7779,7 +7799,7 @@ function useDictee(onPhrase, { continu = true } = {}) {
     lancerSession();
   };
   useEffect(() => () => { actifRef.current = false; annulerRelance(); const r = recoRef.current; recoRef.current = null; if (r) { r.onend = null; try { r.abort ? r.abort() : r.stop(); } catch (e) { /* rien */ } } }, []);
-  return { actif, erreur, statut, demarrer, arreter };
+  return { actif, erreur, statut, provisoire, demarrer, arreter };
 }
 function IconeMicro({ taille = 14 }) {
   return <svg width={taille} height={taille} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5 11a7 7 0 0 0 14 0" /><path d="M12 18v3" /></svg>;
@@ -9860,7 +9880,7 @@ function ElementsBatteriePanel({ eq, update, idPrefix }) {
           <span style={{ width: 10, height: 10, borderRadius: "50%", background: dictee.statut === "ecoute" ? "#2ECC71" : "#F39C12", boxShadow: `0 0 0 4px ${dictee.statut === "ecoute" ? "rgba(46,204,113,0.3)" : "rgba(243,156,18,0.3)"}` }} />
           <span style={{ fontSize: 12, color: dictee.statut === "ecoute" ? "#7EE2A8" : "#F8C471" }}>{dictee.statut === "ecoute" ? "J'écoute…" : "micro en pause, relance…"}</span>
           <span style={{ fontWeight: 700, fontSize: 13 }}>{entries[curseur].label} ({curseur + 1}/{entries.length}) — dites la tension</span>
-          {entendu && <span style={{ fontSize: 12, color: "#C9D1DA" }}>entendu : « {entendu} »</span>}
+          {dictee.provisoire ? <span style={{ fontSize: 12, color: "#F8C471" }}>j'entends : « {dictee.provisoire} »</span> : entendu && <span style={{ fontSize: 12, color: "#C9D1DA" }}>entendu : « {entendu} »</span>}
           <span style={{ fontSize: 11, color: "#9AA5B1", flex: "1 1 100%" }}>« retour » pour corriger · « suivant » pour passer · « stop » pour finir · dites « virgule » : « douze virgule soixante-dix »</span>
         </div>
       )}
