@@ -16016,7 +16016,7 @@ function dessinerCelluleHTA(ctx, x, y, eq, o = {}) {
     ctx.restore();
     pos.relaisBas = yR + (o.complet && val.fonctions.length ? 30 : 18);
   }
-  return { yBas: yy, topo, val, relaisBas: pos.relaisBas };
+  return { yBas: yy, topo, val, relaisBas: pos.relaisBas, pos };
 }
 // Charge alimentée sous la sortie câble d'une cellule (unifilaire prolongé) : transformateur → (gaine) → disjoncteur d'arrivée BT → TGBT
 // (compensation BT, nombre de départs), ou moteur / génératrice / compensateur HTA / autre départ. Renvoie l'ordonnée basse.
@@ -16057,6 +16057,7 @@ function dessinerChargeCellule(ctx, x, y, c, o = {}) {
     if (c.gaine) { ligne([[x, yy], [x, yy + 22]], 5); lib(`gaine ${c.gaine.identification?.repere || ""}`.trim(), yy + 11); yy += 22; }
     // disjoncteur d'arrivée BT (contact fixe en haut avec croix, lame articulée en bas)
     const d = c.arrivee, idd = d.identification || {};
+    if (o.out) o.out.yDG = yy;
     ligne([[x, yy], [x, yy + 10]]); ligne([[x - 4, yy + 6], [x + 4, yy + 14]], 1.6); ligne([[x + 4, yy + 6], [x - 4, yy + 14]], 1.6);
     ligne([[x, yy + 36], [x - 11, yy + 14]]); ligne([[x, yy + 36], [x, yy + 58]]);
     if (String(idd.debrochable || "").toUpperCase() === "OUI") { ligne([[x - 6, yy], [x, yy + 5], [x + 6, yy]], 1.3); ligne([[x - 6, yy + 48], [x, yy + 43], [x + 6, yy + 48]], 1.3); }
@@ -16201,7 +16202,9 @@ function genererSchemaPosteHTA(cellules, titre, opts = {}) {
       ctx.strokeStyle = SCHEMA_TRAIT; ctx.lineWidth = 2;
       if (r.topo.sortie === "cable" && chaines[i]) {
         ctx.beginPath(); ctx.moveTo(x, r.yBas); ctx.lineTo(x, ySortie); ctx.stroke();
-        yChaineMax = Math.max(yChaineMax, dessinerChargeCellule(ctx, x, ySortie, chaines[i], { largeurLibelle: COL - 70, taille: 9.5, largeurBarre: COL - 24 }));
+        const outC = {};
+        const yFinC = dessinerChargeCellule(ctx, x, ySortie, chaines[i], { largeurLibelle: COL - 70, taille: 9.5, largeurBarre: COL - 24, out: outC });
+        r.chaine = { y0: ySortie, y1: yFinC, yDG: outC.yDG }; yChaineMax = Math.max(yChaineMax, yFinC);
       } else if (r.topo.sortie === "cable") {
         ctx.beginPath(); ctx.moveTo(x, r.yBas); ctx.lineTo(x, ySortie); ctx.stroke();
         ctx.fillStyle = SCHEMA_TRAIT; ctx.beginPath(); ctx.moveTo(x - 6, ySortie); ctx.lineTo(x + 6, ySortie); ctx.lineTo(x, ySortie + 11); ctx.closePath(); ctx.fill();
@@ -16228,6 +16231,7 @@ function genererSchemaPosteHTA(cellules, titre, opts = {}) {
         ctx.save(); ctx.font = `9.5px ${SCHEMA_POLICE}`; ctx.fillStyle = "#5B6B7D"; ctx.textAlign = "center"; ctx.fillText("comptage", x, r.yBas + 12); ctx.restore();
       }
     });
+    if (opts.consignation) dessinerSurcoucheConsignation(ctx, { cellules, xs, bas, yBus, ySortie, troncons, COL }, opts.consignation);
     const yFin = Math.max(ySortie + 30, yChaineMax + 22);
     ctx.save(); ctx.font = `9.5px ${SCHEMA_POLICE}`; ctx.fillStyle = "#8B96A3"; ctx.textAlign = "left";
     ctx.fillText(chaines.some(Boolean) ? "Sous chaque départ : la charge alimentée (liens des fiches) · gris : non renseigné." : "Ordre de saisie · « sortie barres » : alimente le tronçon suivant · gris : non renseigné.", 16, yFin);
@@ -19700,6 +19704,105 @@ function ResumeSiteContacts({ site, onModifier }) {
   );
 }
 // Aperçu, avant la génération du rapport, des schémas du site (synoptique + postes HTA), avec les repères pour corriger.
+function ConsignationSite({ site, onFermer }) {
+  const eqs = site.equipements || [];
+  const candidats = eqs.filter((e) => TYPES_CELLULES_HTA.includes(e.type) || e.type === "Transformateur" || e.type === "Disjoncteur BT" || e.type === "Interrupteur BT");
+  const [choisis, setChoisis] = useState([]);
+  const per = useMemo(() => perimetreConsignation(site, choisis), [site, choisis]);
+  const [infos, setInfos] = useState(() => ({ numero: "", date: new Date().toISOString().slice(0, 10), entreprise: "", autorisation: "", nature: "", delegue: false, schemas: false, defaut: false, certif: false, chargeConsignation: site.rapport?.intervenant || "" }));
+  const [gen, setGen] = useState(""); // "" | "encours" | message d'erreur
+  const setI = (k, v) => setInfos((x) => ({ ...x, [k]: v }));
+  const genererAttestation = async () => {
+    setGen("encours");
+    try {
+      const blob = await generateAttestationConsignationDocx(site, per, infos);
+      downloadBlob(blob, `Attestation_consignation_${String(infos.numero || site.nom || "site").replace(/[^a-z0-9]+/gi, "_")}.docx`);
+      setGen("");
+    } catch (e) { console.error("[Attestation de consignation]", e); setGen("Génération impossible : " + (e && e.message ? e.message : "erreur inconnue")); }
+  };
+  const coupures = useMemo(() => pointsCoupureConsignation(site, per), [site, per]);
+  const installation = texteInstallationConsignation(site, per);
+  const groupes = useMemo(() => postesHTASite(site), [site]);
+  const images = useMemo(() => groupes.map((g) => ({ g, img: genererSchemaPosteHTA(g.eqs, `Consignation — ${g.nom}`, { min: 1, eqsSite: g.eqsSite, nomPoste: g.nom, locaux: g.locaux, consignation: { ids: per.ids, posteConsigne: per.postesConsignes.has(g.k) } }) })), [groupes, per]);
+  const locaux = site.locaux || [];
+  const parLocal = [];
+  candidats.forEach((e) => { const nom = (locaux.find((l) => l.id === e.localId) || {}).nom || "Sans local"; let x = parLocal.find((p) => p.nom === nom); if (!x) { x = { nom, eqs: [] }; parLocal.push(x); } x.eqs.push(e); });
+  const bascule = (id) => setChoisis((c) => (c.includes(id) ? c.filter((x) => x !== id) : [...c, id]));
+  const chaines = chainesInterverrouillage(eqs).filter((c) => c.serrures.some((x) => per.ids.has(x.eq.id)));
+  const etapes = [
+    `Séparation : ${coupures.length ? coupures.map((c) => c.label.split(" — ")[0]).join(", ") : "—"}.`,
+    "Condamnation des organes de séparation en position ouverte (cadenas, clés d'interverrouillage), et signalisation.",
+    "Identification de l'ouvrage sur le lieu de travail.",
+    "Vérification d'absence de tension (VAT) au plus près du lieu de travail, côté HTA et côté BT.",
+    "Mise à la terre et en court-circuit (MALT-CCT) : sectionneurs de terre fermés côté HTA, dispositif de MALT-CCT posé côté BT.",
+  ];
+  const lgn = (c, t) => <span style={{ display: "inline-flex", alignItems: "center", gap: 6, marginRight: 14 }}><span style={{ width: 22, height: 5, borderRadius: 3, background: c, opacity: 0.7 }} />{t}</span>;
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(10,15,25,0.62)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 10 }}>
+      <div style={{ background: "#fff", borderRadius: 12, width: "min(1100px, 100%)", maxHeight: "96vh", display: "flex", flexDirection: "column", boxShadow: "0 20px 60px rgba(0,0,0,0.35)" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", borderBottom: "1px solid #E2E6EB" }}>
+          <div>
+            <div style={{ fontWeight: 700, color: "#1A1F26", fontSize: 14 }}>Consignation — {site.nom || "site"}</div>
+            <div style={{ fontSize: 11.5, color: "#5B6B7D" }}>Choisissez les équipements à consigner : le périmètre, le schéma et les points de coupure se mettent à jour.</div>
+          </div>
+          <button onClick={onFermer} style={{ background: "none", border: "none", cursor: "pointer", color: "#5B6B7D", display: "flex" }} title="Fermer"><X size={18} /></button>
+        </div>
+        <div style={{ overflow: "auto", padding: 16, display: "flex", gap: 16, flexWrap: "wrap" }}>
+          <div style={{ flex: "1 1 250px", maxWidth: 320 }}>
+            <div style={{ fontSize: 12.5, fontWeight: 700, color: "#0A5DA8", marginBottom: 6 }}>Équipements</div>
+            {parLocal.map((p) => (
+              <div key={p.nom} style={{ marginBottom: 10 }}>
+                <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: 0.6, color: "#5B6B7D", textTransform: "uppercase", marginBottom: 4 }}>{p.nom}</div>
+                {p.eqs.map((e) => {
+                  const auto = per.ajouts.get(e.id), coche = choisis.includes(e.id);
+                  return (
+                    <label key={e.id} style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "5px 6px", borderRadius: 6, background: coche ? "#E8F4EC" : auto ? "#F3F8F4" : "transparent", fontSize: 12.5, cursor: "pointer" }}>
+                      <input type="checkbox" checked={coche || !!auto} disabled={!!auto && !coche} onChange={() => bascule(e.id)} style={{ marginTop: 2 }} />
+                      <span><b>{nomEqSerrure(e)}</b> <span style={{ color: "#5B6B7D" }}>· {e.type.replace(" HTA", "")}{TYPES_CELLULES_HTA.includes(e.type) && topologieCellule(e).code ? " " + topologieCellule(e).code : ""}</span>
+                        {auto && <div style={{ fontSize: 11, color: "#1F7A3A", fontStyle: "italic" }}>ajouté : {auto}</div>}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+          <div style={{ flex: "3 1 520px", minWidth: 0 }}>
+            <div style={{ fontSize: 11.5, color: "#3E4A5C", marginBottom: 6 }}>{lgn(COUL_CONSIGNATION.on, "sous tension")}{lgn(COUL_CONSIGNATION.off, "hors tension / consigné")}{lgn(COUL_CONSIGNATION.terre, "mise à la terre")}<span>🔒 condamné</span></div>
+            {images.map(({ g, img }) => img && <div key={g.k} style={{ border: "1px solid #E2E6EB", borderRadius: 8, overflowX: "auto", marginBottom: 10 }}><img src={img.dataUrl} alt={g.nom} style={{ display: "block", width: "100%", minWidth: 480 }} /></div>)}
+            {!per.ids.size ? <div style={{ fontSize: 12.5, color: "#8B96A3" }}>Aucun équipement choisi.</div> : (<>
+              <div style={{ fontSize: 12.5, fontWeight: 700, color: "#0A5DA8", margin: "8px 0 4px" }}>Points de coupure (séparation et condamnation)</div>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}><tbody>
+                {coupures.map((c, i) => <tr key={i} style={{ borderBottom: "1px solid #EEF1F5" }}><td style={{ padding: "5px 6px", fontWeight: 600 }}>{c.label}</td><td style={{ padding: "5px 6px", color: "#3E4A5C" }}>{c.action}</td><td style={{ padding: "5px 6px", whiteSpace: "nowrap", color: c.malt === "avec" ? COUL_CONSIGNATION.terre : "#5B6B7D", fontWeight: 600 }}>{c.malt === "avec" ? "séparé avec MALT" : "séparé sans MALT"}</td></tr>)}
+              </tbody></table>
+              {installation && <div style={{ fontSize: 12, color: "#1A1F26", marginTop: 8, padding: "8px 10px", background: "#F4F6F9", borderRadius: 8 }}>{installation}</div>}
+              {chaines.length > 0 && <div style={{ fontSize: 12, marginTop: 8 }}><b>Clés d'interverrouillage concernées :</b> {chaines.map((c) => `${c.cle} (${c.serrures.map((x) => nomEqSerrure(x.eq)).join(" → ")})`).join(" · ")}</div>}
+              <div style={{ fontSize: 12.5, fontWeight: 700, color: "#0A5DA8", margin: "10px 0 4px" }}>Étapes de la consignation (NF C 18-510)</div>
+              <ol style={{ margin: 0, paddingLeft: 18, fontSize: 12, lineHeight: 1.55 }}>{etapes.map((t, i) => <li key={i}>{t}</li>)}</ol>
+              {per.postesConsignes.size === 0 && <div style={{ fontSize: 11.5, color: "#C8102E", marginTop: 6 }}>Jeu de barres HTA et câbles des cellules d'arrivée : restent sous tension.</div>}
+              {per.postesConsignes.size > 0 && <div style={{ fontSize: 11.5, color: "#C8102E", marginTop: 6 }}>Séparation de réseau Enedis : interdiction de travailler sur le compartiment câbles des cellules d'arrivée.</div>}
+              <div style={{ fontSize: 12.5, fontWeight: 700, color: "#0A5DA8", margin: "14px 0 6px" }}>Attestation de consignation (Word)</div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 8 }}>
+                {[["numero", "Numéro d'attestation"], ["date", "Date", "date"], ["entreprise", "Entreprise chargée des travaux"], ["autorisation", "Autorisation de travail attachée"], ["chargeConsignation", "Chargé de consignation"]].map(([k, l, t]) => (
+                  <div key={k}><div style={{ fontSize: 10.5, color: "#5B6B7D", marginBottom: 3 }}>{l}</div><input type={t || "text"} value={infos[k]} onChange={(e) => setI(k, e.target.value)} style={inputStyle} /></div>
+                ))}
+                <div style={{ gridColumn: "1 / -1" }}><div style={{ fontSize: 10.5, color: "#5B6B7D", marginBottom: 3 }}>Nature des travaux</div><input value={infos.nature} onChange={(e) => setI("nature", e.target.value)} style={inputStyle} /></div>
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 8, fontSize: 12 }}>
+                {[["delegue", "Chargé d'exploitation délégué (manœuvres de consignation)"], ["schemas", "Schémas ou plans de l'installation non fournis"], ["defaut", "Attestation réalisée par défaut de chargé de consignation"], ["certif", "Certification du chef d'établissement (données techniques, entreprises, accès)"]].map(([k, l]) => (
+                  <label key={k} style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer" }}><input type="checkbox" checked={!!infos[k]} onChange={(e) => setI(k, e.target.checked)} />{l}</label>
+                ))}
+              </div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginTop: 12 }}>
+                <button onClick={genererAttestation} disabled={gen === "encours"} style={btnPrimary()}><FileText size={14} /> {gen === "encours" ? "Génération…" : "Attestation de consignation (Word)"}</button>
+                {gen && gen !== "encours" && <span style={{ fontSize: 12, color: "#C8102E" }}>{gen}</span>}
+              </div>
+            </>)}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 function ApercuSchemasSite({ site, onFermer, onOuvrirEquipement }) {
   const [zoom, setZoom] = useState(null);
   const sigSite = useMemo(() => signatureSchema([site.equipements, site.locaux]), [site]);
@@ -19761,6 +19864,7 @@ function SiteDetail({ site, allSites, update, onBack, onDelete, onPrint, onPrint
   const [infosOuvertes, setInfosOuvertes] = useState(() => !(site.client || site.nom));
   const [menuPlus, setMenuPlus] = useState(false);
   const [apercuSchemas, setApercuSchemas] = useState(false);
+  const [consignationOuverte, setConsignationOuverte] = useState(false);
   const [reprendreOpen, setReprendreOpen] = useState(false);
   const [reprendreSelection, setReprendreSelection] = useState([]);
   // Un onglet par équipement, nommé d'après l'équipement (son repère) et classé selon l'ordre
@@ -19983,6 +20087,8 @@ function SiteDetail({ site, allSites, update, onBack, onDelete, onPrint, onPrint
             <StatusBadge label={rankToLabel(rank)} />
             <div style={{ flex: "1 1 auto" }} />
             <button onClick={() => setApercuSchemas(true)} style={btnGhost(BRAND.blue)} title="Voir le synoptique et les schémas des postes HTA avant de générer le rapport">Aperçu des schémas</button>
+            <button onClick={() => setConsignationOuverte(true)} style={btnGhost(BRAND.blue)} title="Choisir les équipements à consigner : schéma, points de coupure, attestation">Consignation</button>
+            {consignationOuverte && <ConsignationSite site={site} onFermer={() => setConsignationOuverte(false)} />}
             <button onClick={() => onPrint(site)} style={btnPrimary()}>
               <FileText size={14} /> Générer le rapport
             </button>
@@ -26919,6 +27025,85 @@ function docxSynoptiqueInstallation(site) {
     ...chainesI,
   ];
 }
+// ===== Consignation (NF C18-510) : choix des équipements, schéma coloré, points de coupure — base de l'attestation de l'app Sécurité =====
+// Couleurs de l'app Sécurité : rouge = sous tension, vert = hors tension / consigné, bleu = mise à la terre.
+const COUL_CONSIGNATION = { on: "#C8102E", off: "#1F7A3A", terre: "#1D4ED8" };
+const estArriveeHTA = (e) => e.type === "Interrupteur HTA" && !departCellule(e) && topologieCellule(e).sortie === "cable";
+// Étend la sélection : un départ transformateur entraîne le transformateur et son disjoncteur BT d'arrivée (séparation aval),
+// un transformateur entraîne sa cellule et son disjoncteur BT ; toutes les arrivées consignées = jeu de barres HTA consigné.
+function perimetreConsignation(site, choisis) {
+  const eqs = site.equipements || [];
+  const ids = new Set(choisis), ajouts = new Map();
+  const ajoute = (e, raison) => { if (e && !ids.has(e.id)) { ids.add(e.id); ajouts.set(e.id, raison); } };
+  const cellulesVers = (tr) => eqs.filter((c) => TYPES_CELLULE_DEPART.includes(c.type) && departCellule(c) === "Transformateur" && String(c.identification?.transformateurAssocie || "").trim() === String(tr.identification?.repere || "").trim());
+  for (let tour = 0; tour < 3; tour++) {
+    eqs.filter((e) => ids.has(e.id)).forEach((e) => {
+      if (TYPES_CELLULES_HTA.includes(e.type)) {
+        const c = chaineChargeCellule(e, eqs);
+        if (c && c.ch && c.ch.eq) ajoute(c.ch.eq, `alimenté par ${nomEqSerrure(e)}`);
+        if (c && c.arrivee) ajoute(c.arrivee, `séparation côté BT (retour de tension par ${c.ch.eq ? nomEqSerrure(c.ch.eq) : "le transformateur"})`);
+      }
+      if (e.type === "Transformateur") {
+        cellulesVers(e).forEach((c) => ajoute(c, `cellule d'alimentation de ${nomEqSerrure(e)}`));
+        eqs.filter((d) => d.type === "Disjoncteur BT" && String(d.identification?.transformateurAssocie || "").trim() === String(e.identification?.repere || "").trim() && d.identification?.fonctionBT !== "Départ").forEach((d) => ajoute(d, `séparation côté BT de ${nomEqSerrure(e)}`));
+      }
+    });
+  }
+  const parLocal = new Map();
+  eqs.filter((e) => TYPES_CELLULES_HTA.includes(e.type)).forEach((e) => { const k = e.localId || "_"; if (!parLocal.has(k)) parLocal.set(k, []); parLocal.get(k).push(e); });
+  const postesConsignes = new Set([...parLocal.entries()].filter(([, l]) => { const arr = l.filter(estArriveeHTA); return arr.length && arr.every((a) => ids.has(a.id)); }).map(([k]) => k));
+  return { ids, ajouts, postesConsignes };
+}
+function pointsCoupureConsignation(site, per) {
+  const eqs = (site.equipements || []).filter((e) => per.ids.has(e.id));
+  const out = [];
+  eqs.filter((e) => TYPES_CELLULES_HTA.includes(e.type)).forEach((e) => {
+    const t = topologieCellule(e);
+    const app = t.org.includes("DISJ_DEB") ? "disjoncteur ouvert et débroché" : /^DISJ/.test(t.famille || "") ? "disjoncteur ouvert, sectionneur ouvert" : t.famille === "CONTACTEUR" ? "contacteur ouvert" : "interrupteur ouvert";
+    const terre = t.org.includes("ST") || t.org.includes("ST_AM");
+    out.push({ label: `Cellule ${nomEqSerrure(e)}${t.code ? " (" + t.code + ")" : ""}${estArriveeHTA(e) ? " — arrivée réseau" : ""}`, action: `${app}, condamné${terre ? ", sectionneur de terre fermé" : ""}`, malt: terre ? "avec" : "sans" });
+  });
+  eqs.filter((e) => e.type === "Disjoncteur BT" || e.type === "Interrupteur BT").forEach((e) => {
+    const deb = String(e.identification?.debrochable || "").toUpperCase() === "OUI";
+    out.push({ label: `${e.type} ${nomEqSerrure(e)}${e.identification?.nomTGBT ? " — TGBT " + e.identification.nomTGBT : ""}`, action: `${deb ? "débroché" : "ouvert"}, condamné ; VAT puis MALT-CCT côté BT`, malt: "sans" });
+  });
+  return out;
+}
+function texteInstallationConsignation(site, per) {
+  const eqs = (site.equipements || []).filter((e) => per.ids.has(e.id));
+  const cel = eqs.filter((e) => TYPES_CELLULES_HTA.includes(e.type)).map(nomEqSerrure), tr = eqs.filter((e) => e.type === "Transformateur").map(nomEqSerrure), bt = eqs.filter((e) => /BT$/.test(e.type)).map(nomEqSerrure);
+  const parts = [];
+  if (cel.length) parts.push(`côté HTA : cellule${cel.length > 1 ? "s" : ""} ${cel.join(", ")} (aval de l'appareil de coupure)`);
+  if (tr.length) parts.push(`transformateur${tr.length > 1 ? "s" : ""} ${tr.join(", ")}`);
+  if (bt.length) parts.push(`côté BT : jusqu'à l'amont de ${bt.join(", ")}`);
+  if (per.postesConsignes.size) parts.push("jeu de barres HTA du poste (toutes les arrivées ouvertes et condamnées)");
+  return parts.length ? `Installation comprise entre ${parts.join(" ; ")}.` : "";
+}
+function dessinerCadenas(ctx, x, y, couleur) {
+  ctx.save(); ctx.strokeStyle = couleur; ctx.fillStyle = couleur; ctx.lineWidth = 1.6;
+  ctx.beginPath(); ctx.arc(x, y - 3, 4, Math.PI, 0); ctx.stroke(); ctx.fillRect(x - 6, y - 3, 12, 9);
+  ctx.restore();
+}
+function dessinerSurcoucheConsignation(ctx, g, cons) {
+  const { cellules, xs, bas, yBus, COL } = g;
+  const trait = (pts, c, ep = 5) => { ctx.save(); ctx.globalAlpha = 0.55; ctx.strokeStyle = c; ctx.lineWidth = ep; ctx.lineCap = "round"; ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1]); pts.slice(1).forEach(([a, b]) => ctx.lineTo(a, b)); ctx.stroke(); ctx.restore(); };
+  const busOff = cons.posteConsigne;
+  (g.troncons || [[0, xs.length - 1]]).forEach(([a, b]) => trait([[xs[a] - 40, yBus], [xs[b] + 40, yBus]], busOff ? COUL_CONSIGNATION.off : COUL_CONSIGNATION.on, 8));
+  cellules.forEach((eq, i) => {
+    const x = xs[i], r = bas[i], pos = r.pos || {};
+    const yFin = r.chaine ? (r.chaine.yDG !== undefined ? r.chaine.yDG + 6 : r.chaine.y1) : r.yBas;
+    if (!cons.ids.has(eq.id)) { trait([[x, yBus + 3], [x, Math.max(r.yBas, yFin)]], busOff ? COUL_CONSIGNATION.off : COUL_CONSIGNATION.on, 4); return; }
+    const pM = pos.ISECT ?? pos.INT ?? pos.DISJ ?? pos.DISJ_DEB ?? pos.CONT ?? pos.SECT;
+    const yCoupe = pM !== undefined ? pM + 8 : yBus + 14;
+    if (!estArriveeHTA(eq) || !busOff) trait([[x, yBus + 3], [x, yCoupe]], busOff ? COUL_CONSIGNATION.off : COUL_CONSIGNATION.on, 4);
+    trait([[x, yCoupe + 26], [x, yFin]], COUL_CONSIGNATION.off, 5);
+    if (estArriveeHTA(eq)) trait([[x, r.yBas], [x, r.yBas + 40]], COUL_CONSIGNATION.on, 4); // câble réseau : reste sous tension
+    if (pM !== undefined) dessinerCadenas(ctx, x + 10, pM + 42, COUL_CONSIGNATION.off);
+    const pT = pos.ST ?? pos.ST_AM;
+    if (pT !== undefined) { trait([[x, pT + 8], [x - 26, pT + 8], [x - 26, pT + 40]], COUL_CONSIGNATION.terre, 4); ctx.save(); ctx.font = `bold 9px ${SCHEMA_POLICE}`; ctx.fillStyle = COUL_CONSIGNATION.terre; ctx.textAlign = "right"; ctx.fillText("MALT", x - 30, pT + 6); ctx.restore(); }
+    if (r.chaine && r.chaine.yDG !== undefined) dessinerCadenas(ctx, x + 10, r.chaine.yDG + 50, COUL_CONSIGNATION.off);
+  });
+}
 // ===== Fiche de manœuvre (ordre de service à afficher sur la cellule) =====
 // Procédure générée à partir des liens saisis (cellule → transformateur → disjoncteur BT d'arrivée) et des serrures / clés.
 function procedureManoeuvre(eq, eqs, locaux = []) {
@@ -27125,6 +27310,106 @@ function BoutonFicheManoeuvre({ eq, allSites }) {
       {erreur && <span style={{ fontSize: 12, color: "#C0392B" }}>{erreur}</span>}
     </div>
   );
+}
+// Textes de l'attestation de consignation, repris à l'identique de l'app Sécurité (NF C 18-510).
+const TXT_ATTESTATION_CONSIGNATION = {
+  delegue: "Le représentant de l'entreprise utilisatrice demande au chargé de consignation HT-Maintenance d'assurer la fonction de chargé d'exploitation délégué, dans le cadre des opérations de manœuvres nécessaires à la consignation, sous sa responsabilité.",
+  schemas: "Schémas ou plans de l'installation non fournis.",
+  defaut: "Attestation de consignation réalisée par défaut de chargé de consignation.",
+  certif: "Après avoir communiqué l'ensemble des données techniques à jour, nécessaires aux travaux (schémas – source autonome – asservissements), le chef d'établissement ou son représentant :",
+  certifItems: [
+    "Demande au chargé de consignation d'assurer la prévention des risques électriques liés à la réalisation des opérations citées.",
+    "Certifie qu'aucune entreprise autre que la société HT-Maintenance n'intervient sur les équipements concernés par les opérations citées.",
+    "Reste responsable des accès aux installations et aux équipements non délégués.",
+  ],
+  certifFin: "Assure qu'en cas d'incident consécutif à un vice caché de ses appareils ou à la vétusté de l'installation, la responsabilité de la société HT-Maintenance ne sera pas recherchée.",
+  cc: "Par l'apposition de sa signature, le chargé de consignation atteste de la réalisation des actions telles que définies ci-dessus. Il livre au responsable une attestation de consignation.",
+  rt: "Le responsable de travaux doit considérer comme étant en exploitation toute installation autre que celle certifiée par la présente. Par l'apposition de sa signature, il s'engage à respecter et à faire respecter les prescriptions de sécurité correspondantes à la présente prestation. Il pourra travailler après avoir pris les mesures de sécurité qui lui incombent.",
+  rt2: "Comme indiqué sur l'autorisation de travail de rattachement, le responsable de travaux désigné ci-contre est remplacé. Par l'apposition de sa signature, le nouveau responsable de travaux atteste qu'il a pris les dispositions de sécurité qui lui incombent.",
+  fin: "Par l'apposition de sa signature, le responsable de travaux indique que les travaux désignés sont terminés. Il atteste qu'il a pris les dispositions de sécurité qui lui incombent avant de quitter les lieux. Après s'être assuré qu'aucun intervenant n'accède aux installations électriques, il demande au chargé de consignation d'assurer le rôle de personnel de manœuvre pour fermer le/les organes afin de remettre sous tension les installations.",
+  erdf: "Dans le cas d'une séparation de réseau Enedis (ERDF), il est formellement interdit de travailler sur le compartiment câbles des cellules d'arrivée.",
+};
+async function generateAttestationConsignationDocx(site, per, infos = {}) {
+  await ensureDocx();
+  const s = await resolvePhotosForDocx({ photoSite: site.photoSite || [] });
+  const T = TXT_ATTESTATION_CONSIGNATION;
+  const a = docxAucuneBordure(), fin = { style: DOCX.BorderStyle.SINGLE, size: 6, color: "1A1F26" }, cadre = { top: fin, bottom: fin, left: fin, right: fin };
+  const run = (t, o = {}) => new DOCX.TextRun({ text: String(t ?? ""), size: o.size || 17, bold: !!o.bold, italics: !!o.italics, underline: o.u ? {} : undefined, color: o.color || DOCX_DARK });
+  const para = (enfants, o = {}) => new DOCX.Paragraph({ alignment: o.align, spacing: { before: o.before || 0, after: o.after ?? 30 }, indent: o.indent, children: Array.isArray(enfants) ? enfants : [enfants] });
+  const cell = (w, enfants, o = {}) => new DOCX.TableCell({ width: { size: w, type: DOCX.WidthType.DXA }, columnSpan: o.span, verticalAlign: o.v, margins: { top: 40, bottom: 40, left: 80, right: 80 }, shading: o.fond ? { type: DOCX.ShadingType.CLEAR, fill: o.fond } : undefined, borders: cadre, children: enfants });
+  const tick = (on) => (on ? "☑ " : "☐ ");
+  const W = 10700;
+  const table = (cols, rows) => docxTable({ width: { size: W, type: DOCX.WidthType.DXA }, columnWidths: cols, borders: { top: fin, bottom: fin, left: fin, right: fin, insideHorizontal: fin, insideVertical: fin }, rows });
+  // En-tête : logo HT Maintenance (fond blanc), titre, numéro ; logo client à droite
+  const logoHT = docxImage(LOGO_DARK, 110, 55);
+  const photo = s.photoSite && s.photoSite[0] && s.photoSite[0].dataUrl;
+  let logoClient = null;
+  if (photo) { const d = await chargerDimensionsImage(photo).catch(() => null); const w = d && d.h ? Math.min(120, Math.round((48 * d.w) / d.h)) : 90; logoClient = docxImage(photo, w, d && d.w ? Math.round((w * d.h) / d.w) : 48); }
+  const entete = table([2500, 5000, 1800, 1400], [new DOCX.TableRow({ cantSplit: true, children: [
+    cell(2500, [para(logoHT ? [logoHT] : [run("HT MAINTENANCE", { bold: true })], { after: 0 })], { v: DOCX.VerticalAlign.CENTER }),
+    cell(5000, [para([run("ATTESTATION DE CONSIGNATION", { bold: true, size: 30 })], { align: DOCX.AlignmentType.CENTER, after: 20 }), para([run("Conformément à la NF C 18-510", { size: 17 })], { align: DOCX.AlignmentType.CENTER, after: 0 })], { v: DOCX.VerticalAlign.CENTER }),
+    cell(1800, [para([run("N°", { size: 15 })], { align: DOCX.AlignmentType.CENTER, after: 0 }), para([run(infos.numero || "", { bold: true, size: 22 })], { align: DOCX.AlignmentType.CENTER, after: 0 })], { v: DOCX.VerticalAlign.CENTER }),
+    cell(1400, [para(logoClient ? [logoClient] : [run(site.client || "", { bold: true, size: 15 })], { align: DOCX.AlignmentType.CENTER, after: 0 })], { v: DOCX.VerticalAlign.CENTER }),
+  ] })]);
+  const dateTxt = infos.date ? dateFrIso(infos.date) : "";
+  const lab = (t) => [para([run(t, { bold: true })], { after: 0 })], val = (t) => [para([run(t)], { after: 0 })];
+  const ident = table([2300, 3050, 2300, 3050], [
+    new DOCX.TableRow({ children: [cell(2300, lab("Numéro d'attestation")), cell(3050, val([infos.numero, dateTxt].filter(Boolean).join(" — "))), cell(2300, lab("Entreprise chargée des travaux")), cell(3050, val(infos.entreprise || ""))] }),
+    new DOCX.TableRow({ children: [cell(2300, lab("Adresse du chantier")), cell(3050, val([site.nom, site.adresse].filter(Boolean).join(" — "))), cell(2300, lab("Autorisation de travail attachée")), cell(3050, val(infos.autorisation || ""))] }),
+    new DOCX.TableRow({ children: [cell(2300, lab("Nature des travaux")), cell(8400, val(infos.nature || ""), { span: 3 })] }),
+  ]);
+  const eng = [
+    para([run("Engagement :", { bold: true, u: true })], { before: 100, after: 30 }),
+    para([run(tick(infos.delegue) + T.delegue, { size: 15 })]),
+    para([run(tick(infos.schemas) + T.schemas, { size: 15 })]),
+    para([run(tick(infos.defaut) + T.defaut, { size: 15 })], { after: 80 }),
+  ];
+  // Schéma(s) de consignation (zones sous / hors tension, MALT, cadenas) et points de coupure
+  const imgs = postesHTASite(site).map((g) => genererSchemaPosteHTA(g.eqs, `Consignation — ${g.nom}`, { min: 1, eqsSite: g.eqsSite, nomPoste: g.nom, locaux: g.locaux, consignation: { ids: per.ids, posteConsigne: per.postesConsignes.has(g.k) } })).filter(Boolean);
+  const imsDocx = imgs.map((im) => { const d = dimensionsPng(im.dataUrl); const w = 450; return docxImage(im.dataUrl, w, d && d.w ? Math.round((w * d.h) / d.w) : 300); }).filter(Boolean);
+  const legende = para([run("Rouge : sous tension · Vert : hors tension / consigné · Bleu : mise à la terre · Cadenas : organe condamné", { size: 13, italics: true, color: "5A6573" })], { align: DOCX.AlignmentType.CENTER, after: 0 });
+  const coupures = pointsCoupureConsignation(site, per);
+  const colCad = [
+    ...coupures.flatMap((c) => [
+      para([run(`${c.label} / Cadenas n° ………`, { bold: true, size: 15 })], { after: 10 }),
+      para([run(c.action, { size: 14, italics: true })], { after: 10 }),
+      para([run(tick(c.malt === "sans") + "Séparé sans MALT", { size: 15 })], { after: 0 }),
+      para([run(tick(c.malt === "avec") + "Séparé avec MALT", { size: 15 })], { after: 70 }),
+    ]),
+    para([run(T.erdf, { size: 13, italics: true })], { before: 60, after: 0 }),
+  ];
+  const chaines = chainesInterverrouillage(site.equipements || []).filter((c) => c.serrures.some((x) => per.ids.has(x.eq.id)));
+  const schema = table([7600, 3100], [
+    new DOCX.TableRow({ children: [cell(7600, lab("Schéma de l'installation indiquant les zones hors tension / sous tension et les MALT")), cell(3100, lab("Cadenas"))] }),
+    new DOCX.TableRow({ cantSplit: true, children: [cell(7600, [...imsDocx.map((im) => para([im], { align: DOCX.AlignmentType.CENTER, after: 40 })), legende]), cell(3100, colCad)] }),
+    new DOCX.TableRow({ children: [cell(W, lab("Installation et/ou équipements compris entre :"), { span: 2 })] }),
+    new DOCX.TableRow({ children: [cell(W, [para([run(texteInstallationConsignation(site, per))], { after: 0 }), ...(chaines.length ? [para([run(`Clés d'interverrouillage : ${chaines.map((c) => `${c.cle} (${c.serrures.map((x) => nomEqSerrure(x.eq)).join(" → ")})`).join(" · ")}`, { size: 15, italics: true })], { before: 30, after: 0 })] : [])], { span: 2 })] }),
+    new DOCX.TableRow({ children: [cell(W, [para([run(tick(infos.certif) + T.certif, { size: 15 })]), ...T.certifItems.map((t) => para([run("• " + t, { size: 15 })], { indent: { left: 300 } })), para([run(T.certifFin, { size: 15 })], { after: 0 })], { span: 2 })] }),
+  ]);
+  const sig = (avecObs = true, nom = "") => [para([run("Nom : ", { u: true, size: 15 }), run(nom, { size: 15 })], { before: 40 }), ...(avecObs ? [para([run("Observations :", { u: true, size: 15 })])] : []), para([run("Date et heure :", { u: true, size: 15 })]), para([run("Signature :", { u: true, size: 15 })], { after: 90 })];
+  const q = 2675;
+  const cc = infos.chargeConsignation || "";
+  const validation = table([q, q, q, q], [
+    new DOCX.TableRow({ children: [cell(W, [para([run("VALIDATION", { bold: true })], { align: DOCX.AlignmentType.CENTER, after: 0 })], { span: 4, fond: "F4F6F9" })] }),
+    new DOCX.TableRow({ cantSplit: true, children: [
+      cell(q, [para([run("Représentant de l'entreprise utilisatrice", { bold: true, u: true, size: 15 })]), ...sig()]),
+      cell(q, [para([run("Chargé de consignation", { bold: true, u: true, size: 15 })]), para([run(T.cc, { size: 13 })]), ...sig(true, cc)]),
+      cell(q, [para([run("Responsable de travaux", { bold: true, u: true, size: 15 })]), para([run(T.rt, { size: 13 })]), ...sig()]),
+      cell(q, [para([run("Changement de responsable de travaux", { bold: true, u: true, size: 15 })]), para([run(T.rt2, { size: 13 })]), ...sig()]),
+    ] }),
+    new DOCX.TableRow({ children: [cell(W, [para([run("FIN DE TRAVAUX", { bold: true })], { align: DOCX.AlignmentType.CENTER, after: 0 })], { span: 4, fond: "F4F6F9" })] }),
+    new DOCX.TableRow({ cantSplit: true, children: [
+      cell(q, [para([run(T.fin, { size: 12 })]), ...sig(false)]),
+      cell(q, [para([run("Chargé de consignation", { bold: true, size: 15 })]), ...sig(true, cc)]),
+      cell(q, [para([run("Représentant EU", { bold: true, size: 15 })]), ...sig()]),
+      cell(q, [para([run("Nouveau responsable de travaux", { bold: true, size: 15 })]), ...sig()]),
+    ] }),
+  ]);
+  const children = [entete, para([], { after: 80 }), ident, ...eng, schema,
+    para([run(`Document établi par HT Maintenance d'après les équipements relevés${site.rapport?.date ? " le " + dateFrIso(site.rapport.date) : ""} — schéma et points de coupure à vérifier sur site avant consignation.`, { size: 13, italics: true, color: "5A6573" })], { align: DOCX.AlignmentType.CENTER, before: 40, after: 80 }),
+    validation];
+  const doc = new DOCX.Document({ styles: DOCX_STYLES, sections: [{ properties: { page: { size: { width: A4_LARGEUR, height: A4_HAUTEUR }, margin: { top: 380, bottom: 360, left: 560, right: 560 } } }, children }] });
+  return DOCX.Packer.toBlob(doc);
 }
 async function generateAnnexePhotosDocx(site) {
   await ensureDocx();
