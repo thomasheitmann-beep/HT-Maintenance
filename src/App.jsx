@@ -2051,6 +2051,49 @@ function ajouterDepartCellule(eq, schema) {
   ident = iT >= 0 ? [...ident.slice(0, iT), ajout[0], ...ident.slice(iT)] : [...ident, ...ajout];
   return { ...schema, identification: ident };
 }
+// ===== Interverrouillage par serrures et clés (cellules HTA, appareils BT, transformateurs) =====
+// Chaque serrure : repère de clé (O1, S1…), marque / référence, numéro, organe verrouillé, état de la clé en exploitation normale.
+// Les serrures de même repère, sur tout le site, forment une chaîne (clé libérée ici → utilisée là).
+const TYPES_SERRURES = ["Interrupteur HTA", "Interrupteur Fusible HTA", "Disjoncteur HTA", "Contacteur HTA", "Comptage HTA", "Disjoncteur BT", "Interrupteur BT", "Transformateur"]; // (liste écrite en clair : déclarée avant TYPES_CELLULES_HTA)
+const LISTE_ETAT_CLE = ["Prisonnière", "Libre", "Absente"];
+function organesSerrure(type) {
+  if (type === "Transformateur") return ["Bornes embrochables", "Guillotine (transformateur huile)", "Plastron (transformateur sec)", "Porte / grille d'accès"];
+  if (type === "Disjoncteur BT") return ["Débrochage / ouverture du disjoncteur", "Porte / grille d'accès"];
+  if (type === "Interrupteur BT") return ["Ouverture de l'interrupteur", "Porte / grille d'accès"];
+  return ["Sectionneur de terre", "Appareil principal (interrupteur / disjoncteur)", "Panneau d'accès câbles", "Porte / grille d'accès"];
+}
+const cleSerrure = (r) => String(r || "").trim().toUpperCase().replace(/\s+/g, "");
+const RANG_CHAINE_SERRURE = { "Disjoncteur BT": 0, "Interrupteur BT": 0, Transformateur: 2 };
+function chainesInterverrouillage(eqs) {
+  const parCle = new Map();
+  (eqs || []).forEach((eq) => (eq.serrures || []).forEach((sr) => {
+    const k = cleSerrure(sr.cle); if (!k) return;
+    if (!parCle.has(k)) parCle.set(k, { cle: String(sr.cle).trim(), serrures: [] });
+    parCle.get(k).serrures.push({ eq, sr });
+  }));
+  return [...parCle.values()].map((c) => {
+    c.serrures.sort((a, b) => (RANG_CHAINE_SERRURE[a.eq.type] ?? 1) - (RANG_CHAINE_SERRURE[b.eq.type] ?? 1));
+    const presente = c.serrures.filter((x) => x.sr.etat === "Prisonnière" || x.sr.etat === "Libre");
+    c.alertes = [];
+    if (c.serrures.length < 2) c.alertes.push("clé présente sur une seule serrure : vérifier la serrure associée");
+    if (presente.length > 1) c.alertes.push(`clé déclarée présente sur ${presente.length} serrures à la fois (libre ou prisonnière) : une clé ne peut être qu'à un seul endroit`);
+    if (c.serrures.length >= 2 && !presente.length) c.alertes.push("clé absente de toutes les serrures : clé égarée ou état à corriger");
+    return c;
+  }).sort((a, b) => a.cle.localeCompare(b.cle, "fr", { numeric: true }));
+}
+const nomEqSerrure = (eq) => [eq.identification?.repere, eq.type].filter(Boolean)[0] || eq.type;
+// Symbole de clé (plaques d'ordre de service) : carré vert, rond = absente, rond barré = libre, point plein = prisonnière.
+function dessinerCleSchema(ctx, x, y, sr, cote = "gauche") {
+  const V = "#1E8449", s = 11;
+  ctx.save(); ctx.strokeStyle = V; ctx.fillStyle = V; ctx.lineWidth = 1.3;
+  ctx.fillStyle = "#fff"; ctx.fillRect(x - s / 2, y - s / 2, s, s); ctx.strokeRect(x - s / 2, y - s / 2, s, s);
+  ctx.beginPath(); ctx.arc(x, y, 3, 0, 2 * Math.PI);
+  if (sr.etat === "Prisonnière") { ctx.fillStyle = V; ctx.fill(); } else ctx.stroke();
+  if (sr.etat === "Libre") { ctx.beginPath(); ctx.moveTo(x - 4, y + 4); ctx.lineTo(x + 4, y - 4); ctx.stroke(); }
+  const dx = cote === "gauche" ? s / 2 : -s / 2; ctx.beginPath(); ctx.moveTo(x + dx, y); ctx.lineTo(x + dx + (cote === "gauche" ? 6 : -6), y); ctx.stroke();
+  ctx.font = `bold 9px ${SCHEMA_POLICE}`; ctx.fillStyle = V; ctx.textAlign = "center"; ctx.textBaseline = "bottom"; ctx.fillText(String(sr.cle || "").trim(), x, y - s / 2 - 1);
+  ctx.restore();
+}
 const LISTE_SORTIE_CELLULE = ["Câble", "Jeu de barres aval (cellules suivantes)"];
 const LISTE_FONCTION_APPAREIL_BT = ["Arrivée", "Départ", "Couplage"];
 const LISTE_PROTECTION_GRADINS = ["Fusibles", "Disjoncteurs"];
@@ -2065,6 +2108,7 @@ const CHAMPS_CELLULE_HTA = [
   { key: "courantAssigne", label: "Courant assigné (A)", options: ["200", "400", "630", "800", "1250"] },
   { key: "anneeMiseEnService", label: "Année de mise en service", numeric: true },
   { key: "sortieCellule", label: "Sortie de la cellule (schéma du poste)", options: LISTE_SORTIE_CELLULE },
+  { key: "verrouillageMecaniqueTerre", label: "Verrouillage mécanique appareil / sectionneur de terre", options: ["Oui", "Non"] },
 ];
 const LISTE_TECHNO_COMPENSATION = ["Condensateurs à contacteurs", "Condensateurs à thyristors", "Générateur statique SVG (IGBT)", "Hybride (gradins + SVG)"];
 const LISTE_TYPE_GRADIN = ["Condensateurs (contacteur)", "Condensateurs (thyristors)", "SVG (IGBT)"];
@@ -5243,6 +5287,7 @@ function dupliquerEquipementPourNouvelleVisite(source) {
   fresh.lignageId = source.lignageId || source.id;
   if (source.localLibre) fresh.localLibre = source.localLibre; // local saisi librement : conservé d'une visite à l'autre
   if (source.qrCode) fresh.qrCode = source.qrCode; // l'étiquette posée reste valable d'une visite à l'autre
+  if (Array.isArray(source.serrures) && source.serrures.length) fresh.serrures = JSON.parse(JSON.stringify(source.serrures)); // serrures et clés d'interverrouillage : installation fixe
   // Pièces d'usure et fiche batterie reprises telles quelles (années de mise en service, références,
   // historique des remplacements) : elles évoluent d'une visite à l'autre sans ressaisie.
   const src = source.controles || {};
@@ -15899,7 +15944,7 @@ function dessinerCelluleHTA(ctx, x, y, eq, o = {}) {
   const nbSect = { SECT: liste.filter((k) => k === "SECT").length, ISECT: liste.filter((k) => k === "ISECT").length };
   const iSect = { SECT: 0, ISECT: 0 };
   liste.forEach((k) => {
-    pos[k] = yy;
+    if (pos[k] === undefined) pos[k] = yy; // premier organe de ce type (ex. sectionneur amont d'une DM2)
     if (["INT", "ISECT", "SECT", "DISJ", "DISJ_DEB", "CONT"].includes(k)) { coupure(k, yy); lib((k === "SECT" || k === "ISECT") && o.cote && o.complet ? `${NOM_ORGANE_CELLULE[k]} ${o.cote}` : nbSect[k] > 1 && o.complet ? NOM_ORGANE_CELLULE[k] + (iSect[k]++ === 0 ? " amont" : " aval") : texteOrgane(k, k.startsWith("DISJ") ? val.DISJ : ""), yy + 22); yy += 44; }
     else if (k === "FUS") { ctx.save(); ctx.strokeStyle = T; ctx.lineWidth = 1.6; ctx.fillStyle = "#fff"; ctx.fillRect(x - 6, yy + 6, 12, 26); ctx.strokeRect(x - 6, yy + 6, 12, 26); ctx.fillStyle = T; ctx.fillRect(x - 6, yy + 6, 12, 5); ctx.restore(); ligne([[x, yy], [x, yy + 6]]); ligne([[x, yy + 6], [x, yy + 32]], T, 1); ligne([[x, yy + 32], [x, yy + 38]]); lib(texteOrgane("FUS", val.FUS) + (o.complet ? (topo.combine ? " · combiné (percuteur)" : eq.type === "Interrupteur Fusible HTA" ? " · associé" : "") : ""), yy + 19, val.FUS ? "#5B6B7D" : GRIS); yy += 38; }
     else if (k === "VPIS") { // voyant de présence tension, à gauche de l'axe
@@ -15917,6 +15962,30 @@ function dessinerCelluleHTA(ctx, x, y, eq, o = {}) {
       yy += 46;
     } else if (k === "TT") { ligne([[x, yy], [x, yy + 6]]); ctx.save(); ctx.strokeStyle = val.TT ? T : GRIS; ctx.lineWidth = 1.8; [yy + 15, yy + 27].forEach((cy) => { ctx.beginPath(); ctx.arc(x, cy, 9, 0, 2 * Math.PI); ctx.stroke(); }); ctx.restore(); lib(texteOrgane("TT", val.TT), yy + 21, val.TT ? "#5B6B7D" : GRIS); yy += 36; if (topo.sortie !== "comptage") { ligne([[x, yy], [x, yy + 6]]); yy += 6; } }
   });
+  // verrouillage mécanique entre l'appareil de tête (interrupteur / sectionneur) et le sectionneur de terre : pointillé vert (plaques d'ordre de service)
+  const pTete = pos.ISECT ?? pos.INT ?? pos.SECT ?? pos.CONT;
+  const pTerreLien = topo.famille && /^DISJ/.test(topo.famille) ? (pos.ST_AM ?? pos.ST) : (pos.ST ?? pos.ST_AM);
+  const lienMeca = !o.sansCles && eq.identification?.verrouillageMecaniqueTerre !== "Non" && pTete !== undefined && pTerreLien !== undefined;
+  if (lienMeca) {
+    const V = "#1E8449";
+    ligne([[x - 8, pTete + 22], [x - 44, pTete + 22], [x - 44, pTerreLien + 25], [x - 33, pTerreLien + 25]], V, 1.2, [3, 2]);
+  }
+  // clés d'interverrouillage à côté de l'organe verrouillé (clé du sectionneur de terre : sur le lien mécanique s'il existe)
+  if (!o.sansCles && (eq.serrures || []).length) {
+    const pP = pos.DISJ ?? pos.DISJ_DEB ?? pos.ISECT ?? pos.INT ?? pos.CONT ?? pos.SECT, pT = pos.ST ?? pos.ST_AM;
+    const vus = {};
+    (eq.serrures || []).filter((sr) => cleSerrure(sr.cle)).forEach((sr) => {
+      const org = String(sr.organe || "");
+      let cx = x - 30, cy;
+      if (/terre/i.test(org) && lienMeca) { cx = x - 58; cy = (pTete + 22 + pTerreLien + 25) / 2; }
+      else if (/terre/i.test(org) && pT !== undefined) { cx = x - 52; cy = pT + 22; }
+      else if (/principal|disjoncteur|interrupteur/i.test(org) && pP !== undefined) { cy = pP + 28; }
+      else if (/câbles|cables/i.test(org)) { cx = x - 52; cy = yy - 8; }
+      else cy = y + 8;
+      const k = `${cx}|${cy}`; const n = vus[k] = (vus[k] || 0) + 1;
+      dessinerCleSchema(ctx, cx, cy + (n - 1) * 20, sr);
+    });
+  }
   // percuteur des fusibles (combiné) : pointillé des fusibles vers la lame de l'interrupteur
   const pApp = pos.ISECT ?? pos.INT ?? pos.SECT;
   if (topo.combine && pos.FUS !== undefined && pApp !== undefined && pApp < pos.FUS) ligne([[x + 8, pos.FUS + 19], [x + 8, pApp + 22], [x - 4, pApp + 22]], T, 1.1, [3, 3]);
@@ -15964,6 +16033,7 @@ function dessinerChargeCellule(ctx, x, y, c, o = {}) {
   if (ch.type === "Transformateur") {
     cercle(x, yy + 11, 11); cercle(x, yy + 27, 11);
     lib(ch.repere, yy + 12, true, T); lib([ch.puissance, ch.couplage].filter(Boolean).join(" · "), yy + 26);
+    if (ch.eq) (ch.eq.serrures || []).filter((sr) => cleSerrure(sr.cle)).forEach((sr, i) => dessinerCleSchema(ctx, x - 30, yy + 18 + i * 20, sr));
     yy += 38;
     if (!c.arrivee) { ligne([[x, yy], [x, yy + 14]]); ctx.save(); ctx.fillStyle = T; ctx.beginPath(); ctx.moveTo(x - 6, yy + 14); ctx.lineTo(x + 6, yy + 14); ctx.lineTo(x, yy + 24); ctx.closePath(); ctx.fill(); ctx.restore(); lib(ch.eq ? "BT" : "", yy + 18); return yy + 24; }
     ligne([[x, yy], [x, yy + 4]]); yy += 4;
@@ -15974,6 +16044,7 @@ function dessinerChargeCellule(ctx, x, y, c, o = {}) {
     ligne([[x, yy + 36], [x - 11, yy + 14]]); ligne([[x, yy + 36], [x, yy + 58]]);
     if (String(idd.debrochable || "").toUpperCase() === "OUI") { ligne([[x - 6, yy], [x, yy + 5], [x + 6, yy]], 1.3); ligne([[x - 6, yy + 48], [x, yy + 43], [x + 6, yy + 48]], 1.3); }
     lib(idd.repere || "disjoncteur BT", yy + 20, true, T); lib(idd.intensiteNominale ? `In ${idd.intensiteNominale} A` : "arrivée", yy + 33);
+    (d.serrures || []).filter((sr) => cleSerrure(sr.cle)).forEach((sr, i) => dessinerCleSchema(ctx, x - 30, yy + 30 + i * 20, sr));
     yy += 58;
     // jeu de barres du TGBT
     const bw = Math.min(o.largeurBarre || 110, 140);
@@ -16034,7 +16105,7 @@ function genererSchemaCelluleHTA(eq) {
       ctx.font = `10px ${SCHEMA_POLICE}`; ctx.fillStyle = gris; ctx.fillText("jeu de barres", 30, 54); ctx.fillText("jeu de barres aval", 240, 54);
       ctx.strokeStyle = SCHEMA_TRAIT; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(xL, 63); ctx.lineTo(xL, 76); ctx.moveTo(xR, 63); ctx.lineTo(xR, 76); ctx.stroke();
       const rL = dessinerCelluleHTA(ctx, xL, 76, eq, { complet: true, largeurLibelle: 118, taille: 10.5, org: topo.remontee.gauche, cote: "amont", sansRelais: true });
-      const rR = dessinerCelluleHTA(ctx, xR, 76, eq, { complet: true, largeurLibelle: 132, taille: 10.5, org: topo.remontee.droite, cote: "aval" });
+      const rR = dessinerCelluleHTA(ctx, xR, 76, eq, { complet: true, largeurLibelle: 132, taille: 10.5, org: topo.remontee.droite, cote: "aval", sansCles: true });
       const yLow = Math.max(rL.yBas, rR.yBas, rR.relaisBas || 0) + 16;
       ctx.strokeStyle = SCHEMA_TRAIT; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(xL, rL.yBas); ctx.lineTo(xL, yLow); ctx.lineTo(xR, yLow); ctx.lineTo(xR, rR.yBas); ctx.stroke();
       ctx.font = `10.5px ${SCHEMA_POLICE}`; ctx.fillStyle = gris; ctx.textAlign = "center"; ctx.fillText("remontée vers le jeu de barres aval", (xL + xR) / 2, yLow + 16); ctx.textAlign = "left";
@@ -16130,7 +16201,7 @@ function genererSchemaPosteHTA(cellules, titre, opts = {}) {
         if (r.droiteP && r.droiteP.length) { // organes de la remontée (sectionneur, terre) sous les libellés de la cellule
           const hD = hauteurOrganesCellule(r.droiteP);
           ctx.beginPath(); ctx.moveTo(x, r.yBas); ctx.lineTo(x, ySortie); ctx.lineTo(xr, ySortie); ctx.lineTo(xr, r.debutDroite + hD); ctx.moveTo(xr, r.debutDroite); ctx.lineTo(xr, yBus + 3); ctx.stroke();
-          dessinerCelluleHTA(ctx, xr, r.debutDroite, eq, { complet: false, sansLibelle: true, sansRelais: true, org: r.droiteP });
+          dessinerCelluleHTA(ctx, xr, r.debutDroite, eq, { complet: false, sansLibelle: true, sansRelais: true, sansCles: true, org: r.droiteP });
           ctx.strokeStyle = SCHEMA_TRAIT; ctx.lineWidth = 2;
         } else { ctx.beginPath(); ctx.moveTo(x, r.yBas); ctx.lineTo(x, ySortie); ctx.lineTo(xr, ySortie); ctx.lineTo(xr, yBus + 3); ctx.stroke(); }
         ctx.fillStyle = SCHEMA_MARINE; ctx.fillRect(xr - 2, yBus - 3, Math.max(0, xs[i + 1] - 40 - xr + 4), 6);
@@ -16166,6 +16237,48 @@ function postesHTASite(site) {
   eqs.forEach((e) => { const k = e.localId || "__sans__"; let g = groupes.find((x) => x.k === k); if (!g) { const loc = (site.locaux || []).find((l) => l.id === e.localId); g = { k, nom: loc ? loc.nom || "Poste" : "Poste HTA", eqs: [] }; groupes.push(g); } g.eqs.push(e); });
   return groupes.filter((g) => g.eqs.length >= 2).map((g) => ({ ...g, eqsSite: site.equipements || [], locaux: site.locaux || [] }));
 }
+// Saisie des serrures d'interverrouillage d'un équipement + rappel de la chaîne (mêmes clés ailleurs sur le site).
+function SerruresPanel({ eq, update, allEquipements = [] }) {
+  const liste = eq.serrures || [];
+  const set = (next) => update({ ...eq, serrures: next });
+  const maj = (id, patch) => set(liste.map((x) => (x.id === id ? { ...x, ...patch } : x)));
+  const organes = organesSerrure(eq.type);
+  const chaines = useMemo(() => chainesInterverrouillage(allEquipements.some((e) => e.id === eq.id) ? allEquipements.map((e) => (e.id === eq.id ? eq : e)) : [...allEquipements, eq]), [allEquipements, eq]);
+  const lab = { fontSize: 10.5, color: "#5B6B7D", marginBottom: 3 };
+  const SYMB = { "Prisonnière": "●", "Libre": "⦸", "Absente": "○" };
+  return (
+    <Card style={{ marginBottom: 14 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+        <SectionTitle>Interverrouillage — serrures et clés</SectionTitle>
+        <button onClick={() => set([...liste, { id: uid(), cle: "", organe: organes[0], marque: "", numero: "", etat: "Prisonnière" }])} style={btnGhost(BRAND.blue)}><Plus size={13} /> Ajouter une serrure</button>
+      </div>
+      {!liste.length && <div style={{ fontSize: 12, color: "#8B96A3" }}>Aucune serrure saisie. Ajoutez chaque serrure avec le repère de sa clé (O1, S1…) : les serrures de même repère sur le site forment la chaîne de consignation.</div>}
+      {liste.map((sr) => {
+        const ch = chaines.find((c) => c.cle && cleSerrure(c.cle) === cleSerrure(sr.cle));
+        const autres = ch ? ch.serrures.filter((x) => !(x.eq.id === eq.id && x.sr.id === sr.id)) : [];
+        return (
+          <div key={sr.id} style={{ border: "1px solid #E2E6EB", borderRadius: 10, padding: 10, marginBottom: 8, background: "#FAFBFC" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 8 }}>
+              <div><div style={lab}>Repère de la clé</div><input value={sr.cle || ""} onChange={(e) => maj(sr.id, { cle: e.target.value })} placeholder="ex. O1" style={inputStyle} /></div>
+              <div style={{ gridColumn: "span 2" }}><div style={lab}>Organe verrouillé</div><Select value={sr.organe || ""} onChange={(e) => maj(sr.id, { organe: e.target.value })}>{organes.map((o) => <option key={o} value={o}>{o}</option>)}</Select></div>
+              <div><div style={lab}>État en exploitation normale</div><Select value={sr.etat || "Prisonnière"} onChange={(e) => maj(sr.id, { etat: e.target.value })}>{LISTE_ETAT_CLE.map((o) => <option key={o} value={o}>{SYMB[o]}  {o}</option>)}</Select></div>
+              <div><div style={lab}>Marque / référence serrure</div><input value={sr.marque || ""} onChange={(e) => maj(sr.id, { marque: e.target.value })} placeholder="ex. Ronis 1234" style={inputStyle} /></div>
+              <div><div style={lab}>N° de la clé</div><input value={sr.numero || ""} onChange={(e) => maj(sr.id, { numero: e.target.value })} placeholder="facultatif" style={inputStyle} /></div>
+            </div>
+            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8, marginTop: 6 }}>
+              <div style={{ fontSize: 11.5, color: "#3E4A5C", lineHeight: 1.45 }}>
+                {cleSerrure(sr.cle) ? (autres.length ? <>Clé <b>{sr.cle}</b> aussi sur : {autres.map((x, i) => <span key={i}>{i ? " · " : ""}<b>{nomEqSerrure(x.eq)}</b> ({x.sr.organe || "—"}, {String(x.sr.etat || "").toLowerCase()})</span>)}</> : <span style={{ color: "#B5730A" }}>Clé {sr.cle} sur cette seule serrure pour l'instant : renseignez la serrure associée sur l'autre équipement.</span>) : <span style={{ color: "#8B96A3" }}>Renseignez le repère de la clé.</span>}
+                {ch && ch.alertes.filter((a) => !/seule serrure/.test(a)).map((a, i) => <div key={i} style={{ color: "#C0392B" }}>⚠ {a}</div>)}
+              </div>
+              <button onClick={() => set(liste.filter((x) => x.id !== sr.id))} title="Supprimer la serrure" style={{ ...btnGhost("#C0392B"), padding: "4px 8px" }}><Trash2 size={13} /></button>
+            </div>
+          </div>
+        );
+      })}
+    </Card>
+  );
+}
+// Tableau des chaînes d'interverrouillage du site (onglet aperçu et rapport).
 function SchemaCelluleHTA({ eq }) {
   const img = useMemo(() => genererSchemaCelluleHTA(eq), [eq]);
   if (!img) return null;
@@ -16298,6 +16411,7 @@ function genererSchemaAppareilBT(eq) {
       ligne([[xa, y0], [xa, y0 + 8]]); ligne([[xa, y0 + 38], [xa - 12, y0 + 12]]); ligne([[xa, y0 + 38], [xa, y0 + 54]]);
       if (deb) { ligne([[xa - 7, y0 - 6], [xa, y0 - 1], [xa + 7, y0 - 6]], undefined, 1.4); ligne([[xa - 7, y0 + 60], [xa, y0 + 55], [xa + 7, y0 + 60]], undefined, 1.4); }
       texte(disj ? "disjoncteur" : natBT === "Interrupteur-sectionneur" ? "interr.-sect." : nomBT, xa - 20, y0 + 26, { align: "right", taille: 10 });
+      (eq.serrures || []).filter((sr) => cleSerrure(sr.cle)).forEach((sr, i) => dessinerCleSchema(ctx, xa + 24, y0 + 22 + i * 20, sr, "droite"));
     };
     if (fonction === "Arrivée") {
       ctx.save(); ctx.strokeStyle = SCHEMA_TRAIT; ctx.lineWidth = 2; [78, 96].forEach((cy) => { ctx.beginPath(); ctx.arc(x, cy, 12, 0, 2 * Math.PI); ctx.stroke(); }); ctx.restore();
@@ -17539,6 +17653,18 @@ function analyserAnomaliesEquipement(eq, contexte) {
       }
     }
   }
+  // Courbe de décharge sous le seuil bas de fin de décharge : passage tôt dans l'essai = défaillant (l'onduleur aurait coupé la charge).
+  if (eq.courbeDechargeDonnees) {
+    let a = null; try { a = analyseCourbeDecharge(eq); } catch (e) { a = null; }
+    if (a && a.sousSeuil) {
+      const fr1 = (x, d = 1) => String(Math.round(x * 10 ** d) / 10 ** d).replace(".", ",");
+      const ponctuel = a.enMinutes && a.dureeSous < 5 / 60;
+      const rangD = ponctuel ? 1 : a.tPassage < a.total / 2 ? 2 : 1;
+      const quand = a.enMinutes ? `${a.tPassage < 0.05 ? "dès le début de" : `dès ${fr1(a.tPassage, a.tPassage < 10 ? 1 : 0)} min d'`}essai` : `à la mesure n° ${a.indexPassage} sur ${a.n}`;
+      const duree = a.enMinutes ? (ponctuel ? `creux ponctuel de ${Math.max(1, Math.round(a.dureeSous * 60))} s` : `environ ${fr1(a.dureeSous, a.dureeSous < 10 ? 1 : 0)} min sous le seuil sur ${fr1(a.total, a.total < 10 ? 1 : 0)} min`) : "";
+      ajouter(`Courbe de décharge : tension sous le seuil bas de fin de décharge (${fr1(a.seuil)} V) ${quand}, minimum ${fr1(a.min)} V${duree ? ", " + duree : ""}.`, rangD, ponctuel ? "batterie_decharge_ponctuel" : "batterie_decharge", "batterie");
+    }
+  }
   // Gradins de batterie de compensation : courant par phase comparé au courant théorique (Q/U).
   (eq.controles.gradins_dynamique || []).filter((g) => g.label).forEach((g) => {
     const iTheo = gradinIntensiteTheorique(g.fields.q, g.fields.u, estBatterieMono(eq));
@@ -17711,6 +17837,8 @@ function calibreFusibleNormalise(seuilMin) {
   return c === undefined ? null : String(c).replace(".", ",");
 }
 const RECO_PAR_CATEGORIE = {
+  batterie_decharge_ponctuel: () => "Refaire l'essai de décharge et contrôler le serrage des connexions batterie : creux de tension ponctuel sous le seuil de fin de décharge.",
+  batterie_decharge: () => "Contrôler la batterie sous décharge (mesure bloc par bloc, résistance interne, serrage des connexions) et prévoir son remplacement : la tension passe sous le seuil de fin de décharge pendant l'essai.",
   fusible_calibre: (s, g) => { const n = g && g.seuilMin ? calibreFusibleNormalise(g.seuilMin) : null; return `Remplacer les fusibles (en service et de rechange) par un calibre adapté au transformateur${g && g.seuilMin ? (n ? ` : calibre normalisé ${n} A (au moins ${String(g.seuilMin).replace(".", ",")} A)` : ` (au moins ${g.seuilMin} A)`) : ""}, à confirmer d'après les préconisations du constructeur de la cellule.`; },
   fusible_ib: () => "Étudier le remplacement de la protection par fusibles par un disjoncteur HTA (Ib > 45 A).",
   fusible: (s) => `Remplacer les fusibles concernés par jeu complet de trois (${s}).`,
@@ -17770,7 +17898,7 @@ const RECO_PAR_CATEGORIE = {
   etat_degrade: (s) => `Surveiller à la prochaine visite : ${s}.`,
 };
 const MAX_PRECONISATIONS = 5;
-const ORDRE_RECO = ["huile_dga_critique", "huile_pcb", "huile_physique", "huile_chimique", "huile_dga", "huile_furanes", "huile_eclair", "huile_aspect", "huile_surveillance", "capacite_modules", "module", "redondance_modules", "redondance_parallele", "partage_charge", "surcharge_condensateurs", "resonance", "self_accord", "fusible_calibre", "fusible_ib", "fusible", "fusible_rechange", "securite_non_conforme", "surcharge_kw", "batterie_capacite", "batterie_dimensionnement", "batterie_branche", "surveillance_declenchement", "alimentation_auxiliaire_relais", "seuil_terre_capteur", "maintenance_relais", "thdi_entree", "neutre_harmoniques", "temperature_batterie", "ondulation_batterie", "isolement_continu", "reglage_ir", "svg_sature", "serrage", "contact", "isolement", "enroulements", "huile", "mise_terre", "protection", "disjoncteur", "batterie", "gradin", "cosphi", "usure", "proprete", "ventilation", "thermique", "mesure", "etat_defaillant", "etat_degrade"];
+const ORDRE_RECO = ["huile_dga_critique", "huile_pcb", "huile_physique", "huile_chimique", "huile_dga", "huile_furanes", "huile_eclair", "huile_aspect", "huile_surveillance", "capacite_modules", "module", "redondance_modules", "redondance_parallele", "partage_charge", "surcharge_condensateurs", "resonance", "self_accord", "fusible_calibre", "fusible_ib", "fusible", "fusible_rechange", "securite_non_conforme", "surcharge_kw", "batterie_capacite", "batterie_dimensionnement", "batterie_branche", "surveillance_declenchement", "alimentation_auxiliaire_relais", "seuil_terre_capteur", "maintenance_relais", "thdi_entree", "neutre_harmoniques", "temperature_batterie", "ondulation_batterie", "isolement_continu", "reglage_ir", "svg_sature", "serrage", "contact", "isolement", "enroulements", "huile", "mise_terre", "protection", "disjoncteur", "batterie_decharge", "batterie_decharge_ponctuel", "batterie", "gradin", "cosphi", "usure", "proprete", "ventilation", "thermique", "mesure", "etat_defaillant", "etat_degrade"];
 // Préconisations dédoublonnées, regroupées par famille, les plus urgentes en premier.
 function preconisationsDepuisConstats(constats) {
   const groupes = {};
@@ -17785,6 +17913,12 @@ function preconisationsDepuisConstats(constats) {
   // Calibre inadapté : le remplacement « par des fusibles de caractéristiques identiques » serait contradictoire — la préconisation de calibre le remplace.
   if (groupes.fusible_calibre) { delete groupes.fusible; delete groupes.fusible_rechange; }
   delete groupes.corrige; // défauts corrigés lors de la visite : aucune préconisation
+  // Courbe sous le seuil bas : pas de seconde préconisation si un remplacement de batterie est déjà demandé.
+  if (groupes.batterie_decharge_ponctuel && groupes.batterie_decharge) delete groupes.batterie_decharge_ponctuel;
+  if (groupes.batterie_decharge && (groupes.batterie || groupes.batterie_capacite || (groupes.usure && groupes.usure.sujets.some((x) => /batteri/i.test(x))))) {
+    const r = groupes.batterie_decharge.rang; delete groupes.batterie_decharge;
+    const cible = groupes.batterie || groupes.batterie_capacite; if (cible) cible.rang = Math.max(cible.rang, r);
+  }
   // Batteries : blocs défectueux ET fin de vie → une seule préconisation de remplacement, jamais les deux.
   if (groupes.batterie) {
     const usureBat = !!(groupes.usure && groupes.usure.sujets.some((x) => /batteri/i.test(x)));
@@ -18725,6 +18859,7 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
           <BarreEtapesSections eq={eq} sections={ordreSectionsSaisie(eq, schema)} />
           {eq.type === "Batterie de compensation" && <SynoptiqueBatterie eq={eq} allSites={allSites} />}
           {TYPES_CELLULES_HTA.includes(eq.type) && <SchemaCelluleHTA eq={eq} />}
+          {TYPES_SERRURES.includes(eq.type) && <SerruresPanel eq={eq} update={update} allEquipements={allEquipements} />}
           {["By-pass externe", "Onduleur simplifié", "Disjoncteur BT", "Interrupteur BT"].includes(eq.type) && <SchemaConversionSimple eq={eq} eqsSite={allEquipements} />}
           {ordreSectionsSaisie(eq, schema).map((sec) => <BlocSectionSaisie key={sec.key} eq={eq} sec={sec}>{(() => {
             // Fiche batterie : saisie une seule fois, dans Pièces d'usure → Batteries (premier modèle).
@@ -23522,6 +23657,24 @@ function dureeDepuisIntervalle(nbValeurs, intervalleS) {
   const i = numOf(intervalleS) > 0 ? numOf(intervalleS) : 1;
   return nbValeurs > 1 ? Math.round((((nbValeurs - 1) * i) / 60) * 1000) / 1000 : null;
 }
+// Courbe de décharge comparée au seuil bas (fin de décharge théorique) sur TOUS les relevés de l'essai : premier passage
+// sous le seuil, durée cumulée sous le seuil, minimum. null si pas de courbe ou seuil non calculable.
+function analyseCourbeDecharge(eq) {
+  const p = parametresCourbeDecharge(eq);
+  if (!p || typeof p.seuilBas !== "number" || !(p.seuilBas > 0)) return null;
+  const v = p.valeurs.map((x) => numOf(x)).filter((x) => x !== null);
+  const n = v.length;
+  if (n < 2) return null;
+  const enMinutes = !!((p.temps && p.temps.length === n) || p.dureeMin);
+  const ts = p.temps && p.temps.length === n ? p.temps.map((t) => t - p.temps[0]) : p.dureeMin ? v.map((_, i) => (p.dureeMin * i) / (n - 1)) : v.map((_, i) => i);
+  const total = ts[n - 1] > 0 ? ts[n - 1] : 1;
+  const i0 = v.findIndex((x) => x < p.seuilBas);
+  if (i0 < 0) return { sousSeuil: false };
+  const tPassage = i0 === 0 ? ts[0] : ts[i0 - 1] + ((p.seuilBas - v[i0 - 1]) / (v[i0] - v[i0 - 1])) * (ts[i0] - ts[i0 - 1]);
+  let dureeSous = 0;
+  for (let i = 1; i < n; i++) if (v[i] < p.seuilBas || v[i - 1] < p.seuilBas) dureeSous += (ts[i] - ts[i - 1]) * (v[i] < p.seuilBas && v[i - 1] < p.seuilBas ? 1 : 0.5);
+  return { sousSeuil: true, enMinutes, tPassage, dureeSous, total, min: Math.min(...v), seuil: p.seuilBas, indexPassage: i0 + 1, n };
+}
 function parametresCourbeDecharge(eq) {
   const d = eq && eq.courbeDechargeDonnees;
   if (!d || !Array.isArray(d.valeurs) || d.valeurs.length < 2) return null;
@@ -25510,6 +25663,11 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
     const larg = 250, im = sc ? docxImage(sc, larg, dims && dims.w ? Math.round((larg * dims.h) / dims.w) : 300) : null;
     if (im) elements.push(new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, spacing: { before: 0, after: 80 }, children: [im] }));
   }
+  if (TYPES_SERRURES.includes(eq.type) && (eq.serrures || []).some((sr) => cleSerrure(sr.cle))) {
+    const rowsS = (eq.serrures || []).filter((sr) => cleSerrure(sr.cle)).map((sr) => [`Clé ${String(sr.cle).trim()} — ${sr.organe || "organe non précisé"}`, [`clé ${String(sr.etat || "—").toLowerCase()} en exploitation`, sr.marque && `serrure ${sr.marque}`, sr.numero && `n° ${sr.numero}`].filter(Boolean).join(" · ")]);
+    const tS = docxFieldTable(rowsS);
+    if (tS) elements.push(new DOCX.Paragraph({ keepNext: true, spacing: { before: 120, after: 60 }, children: [new DOCX.TextRun({ text: "Interverrouillage — serrures et clés", bold: true, size: 18, color: DOCX_BLUE })] }), tS);
+  }
   if (eq.type === "Batterie de compensation") {
     const syn = genererSynoptiqueBatterie(eq, equipementsDuSiteDe(eq, allSites || []));
     const dims = syn ? dimensionsPng(syn) : null;
@@ -26707,7 +26865,15 @@ function genererSynoptiqueInstallation(site) {
     return { dataUrl: c.toDataURL("image/png"), w: W, h: H, liens: liens.length };
   } catch (e) { return null; }
 }
+function docxChainesInterverrouillage(site) {
+  const ch = chainesInterverrouillage(site.equipements || []);
+  if (!ch.length) return [];
+  const rows = ch.map((c) => [`Clé ${c.cle}`, c.serrures.map((x) => `${nomEqSerrure(x.eq)} (${String(x.sr.organe || "—").toLowerCase()}, clé ${String(x.sr.etat || "—").toLowerCase()})`).join(" → ") + (c.alertes.length ? ` — à vérifier : ${c.alertes.join(" ; ")}` : "")]);
+  const t = docxFieldTable(rows);
+  return t ? [new DOCX.Paragraph({ keepNext: true, spacing: { before: 240, after: 80 }, children: [new DOCX.TextRun({ text: "Chaînes d'interverrouillage (état des clés en exploitation normale)", bold: true, size: 20, color: DOCX_BLUE })] }), t] : [];
+}
 function docxSynoptiqueInstallation(site) {
+  const chainesI = docxChainesInterverrouillage(site);
   const syn = genererSynoptiqueInstallation(site);
   // Schéma de chaque poste HTA (cellules d'un même local), à la suite du synoptique.
   const postes = [];
@@ -26718,7 +26884,7 @@ function docxSynoptiqueInstallation(site) {
     const im = docxImage(p.dataUrl, w, h);
     if (im) postes.push(new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, spacing: { before: 160, after: 80 }, children: [im] }));
   }));
-  if (!syn) return postes.length ? [docxAncre("som_synoptique"), docxHeading("Synoptique de l'installation", 0, 160), ...postes] : [];
+  if (!syn) return postes.length || chainesI.length ? [docxAncre("som_synoptique"), docxHeading("Synoptique de l'installation", 0, 160), ...postes, ...chainesI] : [];
   const largeur = 640, hauteurMax = 860;
   let w = largeur, h = Math.round(largeur * syn.h / syn.w);
   if (h > hauteurMax) { h = hauteurMax; w = Math.round(hauteurMax * syn.w / syn.h); }
@@ -26730,6 +26896,7 @@ function docxSynoptiqueInstallation(site) {
     new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, spacing: { before: 0, after: 80 }, children: [img] }),
     new DOCX.Paragraph({ spacing: { before: 0, after: 0 }, children: [new DOCX.TextRun({ text: "Construit à partir des locaux et des liens saisis (transformateur associé, rattachements, by-pass raccordés, onduleurs en parallèle). Les équipements sans lien connu sont placés dans leur local, sans trait. Couleur de chaque case : état de l'équipement à l'issue de la maintenance.", size: 15, italics: true, color: "5A6573" })] }),
     ...postes,
+    ...chainesI,
   ];
 }
 async function generateAnnexePhotosDocx(site) {
