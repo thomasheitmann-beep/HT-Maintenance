@@ -18860,6 +18860,7 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
           {eq.type === "Batterie de compensation" && <SynoptiqueBatterie eq={eq} allSites={allSites} />}
           {TYPES_CELLULES_HTA.includes(eq.type) && <SchemaCelluleHTA eq={eq} />}
           {TYPES_SERRURES.includes(eq.type) && <SerruresPanel eq={eq} update={update} allEquipements={allEquipements} />}
+          {TYPES_CELLULES_HTA.includes(eq.type) && <BoutonFicheManoeuvre eq={eq} allSites={allSites} />}
           {["By-pass externe", "Onduleur simplifié", "Disjoncteur BT", "Interrupteur BT"].includes(eq.type) && <SchemaConversionSimple eq={eq} eqsSite={allEquipements} />}
           {ordreSectionsSaisie(eq, schema).map((sec) => <BlocSectionSaisie key={sec.key} eq={eq} sec={sec}>{(() => {
             // Fiche batterie : saisie une seule fois, dans Pièces d'usure → Batteries (premier modèle).
@@ -26898,6 +26899,213 @@ function docxSynoptiqueInstallation(site) {
     ...postes,
     ...chainesI,
   ];
+}
+// ===== Fiche de manœuvre (ordre de service à afficher sur la cellule) =====
+// Procédure générée à partir des liens saisis (cellule → transformateur → disjoncteur BT d'arrivée) et des serrures / clés.
+function procedureManoeuvre(eq, eqs, locaux = []) {
+  const ch = chaineChargeCellule(eq, eqs) || {};
+  const topo = topologieCellule(eq);
+  const id = eq.identification || {};
+  const nomCell = `${id.repere || eq.type}${topo.code ? " (" + topo.code + ")" : ""}`;
+  const local = (locaux.find((l) => l.id === eq.localId) || {}).nom;
+  const cles = (e) => (e && e.serrures ? e.serrures.filter((sr) => cleSerrure(sr.cle)) : []);
+  const serrCell = cles(eq);
+  const tr = ch.ch && ch.ch.eq, dj = ch.arrivee;
+  const horsTension = [], acces = [], notes = [];
+  const libres = new Set(); // clés en main de l'opérateur
+  // 1. Côté BT
+  if (dj) {
+    const nd = dj.identification?.repere || "disjoncteur général BT";
+    horsTension.push(`Ouvrir le disjoncteur général BT ${nd}${ch.tgbt ? ` (TGBT ${ch.tgbt})` : ""}.`);
+    horsTension.push("Vérifier l'ABSENCE DE TENSION.");
+    const sDj = cles(dj).filter((sr) => /débroch|ouverture/i.test(sr.organe || ""));
+    if (sDj.length) sDj.forEach((sr) => { horsTension.push(`${String(dj.identification?.debrochable || "").toUpperCase() === "OUI" ? "Débrocher" : "Verrouiller en position ouverte"} le disjoncteur ${nd} : la clé « ${sr.cle} » est libre, la récupérer.`); libres.add(cleSerrure(sr.cle)); });
+    else if (String(dj.identification?.debrochable || "").toUpperCase() === "OUI") horsTension.push(`Débrocher le disjoncteur ${nd}.`);
+  } else if (tr) {
+    horsTension.push(`Ouvrir l'appareil général BT alimenté par le transformateur ${tr.identification?.repere || ""} (disjoncteur général BT non relié dans l'application).`.replace("  ", " "));
+    horsTension.push("Vérifier l'ABSENCE DE TENSION.");
+  }
+  // 2. Cellule HTA
+  horsTension.push(`Aller à la cellule ${nomCell}${local ? ` — ${local}` : ""}.`);
+  const sTerre = serrCell.filter((sr) => /terre/i.test(sr.organe || ""));
+  sTerre.filter((sr) => libres.has(cleSerrure(sr.cle))).forEach((sr) => horsTension.push(`Placer la clé « ${sr.cle} » dans la serrure.`));
+  const fam = topo.famille || "";
+  if (/^DISJ/.test(fam)) {
+    horsTension.push(`Ouvrir le disjoncteur${id.referenceDisjoncteur ? " " + id.referenceDisjoncteur : ""} de la cellule.`);
+    if (topo.org.includes("DISJ_DEB")) horsTension.push("Débrocher le disjoncteur.");
+    else if (topo.org.includes("SECT")) horsTension.push("Ouvrir le sectionneur.");
+  } else if (fam === "CONTACTEUR") horsTension.push("Ouvrir le contacteur de la cellule.");
+  else horsTension.push(`Ouvrir l'interrupteur${topo.org.includes("ISECT") ? "-sectionneur" : ""} de la cellule.`);
+  horsTension.push(topo.org.includes("VPIS") ? "Vérifier l'absence de tension sur les voyants (VPIS)." : "Vérifier l'absence de tension.");
+  if (topo.org.includes("ST") || topo.org.includes("ST_AM")) {
+    if (sTerre.length) sTerre.forEach((sr) => horsTension.push(`Déverrouiller et fermer le sectionneur de terre : la clé « ${sr.cle} » devient prisonnière.`));
+    else horsTension.push("Fermer le sectionneur de terre.");
+  }
+  // 3. Accès au transformateur / à la charge
+  const sPanneau = serrCell.filter((sr) => /câbles|cables|porte|grille/i.test(sr.organe || ""));
+  if (tr || sPanneau.length) {
+    if (sPanneau.length) {
+      acces.push(`Ouvrir et retirer le panneau câbles de la cellule ${id.repere || ""}.`.replace(" .", "."));
+      acces.push("Faire la VAT.");
+      sPanneau.forEach((sr) => { acces.push(`Accès à la clé « ${sr.cle} » : la tourner pour la libérer.`); libres.add(cleSerrure(sr.cle)); });
+    }
+    if (tr) {
+      const nt = tr.identification?.repere || "transformateur";
+      const sTr = cles(tr);
+      sTr.forEach((sr) => {
+        const org = String(sr.organe || "accès").toLowerCase();
+        acces.push(libres.has(cleSerrure(sr.cle))
+          ? `Avec la clé « ${sr.cle} », déverrouiller ${/bornes/.test(org) ? "le volet de condamnation des bornes embrochables" : /guillotine/.test(org) ? "la guillotine" : /plastron/.test(org) ? "le plastron" : "l'accès"} du transformateur ${nt}.`
+          : `Clé « ${sr.cle} » (${org} du transformateur ${nt}) : vérifier sa provenance — elle n'est libérée par aucune étape précédente.`);
+      });
+      if (!sTr.length) acces.push(`Accès au transformateur ${nt} : après VAT et mise à la terre côté HTA et côté BT.`);
+    }
+  }
+  // 4. Autres clés de la chaîne (interverrouillage entre postes, etc.)
+  const chaines = chainesInterverrouillage(eqs);
+  const traites = new Set([...cles(dj), ...serrCell, ...cles(tr)].map((sr) => cleSerrure(sr.cle)));
+  chaines.filter((c) => c.serrures.some((x) => x.eq.id === eq.id)).forEach((c) => c.serrures.forEach((x) => {
+    if (x.eq.id === eq.id || (dj && x.eq.id === dj.id) || (tr && x.eq.id === tr.id)) return;
+    const loc = (locaux.find((l) => l.id === x.eq.localId) || {}).nom;
+    notes.push(`Clé « ${c.cle} » : également sur ${nomEqSerrure(x.eq)}${loc ? ` (${loc})` : ""} — ${String(x.sr.organe || "").toLowerCase()}, clé ${String(x.sr.etat || "").toLowerCase()} en exploitation.`);
+  }));
+  if (!serrCell.length && !cles(dj).length && !cles(tr).length) notes.push("Interverrouillage par clés non renseigné dans l'application : vérifier les serrures sur site avant affichage.");
+  const titre = tr ? `Départ transformateur ${tr.identification?.repere || ""} — cellule ${nomCell}`.replace("  ", " ")
+    : ch.ch ? `Départ ${String(ch.ch.type).toLowerCase()} ${ch.ch.repere || ""} — cellule ${nomCell}`.replace("  ", " ") : `Cellule ${nomCell}`;
+  return { titre, horsTension, acces, notes, ch, local, traites };
+}
+// Schéma de la fiche : la cellule (cadre rouge), sa charge et la suite BT, avec les clés.
+function genererSchemaFicheManoeuvre(eq, eqs) {
+  if (typeof document === "undefined" || !document.createElement) return null;
+  try {
+    const W = 300, x = 150;
+    const { canvas, ctx } = canevasSchema(W, 900);
+    ctx.fillStyle = SCHEMA_MARINE; ctx.fillRect(60, 20, 200, 4);
+    ctx.strokeStyle = SCHEMA_TRAIT; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(x, 24); ctx.lineTo(x, 36); ctx.stroke();
+    const r = dessinerCelluleHTA(ctx, x, 36, eq, { complet: false, largeurLibelle: 110, taille: 10 });
+    let yb = Math.max(r.yBas, r.relaisBas || 0) + 6;
+    ctx.save(); ctx.strokeStyle = "#C0392B"; ctx.lineWidth = 1.2; ctx.strokeRect(60, 10, 200, yb - 4); ctx.restore();
+    ctx.strokeStyle = SCHEMA_TRAIT; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(x, r.yBas); ctx.lineTo(x, yb + 14); ctx.stroke();
+    const c = chaineChargeCellule(eq, eqs);
+    if (c) yb = dessinerChargeCellule(ctx, x, yb + 14, c, { largeurLibelle: 110, taille: 10, largeurBarre: 130 });
+    else { ctx.fillStyle = SCHEMA_TRAIT; ctx.beginPath(); ctx.moveTo(x - 6, yb + 14); ctx.lineTo(x + 6, yb + 14); ctx.lineTo(x, yb + 25); ctx.closePath(); ctx.fill(); yb += 28; }
+    return rognerSchema(canvas, yb + 12);
+  } catch (e) { return null; }
+}
+// Légende des symboles et des clés (bas de fiche).
+function genererLegendeFicheManoeuvre() {
+  if (typeof document === "undefined" || !document.createElement) return null;
+  try {
+    const W = 730, H = 96;
+    const { canvas, ctx } = canevasSchema(W, H);
+    const T = SCHEMA_TRAIT;
+    const ligne = (pts, ep = 1.8) => { ctx.save(); ctx.strokeStyle = T; ctx.lineWidth = ep; ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1]); pts.slice(1).forEach(([a, b]) => ctx.lineTo(a, b)); ctx.stroke(); ctx.restore(); };
+    const texte = (t, xx, yy) => { ctx.save(); ctx.font = `10.5px ${SCHEMA_POLICE}`; ctx.fillStyle = "#1A1F26"; ctx.textAlign = "left"; ctx.textBaseline = "middle"; ctx.fillText(t, xx, yy); ctx.restore(); };
+    const lame = (xx, y0) => { ligne([[xx, y0 + 40], [xx - 10, y0 + 18]]); ligne([[xx, y0 + 40], [xx, y0 + 54]]); };
+    const y0 = 18;
+    // disjoncteur débrochable
+    ligne([[30, y0], [30, y0 + 10]]); ligne([[26, y0 + 6], [34, y0 + 14]], 1.5); ligne([[34, y0 + 6], [26, y0 + 14]], 1.5); ligne([[24, y0 - 4], [30, y0 + 1], [36, y0 - 4]], 1.3); lame(30, y0); ligne([[24, y0 + 60], [30, y0 + 55], [36, y0 + 60]], 1.3); texte("Disjoncteur débrochable", 44, y0 + 30);
+    // interrupteur
+    let xx = 200; ligne([[xx, y0], [xx, y0 + 8]]); ctx.save(); ctx.strokeStyle = T; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(xx, y0 + 12, 3.5, 0, 2 * Math.PI); ctx.stroke(); ctx.restore(); lame(xx, y0); texte("Interrupteur", xx + 12, y0 + 30);
+    xx = 300; ligne([[xx, y0], [xx, y0 + 8]]); ligne([[xx - 5, y0 + 8], [xx + 5, y0 + 8]]); lame(xx, y0); texte("Sectionneur", xx + 12, y0 + 30);
+    xx = 400; ligne([[xx, y0], [xx, y0 + 8]]); ligne([[xx - 5, y0 + 8], [xx + 5, y0 + 8]]); ctx.save(); ctx.strokeStyle = T; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(xx, y0 + 12, 3, 0, 2 * Math.PI); ctx.stroke(); ctx.restore(); lame(xx, y0); texte("Interr.-sectionneur", xx + 12, y0 + 30);
+    xx = 530; ctx.save(); ctx.strokeStyle = T; ctx.lineWidth = 1.5; ctx.strokeRect(xx - 6, y0 + 10, 12, 30); ctx.fillStyle = T; ctx.fillRect(xx - 6, y0 + 10, 12, 5); ctx.restore(); ligne([[xx, y0], [xx, y0 + 10]]); ligne([[xx, y0 + 40], [xx, y0 + 54]]); texte("Fusible", xx + 12, y0 + 30);
+    xx = 610; ligne([[xx, y0], [xx, y0 + 8]]); ctx.save(); ctx.strokeStyle = T; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(xx, y0 + 11, 3.2, Math.PI / 2, 1.5 * Math.PI); ctx.stroke(); ctx.restore(); lame(xx, y0); texte("Contacteur", xx + 12, y0 + 30);
+    return rognerSchema(canvas, H);
+  } catch (e) { return null; }
+}
+function genererLegendeClesFiche() {
+  if (typeof document === "undefined" || !document.createElement) return null;
+  try {
+    const { canvas, ctx } = canevasSchema(220, 84);
+    [["Absente", "Clé absente"], ["Libre", "Clé libre"], ["Prisonnière", "Clé prisonnière"]].forEach(([etat, t], i) => {
+      dessinerCleSchema(ctx, 20, 22 + i * 24, { cle: "", etat });
+      ctx.save(); ctx.font = `11px ${SCHEMA_POLICE}`; ctx.fillStyle = "#1A1F26"; ctx.textBaseline = "middle"; ctx.fillText(t, 40, 22 + i * 24); ctx.restore();
+    });
+    return rognerSchema(canvas, 84);
+  } catch (e) { return null; }
+}
+async function generateFicheManoeuvreDocx(site, eq) {
+  await ensureDocx();
+  const s = await resolvePhotosForDocx({ photoSite: site.photoSite || [] });
+  const eqs = site.equipements || [];
+  const p = procedureManoeuvre(eq, eqs, site.locaux || []);
+  const a = docxAucuneBordure(), sans = { top: a, bottom: a, left: a, right: a };
+  const run = (t, o = {}) => new DOCX.TextRun({ text: t, size: o.size || 18, bold: !!o.bold, color: o.color || DOCX_DARK, italics: !!o.italics, underline: o.underline ? {} : undefined });
+  const para = (enfants, o = {}) => new DOCX.Paragraph({ alignment: o.align, spacing: { before: o.before || 0, after: o.after ?? 60, line: o.line }, indent: o.indent, children: Array.isArray(enfants) ? enfants : [enfants] });
+  const cell = (w, enfants, o = {}) => new DOCX.TableCell({ width: { size: w, type: DOCX.WidthType.DXA }, verticalAlign: o.vAlign, margins: o.margins || { top: 80, bottom: 80, left: 120, right: 120 }, shading: o.fond ? { type: DOCX.ShadingType.CLEAR, fill: o.fond } : undefined, borders: o.bordures || sans, children: enfants });
+  const W = 10700;
+  // En-tête : logo HT Maintenance (bandeau sombre), ordre de service, logo du client
+  const logoHT = docxImage(LOGO_DARK, 120, 60); // version pour fond blanc
+  const photo = s.photoSite && s.photoSite[0] && s.photoSite[0].dataUrl;
+  let logoClient = null;
+  if (photo) { const d = await chargerDimensionsImage(photo).catch(() => null); const h = 60, w = d && d.h ? Math.min(150, Math.round((h * d.w) / d.h)) : 110; logoClient = docxImage(photo, w, d && d.h ? Math.round((w * d.h) / d.w) : h); }
+  const entete = docxTable({ width: { size: W, type: DOCX.WidthType.DXA }, columnWidths: [2300, 6100, 2300], borders: { ...docxToutesAucune(), insideHorizontal: a, insideVertical: a }, rows: [new DOCX.TableRow({ cantSplit: true, children: [
+    cell(2300, [para(logoHT ? [logoHT] : [run("HT MAINTENANCE", { bold: true })], { align: DOCX.AlignmentType.CENTER, after: 0 })], { vAlign: DOCX.VerticalAlign.CENTER }),
+    cell(6100, [para([run("ORDRE DE SERVICE : ", { bold: true, size: 20 }), run("les manœuvres et travaux doivent être effectués dans le respect des règles de sécurité et des instructions en vigueur.", { bold: true, size: 20 })], { after: 0 })], { vAlign: DOCX.VerticalAlign.CENTER }),
+    cell(2300, [para(logoClient ? [logoClient] : [run(site.client || "", { bold: true, size: 18 })], { align: DOCX.AlignmentType.CENTER, after: 0 })], { vAlign: DOCX.VerticalAlign.CENTER }),
+  ] })] });
+  const rouge = { style: DOCX.BorderStyle.SINGLE, size: 8, color: "C0392B" };
+  const defense = docxTable({ width: { size: W, type: DOCX.WidthType.DXA }, columnWidths: [W], borders: { top: rouge, bottom: rouge, left: rouge, right: rouge, insideHorizontal: a, insideVertical: a }, rows: [new DOCX.TableRow({ cantSplit: true, children: [
+    cell(W, [para([run("Défense d'ouvrir tant que les conducteurs de ce compartiment n'ont pas été mis hors tension.", { bold: true, size: 22, color: "A93226" })], { align: DOCX.AlignmentType.CENTER, after: 0 })], { bordures: { top: rouge, bottom: rouge, left: rouge, right: rouge } }),
+  ] })] });
+  // Corps : schéma à gauche, procédure à droite
+  const sch = genererSchemaFicheManoeuvre(eq, eqs);
+  const dims = sch ? dimensionsPng(sch) : null;
+  const wS = 262, imS = sch ? docxImage(sch, wS, dims && dims.w ? Math.round((wS * dims.h) / dims.w) : 500) : null;
+  const legC = genererLegendeClesFiche(), dL = legC ? dimensionsPng(legC) : null, imLC = legC ? docxImage(legC, 150, dL && dL.w ? Math.round((150 * dL.h) / dL.w) : 57) : null;
+  const titreBloc = (t) => para([run(t, { bold: true, size: 19, underline: true })], { before: 160, after: 80 });
+  const etapes = (liste, depart) => liste.map((t, i) => para([run(`${depart + i}.  `, { bold: true }), run(t)], { after: 50, indent: { left: 360, hanging: 360 } }));
+  const droite = [
+    para([run("Définition des clés :", { bold: true, size: 19, underline: true })], { after: 40 }),
+    ...(imLC ? [para([imLC], { after: 80 })] : []),
+    titreBloc(`Procédure à suivre pour mettre ${p.ch && p.ch.ch && p.ch.ch.eq ? "le transformateur" : "le départ"} hors tension :`),
+    ...etapes(p.horsTension, 1),
+    ...(p.acces.length ? [titreBloc(p.ch && p.ch.ch && p.ch.ch.eq ? "Pour accès au transformateur :" : "Pour accès aux câbles :"), ...etapes(p.acces, p.horsTension.length + 1)] : []),
+    titreBloc("Pour remettre sous tension :"),
+    para([run("Procéder de la manière inverse à la mise hors tension.")], { after: 60 }),
+    ...(p.notes.length ? [titreBloc("Remarques :"), ...p.notes.map((t) => para([run("• " + t, { size: 16, italics: true })], { after: 40 }))] : []),
+  ];
+  const fin = { style: DOCX.BorderStyle.SINGLE, size: 6, color: "1A1F26" };
+  const corps = docxTable({ width: { size: W, type: DOCX.WidthType.DXA }, columnWidths: [4200, 6500], borders: { ...docxToutesAucune(), insideHorizontal: a, insideVertical: a }, rows: [new DOCX.TableRow({ cantSplit: true, children: [
+    cell(4200, [para([run(p.titre, { bold: true, size: 20 })], { align: DOCX.AlignmentType.CENTER, after: 120 }), para(imS ? [imS] : [run("(schéma indisponible)", { italics: true })], { align: DOCX.AlignmentType.CENTER, after: 0 })], { bordures: { top: fin, bottom: fin, left: fin, right: fin } }),
+    cell(6500, droite, { bordures: { top: fin, bottom: fin, left: fin, right: fin }, margins: { top: 120, bottom: 120, left: 240, right: 200 } }),
+  ] })] });
+  const leg = genererLegendeFicheManoeuvre(), dLg = leg ? dimensionsPng(leg) : null, imLg = leg ? docxImage(leg, 690, dLg && dLg.w ? Math.round((690 * dLg.h) / dLg.w) : 90) : null;
+  const children = [
+    entete,
+    para([], { after: 120 }),
+    defense,
+    para([run(`${site.nom || ""}${p.local ? " — " + p.local : ""}`, { bold: true, size: 20, color: DOCX_BLUE })], { align: DOCX.AlignmentType.CENTER, before: 160, after: 120 }),
+    corps,
+    ...(imLg ? [para([imLg], { align: DOCX.AlignmentType.CENTER, before: 120, after: 60 })] : []),
+    para([run(`Fiche établie par HT Maintenance le ${new Date().toLocaleDateString("fr-FR")}, d'après les équipements relevés${site.rapport?.date ? " le " + dateFrIso(site.rapport.date) : ""} — à vérifier sur site avant affichage.`, { size: 14, italics: true, color: "5A6573" })], { align: DOCX.AlignmentType.CENTER, before: 80 }),
+  ];
+  const doc = new DOCX.Document({ styles: DOCX_STYLES, sections: [{ properties: { page: { size: { width: A4_LARGEUR, height: A4_HAUTEUR }, margin: { top: 600, bottom: 600, left: 600, right: 600 } } }, children }] });
+  return DOCX.Packer.toBlob(doc);
+}
+function BoutonFicheManoeuvre({ eq, allSites }) {
+  const [enCours, setEnCours] = useState(false);
+  const [erreur, setErreur] = useState("");
+  if (!departCellule(eq) && !(eq.serrures || []).length) return null;
+  const lancer = async () => {
+    const site = (allSites || []).find((x) => (x.equipements || []).some((e) => e.id === eq.id));
+    if (!site) { setErreur("Site introuvable."); return; }
+    setEnCours(true); setErreur("");
+    try {
+      const siteMaj = { ...site, equipements: site.equipements.map((e) => (e.id === eq.id ? eq : e)) };
+      const blob = await generateFicheManoeuvreDocx(siteMaj, eq);
+      downloadBlob(blob, `Fiche_manoeuvre_${String(eq.identification?.repere || eq.type).replace(/[^a-z0-9]+/gi, "_")}_${String(site.nom || "site").replace(/[^a-z0-9]+/gi, "_")}.docx`);
+    } catch (e) { console.error("[Fiche de manœuvre]", e); setErreur("Génération impossible : " + (e && e.message ? e.message : "erreur inconnue")); }
+    setEnCours(false);
+  };
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
+      <button onClick={lancer} disabled={enCours} style={btnGhost(BRAND.blue)}><FileText size={13} /> {enCours ? "Génération…" : "Fiche de manœuvre (Word)"}</button>
+      <span style={{ fontSize: 11.5, color: "#8B96A3" }}>Ordre de service à afficher sur la cellule : schéma, clés et procédure de consignation.</span>
+      {erreur && <span style={{ fontSize: 12, color: "#C0392B" }}>{erreur}</span>}
+    </div>
+  );
 }
 async function generateAnnexePhotosDocx(site) {
   await ensureDocx();
