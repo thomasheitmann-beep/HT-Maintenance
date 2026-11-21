@@ -15762,8 +15762,25 @@ function genererSynoptiqueBatterie(eq, allEquipements) {
     return rognerSchema(canvas, y + 8);
   } catch (e) { return null; }
 }
+// Économie d'énergie : un schéma n'est redessiné que si une donnée change réellement (photos et textes libres ignorés),
+// et une demi-seconde après la dernière frappe — au lieu d'un dessin complet en double résolution à chaque caractère saisi.
+const signatureSchema = (x) => { try { return JSON.stringify(x, (k, v) => (k === "photos" || k === "dataUrl" || k === "remarquesComplement" || k === "remarquesModifiees" || k === "remarquesModifieesBase" || k === "remarquesAncienne" || k === "courbeDechargeDonnees" || k === "courbeFiles" ? undefined : v)); } catch (e) { return String(Math.random()); } };
+const COMPTEUR_DESSINS = { n: 0 }; // (diagnostic) nombre de schémas dessinés depuis l'ouverture
+function useSchemaDiffere(generer, signature, delai = 450) {
+  const genRef = useRef(generer); genRef.current = generer;
+  const [img, setImg] = useState(() => { COMPTEUR_DESSINS.n++; try { return generer(); } catch (e) { return null; } });
+  const premiere = useRef(true), derniere = useRef(signature);
+  useEffect(() => {
+    if (premiere.current) { premiere.current = false; return undefined; }
+    if (signature === derniere.current) return undefined;
+    const t = setTimeout(() => { derniere.current = signature; COMPTEUR_DESSINS.n++; try { setImg(genRef.current()); } catch (e) { setImg(null); } }, delai);
+    return () => clearTimeout(t);
+  }, [signature]); // eslint-disable-line react-hooks/exhaustive-deps
+  return img;
+}
 function SynoptiqueBatterie({ eq, allSites }) {
-  const img = useMemo(() => genererSynoptiqueBatterie(eq, equipementsDuSiteDe(eq, allSites || [])), [eq, allSites]);
+  const voisins = useMemo(() => equipementsDuSiteDe(eq, allSites || []), [eq, allSites]);
+  const img = useSchemaDiffere(() => genererSynoptiqueBatterie(eq, voisins), signatureSchema([eq, voisins.filter((e) => e.type === "Transformateur").map((e) => e.identification)]));
   if (!img) return null;
   return (
     <Card style={{ marginBottom: 14 }}>
@@ -16280,7 +16297,7 @@ function SerruresPanel({ eq, update, allEquipements = [] }) {
 }
 // Tableau des chaînes d'interverrouillage du site (onglet aperçu et rapport).
 function SchemaCelluleHTA({ eq }) {
-  const img = useMemo(() => genererSchemaCelluleHTA(eq), [eq]);
+  const img = useSchemaDiffere(() => genererSchemaCelluleHTA(eq), signatureSchema(eq));
   if (!img) return null;
   return (
     <Card style={{ marginBottom: 14 }}>
@@ -16453,7 +16470,8 @@ function genererSchemaAppareilBT(eq) {
   } catch (e) { return null; }
 }
 function SchemaConversionSimple({ eq, eqsSite }) {
-  const img = useMemo(() => (eq.type === "By-pass externe" ? genererSchemaBypassExterne(eq, eqsSite) : eq.type === "Onduleur simplifié" ? genererSchemaOnduleurSimplifie(eq) : genererSchemaAppareilBT(eq)), [eq, eqsSite]);
+  const img = useSchemaDiffere(() => (eq.type === "By-pass externe" ? genererSchemaBypassExterne(eq, eqsSite) : eq.type === "Onduleur simplifié" ? genererSchemaOnduleurSimplifie(eq) : genererSchemaAppareilBT(eq)),
+    signatureSchema([eq, eq.type === "By-pass externe" ? (eqsSite || []).map((e) => [e.type, e.identification]) : null]));
   if (!img) return null;
   return (
     <Card style={{ marginBottom: 14 }}>
@@ -19684,8 +19702,9 @@ function ResumeSiteContacts({ site, onModifier }) {
 // Aperçu, avant la génération du rapport, des schémas du site (synoptique + postes HTA), avec les repères pour corriger.
 function ApercuSchemasSite({ site, onFermer, onOuvrirEquipement }) {
   const [zoom, setZoom] = useState(null);
-  const syn = useMemo(() => { try { return genererSynoptiqueInstallation(site); } catch (e) { return null; } }, [site]);
-  const postes = useMemo(() => postesHTASite(site).map((g) => ({ ...g, imgs: imagesPosteHTA(g) })), [site]);
+  const sigSite = useMemo(() => signatureSchema([site.equipements, site.locaux]), [site]);
+  const syn = useMemo(() => { try { return genererSynoptiqueInstallation(site); } catch (e) { return null; } }, [sigSite]); // eslint-disable-line react-hooks/exhaustive-deps
+  const postes = useMemo(() => postesHTASite(site).map((g) => ({ ...g, imgs: imagesPosteHTA(g) })), [sigSite]); // eslint-disable-line react-hooks/exhaustive-deps
   const libSortie = { cable: "câble", barres: "jeu de barres aval", comptage: "comptage", aucune: "—" };
   const image = (cle, src, alt) => src ? (
     <div onClick={() => setZoom(zoom === cle ? null : cle)} style={{ overflowX: "auto", cursor: zoom === cle ? "zoom-out" : "zoom-in", border: "1px solid #E2E6EB", borderRadius: 8, background: "#fff" }}>
@@ -28758,6 +28777,7 @@ function AppPrincipale({ currentUser, onLogout }) {
   // État de la connexion et nombre de photos conservées sur l'appareil en attendant le réseau.
   const [enLigne, setEnLigne] = useState(typeof navigator === "undefined" ? true : navigator.onLine !== false);
   const [nbPhotosEnAttente, setNbPhotosEnAttente] = useState(0);
+  const nbPhotosRef = useRef(-1); // -1 : pas encore vérifié
   useEffect(() => {
     const maj = () => setEnLigne(navigator.onLine !== false);
     window.addEventListener("online", maj);
@@ -29006,7 +29026,7 @@ function AppPrincipale({ currentUser, onLogout }) {
             Object.values(node).forEach(walk);
           }
         })(sitesRefForPoll.current);
-        setNbPhotosEnAttente(aMigrer.size);
+        setNbPhotosEnAttente(aMigrer.size); nbPhotosRef.current = aMigrer.size;
         if (aMigrer.size === 0 || cancelled) return;
         if (typeof navigator !== "undefined" && navigator.onLine === false) return; // hors connexion : on réessaiera au retour du réseau
         const idToken = await currentUser.getIdToken();
@@ -29030,8 +29050,18 @@ function AppPrincipale({ currentUser, onLogout }) {
         migrating = false;
       }
     }
-    migrateOnce();
-    const id = setInterval(migrateOnce, 6000);
+    // Parcours complet des données : toutes les 6 s tant qu'il reste des photos à migrer, sinon une fois par minute,
+    // et jamais quand l'application est en arrière-plan (économie d'énergie).
+    let dernier = 0;
+    const tic = () => {
+      if (typeof document !== "undefined" && document.hidden) return;
+      const maintenant = Date.now();
+      if (nbPhotosRef.current === 0 && maintenant - dernier < 60000) return;
+      dernier = maintenant;
+      migrateOnce();
+    };
+    tic();
+    const id = setInterval(tic, 6000);
     return () => { cancelled = true; clearInterval(id); };
   }, [loaded, currentUser]);
 
@@ -29060,11 +29090,13 @@ function AppPrincipale({ currentUser, onLogout }) {
   }, [loaded, currentUser]);
 
   useEffect(() => {
-    if (!loaded || !currentUser) return;
+    if (!loaded || !currentUser) return undefined;
+    // Copie locale (IndexedDB) : le texte complet n'est produit qu'au moment de l'écriture (400 ms après la dernière
+    // modification, ou immédiatement si la page est fermée) — et non plus à chaque caractère saisi.
+    programmerCache("sites", () => { const j = JSON.stringify(sitesRefForPoll.current); derniereSerialSites.current = j; return { uid: uidCourant(), json: j, base: baseSites.current }; });
+    const minuteur = setTimeout(() => {
     const serialized = JSON.stringify(sites);
-    // Copie locale (IndexedDB) : à chaque modification, avec la dernière version confirmée par le serveur.
     derniereSerialSites.current = serialized;
-    programmerCache("sites", () => ({ uid: uidCourant(), json: derniereSerialSites.current, base: baseSites.current }));
     if (serialized === lastSyncedSites.current) return;
     // Filet de sécurité : si des sites non vides ont déjà été chargés depuis le serveur dans cette
     // session, on refuse d'écrire une liste vide automatiquement — un futur bug de chargement ne
@@ -29095,6 +29127,8 @@ function AppPrincipale({ currentUser, onLogout }) {
       }
       return true; // l'échec est géré ci-dessus (indicateur d'erreur + nouvelle tentative automatique dédiée)
     });
+    }, 300);
+    return () => clearTimeout(minuteur);
   }, [sites, loaded, currentUser]);
 
   useEffect(() => {
