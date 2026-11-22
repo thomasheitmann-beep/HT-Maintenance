@@ -27111,7 +27111,10 @@ function dessinerSurcoucheConsignation(ctx, g, cons) {
     }
     const yFin = r.chaine ? (r.chaine.yDG !== undefined ? r.chaine.yDG + 6 : r.chaine.y1) : r.yBas;
     if (!cons.ids.has(eq.id)) { trait([[x, yBus + 3], [x, Math.max(r.yBas, yFin)]], busOff ? COUL_CONSIGNATION.off : COUL_CONSIGNATION.on, 4); return; }
-    const pM = pos.ISECT ?? pos.INT ?? pos.DISJ ?? pos.DISJ_DEB ?? pos.CONT ?? pos.SECT;
+    // Point de séparation = organe de sectionnement le plus en amont (sectionneur amont d'une DM2, débrochage, interrupteur-sectionneur) ;
+    // le disjoncteur ou le contacteur seul n'est retenu qu'à défaut d'organe de séparation.
+    const sep = ["ISECT", "SECT", "DISJ_DEB", "INT"].map((k) => pos[k]).filter((v) => v !== undefined);
+    const pM = sep.length ? Math.min(...sep) : (pos.DISJ ?? pos.CONT);
     const yCoupe = pM !== undefined ? pM + 8 : yBus + 14;
     if (!estArriveeHTA(eq) || !busOff) trait([[x, yBus + 3], [x, yCoupe]], busOff ? COUL_CONSIGNATION.off : COUL_CONSIGNATION.on, 4);
     trait([[x, yCoupe + 26], [x, yFin]], COUL_CONSIGNATION.off, 5);
