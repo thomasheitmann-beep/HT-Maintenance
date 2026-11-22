@@ -16158,7 +16158,11 @@ function genererSchemaPosteHTA(cellules, titre, opts = {}) {
     }
     const chaines = cellules.map((eq) => { try { return chaineChargeCellule(eq, eqsSite); } catch (e) { return null; } });
     const hChaine = Math.max(0, ...chaines.map((c) => (c ? c.h : 0)));
-    const COL = 150, PAD = 30, W = Math.max(480, PAD * 2 + cellules.length * COL + 40, texteSat ? 16 + String(titre || "").length * 8.5 + texteSat.length * 6.2 + 40 : 0), H = 560 + hChaine; // largeur ajustée au nombre de cellules : schéma centré dans le rapport
+    // Après une « sortie barres », espace supplémentaire : la remontée vers le jeu de barres aval passe entre les deux cellules
+    // sans chevaucher les libellés de la cellule ni les clés / le verrouillage mécanique de la cellule suivante.
+    const ECART_BARRES = 40;
+    const nbBarresAvant = cellules.map((_, i) => cellules.slice(0, i).filter((c) => topologieCellule(c).sortie === "barres").length);
+    const COL = 150, PAD = 30, W = Math.max(480, PAD * 2 + cellules.length * COL + 40 + ECART_BARRES * (nbBarresAvant[cellules.length - 1] || 0), texteSat ? 16 + String(titre || "").length * 8.5 + texteSat.length * 6.2 + 40 : 0), H = 560 + hChaine; // largeur ajustée au nombre de cellules : schéma centré dans le rapport
     const { canvas, ctx } = canevasSchema(W, H);
     ctx.font = `bold 14px ${SCHEMA_POLICE}`; ctx.fillStyle = SCHEMA_MARINE; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
     ctx.fillText(titre || "Poste HTA", 16, 24);
@@ -16166,7 +16170,7 @@ function genererSchemaPosteHTA(cellules, titre, opts = {}) {
       const wT = ctx.measureText(titre || "Poste HTA").width;
       ctx.save(); ctx.font = `bold 10.5px ${SCHEMA_POLICE}`; ctx.fillStyle = "#0A5DA8"; let t = texteSat; while (t.length > 1 && ctx.measureText(t).width > W - wT - 50) t = t.slice(0, -2) + "…"; ctx.fillText(t, 16 + wT + 14, 24); ctx.restore();
     }
-    const yBus = 84, xs = cellules.map((_, i) => PAD + COL * i + 48);
+    const yBus = 84, xs = cellules.map((_, i) => PAD + COL * i + 48 + ECART_BARRES * nbBarresAvant[i]);
     let debut = 0, yMax = 0;
     const troncons = [];
     const bas = [];
@@ -16217,7 +16221,7 @@ function genererSchemaPosteHTA(cellules, titre, opts = {}) {
         ctx.save(); ctx.font = `9.5px ${SCHEMA_POLICE}`; ctx.fillStyle = "#5B6B7D"; ctx.textAlign = "left"; ctx.fillText("→ jeu de barres aval (suite)", x + 8, ySortie + 14); ctx.restore();
       } else if (r.topo.sortie === "barres" && i < cellules.length - 1) {
         const xn = xs[i + 1] - 40 + 6; // début du tronçon suivant
-        const xr = (x + xs[i + 1]) / 2 + 30;
+        const xr = xs[i + 1] - 88; r.xr = xr; // à gauche des clés (x - 58) et du verrouillage mécanique (x - 44) de la cellule suivante
         if (r.droiteP && r.droiteP.length) { // organes de la remontée (sectionneur, terre) sous les libellés de la cellule
           const hD = hauteurOrganesCellule(r.droiteP);
           ctx.beginPath(); ctx.moveTo(x, r.yBas); ctx.lineTo(x, ySortie); ctx.lineTo(xr, ySortie); ctx.lineTo(xr, r.debutDroite + hD); ctx.moveTo(xr, r.debutDroite); ctx.lineTo(xr, yBus + 3); ctx.stroke();
@@ -27076,6 +27080,8 @@ function texteInstallationConsignation(site, per) {
   if (cel.length) parts.push(`côté HTA : cellule${cel.length > 1 ? "s" : ""} ${cel.join(", ")} (aval de l'appareil de coupure)`);
   if (tr.length) parts.push(`transformateur${tr.length > 1 ? "s" : ""} ${tr.join(", ")}`);
   if (bt.length) parts.push(`côté BT : jusqu'à l'amont de ${bt.join(", ")}`);
+  const avals = eqs.filter((e) => TYPES_CELLULES_HTA.includes(e.type) && topologieCellule(e).sortie === "barres").map(nomEqSerrure);
+  if (avals.length) parts.push(`jeu de barres aval alimenté par ${avals.join(", ")} et cellules raccordées, côté barres`);
   if (per.postesConsignes.size) parts.push("jeu de barres HTA du poste (toutes les arrivées ouvertes et condamnées)");
   return parts.length ? `Installation comprise entre ${parts.join(" ; ")}.` : "";
 }
@@ -27087,10 +27093,22 @@ function dessinerCadenas(ctx, x, y, couleur) {
 function dessinerSurcoucheConsignation(ctx, g, cons) {
   const { cellules, xs, bas, yBus, COL } = g;
   const trait = (pts, c, ep = 5) => { ctx.save(); ctx.globalAlpha = 0.55; ctx.strokeStyle = c; ctx.lineWidth = ep; ctx.lineCap = "round"; ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1]); pts.slice(1).forEach(([a, b]) => ctx.lineTo(a, b)); ctx.stroke(); ctx.restore(); };
-  const busOff = cons.posteConsigne;
-  (g.troncons || [[0, xs.length - 1]]).forEach(([a, b]) => trait([[xs[a] - 40, yBus], [xs[b] + 40, yBus]], busOff ? COUL_CONSIGNATION.off : COUL_CONSIGNATION.on, 8));
+  // État de chaque tronçon : le premier est hors tension si toutes les arrivées sont consignées ; un tronçon aval (alimenté par une
+  // « sortie barres ») est hors tension dès que la cellule qui l'alimente est consignée ou que son propre tronçon est hors tension.
+  const troncons = g.troncons || [[0, xs.length - 1]];
+  const tronconOff = [];
+  troncons.forEach(([a], k) => { tronconOff[k] = k === 0 ? !!cons.posteConsigne : tronconOff[k - 1] || cons.ids.has(cellules[a - 1].id); });
+  const offCellule = (i) => tronconOff[troncons.findIndex(([a, b]) => i >= a && i <= b)];
+  troncons.forEach(([a, b], k) => trait([[xs[a] - 40, yBus], [xs[b] + 40, yBus]], tronconOff[k] ? COUL_CONSIGNATION.off : COUL_CONSIGNATION.on, 8));
   cellules.forEach((eq, i) => {
     const x = xs[i], r = bas[i], pos = r.pos || {};
+    const busOff = offCellule(i);
+    // Liaison « sortie barres » vers le tronçon suivant : même état que ce tronçon
+    if (r.topo.sortie === "barres" && i < cellules.length - 1 && g.ySortie !== undefined) {
+      const xr = r.xr ?? xs[i + 1] - 88, off = tronconOff[troncons.findIndex(([a]) => a === i + 1)];
+      trait([[x, r.yBas], [x, g.ySortie], [xr, g.ySortie], [xr, yBus]], off ? COUL_CONSIGNATION.off : COUL_CONSIGNATION.on, 4);
+      trait([[xr, yBus], [xs[i + 1] - 40, yBus]], off ? COUL_CONSIGNATION.off : COUL_CONSIGNATION.on, 8);
+    }
     const yFin = r.chaine ? (r.chaine.yDG !== undefined ? r.chaine.yDG + 6 : r.chaine.y1) : r.yBas;
     if (!cons.ids.has(eq.id)) { trait([[x, yBus + 3], [x, Math.max(r.yBas, yFin)]], busOff ? COUL_CONSIGNATION.off : COUL_CONSIGNATION.on, 4); return; }
     const pM = pos.ISECT ?? pos.INT ?? pos.DISJ ?? pos.DISJ_DEB ?? pos.CONT ?? pos.SECT;
@@ -27331,84 +27349,114 @@ const TXT_ATTESTATION_CONSIGNATION = {
 };
 async function generateAttestationConsignationDocx(site, per, infos = {}) {
   await ensureDocx();
-  const s = await resolvePhotosForDocx({ photoSite: site.photoSite || [] });
   const T = TXT_ATTESTATION_CONSIGNATION;
-  const a = docxAucuneBordure(), fin = { style: DOCX.BorderStyle.SINGLE, size: 6, color: "1A1F26" }, cadre = { top: fin, bottom: fin, left: fin, right: fin };
-  const run = (t, o = {}) => new DOCX.TextRun({ text: String(t ?? ""), size: o.size || 17, bold: !!o.bold, italics: !!o.italics, underline: o.u ? {} : undefined, color: o.color || DOCX_DARK });
-  const para = (enfants, o = {}) => new DOCX.Paragraph({ alignment: o.align, spacing: { before: o.before || 0, after: o.after ?? 30 }, indent: o.indent, children: Array.isArray(enfants) ? enfants : [enfants] });
-  const cell = (w, enfants, o = {}) => new DOCX.TableCell({ width: { size: w, type: DOCX.WidthType.DXA }, columnSpan: o.span, verticalAlign: o.v, margins: { top: 40, bottom: 40, left: 80, right: 80 }, shading: o.fond ? { type: DOCX.ShadingType.CLEAR, fill: o.fond } : undefined, borders: cadre, children: enfants });
-  const tick = (on) => (on ? "☑ " : "☐ ");
+  const BLEU = DOCX_BLUE, GRIS = "5A6573", FILET = "C9D0D8", FOND_LAB = "EEF1F4", ROUGE = "C8102E";
+  const rien = docxAucuneBordure(), filet = { style: DOCX.BorderStyle.SINGLE, size: 6, color: FILET };
+  const cadre = { top: filet, bottom: filet, left: filet, right: filet };
+  const sansCadre = { top: rien, bottom: rien, left: rien, right: rien };
+  const run = (t, o = {}) => new DOCX.TextRun({ text: String(t ?? ""), size: o.size || 17, bold: !!o.bold, italics: !!o.italics, color: o.color || DOCX_DARK, characterSpacing: o.sp });
+  const para = (enfants, o = {}) => new DOCX.Paragraph({ alignment: o.align, keepNext: o.keepNext, spacing: { before: o.before || 0, after: o.after ?? 30 }, indent: o.indent, border: o.border, shading: o.fond ? { type: DOCX.ShadingType.CLEAR, fill: o.fond } : undefined, tabStops: o.tabs, children: Array.isArray(enfants) ? enfants : [enfants] });
+  const cell = (w, enfants, o = {}) => new DOCX.TableCell({ width: { size: w, type: DOCX.WidthType.DXA }, columnSpan: o.span, verticalAlign: o.v, margins: o.m || { top: 50, bottom: 50, left: 110, right: 110 }, shading: o.fond ? { type: DOCX.ShadingType.CLEAR, fill: o.fond } : undefined, borders: o.borders || cadre, children: enfants });
+  // Case à cocher : cochée en bleu, vide en gris foncé
+  const coche = (on, t, o = {}) => para([new DOCX.TextRun({ text: on ? "☑  " : "☐  ", size: (o.size || 16) + 2, color: on ? BLEU : DOCX_DARK, font: "Segoe UI Symbol" }), ...(Array.isArray(t) ? t : [run(t, { size: o.size || 16 })])], { after: o.after ?? 30, indent: { left: 300, hanging: 300 } });
   const W = 10700;
-  const table = (cols, rows) => docxTable({ width: { size: W, type: DOCX.WidthType.DXA }, columnWidths: cols, borders: { top: fin, bottom: fin, left: fin, right: fin, insideHorizontal: fin, insideVertical: fin }, rows });
-  // En-tête : logo HT Maintenance (fond blanc), titre, numéro ; logo client à droite
-  const logoHT = docxImage(LOGO_DARK, 110, 55);
-  const photo = s.photoSite && s.photoSite[0] && s.photoSite[0].dataUrl;
-  let logoClient = null;
-  if (photo) { const d = await chargerDimensionsImage(photo).catch(() => null); const w = d && d.h ? Math.min(120, Math.round((48 * d.w) / d.h)) : 90; logoClient = docxImage(photo, w, d && d.w ? Math.round((w * d.h) / d.w) : 48); }
-  const entete = table([2500, 5000, 1800, 1400], [new DOCX.TableRow({ cantSplit: true, children: [
-    cell(2500, [para(logoHT ? [logoHT] : [run("HT MAINTENANCE", { bold: true })], { after: 0 })], { v: DOCX.VerticalAlign.CENTER }),
-    cell(5000, [para([run("ATTESTATION DE CONSIGNATION", { bold: true, size: 30 })], { align: DOCX.AlignmentType.CENTER, after: 20 }), para([run("Conformément à la NF C 18-510", { size: 17 })], { align: DOCX.AlignmentType.CENTER, after: 0 })], { v: DOCX.VerticalAlign.CENTER }),
-    cell(1800, [para([run("N°", { size: 15 })], { align: DOCX.AlignmentType.CENTER, after: 0 }), para([run(infos.numero || "", { bold: true, size: 22 })], { align: DOCX.AlignmentType.CENTER, after: 0 })], { v: DOCX.VerticalAlign.CENTER }),
-    cell(1400, [para(logoClient ? [logoClient] : [run(site.client || "", { bold: true, size: 15 })], { align: DOCX.AlignmentType.CENTER, after: 0 })], { v: DOCX.VerticalAlign.CENTER }),
-  ] })]);
+  const table = (cols, rows, o = {}) => docxTable({ width: { size: W, type: DOCX.WidthType.DXA }, columnWidths: cols, borders: o.borders || { top: filet, bottom: filet, left: filet, right: filet, insideHorizontal: filet, insideVertical: filet }, rows });
+  // Bandeau de section bleu, titre blanc en capitales espacées (texte optionnel aligné à droite)
+  const bandeau = (w, titre, o = {}) => cell(w, [para([run(titre.toUpperCase(), { bold: true, size: 17, color: "FFFFFF", sp: 20 }), ...(o.droite ? [run("\t" + o.droite, { size: 15, color: "FFFFFF" })] : [])], { after: 0, keepNext: true, tabs: o.droite ? [{ type: DOCX.TabStopType.RIGHT, position: w - 240 }] : undefined })], { span: o.span, fond: BLEU, borders: { top: { style: DOCX.BorderStyle.SINGLE, size: 6, color: BLEU }, bottom: { style: DOCX.BorderStyle.SINGLE, size: 6, color: BLEU }, left: { style: DOCX.BorderStyle.SINGLE, size: 6, color: BLEU }, right: { style: DOCX.BorderStyle.SINGLE, size: 6, color: BLEU } }, m: { top: 40, bottom: 40, left: 140, right: 140 } });
   const dateTxt = infos.date ? dateFrIso(infos.date) : "";
-  const lab = (t) => [para([run(t, { bold: true })], { after: 0 })], val = (t) => [para([run(t)], { after: 0 })];
-  const ident = table([2300, 3050, 2300, 3050], [
-    new DOCX.TableRow({ children: [cell(2300, lab("Numéro d'attestation")), cell(3050, val([infos.numero, dateTxt].filter(Boolean).join(" — "))), cell(2300, lab("Entreprise chargée des travaux")), cell(3050, val(infos.entreprise || ""))] }),
-    new DOCX.TableRow({ children: [cell(2300, lab("Adresse du chantier")), cell(3050, val([site.nom, site.adresse].filter(Boolean).join(" — "))), cell(2300, lab("Autorisation de travail attachée")), cell(3050, val(infos.autorisation || ""))] }),
-    new DOCX.TableRow({ children: [cell(2300, lab("Nature des travaux")), cell(8400, val(infos.nature || ""), { span: 3 })] }),
+  // En-tête : logo + activité, titre, cartouche du numéro ; filet ambre dessous
+  const logoHT = docxImage(LOGO_DARK, 110, 55);
+  const bleuFin = { style: DOCX.BorderStyle.SINGLE, size: 10, color: BLEU };
+  const entete = table([2700, 5900, 2100], [new DOCX.TableRow({ cantSplit: true, children: [
+    cell(2700, [para(logoHT ? [logoHT] : [run("HT MAINTENANCE", { bold: true, color: BLEU })], { after: 20 }), para([run("Maintenance électrique HTA / BT / Conversion d'énergie", { size: 11, color: GRIS })], { after: 0 })], { borders: sansCadre, v: DOCX.VerticalAlign.CENTER, m: { top: 0, bottom: 0, left: 0, right: 80 } }),
+    cell(5900, [para([run("ATTESTATION DE CONSIGNATION", { bold: true, size: 30, sp: 10 })], { align: DOCX.AlignmentType.CENTER, after: 40 }), para([run("Conformément à la NF C 18-510", { size: 17, color: GRIS })], { align: DOCX.AlignmentType.CENTER, after: 0 })], { borders: sansCadre, v: DOCX.VerticalAlign.CENTER }),
+    cell(2100, [para([run("N° d'attestation", { size: 15, color: BLEU })], { align: DOCX.AlignmentType.CENTER, after: 10 }), para([run(infos.numero || "", { bold: true, size: 26 })], { align: DOCX.AlignmentType.CENTER, after: 10 }), para([run(dateTxt ? "du " + dateTxt : "", { size: 15, color: GRIS })], { align: DOCX.AlignmentType.CENTER, after: 0 })], { borders: { top: bleuFin, bottom: bleuFin, left: bleuFin, right: bleuFin }, v: DOCX.VerticalAlign.CENTER, m: { top: 50, bottom: 50, left: 80, right: 80 } }),
+  ] })], { borders: { top: rien, bottom: rien, left: rien, right: rien, insideHorizontal: rien, insideVertical: rien } });
+  const filetAmbre = para([run("", { size: 4 })], { before: 0, after: 80, border: { bottom: { style: DOCX.BorderStyle.SINGLE, size: 24, color: DOCX_AMBER, space: 1 } } });
+  // Identification
+  const lab = (t) => [para([run(t, { bold: true, size: 17 })], { after: 0 })], val = (t) => [para([run(t, { size: 17 })], { after: 0 })];
+  const ident = table([2900, 2500, 2900, 2400], [
+    new DOCX.TableRow({ children: [cell(2900, lab("Entreprise chargée des travaux"), { fond: FOND_LAB }), cell(2500, val(infos.entreprise || "")), cell(2900, lab("Autorisation de travail attachée"), { fond: FOND_LAB }), cell(2400, val(infos.autorisation || ""))] }),
+    new DOCX.TableRow({ children: [cell(2900, lab("Adresse du chantier"), { fond: FOND_LAB }), cell(7800, val([site.nom, site.adresse].filter(Boolean).join(" — ")), { span: 3 })] }),
+    new DOCX.TableRow({ children: [cell(2900, lab("Nature des travaux"), { fond: FOND_LAB }), cell(7800, val(infos.nature || ""), { span: 3 })] }),
   ]);
-  const eng = [
-    para([run("Engagement :", { bold: true, u: true })], { before: 100, after: 30 }),
-    para([run(tick(infos.delegue) + T.delegue, { size: 15 })]),
-    para([run(tick(infos.schemas) + T.schemas, { size: 15 })]),
-    para([run(tick(infos.defaut) + T.defaut, { size: 15 })], { after: 80 }),
-  ];
-  // Schéma(s) de consignation (zones sous / hors tension, MALT, cadenas) et points de coupure
+  const espace = () => new DOCX.Paragraph({ spacing: { before: 0, after: 0, line: 80, lineRule: DOCX.LineRuleType.EXACT }, children: [] });
+  // Engagement
+  const delegue = T.delegue.replace(/sous sa responsabilité\.$/, "");
+  const engagement = table([W], [
+    new DOCX.TableRow({ children: [bandeau(W, "Engagement")] }),
+    new DOCX.TableRow({ children: [cell(W, [
+      coche(infos.delegue, [run(delegue, { size: 16 }), run("sous sa responsabilité", { size: 16, bold: true }), run(".", { size: 16 })]),
+      coche(infos.schemas, T.schemas),
+      coche(infos.defaut, T.defaut, { after: 0 }),
+    ], { m: { top: 80, bottom: 80, left: 140, right: 140 } })] }),
+  ]);
+  // Schéma(s) de consignation et cadenas
   const imgs = postesHTASite(site).map((g) => genererSchemaPosteHTA(g.eqs, `Consignation — ${g.nom}`, { min: 1, eqsSite: g.eqsSite, nomPoste: g.nom, locaux: g.locaux, consignation: { ids: per.ids, posteConsigne: per.postesConsignes.has(g.k) } })).filter(Boolean);
-  const imsDocx = imgs.map((im) => { const d = dimensionsPng(im.dataUrl); const w = 450; return docxImage(im.dataUrl, w, d && d.w ? Math.round((w * d.h) / d.w) : 300); }).filter(Boolean);
-  const legende = para([run("Rouge : sous tension · Vert : hors tension / consigné · Bleu : mise à la terre · Cadenas : organe condamné", { size: 13, italics: true, color: "5A6573" })], { align: DOCX.AlignmentType.CENTER, after: 0 });
+  const imsDocx = imgs.map((im) => { const d = dimensionsPng(im.dataUrl); const w = 365; return docxImage(im.dataUrl, w, d && d.w ? Math.round((w * d.h) / d.w) : 300); }).filter(Boolean);
   const coupures = pointsCoupureConsignation(site, per);
+  const compact = false; // mise en page identique quel que soit le nombre de points de coupure (2e page si nécessaire)
   const colCad = [
-    ...coupures.flatMap((c) => [
-      para([run(`${c.label} / Cadenas n° ………`, { bold: true, size: 15 })], { after: 10 }),
-      para([run(c.action, { size: 14, italics: true })], { after: 10 }),
-      para([run(tick(c.malt === "sans") + "Séparé sans MALT", { size: 15 })], { after: 0 }),
-      para([run(tick(c.malt === "avec") + "Séparé avec MALT", { size: 15 })], { after: 70 }),
+    ...coupures.flatMap((c, i) => [
+      ...(compact
+        ? [para([run(c.label, { bold: true, size: 15 }), run("  ·  Cadenas n° ", { bold: true, size: 15 }), run("………", { bold: true, size: 15, color: BLEU })], { before: i ? 50 : 0, after: 0, border: i ? { top: { style: DOCX.BorderStyle.SINGLE, size: 4, color: FILET, space: 3 } } : undefined })]
+        : [para([run(c.label, { bold: true, size: 16 })], { before: i ? 90 : 0, after: 0, border: i ? { top: { style: DOCX.BorderStyle.SINGLE, size: 4, color: FILET, space: 4 } } : undefined }),
+          para([run("Cadenas n° ", { bold: true, size: 16 }), run("………", { bold: true, size: 16, color: BLEU })], { after: 10 })]),
+      para([run(c.action, { size: compact ? 11 : 12, color: GRIS, italics: true })], { after: compact ? 0 : 10 }),
+      para([...[["sans", "Séparé sans MALT"], ["avec", "Séparé avec MALT"]].flatMap(([k, t], j) => [new DOCX.TextRun({ text: (j ? "    " : "") + (c.malt === k ? "☑ " : "☐ "), size: 16, color: c.malt === k ? BLEU : DOCX_DARK, font: "Segoe UI Symbol" }), run(t, { size: 14 })])], { after: 0 }),
     ]),
-    para([run(T.erdf, { size: 13, italics: true })], { before: 60, after: 0 }),
+    para([run(T.erdf.replace(" (ERDF)", ""), { size: 13, color: ROUGE })], { before: 80, after: 0, fond: "FBEAEC", border: { left: { style: DOCX.BorderStyle.SINGLE, size: 24, color: ROUGE, space: 6 } }, indent: { left: 100 } }),
   ];
+  const trait = (coul, t) => [run("━━ ", { size: 16, color: coul, bold: true }), run(t + "      ", { size: 15, color: GRIS })];
+  const schema = table([7200, 3500], [
+    new DOCX.TableRow({ children: [bandeau(7200, "Schéma — zones hors tension / sous tension et MALT"), bandeau(3500, "Cadenas")] }),
+    new DOCX.TableRow({ cantSplit: true, children: [
+      cell(7200, imsDocx.map((im) => para([im], { align: DOCX.AlignmentType.CENTER, after: 40 })), { v: DOCX.VerticalAlign.CENTER, m: { top: 30, bottom: 0, left: 60, right: 60 } }),
+      cell(3500, colCad, { m: { top: 80, bottom: 80, left: 120, right: 120 } }),
+    ] }),
+    new DOCX.TableRow({ children: [cell(W, [para([...trait("C8102E", "Sous tension"), ...trait("1F7A3A", "Hors tension / consigné"), ...trait(BLEU, "Mise à la terre"), run("🔒 ", { size: 14 }), run("Organe condamné", { size: 15, color: GRIS })], { after: 0 })], { span: 2, m: { top: 40, bottom: 40, left: 140, right: 140 } })] }),
+  ]);
+  // Installation comprise entre + certification
   const chaines = chainesInterverrouillage(site.equipements || []).filter((c) => c.serrures.some((x) => per.ids.has(x.eq.id)));
-  const schema = table([7600, 3100], [
-    new DOCX.TableRow({ children: [cell(7600, lab("Schéma de l'installation indiquant les zones hors tension / sous tension et les MALT")), cell(3100, lab("Cadenas"))] }),
-    new DOCX.TableRow({ cantSplit: true, children: [cell(7600, [...imsDocx.map((im) => para([im], { align: DOCX.AlignmentType.CENTER, after: 40 })), legende]), cell(3100, colCad)] }),
-    new DOCX.TableRow({ children: [cell(W, lab("Installation et/ou équipements compris entre :"), { span: 2 })] }),
-    new DOCX.TableRow({ children: [cell(W, [para([run(texteInstallationConsignation(site, per))], { after: 0 }), ...(chaines.length ? [para([run(`Clés d'interverrouillage : ${chaines.map((c) => `${c.cle} (${c.serrures.map((x) => nomEqSerrure(x.eq)).join(" → ")})`).join(" · ")}`, { size: 15, italics: true })], { before: 30, after: 0 })] : [])], { span: 2 })] }),
-    new DOCX.TableRow({ children: [cell(W, [para([run(tick(infos.certif) + T.certif, { size: 15 })]), ...T.certifItems.map((t) => para([run("• " + t, { size: 15 })], { indent: { left: 300 } })), para([run(T.certifFin, { size: 15 })], { after: 0 })], { span: 2 })] }),
+  const installation = table([W], [
+    new DOCX.TableRow({ children: [bandeau(W, "Installation et/ou équipements compris entre")] }),
+    new DOCX.TableRow({ children: [cell(W, [para([run(texteInstallationConsignation(site, per), { size: 17, bold: true })], { after: 0 }), ...(chaines.length ? [para([run(`Clés d'interverrouillage : ${chaines.map((c) => `${c.cle} (${c.serrures.map((x) => nomEqSerrure(x.eq)).join(" → ")})`).join(" · ")}`, { size: 15, italics: true, color: GRIS })], { before: 30, after: 0 })] : [])], { m: { top: 50, bottom: 50, left: 140, right: 140 } })] }),
+    new DOCX.TableRow({ children: [cell(W, [
+      coche(infos.certif, T.certif, { size: 15 }),
+      ...T.certifItems.map((t) => para([run("•  " + t, { size: 15 })], { indent: { left: 560, hanging: 200 }, after: 0 })),
+      para([run(T.certifFin, { size: 15 })], { before: 20, after: 0 }),
+    ], { m: { top: 80, bottom: 80, left: 140, right: 140 } })] }),
   ]);
-  const sig = (avecObs = true, nom = "") => [para([run("Nom : ", { u: true, size: 15 }), run(nom, { size: 15 })], { before: 40 }), ...(avecObs ? [para([run("Observations :", { u: true, size: 15 })])] : []), para([run("Date et heure :", { u: true, size: 15 })]), para([run("Signature :", { u: true, size: 15 })], { after: 90 })];
-  const q = 2675;
-  const cc = infos.chargeConsignation || "";
+  // Blocs de signature : titre bleu, texte d'engagement en gris, Nom / Le / Obs., cadre « Signature » en pointillés
+  const tiret = { style: DOCX.BorderStyle.DASHED, size: 4, color: "AEB6C0", space: 2 };
+  const ligne = (l, v = "") => para([run(l + " : ", { size: 15, color: GRIS }), run(v, { size: 15 })], { after: 10 });
+    // Zone de signature : rangée dédiée sous chaque bloc, filet pointillé en haut (pas de tableau imbriqué, compatible Pages)
+  const pointille = { style: DOCX.BorderStyle.DASHED, size: 6, color: "AEB6C0" };
+  const rangeeSig = () => new DOCX.TableRow({ cantSplit: true, children: [0, 1, 2, 3].map(() => cell(2675, [para([run("Signature", { size: 11, color: "8A939E" }), new DOCX.TextRun({ break: 1, size: 14 }), new DOCX.TextRun({ break: 1, size: 14 })], { after: 0 })], { borders: { ...cadre, top: pointille }, m: { top: 20, bottom: 30, left: 110, right: 110 } })) });
+  const bloc = (titre, texte, champs) => [para([run(titre, { bold: true, size: 17, color: BLEU })], { after: 20 }), ...(texte ? [para([run(texte, { size: 12, color: GRIS })], { after: 30 })] : []), ...champs];
+  const q = 2675, cc = infos.chargeConsignation || "";
+  const cs = { m: { top: 50, bottom: 30, left: 110, right: 110 }, borders: { ...cadre, bottom: pointille } };
   const validation = table([q, q, q, q], [
-    new DOCX.TableRow({ children: [cell(W, [para([run("VALIDATION", { bold: true })], { align: DOCX.AlignmentType.CENTER, after: 0 })], { span: 4, fond: "F4F6F9" })] }),
+    new DOCX.TableRow({ children: [bandeau(W, "Validation", { span: 4 })] }),
     new DOCX.TableRow({ cantSplit: true, children: [
-      cell(q, [para([run("Représentant de l'entreprise utilisatrice", { bold: true, u: true, size: 15 })]), ...sig()]),
-      cell(q, [para([run("Chargé de consignation", { bold: true, u: true, size: 15 })]), para([run(T.cc, { size: 13 })]), ...sig(true, cc)]),
-      cell(q, [para([run("Responsable de travaux", { bold: true, u: true, size: 15 })]), para([run(T.rt, { size: 13 })]), ...sig()]),
-      cell(q, [para([run("Changement de responsable de travaux", { bold: true, u: true, size: 15 })]), para([run(T.rt2, { size: 13 })]), ...sig()]),
+      cell(q, bloc("Représentant de l'entreprise utilisatrice", "", [ligne("Nom"), ligne("Le"), ligne("Obs.")]), cs),
+      cell(q, bloc("Chargé de consignation", T.cc, [ligne("Nom", cc), ligne("Le")]), cs),
+      cell(q, bloc("Responsable de travaux", T.rt, [ligne("Nom"), ligne("Le")]), cs),
+      cell(q, bloc("Changement de responsable de travaux", T.rt2, [ligne("Nom"), ligne("Le")]), cs),
     ] }),
-    new DOCX.TableRow({ children: [cell(W, [para([run("FIN DE TRAVAUX", { bold: true })], { align: DOCX.AlignmentType.CENTER, after: 0 })], { span: 4, fond: "F4F6F9" })] }),
+    rangeeSig(),
+    new DOCX.TableRow({ children: [bandeau(W, "Fin de travaux", { span: 4, droite: "Remise sous tension" })] }),
     new DOCX.TableRow({ cantSplit: true, children: [
-      cell(q, [para([run(T.fin, { size: 12 })]), ...sig(false)]),
-      cell(q, [para([run("Chargé de consignation", { bold: true, size: 15 })]), ...sig(true, cc)]),
-      cell(q, [para([run("Représentant EU", { bold: true, size: 15 })]), ...sig()]),
-      cell(q, [para([run("Nouveau responsable de travaux", { bold: true, size: 15 })]), ...sig()]),
+      cell(q, bloc("Responsable de travaux", T.fin.replace("Par l'apposition de sa signature, le responsable de travaux indique", "Indique"), [ligne("Nom"), ligne("Le")]), cs),
+      cell(q, bloc("Chargé de consignation", "", [ligne("Nom", cc), ligne("Le"), ligne("Obs.")]), cs),
+      cell(q, bloc("Représentant de l'entreprise utilisatrice", "", [ligne("Nom"), ligne("Le"), ligne("Obs.")]), cs),
+      cell(q, bloc("Nouveau responsable de travaux", "", [ligne("Nom"), ligne("Le"), ligne("Obs.")]), cs),
     ] }),
+    rangeeSig(),
   ]);
-  const children = [entete, para([], { after: 80 }), ident, ...eng, schema,
-    para([run(`Document établi par HT Maintenance d'après les équipements relevés${site.rapport?.date ? " le " + dateFrIso(site.rapport.date) : ""} — schéma et points de coupure à vérifier sur site avant consignation.`, { size: 13, italics: true, color: "5A6573" })], { align: DOCX.AlignmentType.CENTER, before: 40, after: 80 }),
-    validation];
-  const doc = new DOCX.Document({ styles: DOCX_STYLES, sections: [{ properties: { page: { size: { width: A4_LARGEUR, height: A4_HAUTEUR }, margin: { top: 380, bottom: 360, left: 560, right: 560 } } }, children }] });
+  const pied = para([run("HT MAINTENANCE", { bold: true, size: 14, color: BLEU, sp: 20 }), run(" · 15 route de Rauwiller, 57635 Lixheim · 06 73 66 96 36 · thomas.heitmann@orange.fr", { size: 13, color: GRIS }), run(`\t${infos.numero ? infos.numero + " · " : ""}page `, { size: 13, color: GRIS }), new DOCX.TextRun({ children: [DOCX.PageNumber.CURRENT], size: 13, color: GRIS }), run("/", { size: 13, color: GRIS }), new DOCX.TextRun({ children: [DOCX.PageNumber.TOTAL_PAGES], size: 13, color: GRIS })], { before: 0, after: 0, tabs: [{ type: DOCX.TabStopType.RIGHT, position: W }], border: { top: { style: DOCX.BorderStyle.SINGLE, size: 6, color: FILET, space: 4 } } });
+  const children = [entete, filetAmbre, ident, espace(), engagement, espace(), schema, espace(), installation, espace(), validation];
+  const doc = new DOCX.Document({ styles: DOCX_STYLES, sections: [{ properties: { page: { size: { width: A4_LARGEUR, height: A4_HAUTEUR }, margin: { top: 300, bottom: 460, left: 560, right: 560, footer: 140 } } }, footers: { default: new DOCX.Footer({ children: [pied] }) }, children }] });
   return DOCX.Packer.toBlob(doc);
 }
 async function generateAnnexePhotosDocx(site) {
