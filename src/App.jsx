@@ -7413,7 +7413,7 @@ function SignatureCanvas({ value, onSave, width = 340, height = 120 }) {
 // Ouvre la signature dans une fenêtre dédiée (au lieu d'un pavé intégré à la page qui défile) :
 // ça isole complètement le geste de signature du défilement de la page sur mobile, et laisse
 // plus de place pour signer confortablement.
-function SignatureField({ label, value, onChange }) {
+function SignatureField({ label, value, onChange, zIndex = 220 }) {
   const [open, setOpen] = useState(false);
 
   // Bloque le défilement de toute la page tant que la fenêtre de signature est ouverte :
@@ -7455,7 +7455,7 @@ function SignatureField({ label, value, onChange }) {
       )}
 
       {open && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(4,9,16,0.85)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 220, padding: 16, touchAction: "none" }} onClick={() => setOpen(false)}>
+        <div style={{ position: "fixed", inset: 0, background: "rgba(4,9,16,0.85)", display: "flex", alignItems: "center", justifyContent: "center", zIndex, padding: 16, touchAction: "none" }} onClick={() => setOpen(false)}>
           <div onClick={(e) => e.stopPropagation()} style={{ background: "#F7F8FA", border: "1px solid #D8DEE5", borderRadius: 14, padding: 20, maxWidth: 420, width: "100%", boxShadow: "0 20px 50px rgba(0,0,0,0.5)" }}>
             <div style={{ fontSize: 14, fontWeight: 700, color: "#1A1F26", marginBottom: 2 }}>{label}</div>
             <div style={{ fontSize: 12, color: "#5B6B7D", marginBottom: 14 }}>Signez avec le doigt ou la souris ci-dessous</div>
@@ -19708,30 +19708,86 @@ function ResumeSiteContacts({ site, onModifier }) {
   );
 }
 // Aperçu, avant la génération du rapport, des schémas du site (synoptique + postes HTA), avec les repères pour corriger.
-function ConsignationSite({ site, onFermer }) {
+// ===== Attestations de consignation enregistrées dans le site (site.consignations) =====
+// Une attestation se signe en deux temps (validation puis fin de travaux) : elle est donc conservée
+// dans le site, avec ses signatures (images PNG légères, quelques Ko).
+const personneAC = (nom = "") => ({ nom, obs: "", dt: "", sig: "" });
+const ROLES_VALIDATION_AC = [["eu", "Représentant de l'entreprise utilisatrice"], ["cc", "Chargé de consignation"], ["rt", "Responsable de travaux"], ["rt2", "Changement de responsable de travaux"]];
+const ROLES_FIN_AC = [["rt", "Responsable de travaux"], ["cc", "Chargé de consignation"], ["eu", "Représentant de l'entreprise utilisatrice"], ["rt2", "Nouveau responsable de travaux"]];
+function nouvelleAttestationConsignation(site) {
+  const an = new Date().getFullYear();
+  const max = (site.consignations || []).reduce((m, a) => { const r = String(a.numero || "").match(/AC-(\d{4})-(\d+)/); return r && +r[1] === an ? Math.max(m, +r[2]) : m; }, 0);
+  const cc = site.rapport?.intervenant || "";
+  return {
+    id: uid(), numero: `AC-${an}-${String(max + 1).padStart(3, "0")}`, date: new Date().toISOString().slice(0, 10), choisis: [],
+    entreprise: "", adresse: [site.nom, site.adresse].filter(Boolean).join(" — "), autorisation: "", nature: "",
+    delegue: false, schemas: false, defaut: false, certif: false, installation: "", coupures: {},
+    val: { eu: personneAC(), cc: personneAC(cc), rt: personneAC(), rt2: personneAC() },
+    fin: { rt: personneAC(), cc: personneAC(cc), eu: personneAC(), rt2: personneAC() },
+    creeLe: Date.now(),
+  };
+}
+function statutAttestationConsignation(ac) {
+  if (ac.fin?.rt?.sig && ac.fin?.cc?.sig) return { t: "Terminée", c: "#1F7A3A" };
+  if (ac.val?.cc?.sig) return { t: "Consignée", c: "#C8102E" };
+  return { t: "Brouillon", c: "#6B7280" };
+}
+function dateHeureFr(dt) {
+  const m = String(dt || "").match(/^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2}))?/);
+  return m ? `${m[3]}/${m[2]}/${m[1]}${m[4] ? ` ${m[4]}:${m[5]}` : ""}` : "";
+}
+// Signature réduite (240 × 107 px, PNG) avant enregistrement dans le site : quelques Ko au lieu d'une dizaine
+function compresserSignature(dataUrl) {
+  return new Promise((res) => {
+    if (!dataUrl) { res(""); return; }
+    const img = new window.Image();
+    img.onload = () => { try { const c = document.createElement("canvas"); c.width = 240; c.height = 107; c.getContext("2d").drawImage(img, 0, 0, 240, 107); const out = c.toDataURL("image/png"); res(out.length < dataUrl.length ? out : dataUrl); } catch (e) { res(dataUrl); } };
+    img.onerror = () => res(dataUrl);
+    img.src = dataUrl;
+  });
+}
+const maintenantLocal = () => { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 16); };
+function ConsignationSite({ site, update, onFermer }) {
   const eqs = site.equipements || [];
+  const liste = site.consignations || [];
   const candidats = eqs.filter((e) => TYPES_CELLULES_HTA.includes(e.type) || e.type === "Transformateur" || e.type === "Disjoncteur BT" || e.type === "Interrupteur BT");
-  const [choisis, setChoisis] = useState([]);
+  const [brouillon, setBrouillon] = useState(() => nouvelleAttestationConsignation(site));
+  // À l'ouverture : la dernière attestation non terminée, sinon une nouvelle
+  const [acId, setAcId] = useState(() => { const enCours = [...liste].reverse().find((a) => statutAttestationConsignation(a).t !== "Terminée"); return enCours ? enCours.id : brouillon.id; });
+  const ac = liste.find((a) => a.id === acId) || brouillon;
+  const enregistree = liste.some((a) => a.id === acId);
+  // Toute modification enregistre l'attestation dans le site (création au premier changement)
+  const modifier = (f) => {
+    const id = ac.id, base = ac;
+    update((d) => { const l = d.consignations || []; return l.some((a) => a.id === id) ? { ...d, consignations: l.map((a) => (a.id === id ? { ...f(a), modifieLe: Date.now() } : a)) } : { ...d, consignations: [...l, { ...f(base), modifieLe: Date.now() }] }; });
+    setAcId(id);
+  };
+  const setI = (k, v) => modifier((a) => ({ ...a, [k]: v }));
+  const setP = (groupe, role, k, v) => modifier((a) => ({ ...a, [groupe]: { ...a[groupe], [role]: { ...(a[groupe] || {})[role], [k]: v } } }));
+  const setCoupure = (label, k, v) => modifier((a) => ({ ...a, coupures: { ...(a.coupures || {}), [label]: { ...((a.coupures || {})[label] || {}), [k]: v } } }));
+  const verrouille = !!ac.val?.cc?.sig; // périmètre figé dès la signature du chargé de consignation
+  const choisis = ac.choisis || [];
   const per = useMemo(() => perimetreConsignation(site, choisis), [site, choisis]);
-  const [infos, setInfos] = useState(() => ({ numero: "", date: new Date().toISOString().slice(0, 10), entreprise: "", autorisation: "", nature: "", delegue: false, schemas: false, defaut: false, certif: false, chargeConsignation: site.rapport?.intervenant || "" }));
+  const nouvelle = () => { const n = nouvelleAttestationConsignation(site); setBrouillon(n); setAcId(n.id); };
+  const supprimer = (id) => { update((d) => ({ ...d, consignations: (d.consignations || []).filter((a) => a.id !== id) })); if (id === acId) nouvelle(); };
   const [gen, setGen] = useState(""); // "" | "encours" | message d'erreur
-  const setI = (k, v) => setInfos((x) => ({ ...x, [k]: v }));
-  const genererAttestation = async () => {
+  const infosWord = (a) => ({ ...a, chargeConsignation: a.val?.cc?.nom || "" });
+  const genererAttestation = async (a = ac) => {
     setGen("encours");
     try {
-      const blob = await generateAttestationConsignationDocx(site, per, infos);
-      downloadBlob(blob, `Attestation_consignation_${String(infos.numero || site.nom || "site").replace(/[^a-z0-9]+/gi, "_")}.docx`);
+      const blob = await generateAttestationConsignationDocx(site, perimetreConsignation(site, a.choisis || []), infosWord(a));
+      downloadBlob(blob, `Attestation_consignation_${String(a.numero || site.nom || "site").replace(/[^a-z0-9]+/gi, "_")}.docx`);
       setGen("");
     } catch (e) { console.error("[Attestation de consignation]", e); setGen("Génération impossible : " + (e && e.message ? e.message : "erreur inconnue")); }
   };
   const coupures = useMemo(() => pointsCoupureConsignation(site, per), [site, per]);
-  const installation = texteInstallationConsignation(site, per);
+  const installationAuto = texteInstallationConsignation(site, per);
   const groupes = useMemo(() => postesHTASite(site), [site]);
   const images = useMemo(() => groupes.map((g) => ({ g, img: genererSchemaPosteHTA(g.eqs, `Consignation — ${g.nom}`, { min: 1, eqsSite: g.eqsSite, nomPoste: g.nom, locaux: g.locaux, consignation: { ids: per.ids, posteConsigne: per.postesConsignes.has(g.k) } }) })), [groupes, per]);
   const locaux = site.locaux || [];
   const parLocal = [];
   candidats.forEach((e) => { const nom = (locaux.find((l) => l.id === e.localId) || {}).nom || "Sans local"; let x = parLocal.find((p) => p.nom === nom); if (!x) { x = { nom, eqs: [] }; parLocal.push(x); } x.eqs.push(e); });
-  const bascule = (id) => setChoisis((c) => (c.includes(id) ? c.filter((x) => x !== id) : [...c, id]));
+  const bascule = (id) => { if (!verrouille) modifier((a) => { const c = a.choisis || []; return { ...a, choisis: c.includes(id) ? c.filter((x) => x !== id) : [...c, id] }; }); };
   const chaines = chainesInterverrouillage(eqs).filter((c) => c.serrures.some((x) => per.ids.has(x.eq.id)));
   const etapes = [
     `Séparation : ${coupures.length ? coupures.map((c) => c.label.split(" — ")[0]).join(", ") : "—"}.`,
@@ -19741,66 +19797,132 @@ function ConsignationSite({ site, onFermer }) {
     "Mise à la terre et en court-circuit (MALT-CCT) : sectionneurs de terre fermés côté HTA, dispositif de MALT-CCT posé côté BT.",
   ];
   const lgn = (c, t) => <span style={{ display: "inline-flex", alignItems: "center", gap: 6, marginRight: 14 }}><span style={{ width: 22, height: 5, borderRadius: 3, background: c, opacity: 0.7 }} />{t}</span>;
+  const titre = (t, m = "14px 0 6px") => <div style={{ fontSize: 12.5, fontWeight: 700, color: "#0A5DA8", margin: m }}>{t}</div>;
+  const etiq = (t) => <div style={{ fontSize: 10.5, color: "#5B6B7D", marginBottom: 3 }}>{t}</div>;
+  const statut = statutAttestationConsignation(ac);
+  const blocSignataire = (groupe, role, libelle) => {
+    const pe = (ac[groupe] || {})[role] || personneAC();
+    return (
+      <div key={groupe + role} style={{ border: "1px solid #E2E6EB", borderRadius: 8, padding: 10, background: pe.sig ? "#F3F8F4" : "#fff" }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: "#0A5DA8", marginBottom: 6 }}>{libelle}</div>
+        {etiq("Nom")}<input value={pe.nom || ""} onChange={(e) => setP(groupe, role, "nom", e.target.value)} style={inputStyle} />
+        <div style={{ marginTop: 6, display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>{etiq("Date et heure")}<button onClick={() => setP(groupe, role, "dt", maintenantLocal())} style={{ background: "none", border: "none", color: BRAND.blue, fontSize: 11, fontWeight: 600, cursor: "pointer", padding: 0, display: "inline-flex", alignItems: "center", gap: 3 }} title="Date et heure actuelles"><Clock size={11} /> Maintenant</button></div>
+        <input type="datetime-local" value={pe.dt || ""} onChange={(e) => setP(groupe, role, "dt", e.target.value)} style={{ ...inputStyle, width: "100%", boxSizing: "border-box" }} />
+        <div style={{ marginTop: 6 }}>{etiq("Observations")}</div>
+        <input value={pe.obs || ""} onChange={(e) => setP(groupe, role, "obs", e.target.value)} style={inputStyle} />
+        <div style={{ marginTop: 8 }}>
+          <SignatureField label="Signature" value={pe.sig || ""} zIndex={1200} onChange={async (v0) => { const v = await compresserSignature(v0); modifier((a) => ({ ...a, [groupe]: { ...a[groupe], [role]: { ...(a[groupe] || {})[role], sig: v || "", dt: v && !((a[groupe] || {})[role] || {}).dt ? maintenantLocal() : ((a[groupe] || {})[role] || {}).dt || "" } } })); }} />
+        </div>
+      </div>
+    );
+  };
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(10,15,25,0.62)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 10 }}>
       <div style={{ background: "#fff", borderRadius: 12, width: "min(1100px, 100%)", maxHeight: "96vh", display: "flex", flexDirection: "column", boxShadow: "0 20px 60px rgba(0,0,0,0.35)" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", borderBottom: "1px solid #E2E6EB" }}>
           <div>
             <div style={{ fontWeight: 700, color: "#1A1F26", fontSize: 14 }}>Consignation — {site.nom || "site"}</div>
-            <div style={{ fontSize: 11.5, color: "#5B6B7D" }}>Choisissez les équipements à consigner : le périmètre, le schéma et les points de coupure se mettent à jour.</div>
+            <div style={{ fontSize: 11.5, color: "#5B6B7D" }}>Choisissez les équipements à consigner, complétez l'attestation et faites signer : tout est enregistré dans le site.</div>
           </div>
           <button onClick={onFermer} style={{ background: "none", border: "none", cursor: "pointer", color: "#5B6B7D", display: "flex" }} title="Fermer"><X size={18} /></button>
         </div>
-        <div style={{ overflow: "auto", padding: 16, display: "flex", gap: 16, flexWrap: "wrap" }}>
-          <div style={{ flex: "1 1 250px", maxWidth: 320 }}>
-            <div style={{ fontSize: 12.5, fontWeight: 700, color: "#0A5DA8", marginBottom: 6 }}>Équipements</div>
-            {parLocal.map((p) => (
-              <div key={p.nom} style={{ marginBottom: 10 }}>
-                <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: 0.6, color: "#5B6B7D", textTransform: "uppercase", marginBottom: 4 }}>{p.nom}</div>
-                {p.eqs.map((e) => {
-                  const auto = per.ajouts.get(e.id), coche = choisis.includes(e.id);
-                  return (
-                    <label key={e.id} style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "5px 6px", borderRadius: 6, background: coche ? "#E8F4EC" : auto ? "#F3F8F4" : "transparent", fontSize: 12.5, cursor: "pointer" }}>
-                      <input type="checkbox" checked={coche || !!auto} disabled={!!auto && !coche} onChange={() => bascule(e.id)} style={{ marginTop: 2 }} />
-                      <span><b>{nomEqSerrure(e)}</b> <span style={{ color: "#5B6B7D" }}>· {e.type.replace(" HTA", "")}{TYPES_CELLULES_HTA.includes(e.type) && topologieCellule(e).code ? " " + topologieCellule(e).code : ""}</span>
-                        {auto && <div style={{ fontSize: 11, color: "#1F7A3A", fontStyle: "italic" }}>ajouté : {auto}</div>}</span>
-                    </label>
-                  );
-                })}
-              </div>
+        <div style={{ overflow: "auto", padding: 16 }}>
+          {/* Attestations du site */}
+          <div style={{ border: "1px solid #E2E6EB", borderRadius: 8, padding: "8px 10px", marginBottom: 14, background: "#F7F9FB" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+              <div style={{ fontSize: 12.5, fontWeight: 700, color: "#1A1F26" }}>Attestations du site ({liste.length})</div>
+              <button onClick={nouvelle} style={{ ...btnGhost(BRAND.blue), fontSize: 11.5, padding: "5px 10px" }}><Plus size={13} /> Nouvelle attestation</button>
+            </div>
+            {liste.length > 0 && <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 6 }}>
+              {[...liste].reverse().map((a) => { const st = statutAttestationConsignation(a), actif = a.id === acId; return (
+                <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", padding: "5px 8px", borderRadius: 6, background: actif ? "#E6F0FA" : "#fff", border: `1px solid ${actif ? "#9CC3E8" : "#E2E6EB"}`, fontSize: 12 }}>
+                  <b style={{ minWidth: 100 }}>{a.numero || "—"}</b>
+                  <span style={{ color: "#5B6B7D" }}>{a.date ? dateFrIso(a.date) : ""}</span>
+                  <span style={{ flex: 1, minWidth: 120, color: "#3E4A5C", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.nature || "(nature des travaux à préciser)"}</span>
+                  <span style={{ fontSize: 10.5, fontWeight: 700, color: "#fff", background: st.c, borderRadius: 10, padding: "2px 8px" }}>{st.t}</span>
+                  {!actif && <button onClick={() => setAcId(a.id)} style={{ ...btnGhost(BRAND.blue), fontSize: 11, padding: "3px 8px" }}><PenLine size={12} /> Ouvrir</button>}
+                  <button onClick={() => genererAttestation(a)} disabled={gen === "encours"} style={{ ...btnGhost(BRAND.blue), fontSize: 11, padding: "3px 8px" }}><FileText size={12} /> Word</button>
+                  <InlineConfirmButton icon={Trash2} label="" onConfirm={() => supprimer(a.id)} />
+                </div>
+              ); })}
+            </div>}
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+            <div style={{ fontSize: 13.5, fontWeight: 700, color: "#1A1F26" }}>Attestation {ac.numero || ""}</div>
+            <span style={{ fontSize: 10.5, fontWeight: 700, color: "#fff", background: statut.c, borderRadius: 10, padding: "2px 8px" }}>{statut.t}</span>
+            {!enregistree && <span style={{ fontSize: 11, color: "#8B96A3" }}>nouvelle — enregistrée dès la première saisie</span>}
+          </div>
+          <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+            <div style={{ flex: "1 1 250px", maxWidth: 320 }}>
+              {titre("Équipements", "0 0 6px")}
+              {verrouille && <div style={{ fontSize: 11, color: "#C8102E", marginBottom: 6 }}>Périmètre figé : le chargé de consignation a signé la validation.</div>}
+              {parLocal.map((p) => (
+                <div key={p.nom} style={{ marginBottom: 10 }}>
+                  <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: 0.6, color: "#5B6B7D", textTransform: "uppercase", marginBottom: 4 }}>{p.nom}</div>
+                  {p.eqs.map((e) => {
+                    const auto = per.ajouts.get(e.id), coche = choisis.includes(e.id);
+                    return (
+                      <label key={e.id} style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "5px 6px", borderRadius: 6, background: coche ? "#E8F4EC" : auto ? "#F3F8F4" : "transparent", fontSize: 12.5, cursor: verrouille ? "default" : "pointer" }}>
+                        <input type="checkbox" checked={coche || !!auto} disabled={verrouille || (!!auto && !coche)} onChange={() => bascule(e.id)} style={{ marginTop: 2 }} />
+                        <span><b>{nomEqSerrure(e)}</b> <span style={{ color: "#5B6B7D" }}>· {e.type.replace(" HTA", "")}{TYPES_CELLULES_HTA.includes(e.type) && topologieCellule(e).code ? " " + topologieCellule(e).code : ""}</span>
+                          {auto && <div style={{ fontSize: 11, color: "#1F7A3A", fontStyle: "italic" }}>ajouté : {auto}</div>}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              ))}
+            </div>
+            <div style={{ flex: "3 1 520px", minWidth: 0 }}>
+              <div style={{ fontSize: 11.5, color: "#3E4A5C", marginBottom: 6 }}>{lgn(COUL_CONSIGNATION.on, "sous tension")}{lgn(COUL_CONSIGNATION.off, "hors tension / consigné")}{lgn(COUL_CONSIGNATION.terre, "mise à la terre")}<span>🔒 condamné</span></div>
+              {images.map(({ g, img }) => img && <div key={g.k} style={{ border: "1px solid #E2E6EB", borderRadius: 8, overflowX: "auto", marginBottom: 10 }}><img src={img.dataUrl} alt={g.nom} style={{ display: "block", width: "100%", minWidth: 480 }} /></div>)}
+              {!per.ids.size ? <div style={{ fontSize: 12.5, color: "#8B96A3" }}>Aucun équipement choisi.</div> : (<>
+                {titre("Points de coupure (séparation et condamnation)", "8px 0 4px")}
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {coupures.map((c) => { const x = (ac.coupures || {})[c.label] || {}; const malt = x.malt || c.malt; return (
+                    <div key={c.label} style={{ border: "1px solid #EEF1F5", borderRadius: 8, padding: "6px 8px" }}>
+                      <div style={{ fontSize: 12, fontWeight: 600 }}>{c.label}</div>
+                      <div style={{ fontSize: 11.5, color: "#3E4A5C", marginBottom: 4 }}>{c.action}</div>
+                      <div style={{ display: "grid", gridTemplateColumns: "110px 170px 1fr", gap: 6, alignItems: "end" }}>
+                        <div>{etiq("Cadenas n°")}<input value={x.cadenas || ""} onChange={(e) => setCoupure(c.label, "cadenas", e.target.value)} style={inputStyle} placeholder="ex. H-07" /></div>
+                        <div>{etiq("Séparation")}<select value={malt} onChange={(e) => setCoupure(c.label, "malt", e.target.value)} style={inputStyle}><option value="sans">Séparé sans MALT</option><option value="avec">Séparé avec MALT</option></select></div>
+                        <div>{etiq("Observation")}<input value={x.obs || ""} onChange={(e) => setCoupure(c.label, "obs", e.target.value)} style={inputStyle} /></div>
+                      </div>
+                    </div>
+                  ); })}
+                </div>
+                {titre("Installation et/ou équipements compris entre", "10px 0 4px")}
+                <textarea value={ac.installation || installationAuto} onChange={(e) => setI("installation", e.target.value === installationAuto ? "" : e.target.value)} rows={3} style={{ ...inputStyle, width: "100%", resize: "vertical", fontFamily: "inherit" }} />
+                {ac.installation && <button onClick={() => setI("installation", "")} style={{ ...btnGhost(), fontSize: 11, padding: "3px 8px", marginTop: 4 }}><RotateCcw size={12} /> Texte automatique</button>}
+                {chaines.length > 0 && <div style={{ fontSize: 12, marginTop: 8 }}><b>Clés d'interverrouillage concernées :</b> {chaines.map((c) => `${c.cle} (${c.serrures.map((x) => nomEqSerrure(x.eq)).join(" → ")})`).join(" · ")}</div>}
+                {titre("Étapes de la consignation (NF C 18-510)", "10px 0 4px")}
+                <ol style={{ margin: 0, paddingLeft: 18, fontSize: 12, lineHeight: 1.55 }}>{etapes.map((t, i) => <li key={i}>{t}</li>)}</ol>
+                {per.postesConsignes.size === 0 && <div style={{ fontSize: 11.5, color: "#C8102E", marginTop: 6 }}>Jeu de barres HTA et câbles des cellules d'arrivée : restent sous tension.</div>}
+                {per.postesConsignes.size > 0 && <div style={{ fontSize: 11.5, color: "#C8102E", marginTop: 6 }}>Séparation de réseau Enedis : interdiction de travailler sur le compartiment câbles des cellules d'arrivée.</div>}
+              </>)}
+            </div>
+          </div>
+          {titre("Identification")}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 8 }}>
+            {[["numero", "Numéro d'attestation"], ["date", "Date", "date"], ["entreprise", "Entreprise chargée des travaux"], ["autorisation", "Autorisation de travail attachée"]].map(([k, l, t]) => (
+              <div key={k}>{etiq(l)}<input type={t || "text"} value={ac[k] || ""} onChange={(e) => setI(k, e.target.value)} style={inputStyle} /></div>
+            ))}
+            <div style={{ gridColumn: "1 / -1" }}>{etiq("Adresse du chantier")}<input value={ac.adresse || ""} onChange={(e) => setI("adresse", e.target.value)} style={inputStyle} /></div>
+            <div style={{ gridColumn: "1 / -1" }}>{etiq("Nature des travaux")}<input value={ac.nature || ""} onChange={(e) => setI("nature", e.target.value)} style={inputStyle} /></div>
+          </div>
+          {titre("Engagement et certification")}
+          <div style={{ display: "flex", flexDirection: "column", gap: 5, fontSize: 12 }}>
+            {[["delegue", "Le représentant de l'entreprise utilisatrice demande au chargé de consignation d'assurer la fonction de chargé d'exploitation délégué (manœuvres de consignation)"], ["schemas", "Schémas ou plans de l'installation non fournis"], ["defaut", "Attestation réalisée par défaut de chargé de consignation"], ["certif", "Certification du chef d'établissement (données techniques communiquées, pas d'autre entreprise, accès non délégués)"]].map(([k, l]) => (
+              <label key={k} style={{ display: "flex", gap: 6, alignItems: "flex-start", cursor: "pointer" }}><input type="checkbox" checked={!!ac[k]} onChange={(e) => setI(k, e.target.checked)} style={{ marginTop: 2 }} />{l}</label>
             ))}
           </div>
-          <div style={{ flex: "3 1 520px", minWidth: 0 }}>
-            <div style={{ fontSize: 11.5, color: "#3E4A5C", marginBottom: 6 }}>{lgn(COUL_CONSIGNATION.on, "sous tension")}{lgn(COUL_CONSIGNATION.off, "hors tension / consigné")}{lgn(COUL_CONSIGNATION.terre, "mise à la terre")}<span>🔒 condamné</span></div>
-            {images.map(({ g, img }) => img && <div key={g.k} style={{ border: "1px solid #E2E6EB", borderRadius: 8, overflowX: "auto", marginBottom: 10 }}><img src={img.dataUrl} alt={g.nom} style={{ display: "block", width: "100%", minWidth: 480 }} /></div>)}
-            {!per.ids.size ? <div style={{ fontSize: 12.5, color: "#8B96A3" }}>Aucun équipement choisi.</div> : (<>
-              <div style={{ fontSize: 12.5, fontWeight: 700, color: "#0A5DA8", margin: "8px 0 4px" }}>Points de coupure (séparation et condamnation)</div>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}><tbody>
-                {coupures.map((c, i) => <tr key={i} style={{ borderBottom: "1px solid #EEF1F5" }}><td style={{ padding: "5px 6px", fontWeight: 600 }}>{c.label}</td><td style={{ padding: "5px 6px", color: "#3E4A5C" }}>{c.action}</td><td style={{ padding: "5px 6px", whiteSpace: "nowrap", color: c.malt === "avec" ? COUL_CONSIGNATION.terre : "#5B6B7D", fontWeight: 600 }}>{c.malt === "avec" ? "séparé avec MALT" : "séparé sans MALT"}</td></tr>)}
-              </tbody></table>
-              {installation && <div style={{ fontSize: 12, color: "#1A1F26", marginTop: 8, padding: "8px 10px", background: "#F4F6F9", borderRadius: 8 }}>{installation}</div>}
-              {chaines.length > 0 && <div style={{ fontSize: 12, marginTop: 8 }}><b>Clés d'interverrouillage concernées :</b> {chaines.map((c) => `${c.cle} (${c.serrures.map((x) => nomEqSerrure(x.eq)).join(" → ")})`).join(" · ")}</div>}
-              <div style={{ fontSize: 12.5, fontWeight: 700, color: "#0A5DA8", margin: "10px 0 4px" }}>Étapes de la consignation (NF C 18-510)</div>
-              <ol style={{ margin: 0, paddingLeft: 18, fontSize: 12, lineHeight: 1.55 }}>{etapes.map((t, i) => <li key={i}>{t}</li>)}</ol>
-              {per.postesConsignes.size === 0 && <div style={{ fontSize: 11.5, color: "#C8102E", marginTop: 6 }}>Jeu de barres HTA et câbles des cellules d'arrivée : restent sous tension.</div>}
-              {per.postesConsignes.size > 0 && <div style={{ fontSize: 11.5, color: "#C8102E", marginTop: 6 }}>Séparation de réseau Enedis : interdiction de travailler sur le compartiment câbles des cellules d'arrivée.</div>}
-              <div style={{ fontSize: 12.5, fontWeight: 700, color: "#0A5DA8", margin: "14px 0 6px" }}>Attestation de consignation (Word)</div>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 8 }}>
-                {[["numero", "Numéro d'attestation"], ["date", "Date", "date"], ["entreprise", "Entreprise chargée des travaux"], ["autorisation", "Autorisation de travail attachée"], ["chargeConsignation", "Chargé de consignation"]].map(([k, l, t]) => (
-                  <div key={k}><div style={{ fontSize: 10.5, color: "#5B6B7D", marginBottom: 3 }}>{l}</div><input type={t || "text"} value={infos[k]} onChange={(e) => setI(k, e.target.value)} style={inputStyle} /></div>
-                ))}
-                <div style={{ gridColumn: "1 / -1" }}><div style={{ fontSize: 10.5, color: "#5B6B7D", marginBottom: 3 }}>Nature des travaux</div><input value={infos.nature} onChange={(e) => setI("nature", e.target.value)} style={inputStyle} /></div>
-              </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 8, fontSize: 12 }}>
-                {[["delegue", "Chargé d'exploitation délégué (manœuvres de consignation)"], ["schemas", "Schémas ou plans de l'installation non fournis"], ["defaut", "Attestation réalisée par défaut de chargé de consignation"], ["certif", "Certification du chef d'établissement (données techniques, entreprises, accès)"]].map(([k, l]) => (
-                  <label key={k} style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer" }}><input type="checkbox" checked={!!infos[k]} onChange={(e) => setI(k, e.target.checked)} />{l}</label>
-                ))}
-              </div>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginTop: 12 }}>
-                <button onClick={genererAttestation} disabled={gen === "encours"} style={btnPrimary()}><FileText size={14} /> {gen === "encours" ? "Génération…" : "Attestation de consignation (Word)"}</button>
-                {gen && gen !== "encours" && <span style={{ fontSize: 12, color: "#C8102E" }}>{gen}</span>}
-              </div>
-            </>)}
+          {titre("Validation — signatures")}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 8 }}>{ROLES_VALIDATION_AC.map(([r, l]) => blocSignataire("val", r, l))}</div>
+          {titre("Fin de travaux — remise sous tension")}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 8 }}>{ROLES_FIN_AC.map(([r, l]) => blocSignataire("fin", r, l))}</div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginTop: 14, paddingTop: 12, borderTop: "1px solid #E2E6EB" }}>
+            <button onClick={() => genererAttestation()} disabled={gen === "encours" || !per.ids.size} style={btnPrimary()}><FileText size={14} /> {gen === "encours" ? "Génération…" : "Attestation de consignation (Word)"}</button>
+            {!per.ids.size && <span style={{ fontSize: 11.5, color: "#8B96A3" }}>Choisissez au moins un équipement.</span>}
+            {gen && gen !== "encours" && <span style={{ fontSize: 12, color: "#C8102E" }}>{gen}</span>}
           </div>
         </div>
       </div>
@@ -20092,7 +20214,7 @@ function SiteDetail({ site, allSites, update, onBack, onDelete, onPrint, onPrint
             <div style={{ flex: "1 1 auto" }} />
             <button onClick={() => setApercuSchemas(true)} style={btnGhost(BRAND.blue)} title="Voir le synoptique et les schémas des postes HTA avant de générer le rapport">Aperçu des schémas</button>
             <button onClick={() => setConsignationOuverte(true)} style={btnGhost(BRAND.blue)} title="Choisir les équipements à consigner : schéma, points de coupure, attestation">Consignation</button>
-            {consignationOuverte && <ConsignationSite site={site} onFermer={() => setConsignationOuverte(false)} />}
+            {consignationOuverte && <ConsignationSite site={site} update={update} onFermer={() => setConsignationOuverte(false)} />}
             <button onClick={() => onPrint(site)} style={btnPrimary()}>
               <FileText size={14} /> Générer le rapport
             </button>
@@ -27380,7 +27502,7 @@ async function generateAttestationConsignationDocx(site, per, infos = {}) {
   const lab = (t) => [para([run(t, { bold: true, size: 17 })], { after: 0 })], val = (t) => [para([run(t, { size: 17 })], { after: 0 })];
   const ident = table([2900, 2500, 2900, 2400], [
     new DOCX.TableRow({ children: [cell(2900, lab("Entreprise chargée des travaux"), { fond: FOND_LAB }), cell(2500, val(infos.entreprise || "")), cell(2900, lab("Autorisation de travail attachée"), { fond: FOND_LAB }), cell(2400, val(infos.autorisation || ""))] }),
-    new DOCX.TableRow({ children: [cell(2900, lab("Adresse du chantier"), { fond: FOND_LAB }), cell(7800, val([site.nom, site.adresse].filter(Boolean).join(" — ")), { span: 3 })] }),
+    new DOCX.TableRow({ children: [cell(2900, lab("Adresse du chantier"), { fond: FOND_LAB }), cell(7800, val(infos.adresse || [site.nom, site.adresse].filter(Boolean).join(" — ")), { span: 3 })] }),
     new DOCX.TableRow({ children: [cell(2900, lab("Nature des travaux"), { fond: FOND_LAB }), cell(7800, val(infos.nature || ""), { span: 3 })] }),
   ]);
   const espace = () => new DOCX.Paragraph({ spacing: { before: 0, after: 0, line: 80, lineRule: DOCX.LineRuleType.EXACT }, children: [] });
@@ -27397,16 +27519,18 @@ async function generateAttestationConsignationDocx(site, per, infos = {}) {
   // Schéma(s) de consignation et cadenas
   const imgs = postesHTASite(site).map((g) => genererSchemaPosteHTA(g.eqs, `Consignation — ${g.nom}`, { min: 1, eqsSite: g.eqsSite, nomPoste: g.nom, locaux: g.locaux, consignation: { ids: per.ids, posteConsigne: per.postesConsignes.has(g.k) } })).filter(Boolean);
   const imsDocx = imgs.map((im) => { const d = dimensionsPng(im.dataUrl); const w = 365; return docxImage(im.dataUrl, w, d && d.w ? Math.round((w * d.h) / d.w) : 300); }).filter(Boolean);
-  const coupures = pointsCoupureConsignation(site, per);
+  // Points de coupure : n° de cadenas, MALT et observation saisis dans l'attestation (sinon valeurs déduites du schéma)
+  const coupures = pointsCoupureConsignation(site, per).map((c) => { const x = (infos.coupures || {})[c.label] || {}; return { ...c, cadenas: x.cadenas || "", malt: x.malt || c.malt, obs: x.obs || "" }; });
   const compact = false; // mise en page identique quel que soit le nombre de points de coupure (2e page si nécessaire)
   const colCad = [
     ...coupures.flatMap((c, i) => [
       ...(compact
-        ? [para([run(c.label, { bold: true, size: 15 }), run("  ·  Cadenas n° ", { bold: true, size: 15 }), run("………", { bold: true, size: 15, color: BLEU })], { before: i ? 50 : 0, after: 0, border: i ? { top: { style: DOCX.BorderStyle.SINGLE, size: 4, color: FILET, space: 3 } } : undefined })]
+        ? [para([run(c.label, { bold: true, size: 15 }), run("  ·  Cadenas n° ", { bold: true, size: 15 }), run(c.cadenas || "………", { bold: true, size: 15, color: BLEU })], { before: i ? 50 : 0, after: 0, border: i ? { top: { style: DOCX.BorderStyle.SINGLE, size: 4, color: FILET, space: 3 } } : undefined })]
         : [para([run(c.label, { bold: true, size: 16 })], { before: i ? 90 : 0, after: 0, border: i ? { top: { style: DOCX.BorderStyle.SINGLE, size: 4, color: FILET, space: 4 } } : undefined }),
-          para([run("Cadenas n° ", { bold: true, size: 16 }), run("………", { bold: true, size: 16, color: BLEU })], { after: 10 })]),
+          para([run("Cadenas n° ", { bold: true, size: 16 }), run(c.cadenas || "………", { bold: true, size: 16, color: BLEU })], { after: 10 })]),
       para([run(c.action, { size: compact ? 11 : 12, color: GRIS, italics: true })], { after: compact ? 0 : 10 }),
       para([...[["sans", "Séparé sans MALT"], ["avec", "Séparé avec MALT"]].flatMap(([k, t], j) => [new DOCX.TextRun({ text: (j ? "    " : "") + (c.malt === k ? "☑ " : "☐ "), size: 16, color: c.malt === k ? BLEU : DOCX_DARK, font: "Segoe UI Symbol" }), run(t, { size: 14 })])], { after: 0 }),
+      ...(c.obs ? [para([run("Obs. : " + c.obs, { size: 13, italics: true })], { before: 10, after: 0 })] : []),
     ]),
     para([run(T.erdf.replace(" (ERDF)", ""), { size: 13, color: ROUGE })], { before: 80, after: 0, fond: "FBEAEC", border: { left: { style: DOCX.BorderStyle.SINGLE, size: 24, color: ROUGE, space: 6 } }, indent: { left: 100 } }),
   ];
@@ -27423,7 +27547,7 @@ async function generateAttestationConsignationDocx(site, per, infos = {}) {
   const chaines = chainesInterverrouillage(site.equipements || []).filter((c) => c.serrures.some((x) => per.ids.has(x.eq.id)));
   const installation = table([W], [
     new DOCX.TableRow({ children: [bandeau(W, "Installation et/ou équipements compris entre")] }),
-    new DOCX.TableRow({ children: [cell(W, [para([run(texteInstallationConsignation(site, per), { size: 17, bold: true })], { after: 0 }), ...(chaines.length ? [para([run(`Clés d'interverrouillage : ${chaines.map((c) => `${c.cle} (${c.serrures.map((x) => nomEqSerrure(x.eq)).join(" → ")})`).join(" · ")}`, { size: 15, italics: true, color: GRIS })], { before: 30, after: 0 })] : [])], { m: { top: 50, bottom: 50, left: 140, right: 140 } })] }),
+    new DOCX.TableRow({ children: [cell(W, [para([run(infos.installation || texteInstallationConsignation(site, per), { size: 17, bold: true })], { after: 0 }), ...(chaines.length ? [para([run(`Clés d'interverrouillage : ${chaines.map((c) => `${c.cle} (${c.serrures.map((x) => nomEqSerrure(x.eq)).join(" → ")})`).join(" · ")}`, { size: 15, italics: true, color: GRIS })], { before: 30, after: 0 })] : [])], { m: { top: 50, bottom: 50, left: 140, right: 140 } })] }),
     new DOCX.TableRow({ children: [cell(W, [
       coche(infos.certif, T.certif, { size: 15 }),
       ...T.certifItems.map((t) => para([run("•  " + t, { size: 15 })], { indent: { left: 560, hanging: 200 }, after: 0 })),
@@ -27435,27 +27559,31 @@ async function generateAttestationConsignationDocx(site, per, infos = {}) {
   const ligne = (l, v = "") => para([run(l + " : ", { size: 15, color: GRIS }), run(v, { size: 15 })], { after: 10 });
     // Zone de signature : rangée dédiée sous chaque bloc, filet pointillé en haut (pas de tableau imbriqué, compatible Pages)
   const pointille = { style: DOCX.BorderStyle.DASHED, size: 6, color: "AEB6C0" };
-  const rangeeSig = () => new DOCX.TableRow({ cantSplit: true, children: [0, 1, 2, 3].map(() => cell(2675, [para([run("Signature", { size: 11, color: "8A939E" }), new DOCX.TextRun({ break: 1, size: 14 }), new DOCX.TextRun({ break: 1, size: 14 })], { after: 0 })], { borders: { ...cadre, top: pointille }, m: { top: 20, bottom: 30, left: 110, right: 110 } })) });
+  const imgSig = (p) => (p && p.sig ? docxImage(p.sig, 99, 44) : null);
+  const rangeeSig = (personnes) => new DOCX.TableRow({ cantSplit: true, children: personnes.map((pe) => { const im = imgSig(pe); return cell(2675, [para([run("Signature", { size: 11, color: "8A939E" }), ...(im ? [] : [new DOCX.TextRun({ break: 1, size: 14 }), new DOCX.TextRun({ break: 1, size: 14 })])], { after: 0 }), ...(im ? [para([im], { align: DOCX.AlignmentType.CENTER, after: 0 })] : [])], { borders: { ...cadre, top: pointille }, m: { top: 20, bottom: 30, left: 110, right: 110 } }); }) });
   const bloc = (titre, texte, champs) => [para([run(titre, { bold: true, size: 17, color: BLEU })], { after: 20 }), ...(texte ? [para([run(texte, { size: 12, color: GRIS })], { after: 30 })] : []), ...champs];
-  const q = 2675, cc = infos.chargeConsignation || "";
+  const q = 2675, V = infos.val || {}, F = infos.fin || {};
+  const ccNom = infos.chargeConsignation || "";
+  // Nom / Le / Obs. d'un signataire (« Obs. » toujours présent là où la maquette le prévoit, sinon seulement s'il est renseigné)
+  const champs = (pe = {}, obsToujours = false, nomDefaut = "") => [ligne("Nom", pe.nom || nomDefaut), ligne("Le", dateHeureFr(pe.dt)), ...(obsToujours || pe.obs ? [ligne("Obs.", pe.obs || "")] : [])];
   const cs = { m: { top: 50, bottom: 30, left: 110, right: 110 }, borders: { ...cadre, bottom: pointille } };
   const validation = table([q, q, q, q], [
     new DOCX.TableRow({ children: [bandeau(W, "Validation", { span: 4 })] }),
     new DOCX.TableRow({ cantSplit: true, children: [
-      cell(q, bloc("Représentant de l'entreprise utilisatrice", "", [ligne("Nom"), ligne("Le"), ligne("Obs.")]), cs),
-      cell(q, bloc("Chargé de consignation", T.cc, [ligne("Nom", cc), ligne("Le")]), cs),
-      cell(q, bloc("Responsable de travaux", T.rt, [ligne("Nom"), ligne("Le")]), cs),
-      cell(q, bloc("Changement de responsable de travaux", T.rt2, [ligne("Nom"), ligne("Le")]), cs),
+      cell(q, bloc("Représentant de l'entreprise utilisatrice", "", champs(V.eu, true)), cs),
+      cell(q, bloc("Chargé de consignation", T.cc, champs(V.cc, false, ccNom)), cs),
+      cell(q, bloc("Responsable de travaux", T.rt, champs(V.rt)), cs),
+      cell(q, bloc("Changement de responsable de travaux", T.rt2, champs(V.rt2)), cs),
     ] }),
-    rangeeSig(),
+    rangeeSig([V.eu, V.cc, V.rt, V.rt2]),
     new DOCX.TableRow({ children: [bandeau(W, "Fin de travaux", { span: 4, droite: "Remise sous tension" })] }),
     new DOCX.TableRow({ cantSplit: true, children: [
-      cell(q, bloc("Responsable de travaux", T.fin.replace("Par l'apposition de sa signature, le responsable de travaux indique", "Indique"), [ligne("Nom"), ligne("Le")]), cs),
-      cell(q, bloc("Chargé de consignation", "", [ligne("Nom", cc), ligne("Le"), ligne("Obs.")]), cs),
-      cell(q, bloc("Représentant de l'entreprise utilisatrice", "", [ligne("Nom"), ligne("Le"), ligne("Obs.")]), cs),
-      cell(q, bloc("Nouveau responsable de travaux", "", [ligne("Nom"), ligne("Le"), ligne("Obs.")]), cs),
+      cell(q, bloc("Responsable de travaux", T.fin.replace("Par l'apposition de sa signature, le responsable de travaux indique", "Indique"), champs(F.rt)), cs),
+      cell(q, bloc("Chargé de consignation", "", champs(F.cc, true, ccNom)), cs),
+      cell(q, bloc("Représentant de l'entreprise utilisatrice", "", champs(F.eu, true)), cs),
+      cell(q, bloc("Nouveau responsable de travaux", "", champs(F.rt2, true)), cs),
     ] }),
-    rangeeSig(),
+    rangeeSig([F.rt, F.cc, F.eu, F.rt2]),
   ]);
   const pied = para([run("HT MAINTENANCE", { bold: true, size: 14, color: BLEU, sp: 20 }), run(" · 15 route de Rauwiller, 57635 Lixheim · 06 73 66 96 36 · thomas.heitmann@orange.fr", { size: 13, color: GRIS }), run(`\t${infos.numero ? infos.numero + " · " : ""}page `, { size: 13, color: GRIS }), new DOCX.TextRun({ children: [DOCX.PageNumber.CURRENT], size: 13, color: GRIS }), run("/", { size: 13, color: GRIS }), new DOCX.TextRun({ children: [DOCX.PageNumber.TOTAL_PAGES], size: 13, color: GRIS })], { before: 0, after: 0, tabs: [{ type: DOCX.TabStopType.RIGHT, position: W }], border: { top: { style: DOCX.BorderStyle.SINGLE, size: 6, color: FILET, space: 4 } } });
   const children = [entete, filetAmbre, ident, espace(), engagement, espace(), schema, espace(), installation, espace(), validation];
