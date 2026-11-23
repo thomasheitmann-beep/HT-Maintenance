@@ -2056,6 +2056,19 @@ function ajouterDepartCellule(eq, schema) {
 // Les serrures de même repère, sur tout le site, forment une chaîne (clé libérée ici → utilisée là).
 const TYPES_SERRURES = ["Interrupteur HTA", "Interrupteur Fusible HTA", "Disjoncteur HTA", "Contacteur HTA", "Comptage HTA", "Disjoncteur BT", "Interrupteur BT", "Transformateur"]; // (liste écrite en clair : déclarée avant TYPES_CELLULES_HTA)
 const LISTE_ETAT_CLE = ["Prisonnière", "Libre", "Absente"];
+// Contrôle de la serrure et de la clé : chaque état non conforme crée un constat et sa préconisation (remarques de l'équipement).
+// rang 2 = anomalie de sécurité (interverrouillage inopérant), rang 1 = anomalie à traiter / surveiller.
+const LISTE_CONTROLE_SERRURE = [
+  { v: "Conforme" },
+  { v: "Clé absente / égarée", cat: "serrure_cle_absente", rang: 1 },
+  { v: "Clé cassée / endommagée — à remplacer", cat: "serrure_cle_cassee", rang: 2 },
+  { v: "Serrure grippée / manœuvre dure", cat: "serrure_grippee", rang: 1 },
+  { v: "Serrure cassée / hors service — à remplacer", cat: "serrure_hs", rang: 2 },
+  { v: "Repère ou n° illisible", cat: "serrure_marquage", rang: 1 },
+  { v: "Serrure démontée / non montée", cat: "serrure_demontee", rang: 2 },
+  { v: "Non vérifié" },
+];
+const LISTE_LIAISON_CLES = ["Anneau soudé", "Porte-clés indémontable", "Câble serti", "Autre liaison non ouvrable"];
 function organesSerrure(type) {
   if (type === "Transformateur") return ["Bornes embrochables", "Guillotine (transformateur huile)", "Plastron (transformateur sec)", "Porte / grille d'accès"];
   if (type === "Disjoncteur BT") return ["Débrochage / ouverture du disjoncteur", "Porte / grille d'accès"];
@@ -2064,20 +2077,51 @@ function organesSerrure(type) {
 }
 const cleSerrure = (r) => String(r || "").trim().toUpperCase().replace(/\s+/g, "");
 const RANG_CHAINE_SERRURE = { "Disjoncteur BT": 0, "Interrupteur BT": 0, Transformateur: 2 };
-function chainesInterverrouillage(eqs) {
-  const parCle = new Map();
+// Clés de repères différents liées physiquement (anneau soudé, porte-clés indémontable…) : elles forment un seul trousseau,
+// donc une seule chaîne d'interverrouillage (ex. « O1 + A2 (anneau soudé) »).
+function groupesClesLiees(eqs) {
+  const parent = new Map(), affiche = new Map(), liaisons = new Map();
+  const trouve = (k) => { if (!parent.has(k)) parent.set(k, k); let r = k; while (parent.get(r) !== r) r = parent.get(r); parent.set(k, r); return r; };
+  const unir = (a, b) => { const ra = trouve(a), rb = trouve(b); if (ra !== rb) parent.set(rb, ra); };
   (eqs || []).forEach((eq) => (eq.serrures || []).forEach((sr) => {
     const k = cleSerrure(sr.cle); if (!k) return;
-    if (!parCle.has(k)) parCle.set(k, { cle: String(sr.cle).trim(), serrures: [] });
-    parCle.get(k).serrures.push({ eq, sr });
+    trouve(k); if (!affiche.has(k)) affiche.set(k, String(sr.cle).trim());
+    const l = cleSerrure(sr.lieeA);
+    if (l && l !== k) { trouve(l); if (!affiche.has(l)) affiche.set(l, String(sr.lieeA).trim()); unir(k, l); liaisons.set(k + "|" + l, (sr.liaison || "Anneau soudé").toLowerCase()); }
   }));
-  return [...parCle.values()].map((c) => {
+  return { racine: trouve, affiche, liaisons, cles: () => [...parent.keys()] };
+}
+function chainesInterverrouillage(eqs) {
+  const G = groupesClesLiees(eqs);
+  const parRacine = new Map();
+  (eqs || []).forEach((eq) => (eq.serrures || []).forEach((sr) => {
+    const k = cleSerrure(sr.cle); if (!k) return;
+    const r = G.racine(k);
+    if (!parRacine.has(r)) parRacine.set(r, { serrures: [] });
+    parRacine.get(r).serrures.push({ eq, sr });
+  }));
+  return [...parRacine.entries()].map(([r, c]) => {
+    c.serrures.sort((a, b) => (RANG_CHAINE_SERRURE[a.eq.type] ?? 1) - (RANG_CHAINE_SERRURE[b.eq.type] ?? 1));
+    // ordre des repères : celui de la chaîne (côté BT d'abord), puis alphabétique
+    const rangCle = (k) => { const i = c.serrures.findIndex((x) => cleSerrure(x.sr.cle) === k); return i < 0 ? 999 : i; };
+    const membres = G.cles().filter((k) => G.racine(k) === r).sort((a, b) => rangCle(a) - rangCle(b) || a.localeCompare(b, "fr", { numeric: true }));
+    c.clesNorm = new Set(membres);
+    c.cles = membres.map((k) => G.affiche.get(k) || k);
+    c.liaison = membres.length > 1 ? [...new Set([...G.liaisons.entries()].filter(([kk]) => c.clesNorm.has(kk.split("|")[0])).map(([, v]) => v))].join(", ") || "anneau soudé" : "";
+    c.cle = c.cles.join(" + ");
+    c.libelle = c.cle + (c.liaison ? ` (${c.liaison})` : "");
     c.serrures.sort((a, b) => (RANG_CHAINE_SERRURE[a.eq.type] ?? 1) - (RANG_CHAINE_SERRURE[b.eq.type] ?? 1));
     const presente = c.serrures.filter((x) => x.sr.etat === "Prisonnière" || x.sr.etat === "Libre");
     c.alertes = [];
     if (c.serrures.length < 2) c.alertes.push("clé présente sur une seule serrure : vérifier la serrure associée");
-    if (presente.length > 1) c.alertes.push(`clé déclarée présente sur ${presente.length} serrures à la fois (libre ou prisonnière) : une clé ne peut être qu'à un seul endroit`);
+    if (presente.length > 1) c.alertes.push(`${membres.length > 1 ? "trousseau" : "clé"} déclaré${membres.length > 1 ? "" : "e"} présent${membres.length > 1 ? "" : "e"} sur ${presente.length} serrures à la fois (libre ou prisonnière) : ${membres.length > 1 ? "un trousseau" : "une clé"} ne peut être qu'à un seul endroit`);
     if (c.serrures.length >= 2 && !presente.length) c.alertes.push("clé absente de toutes les serrures : clé égarée ou état à corriger");
+    // Même repère mais n° de clé différents : clés distinctes, à déclarer liées si elles le sont (anneau soudé…)
+    membres.forEach((k) => {
+      const nums = [...new Set(c.serrures.filter((x) => cleSerrure(x.sr.cle) === k && String(x.sr.numero || "").trim()).map((x) => String(x.sr.numero).trim().toUpperCase()))];
+      if (nums.length > 1) c.alertes.push(`repère ${G.affiche.get(k) || k} avec des n° de clé différents (${nums.join(", ")}) : vérifier, ou déclarer la liaison entre les clés (anneau soudé…)`);
+    });
+    c.serrures.filter((x) => { const d = LISTE_CONTROLE_SERRURE.find((o) => o.v === x.sr.controle); return d && d.rang >= 2; }).forEach((x) => c.alertes.push(`${nomEqSerrure(x.eq)} : ${String(x.sr.controle).toLowerCase()} — interverrouillage inopérant`));
     return c;
   }).sort((a, b) => a.cle.localeCompare(b.cle, "fr", { numeric: true }));
 }
@@ -2091,7 +2135,7 @@ function dessinerCleSchema(ctx, x, y, sr, cote = "gauche") {
   if (sr.etat === "Prisonnière") { ctx.fillStyle = V; ctx.fill(); } else ctx.stroke();
   if (sr.etat === "Libre") { ctx.beginPath(); ctx.moveTo(x - 4, y + 4); ctx.lineTo(x + 4, y - 4); ctx.stroke(); }
   const dx = cote === "gauche" ? s / 2 : -s / 2; ctx.beginPath(); ctx.moveTo(x + dx, y); ctx.lineTo(x + dx + (cote === "gauche" ? 6 : -6), y); ctx.stroke();
-  ctx.font = `bold 9px ${SCHEMA_POLICE}`; ctx.fillStyle = V; ctx.textAlign = "center"; ctx.textBaseline = "bottom"; ctx.fillText(String(sr.cle || "").trim(), x, y - s / 2 - 1);
+  ctx.font = `bold 9px ${SCHEMA_POLICE}`; ctx.fillStyle = V; ctx.textAlign = "center"; ctx.textBaseline = "bottom"; ctx.fillText(String(sr.cle || "").trim() + (cleSerrure(sr.lieeA) ? "+" + String(sr.lieeA).trim() : ""), x, y - s / 2 - 1);
   ctx.restore();
 }
 const LISTE_SORTIE_CELLULE = ["Câble", "Jeu de barres aval (cellules suivantes)"];
@@ -16275,11 +16319,13 @@ function SerruresPanel({ eq, update, allEquipements = [] }) {
     <Card style={{ marginBottom: 14 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
         <SectionTitle>Interverrouillage — serrures et clés</SectionTitle>
+        <datalist id={"cles-site-" + eq.id}>{[...new Set(chaines.flatMap((c) => c.cles))].map((k) => <option key={k} value={k} />)}</datalist>
         <button onClick={() => set([...liste, { id: uid(), cle: "", organe: organes[0], marque: "", numero: "", etat: "Prisonnière" }])} style={btnGhost(BRAND.blue)}><Plus size={13} /> Ajouter une serrure</button>
       </div>
       {!liste.length && <div style={{ fontSize: 12, color: "#8B96A3" }}>Aucune serrure saisie. Ajoutez chaque serrure avec le repère de sa clé (O1, S1…) : les serrures de même repère sur le site forment la chaîne de consignation.</div>}
       {liste.map((sr) => {
-        const ch = chaines.find((c) => c.cle && cleSerrure(c.cle) === cleSerrure(sr.cle));
+        const ch = chaines.find((c) => c.clesNorm && c.clesNorm.has(cleSerrure(sr.cle)));
+        const ctrl = LISTE_CONTROLE_SERRURE.find((o) => o.v === sr.controle);
         const autres = ch ? ch.serrures.filter((x) => !(x.eq.id === eq.id && x.sr.id === sr.id)) : [];
         return (
           <div key={sr.id} style={{ border: "1px solid #E2E6EB", borderRadius: 10, padding: 10, marginBottom: 8, background: "#FAFBFC" }}>
@@ -16290,9 +16336,17 @@ function SerruresPanel({ eq, update, allEquipements = [] }) {
               <div><div style={lab}>Marque / référence serrure</div><input value={sr.marque || ""} onChange={(e) => maj(sr.id, { marque: e.target.value })} placeholder="ex. Ronis 1234" style={inputStyle} /></div>
               <div><div style={lab}>N° de la clé</div><input value={sr.numero || ""} onChange={(e) => maj(sr.id, { numero: e.target.value })} placeholder="facultatif" style={inputStyle} /></div>
             </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 8, marginTop: 8 }}>
+              <div style={{ gridColumn: "span 2" }}><div style={lab}>Contrôle serrure et clé</div><Select value={sr.controle || ""} onChange={(e) => maj(sr.id, { controle: e.target.value })}><option value="">— à contrôler —</option>{LISTE_CONTROLE_SERRURE.map((o) => <option key={o.v} value={o.v}>{o.v}</option>)}</Select></div>
+              <div style={{ gridColumn: "span 2" }}><div style={lab}>Observation</div><input value={sr.observation || ""} onChange={(e) => maj(sr.id, { observation: e.target.value })} placeholder="facultatif" style={inputStyle} /></div>
+              <div><div style={lab}>Clé liée à (autre repère)</div><input list={"cles-site-" + eq.id} value={sr.lieeA || ""} onChange={(e) => maj(sr.id, { lieeA: e.target.value, liaison: sr.liaison || LISTE_LIAISON_CLES[0] })} placeholder="ex. A2" style={inputStyle} /></div>
+              {cleSerrure(sr.lieeA) && <div><div style={lab}>Type de liaison</div><Select value={sr.liaison || LISTE_LIAISON_CLES[0]} onChange={(e) => maj(sr.id, { liaison: e.target.value })}>{LISTE_LIAISON_CLES.map((o) => <option key={o} value={o}>{o}</option>)}</Select></div>}
+            </div>
+            {ctrl && ctrl.cat && <div style={{ fontSize: 11.5, marginTop: 6, padding: "5px 8px", borderRadius: 6, background: ctrl.rang >= 2 ? "#FDECEC" : "#FFF6E0", color: ctrl.rang >= 2 ? "#B3261E" : "#8A5A00" }}><b>Préconisation :</b> {RECO_PAR_CATEGORIE[ctrl.cat](`clé ${String(sr.cle || "").trim() || "sans repère"} (${String(sr.organe || "serrure").toLowerCase()})`)}{ctrl.rang >= 2 ? " — Prioritaire" : ""}.</div>}
             <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8, marginTop: 6 }}>
               <div style={{ fontSize: 11.5, color: "#3E4A5C", lineHeight: 1.45 }}>
-                {cleSerrure(sr.cle) ? (autres.length ? <>Clé <b>{sr.cle}</b> aussi sur : {autres.map((x, i) => <span key={i}>{i ? " · " : ""}<b>{nomEqSerrure(x.eq)}</b> ({x.sr.organe || "—"}, {String(x.sr.etat || "").toLowerCase()})</span>)}</> : <span style={{ color: "#B5730A" }}>Clé {sr.cle} sur cette seule serrure pour l'instant : renseignez la serrure associée sur l'autre équipement.</span>) : <span style={{ color: "#8B96A3" }}>Renseignez le repère de la clé.</span>}
+                {ch && ch.cles.length > 1 && <div>Trousseau <b>{ch.libelle}</b></div>}
+                {cleSerrure(sr.cle) ? (autres.length ? <>{ch && ch.cles.length > 1 ? "Même trousseau" : <>Clé <b>{sr.cle}</b> aussi</>} sur : {autres.map((x, i) => <span key={i}>{i ? " · " : ""}<b>{nomEqSerrure(x.eq)}</b> ({x.sr.organe || "—"}, {String(x.sr.etat || "").toLowerCase()})</span>)}</> : <span style={{ color: "#B5730A" }}>Clé {sr.cle} sur cette seule serrure pour l'instant : renseignez la serrure associée sur l'autre équipement.</span>) : <span style={{ color: "#8B96A3" }}>Renseignez le repère de la clé.</span>}
                 {ch && ch.alertes.filter((a) => !/seule serrure/.test(a)).map((a, i) => <div key={i} style={{ color: "#C0392B" }}>⚠ {a}</div>)}
               </div>
               <button onClick={() => set(liste.filter((x) => x.id !== sr.id))} title="Supprimer la serrure" style={{ ...btnGhost("#C0392B"), padding: "4px 8px" }}><Trash2 size={13} /></button>
@@ -17691,6 +17745,13 @@ function analyserAnomaliesEquipement(eq, contexte) {
       ajouter(`Courbe de décharge : tension sous le seuil bas de fin de décharge (${fr1(a.seuil)} V) ${quand}, minimum ${fr1(a.min)} V${duree ? ", " + duree : ""}.`, rangD, ponctuel ? "batterie_decharge_ponctuel" : "batterie_decharge", "batterie");
     }
   }
+  // Interverrouillage : contrôle des serrures et des clés
+  (eq.serrures || []).forEach((sr) => {
+    const d = LISTE_CONTROLE_SERRURE.find((o) => o.v === sr.controle);
+    if (!d || !d.cat) return;
+    const sujet = `clé ${String(sr.cle || "").trim() || "sans repère"} (${String(sr.organe || "serrure").toLowerCase()})`;
+    ajouter(`Interverrouillage : ${d.v.charAt(0).toLowerCase() + d.v.slice(1)} — ${sujet}${sr.observation ? ` (${sr.observation})` : ""}.`, d.rang, d.cat, sujet);
+  });
   // Gradins de batterie de compensation : courant par phase comparé au courant théorique (Q/U).
   (eq.controles.gradins_dynamique || []).filter((g) => g.label).forEach((g) => {
     const iTheo = gradinIntensiteTheorique(g.fields.q, g.fields.u, estBatterieMono(eq));
@@ -17863,6 +17924,12 @@ function calibreFusibleNormalise(seuilMin) {
   return c === undefined ? null : String(c).replace(".", ",");
 }
 const RECO_PAR_CATEGORIE = {
+  serrure_cle_absente: (s) => `Retrouver ou refaire la clé (même code, auprès du fabricant de la serrure) : ${s} — consignation par interverrouillage impossible sans elle`,
+  serrure_cle_cassee: (s) => `Remplacer la clé (commande sur le n° de clé auprès du fabricant de la serrure) : ${s}`,
+  serrure_grippee: (s) => `Nettoyer et lubrifier la serrure (produit adapté, sans graisse), la remplacer si le défaut persiste : ${s}`,
+  serrure_hs: (s) => `Remplacer la serrure (même code de clé) : ${s} — interverrouillage inopérant en attendant`,
+  serrure_marquage: (s) => `Refaire le marquage de la clé et de la serrure : ${s}`,
+  serrure_demontee: (s) => `Remonter la serrure : ${s} — interverrouillage inopérant`,
   batterie_decharge_ponctuel: () => "Refaire l'essai de décharge et contrôler le serrage des connexions batterie : creux de tension ponctuel sous le seuil de fin de décharge.",
   batterie_decharge: () => "Contrôler la batterie sous décharge (mesure bloc par bloc, résistance interne, serrage des connexions) et prévoir son remplacement : la tension passe sous le seuil de fin de décharge pendant l'essai.",
   fusible_calibre: (s, g) => { const n = g && g.seuilMin ? calibreFusibleNormalise(g.seuilMin) : null; return `Remplacer les fusibles (en service et de rechange) par un calibre adapté au transformateur${g && g.seuilMin ? (n ? ` : calibre normalisé ${n} A (au moins ${String(g.seuilMin).replace(".", ",")} A)` : ` (au moins ${g.seuilMin} A)`) : ""}, à confirmer d'après les préconisations du constructeur de la cellule.`; },
@@ -17924,7 +17991,7 @@ const RECO_PAR_CATEGORIE = {
   etat_degrade: (s) => `Surveiller à la prochaine visite : ${s}.`,
 };
 const MAX_PRECONISATIONS = 5;
-const ORDRE_RECO = ["huile_dga_critique", "huile_pcb", "huile_physique", "huile_chimique", "huile_dga", "huile_furanes", "huile_eclair", "huile_aspect", "huile_surveillance", "capacite_modules", "module", "redondance_modules", "redondance_parallele", "partage_charge", "surcharge_condensateurs", "resonance", "self_accord", "fusible_calibre", "fusible_ib", "fusible", "fusible_rechange", "securite_non_conforme", "surcharge_kw", "batterie_capacite", "batterie_dimensionnement", "batterie_branche", "surveillance_declenchement", "alimentation_auxiliaire_relais", "seuil_terre_capteur", "maintenance_relais", "thdi_entree", "neutre_harmoniques", "temperature_batterie", "ondulation_batterie", "isolement_continu", "reglage_ir", "svg_sature", "serrage", "contact", "isolement", "enroulements", "huile", "mise_terre", "protection", "disjoncteur", "batterie_decharge", "batterie_decharge_ponctuel", "batterie", "gradin", "cosphi", "usure", "proprete", "ventilation", "thermique", "mesure", "etat_defaillant", "etat_degrade"];
+const ORDRE_RECO = ["huile_dga_critique", "huile_pcb", "huile_physique", "huile_chimique", "huile_dga", "huile_furanes", "huile_eclair", "huile_aspect", "huile_surveillance", "capacite_modules", "module", "redondance_modules", "redondance_parallele", "partage_charge", "surcharge_condensateurs", "resonance", "self_accord", "fusible_calibre", "fusible_ib", "fusible", "fusible_rechange", "securite_non_conforme", "serrure_hs", "serrure_demontee", "serrure_cle_cassee", "serrure_cle_absente", "serrure_grippee", "serrure_marquage", "surcharge_kw", "batterie_capacite", "batterie_dimensionnement", "batterie_branche", "surveillance_declenchement", "alimentation_auxiliaire_relais", "seuil_terre_capteur", "maintenance_relais", "thdi_entree", "neutre_harmoniques", "temperature_batterie", "ondulation_batterie", "isolement_continu", "reglage_ir", "svg_sature", "serrage", "contact", "isolement", "enroulements", "huile", "mise_terre", "protection", "disjoncteur", "batterie_decharge", "batterie_decharge_ponctuel", "batterie", "gradin", "cosphi", "usure", "proprete", "ventilation", "thermique", "mesure", "etat_defaillant", "etat_degrade"];
 // Préconisations dédoublonnées, regroupées par famille, les plus urgentes en premier.
 function preconisationsDepuisConstats(constats) {
   const groupes = {};
@@ -19893,7 +19960,7 @@ function ConsignationSite({ site, update, onFermer }) {
                 {titre("Installation et/ou équipements compris entre", "10px 0 4px")}
                 <textarea value={ac.installation || installationAuto} onChange={(e) => setI("installation", e.target.value === installationAuto ? "" : e.target.value)} rows={3} style={{ ...inputStyle, width: "100%", resize: "vertical", fontFamily: "inherit" }} />
                 {ac.installation && <button onClick={() => setI("installation", "")} style={{ ...btnGhost(), fontSize: 11, padding: "3px 8px", marginTop: 4 }}><RotateCcw size={12} /> Texte automatique</button>}
-                {chaines.length > 0 && <div style={{ fontSize: 12, marginTop: 8 }}><b>Clés d'interverrouillage concernées :</b> {chaines.map((c) => `${c.cle} (${c.serrures.map((x) => nomEqSerrure(x.eq)).join(" → ")})`).join(" · ")}</div>}
+                {chaines.length > 0 && <div style={{ fontSize: 12, marginTop: 8 }}><b>Clés d'interverrouillage concernées :</b> {chaines.map((c) => `${c.libelle} : ${c.serrures.map((x) => nomEqSerrure(x.eq)).join(" → ")}`).join(" · ")}</div>}
                 {titre("Étapes de la consignation (NF C 18-510)", "10px 0 4px")}
                 <ol style={{ margin: 0, paddingLeft: 18, fontSize: 12, lineHeight: 1.55 }}>{etapes.map((t, i) => <li key={i}>{t}</li>)}</ol>
                 {per.postesConsignes.size === 0 && <div style={{ fontSize: 11.5, color: "#C8102E", marginTop: 6 }}>Jeu de barres HTA et câbles des cellules d'arrivée : restent sous tension.</div>}
@@ -25916,7 +25983,7 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
     if (im) elements.push(new DOCX.Paragraph({ alignment: DOCX.AlignmentType.CENTER, spacing: { before: 0, after: 80 }, children: [im] }));
   }
   if (TYPES_SERRURES.includes(eq.type) && (eq.serrures || []).some((sr) => cleSerrure(sr.cle))) {
-    const rowsS = (eq.serrures || []).filter((sr) => cleSerrure(sr.cle)).map((sr) => [`Clé ${String(sr.cle).trim()} — ${sr.organe || "organe non précisé"}`, [`clé ${String(sr.etat || "—").toLowerCase()} en exploitation`, sr.marque && `serrure ${sr.marque}`, sr.numero && `n° ${sr.numero}`].filter(Boolean).join(" · ")]);
+    const rowsS = (eq.serrures || []).filter((sr) => cleSerrure(sr.cle)).map((sr) => [`Clé ${String(sr.cle).trim()} — ${sr.organe || "organe non précisé"}`, [`clé ${String(sr.etat || "—").toLowerCase()} en exploitation`, sr.marque && `serrure ${sr.marque}`, sr.numero && `n° ${sr.numero}`, cleSerrure(sr.lieeA) && `liée à la clé ${String(sr.lieeA).trim()} (${String(sr.liaison || "Anneau soudé").toLowerCase()})`, sr.controle && `contrôle : ${String(sr.controle).toLowerCase()}`, sr.observation].filter(Boolean).join(" · ")]);
     const tS = docxFieldTable(rowsS);
     if (tS) elements.push(new DOCX.Paragraph({ keepNext: true, spacing: { before: 120, after: 60 }, children: [new DOCX.TextRun({ text: "Interverrouillage — serrures et clés", bold: true, size: 18, color: DOCX_BLUE })] }), tS);
   }
@@ -27120,7 +27187,7 @@ function genererSynoptiqueInstallation(site) {
 function docxChainesInterverrouillage(site) {
   const ch = chainesInterverrouillage(site.equipements || []);
   if (!ch.length) return [];
-  const rows = ch.map((c) => [`Clé ${c.cle}`, c.serrures.map((x) => `${nomEqSerrure(x.eq)} (${String(x.sr.organe || "—").toLowerCase()}, clé ${String(x.sr.etat || "—").toLowerCase()})`).join(" → ") + (c.alertes.length ? ` — à vérifier : ${c.alertes.join(" ; ")}` : "")]);
+  const rows = ch.map((c) => [`${c.cles.length > 1 ? "Clés" : "Clé"} ${c.libelle}`, c.serrures.map((x) => `${nomEqSerrure(x.eq)} (${String(x.sr.organe || "—").toLowerCase()}, clé ${String(x.sr.etat || "—").toLowerCase()})`).join(" → ") + (c.alertes.length ? ` — à vérifier : ${c.alertes.join(" ; ")}` : "")]);
   const t = docxFieldTable(rows);
   return t ? [new DOCX.Paragraph({ keepNext: true, spacing: { before: 240, after: 80 }, children: [new DOCX.TextRun({ text: "Chaînes d'interverrouillage (état des clés en exploitation normale)", bold: true, size: 20, color: DOCX_BLUE })] }), t] : [];
 }
@@ -27260,13 +27327,18 @@ function procedureManoeuvre(eq, eqs, locaux = []) {
   const tr = ch.ch && ch.ch.eq, dj = ch.arrivee;
   const horsTension = [], acces = [], notes = [];
   const libres = new Set(); // clés en main de l'opérateur
+  // Trousseaux (clés liées par anneau soudé…) : libérer une clé libère tout le trousseau
+  const chainesSite = chainesInterverrouillage(eqs);
+  const trousseau = (k) => chainesSite.find((c) => c.clesNorm.has(cleSerrure(k)));
+  const libere = (k) => { const t = trousseau(k); (t && t.cles.length > 1 ? [...t.clesNorm] : [cleSerrure(k)]).forEach((x) => libres.add(x)); };
+  const nomCle = (k) => { const t = trousseau(k); const autres = t && t.cles.length > 1 ? t.cles.filter((x) => cleSerrure(x) !== cleSerrure(k)) : []; return `« ${String(k).trim()} »${autres.length ? ` (${t.liaison} avec ${autres.join(", ")})` : ""}`; };
   // 1. Côté BT
   if (dj) {
     const nd = dj.identification?.repere || "disjoncteur général BT";
     horsTension.push(`Ouvrir le disjoncteur général BT ${nd}${ch.tgbt ? ` (TGBT ${ch.tgbt})` : ""}.`);
     horsTension.push("Vérifier l'ABSENCE DE TENSION.");
     const sDj = cles(dj).filter((sr) => /débroch|ouverture/i.test(sr.organe || ""));
-    if (sDj.length) sDj.forEach((sr) => { horsTension.push(`${String(dj.identification?.debrochable || "").toUpperCase() === "OUI" ? "Débrocher" : "Verrouiller en position ouverte"} le disjoncteur ${nd} : la clé « ${sr.cle} » est libre, la récupérer.`); libres.add(cleSerrure(sr.cle)); });
+    if (sDj.length) sDj.forEach((sr) => { horsTension.push(`${String(dj.identification?.debrochable || "").toUpperCase() === "OUI" ? "Débrocher" : "Verrouiller en position ouverte"} le disjoncteur ${nd} : la clé ${nomCle(sr.cle)} est libre, la récupérer.`); libere(sr.cle); });
     else if (String(dj.identification?.debrochable || "").toUpperCase() === "OUI") horsTension.push(`Débrocher le disjoncteur ${nd}.`);
   } else if (tr) {
     horsTension.push(`Ouvrir l'appareil général BT alimenté par le transformateur ${tr.identification?.repere || ""} (disjoncteur général BT non relié dans l'application).`.replace("  ", " "));
@@ -27275,7 +27347,7 @@ function procedureManoeuvre(eq, eqs, locaux = []) {
   // 2. Cellule HTA
   horsTension.push(`Aller à la cellule ${nomCell}${local ? ` — ${local}` : ""}.`);
   const sTerre = serrCell.filter((sr) => /terre/i.test(sr.organe || ""));
-  sTerre.filter((sr) => libres.has(cleSerrure(sr.cle))).forEach((sr) => horsTension.push(`Placer la clé « ${sr.cle} » dans la serrure.`));
+  sTerre.filter((sr) => libres.has(cleSerrure(sr.cle))).forEach((sr) => horsTension.push(`Placer la clé ${nomCle(sr.cle)} dans la serrure.`));
   const fam = topo.famille || "";
   if (/^DISJ/.test(fam)) {
     horsTension.push(`Ouvrir le disjoncteur${id.referenceDisjoncteur ? " " + id.referenceDisjoncteur : ""} de la cellule.`);
@@ -27285,7 +27357,7 @@ function procedureManoeuvre(eq, eqs, locaux = []) {
   else horsTension.push(`Ouvrir l'interrupteur${topo.org.includes("ISECT") ? "-sectionneur" : ""} de la cellule.`);
   horsTension.push(topo.org.includes("VPIS") ? "Vérifier l'absence de tension sur les voyants (VPIS)." : "Vérifier l'absence de tension.");
   if (topo.org.includes("ST") || topo.org.includes("ST_AM")) {
-    if (sTerre.length) sTerre.forEach((sr) => horsTension.push(`Déverrouiller et fermer le sectionneur de terre : la clé « ${sr.cle} » devient prisonnière.`));
+    if (sTerre.length) sTerre.forEach((sr) => horsTension.push(`Déverrouiller et fermer le sectionneur de terre : la clé ${nomCle(sr.cle)} devient prisonnière.`));
     else horsTension.push("Fermer le sectionneur de terre.");
   }
   // 3. Accès au transformateur / à la charge
@@ -27294,7 +27366,7 @@ function procedureManoeuvre(eq, eqs, locaux = []) {
     if (sPanneau.length) {
       acces.push(`Ouvrir et retirer le panneau câbles de la cellule ${id.repere || ""}.`.replace(" .", "."));
       acces.push("Faire la VAT.");
-      sPanneau.forEach((sr) => { acces.push(`Accès à la clé « ${sr.cle} » : la tourner pour la libérer.`); libres.add(cleSerrure(sr.cle)); });
+      sPanneau.forEach((sr) => { acces.push(`Accès à la clé ${nomCle(sr.cle)} : la tourner pour la libérer.`); libere(sr.cle); });
     }
     if (tr) {
       const nt = tr.identification?.repere || "transformateur";
@@ -27302,19 +27374,19 @@ function procedureManoeuvre(eq, eqs, locaux = []) {
       sTr.forEach((sr) => {
         const org = String(sr.organe || "accès").toLowerCase();
         acces.push(libres.has(cleSerrure(sr.cle))
-          ? `Avec la clé « ${sr.cle} », déverrouiller ${/bornes/.test(org) ? "le volet de condamnation des bornes embrochables" : /guillotine/.test(org) ? "la guillotine" : /plastron/.test(org) ? "le plastron" : "l'accès"} du transformateur ${nt}.`
+          ? `Avec la clé ${nomCle(sr.cle)}, déverrouiller ${/bornes/.test(org) ? "le volet de condamnation des bornes embrochables" : /guillotine/.test(org) ? "la guillotine" : /plastron/.test(org) ? "le plastron" : "l'accès"} du transformateur ${nt}.`
           : `Clé « ${sr.cle} » (${org} du transformateur ${nt}) : vérifier sa provenance — elle n'est libérée par aucune étape précédente.`);
       });
       if (!sTr.length) acces.push(`Accès au transformateur ${nt} : après VAT et mise à la terre côté HTA et côté BT.`);
     }
   }
   // 4. Autres clés de la chaîne (interverrouillage entre postes, etc.)
-  const chaines = chainesInterverrouillage(eqs);
+  const chaines = chainesSite;
   const traites = new Set([...cles(dj), ...serrCell, ...cles(tr)].map((sr) => cleSerrure(sr.cle)));
   chaines.filter((c) => c.serrures.some((x) => x.eq.id === eq.id)).forEach((c) => c.serrures.forEach((x) => {
     if (x.eq.id === eq.id || (dj && x.eq.id === dj.id) || (tr && x.eq.id === tr.id)) return;
     const loc = (locaux.find((l) => l.id === x.eq.localId) || {}).nom;
-    notes.push(`Clé « ${c.cle} » : également sur ${nomEqSerrure(x.eq)}${loc ? ` (${loc})` : ""} — ${String(x.sr.organe || "").toLowerCase()}, clé ${String(x.sr.etat || "").toLowerCase()} en exploitation.`);
+    notes.push(`${c.cles.length > 1 ? "Trousseau" : "Clé"} « ${c.libelle} » : également sur ${nomEqSerrure(x.eq)}${loc ? ` (${loc})` : ""} — ${String(x.sr.organe || "").toLowerCase()}, clé ${String(x.sr.etat || "").toLowerCase()} en exploitation.`);
   }));
   if (!serrCell.length && !cles(dj).length && !cles(tr).length) notes.push("Interverrouillage par clés non renseigné dans l'application : vérifier les serrures sur site avant affichage.");
   const titre = tr ? `Départ transformateur ${tr.identification?.repere || ""} — cellule ${nomCell}`.replace("  ", " ")
@@ -27547,7 +27619,7 @@ async function generateAttestationConsignationDocx(site, per, infos = {}) {
   const chaines = chainesInterverrouillage(site.equipements || []).filter((c) => c.serrures.some((x) => per.ids.has(x.eq.id)));
   const installation = table([W], [
     new DOCX.TableRow({ children: [bandeau(W, "Installation et/ou équipements compris entre")] }),
-    new DOCX.TableRow({ children: [cell(W, [para([run(infos.installation || texteInstallationConsignation(site, per), { size: 17, bold: true })], { after: 0 }), ...(chaines.length ? [para([run(`Clés d'interverrouillage : ${chaines.map((c) => `${c.cle} (${c.serrures.map((x) => nomEqSerrure(x.eq)).join(" → ")})`).join(" · ")}`, { size: 15, italics: true, color: GRIS })], { before: 30, after: 0 })] : [])], { m: { top: 50, bottom: 50, left: 140, right: 140 } })] }),
+    new DOCX.TableRow({ children: [cell(W, [para([run(infos.installation || texteInstallationConsignation(site, per), { size: 17, bold: true })], { after: 0 }), ...(chaines.length ? [para([run(`Clés d'interverrouillage : ${chaines.map((c) => `${c.libelle} : ${c.serrures.map((x) => nomEqSerrure(x.eq)).join(" → ")}`).join(" · ")}`, { size: 15, italics: true, color: GRIS })], { before: 30, after: 0 })] : [])], { m: { top: 50, bottom: 50, left: 140, right: 140 } })] }),
     new DOCX.TableRow({ children: [cell(W, [
       coche(infos.certif, T.certif, { size: 15 }),
       ...T.certifItems.map((t) => para([run("•  " + t, { size: 15 })], { indent: { left: 560, hanging: 200 }, after: 0 })),
