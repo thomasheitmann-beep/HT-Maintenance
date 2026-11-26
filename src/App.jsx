@@ -4013,9 +4013,9 @@ function isolementFields(itemType, classeIsolation, avecRealise, transfoSec = fa
         const dar = numOf(f.dar);
         if (dar === null) return "";
         if (dar < 1) return `🔴 DAR = ${dar} — inférieur à 1, absorption diélectrique quasi nulle. Syndrome possible : contamination, humidité ou isolant dégradé.`;
-        if (dar < 1.25) return `⚠ DAR = ${dar} — en dessous de 1,25, isolement insuffisant selon la pratique courante (IEEE 43). À surveiller.`;
+        if (dar < 1.25) return `⚠ DAR = ${dar} — en dessous de 1,25, isolement insuffisant selon le repère usuel (IEEE 43, norme écrite pour les machines tournantes). À surveiller.`;
         if (dar < 1.6) return `⚠ DAR = ${dar} — entre 1,25 et 1,6, zone intermédiaire. À surveiller.`;
-        return `✓ DAR = ${dar} — supérieur ou égal à 1,6, isolement excellent selon la pratique courante (IEEE 43).`;
+        return `✓ DAR = ${dar} — supérieur ou égal à 1,6, isolement excellent selon le repère usuel (IEEE 43).`;
       },
     },
   ];
@@ -10486,9 +10486,9 @@ function analyseOnduleur(eq, allSites, rapportDate) {
     const depasseeNormale = annee && duree && anneeRef >= annee + duree;
     const texte = `Température du local ${v2(T, 0)} °C : la durée de vie d'une batterie au plomb est divisée environ par 2 tous les 10 °C au-dessus de 20 °C${corr ? ` — durée probable ≈ ${v2(corr, 1)} ans au lieu de ${duree}${echeance ? `, soit un remplacement vers ${echeance}` : ""}` : ""}.`;
     if (echeance && !depasseeNormale && anneeRef >= echeance) {
-      const phrase = `Batterie de ${annee} dans un local à ${v2(T, 0)} °C : compte tenu de la température, sa durée de vie probable (≈ ${v2(corr, 1)} ans au lieu de ${duree}) est atteinte.`;
+      const phrase = `Batterie de ${annee} dans un local à ${v2(T, 0)} °C : estimation : compte tenu de la température, sa durée de vie probable (≈ ${v2(corr, 1)} ans au lieu de ${duree}) serait atteinte (règle usuelle : durée de vie divisée par 2 tous les 10 °C au-dessus de 20 °C).`;
       out.push({ section: "mesures_batterie_ups", niveau: 1, texte, constat: { phrase, rang: 1, categorie: "temperature_batterie", sujet: "batterie" } });
-    } else if (T >= 30) out.push({ section: "mesures_batterie_ups", niveau: 1, texte, constat: { phrase: `Température du local batterie élevée (${v2(T, 0)} °C) : durée de vie de la batterie fortement réduite (≈ divisée par ${v2(facteur, 1)}).`, rang: 1, categorie: "temperature_batterie", sujet: "local batterie" } });
+    } else if (T >= 30) out.push({ section: "mesures_batterie_ups", niveau: 1, texte, constat: { phrase: `Température du local batterie élevée (${v2(T, 0)} °C) : durée de vie de la batterie probablement réduite (estimation : ≈ divisée par ${v2(facteur, 1)}).`, rang: 1, categorie: "temperature_batterie", sujet: "local batterie" } });
     else out.push({ section: "mesures_batterie_ups", niveau: 0, texte });
   }
   let th = null; try { th = calcTensionsBatterieTheoriques(eq); } catch (e) { /* facultatif */ }
@@ -10975,20 +10975,20 @@ function calcVerificationFusibleTransfo(eq, allEquipements, locaux) {
   const ib = Math.round((sn / (Math.sqrt(3) * u)) * 100) / 100; // A
   const inFusible = numOf(eq.controles?.electriques?.fusibles_installes?.fields?.in);
   const local = (locaux || []).find((l) => l.id === eq.localId);
-  const norme = (local && local.normeFusible) || "NF C13-100";
+  const norme = (local && local.normeFusible) || ""; // plus de norme par défaut : la règle des 45 A ne s'applique que si la norme du poste est renseignée
   const ibTropEleve = norme === "NF C13-100" && ib > 45;
   const seuilMin = Math.round(1.4 * ib * 100) / 100;
   const sousCalibre = inFusible !== null && inFusible < seuilMin;
   return { transfoRepere: tr.repere, manuel: tr.source === "manuel", sn, u, ib, inFusible, seuilMin, ibTropEleve, sousCalibre, norme };
 }
 function texteVerificationFusibleTransfo(v) {
-  let texte = `Contrôle calibre fusible / ${libelleTransfo(v)} (${v.norme}) : Ib (courant de base primaire, ${v.sn} kVA sous ${v.u} kV) = ${v.ib} A — repère de bon sens In ≥ 1,4 × Ib = ${v.seuilMin} A.`;
+  let texte = `Analyse indicative — calibre des fusibles / ${libelleTransfo(v)}${v.norme ? ` (${v.norme})` : " (norme du poste non renseignée)"} : Ib (courant de base primaire, ${v.sn} kVA sous ${v.u} kV) = ${v.ib} A — repère usuel In ≥ 1,4 × Ib = ${v.seuilMin} A (règle de bon sens, les tableaux de choix du constructeur de la cellule et des fusibles font foi).`;
   if (v.inFusible !== null) texte += ` Calibre installé : ${v.inFusible} A.`;
-  if (v.ibTropEleve) texte += " ⚠ Ib > 45 A : au-delà de ce seuil, la protection par fusible n'est normalement plus valable en NF C13-100 pour un poste à un seul transformateur — un disjoncteur HTA est requis à la place.";
-  if (v.sousCalibre) texte += ` ⚠ Calibre installé inférieur au seuil recommandé (risque de fusion intempestive à l'enclenchement) — prévoir le remplacement des fusibles installés et de rechange par un calibre adapté, d'au moins ${v.seuilMin} A${calibreFusibleNormalise(v.seuilMin) ? ` (calibre normalisé ${calibreFusibleNormalise(v.seuilMin)} A)` : ""}, à confirmer d'après les préconisations du constructeur de la cellule.`;
-  if (v.norme === "NF C13-200") texte += " Norme NF C13-200 : pas de plafond fixe à 45 A — le calibre exact doit suivre les préconisations du constructeur de la cellule (repère indicatif : jusqu'à environ 1600 kVA avec des fusibles FN 63 A).";
+  if (v.ibTropEleve) texte += " ⚠ Point de vigilance : Ib > 45 A — en NF C13-100, la protection par fusibles d'un poste à un seul transformateur est généralement limitée à ce courant ; à vérifier au regard du type de poste.";
+  if (v.sousCalibre) texte += ` ⚠ Point de vigilance : calibre installé inférieur au repère usuel (risque de fusion intempestive à l'enclenchement) — à vérifier d'après les tableaux de choix du constructeur de la cellule et des fusibles.`;
+  if (v.norme === "NF C13-200") texte += " Norme NF C13-200 : pas de plafond fixe à 45 A — le calibre exact suit les tableaux du constructeur de la cellule.";
   if (v.norme === "DIN") texte += " Fusibles DIN : calibres plus élevés disponibles (80/100/125 A) — étude et accord du constructeur de la cellule nécessaires pour valider ce calibre.";
-  if (!v.ibTropEleve && !v.sousCalibre && v.inFusible !== null && v.norme === "NF C13-100") texte += " Cohérent avec la règle générale.";
+  if (!v.ibTropEleve && !v.sousCalibre && v.inFusible !== null) texte += " Cohérent avec le repère usuel.";
   return texte;
 }
 // Contrôle du pouvoir de coupure d'un disjoncteur BT par rapport au courant de court-circuit présumé
@@ -11039,8 +11039,8 @@ function texteTenueEnsemble(v) {
   if (!v.ensemble) return "";
   if (v.icw === null) return " Tableau NF EN 61439 : tenue au court-circuit (Icw) non renseignée dans le local — à relever sur la plaque signalétique.";
   return v.icwInsuffisant
-    ? ` ⚠ Tableau NF EN 61439 : Icw = ${v.icw} kA inférieur à l'Icc présumé (${v.iccKa} kA) — tenue du tableau à justifier (protection amont limitant le courant, courant de court-circuit conditionnel Icc garanti par le constructeur) ou tableau à mettre à niveau.`
-    : ` Tableau NF EN 61439 : Icw = ${v.icw} kA ≥ Icc présumé — tenue du tableau cohérente.`;
+    ? ` ⚠ Tableau NF EN 61439 : Icw = ${v.icw} kA inférieur à l'Icc maximal théorique (${v.iccKa} kA) — point de vigilance : tenue du tableau à confirmer (protection amont limitant le courant, courant de court-circuit conditionnel garanti par le constructeur, étude de courts-circuits).`
+    : ` Tableau NF EN 61439 : Icw = ${v.icw} kA ≥ Icc maximal théorique — tenue du tableau cohérente.`;
 }
 function calcVerificationPouvoirCoupureMulti(eq, allEquipements, locaux) {
   const sources = sourcesTransfosAmont(eq, allEquipements);
@@ -11104,9 +11104,9 @@ function calcVerificationIrTransfo(eq, allEquipements) {
   return { ir: Math.round(ir), inTr: Math.round(inTr), rapport, etat, transfoRepere: tr.repere, sn: tr.sn, u2: tr.u2, arrivee };
 }
 function texteVerificationIrTransfo(v) {
-  const base = `Réglage long retard Ir = ${v.ir} A comparé au courant nominal du transformateur${v.transfoRepere ? " « " + v.transfoRepere + " »" : ""} (${v.sn} kVA sous ${v.u2} V) : In ≈ ${v.inTr} A (Ir = ${Math.round(v.rapport * 100)} % de In)`;
-  if (v.etat === "haut") return `⚠ ${base} — Ir supérieur à In transformateur : le transformateur n'est pas protégé en surcharge par ce disjoncteur. Réglage à revoir (Ir ≈ In du transformateur), sauf ventilation forcée ou surcharge admise par le constructeur.`;
-  if (v.etat === "bas") return `⚠ ${base} — Ir nettement inférieur à In transformateur : risque de déclenchement intempestif à forte charge et puissance du transformateur sous-utilisée. Réglage à vérifier.`;
+  const base = `Analyse indicative — réglage long retard Ir = ${v.ir} A comparé au courant nominal du transformateur${v.transfoRepere ? " « " + v.transfoRepere + " »" : ""} (${v.sn} kVA sous ${v.u2} V) : In ≈ ${v.inTr} A (Ir = ${Math.round(v.rapport * 100)} % de In)`;
+  if (v.etat === "haut") return `⚠ ${base} — point de vigilance : Ir supérieur au courant nominal du transformateur, qui pourrait ne pas être protégé en surcharge par ce disjoncteur. À vérifier avec l'exploitant (ventilation forcée, surcharge admise par le constructeur, sélectivité).`;
+  if (v.etat === "bas") return `⚠ ${base} — point de vigilance : Ir nettement inférieur au courant nominal du transformateur (risque de déclenchement à forte charge). À vérifier avec l'exploitant.`;
   return `${base} — cohérent.`;
 }
 function VerificationIrTransfo({ eq, allEquipements }) {
@@ -11116,7 +11116,7 @@ function VerificationIrTransfo({ eq, allEquipements }) {
   return <div style={{ background: alerte ? "#FDF3E3" : "#EEF2F6", borderRadius: 8, padding: "10px 12px", fontSize: 12, color: alerte ? "#8A5A0A" : "#0A5DA8", margin: "8px 0", lineHeight: 1.5 }}>{texteVerificationIrTransfo(v)}</div>;
 }
 const REFERENCE_NORME_POUVOIR_COUPURE = {
-  "NF C 15-100": " NF C 15-100 (article 434) : le pouvoir de coupure d'un dispositif de protection ne doit pas être inférieur au courant de court-circuit présumé à l'endroit où il est installé.",
+  "NF C 15-100": " NF C 15-100 : le pouvoir de coupure d'un dispositif de protection ne doit pas être inférieur au courant de court-circuit présumé à l'endroit où il est installé.",
   "NF EN 61439": " NF EN 61439 : l'ensemble doit supporter le courant de court-circuit présumé à son point d'installation (tenue assignée Icw / Icc) — le pouvoir de coupure de ses appareils de protection ne doit pas lui être inférieur.",
   "NF EN 60439 (ancienne)": " NF EN 60439 (remplacée par la NF EN 61439) : l'ensemble doit supporter le courant de court-circuit présumé à son point d'installation — le pouvoir de coupure de ses appareils de protection ne doit pas lui être inférieur.",
   "NF C 14-100": " NF C 14-100 (branchement) : le pouvoir de coupure du dispositif de protection de branchement est fixé par les prescriptions du distributeur — s'y référer.",
@@ -11128,24 +11128,24 @@ function texteVerificationPouvoirCoupure(v) {
     if (v.manque) return `Contrôle du pouvoir de coupure / ${lib} : ${v.manque}.`;
     const fr = (x) => String(x); // même présentation des nombres que le texte à un seul transformateur
     const detail = v.sources.map((x) => `${x.n > 1 ? `${x.n} × ` : ""}${x.sn} kVA (${x.u2} V, Ucc ${x.ucc} %) = ${fr(x.iccUnitaire)} kA${x.n > 1 ? ` → ${fr(x.iccTotal)} kA` : ""}`).join(" ; ");
-    let t = `${v.insuffisant ? "⚠ " : ""}Contrôle du pouvoir de coupure / ${lib} (${v.norme}) : courant de court-circuit triphasé maximal Icc ≈ ${fr(v.iccKa)} kA — ${v.couplage === "ouvert" ? "couplage ouvert : un seul transformateur alimente, cas le plus défavorable retenu" : "couplage fermé : somme des contributions de chaque transformateur"} (${detail}).`;
+    let t = `${v.insuffisant ? "⚠ " : ""}Analyse indicative — pouvoir de coupure / ${lib} (${v.norme}) : courant de court-circuit triphasé maximal théorique Icc ≈ ${fr(v.iccKa)} kA — ${v.couplage === "ouvert" ? "couplage ouvert : un seul transformateur alimente, cas le plus défavorable retenu" : "couplage fermé : somme des contributions de chaque transformateur"} (${detail}).`;
     if (v.desaccord) t += " ⚠ Tensions secondaires différentes de plus de 10 % : vérifier la mise en parallèle.";
     t += v.icu !== null ? ` Pouvoir de coupure installé : Icu = ${v.icu} kA.` : " Pouvoir de coupure (Icu) non renseigné dans « Réglage du disjoncteur ».";
-    if (v.insuffisant) t += " Icu inférieur à l'Icc maximal : à confirmer selon la position du disjoncteur (un départ en aval voit un courant plus faible, atténué par les câbles) — sinon remplacer l'appareil ou justifier une filiation avec la protection amont.";
-    else if (v.icu !== null) t += " Cohérent : Icu ≥ Icc maximal.";
+    if (v.insuffisant) t += " Point de vigilance : Icu inférieur à l'Icc maximal théorique — à confirmer par une étude de courts-circuits (position du disjoncteur, atténuation par les câbles, filiation avec la protection amont) et d'après la plaque de l'appareil.";
+    else if (v.icu !== null) t += " Cohérent : Icu ≥ Icc maximal théorique.";
     if (v.couplage !== "ouvert") t += " Pour l'arrivée d'un transformateur, retenir la plus grande valeur entre l'Icc de ce transformateur et la somme des autres (défaut entre le transformateur et son disjoncteur).";
-    return (v.icwInsuffisant && !t.startsWith("⚠") ? "⚠ " : "") + t + texteTenueEnsemble(v) + " Source amont supposée infinie et câbles ignorés : repère indicatif." + referencesNormes(REFERENCE_NORME_POUVOIR_COUPURE, v);
+    return (v.icwInsuffisant && !t.startsWith("⚠") ? "⚠ " : "") + t + texteTenueEnsemble(v) + " Hypothèses : Icc maximal théorique aux bornes du transformateur (source amont supposée infinie, câbles et réseau amont ignorés) ; l'Icc réel au point d'installation est inférieur et relève d'une étude de courts-circuits. Icu : valeur saisie, la plaque de l'appareil fait foi." + referencesNormes(REFERENCE_NORME_POUVOIR_COUPURE, v);
   }
   if (v.manque) return `Contrôle du pouvoir de coupure / ${libelleTransfo(v)} : ${v.manque}.`;
   // Le « ⚠ » en tête de texte fait passer l'encart Word en orange (voir docxNormeNote).
-  let t = `${v.insuffisant ? "⚠ " : ""}Contrôle du pouvoir de coupure / ${libelleTransfo(v)} (${v.norme}) : courant de court-circuit triphasé maximal aux bornes secondaires Icc ≈ ${v.iccKa} kA (${v.sn} kVA, ${v.u2} V, Ucc ${v.ucc} %, courant nominal ${v.i2n} A, source amont supposée infinie).`;
+  let t = `${v.insuffisant ? "⚠ " : ""}Analyse indicative — pouvoir de coupure / ${libelleTransfo(v)} (${v.norme}) : courant de court-circuit triphasé maximal théorique aux bornes secondaires Icc ≈ ${v.iccKa} kA (${v.sn} kVA, ${v.u2} V, Ucc ${v.ucc} %, courant nominal ${v.i2n} A).`;
   t += v.icu !== null ? ` Pouvoir de coupure installé : Icu = ${v.icu} kA.` : " Pouvoir de coupure (Icu) non renseigné dans « Réglage du disjoncteur ».";
   if (v.insuffisant) {
-    t += " Icu inférieur à l'Icc maximal : à confirmer selon la position du disjoncteur (un départ en aval voit un courant plus faible, atténué par les câbles) — sinon remplacer l'appareil ou justifier une filiation avec la protection amont (tableau du constructeur).";
+    t += " Point de vigilance : Icu inférieur à l'Icc maximal théorique — à confirmer par une étude de courts-circuits (position du disjoncteur, atténuation par les câbles, filiation avec la protection amont d'après le tableau du constructeur) et d'après la plaque de l'appareil.";
   } else if (v.icu !== null) {
-    t += " Cohérent : Icu ≥ Icc maximal.";
+    t += " Cohérent : Icu ≥ Icc maximal théorique.";
   }
-  return (v.icwInsuffisant && !t.startsWith("⚠") ? "⚠ " : "") + t + texteTenueEnsemble(v) + referencesNormes(REFERENCE_NORME_POUVOIR_COUPURE, v);
+  return (v.icwInsuffisant && !t.startsWith("⚠") ? "⚠ " : "") + t + texteTenueEnsemble(v) + " Hypothèses : Icc maximal théorique aux bornes du transformateur (source amont supposée infinie, câbles et réseau amont ignorés) ; l'Icc réel au point d'installation est inférieur et relève d'une étude de courts-circuits. Icu : valeur saisie, la plaque de l'appareil fait foi." + referencesNormes(REFERENCE_NORME_POUVOIR_COUPURE, v);
 }
 // Équipements du site auquel appartient `eq` (rapport Word : on reçoit tous les sites, pas seulement le courant).
 function equipementsDuSiteDe(eq, allSites) {
@@ -11177,7 +11177,7 @@ function calcVerificationJeuDeBarre(eq, allEquipements, locaux) {
   return { ...base, sn, u2, i2n, insuffisant: iAssigne !== null && iAssigne < i2n, ina, inaInsuffisant: ina !== null && ina < i2n };
 }
 const REFERENCE_NORME_JEU_DE_BARRE = {
-  "NF C 15-100": " NF C 15-100 (article 433) : le courant admissible d'une canalisation doit être au moins égal au courant d'emploi et au calibre de la protection placée en amont.",
+  "NF C 15-100": " NF C 15-100 : le courant admissible d'une canalisation doit être au moins égal au courant d'emploi et au calibre de la protection placée en amont.",
   "NF EN 61439": " NF EN 61439 : le courant assigné du jeu de barres (vérifié par essai d'échauffement) doit être au moins égal au courant qui le traverse ; il dépend de la température ambiante et des conditions d'installation.",
   "NF EN 60439 (ancienne)": " NF EN 60439 (remplacée par la NF EN 61439) : le courant assigné du jeu de barres doit être au moins égal au courant qui le traverse, dans ses conditions d'installation.",
   "NF C 14-100": " NF C 14-100 (branchement) : les caractéristiques de la canalisation de branchement sont fixées par la puissance de raccordement — s'y référer.",
@@ -11186,9 +11186,9 @@ const REFERENCE_NORME_JEU_DE_BARRE = {
 function texteVerificationJeuDeBarre(v) {
   if (v.manque) return `Contrôle du courant assigné / ${libelleTransfo(v)} : ${v.manque}.`;
   // Le « ⚠ » en tête de texte fait passer l'encart Word en orange (voir docxNormeNote).
-  let t = `${v.insuffisant ? "⚠ " : ""}Contrôle du courant assigné / ${libelleTransfo(v)} (${v.norme}) : courant nominal secondaire In2 ≈ ${v.i2n} A (${v.sn} kVA sous ${v.u2} V).`;
+  let t = `${v.insuffisant ? "⚠ " : ""}Analyse indicative — courant assigné / ${libelleTransfo(v)} (${v.norme}) : courant nominal secondaire In2 ≈ ${v.i2n} A (${v.sn} kVA sous ${v.u2} V).`;
   t += v.iAssigne !== null ? ` Courant assigné du jeu de barre : ${v.iAssigne} A.` : " Courant assigné du jeu de barre non renseigné dans l'identification.";
-  if (v.insuffisant) t += " Courant assigné inférieur au courant nominal du transformateur : à vérifier — cohérent seulement si le jeu de barre est protégé par un disjoncteur de calibre inférieur ou n'alimente qu'une partie de la charge, sinon il est sous-dimensionné.";
+  if (v.insuffisant) t += " Point de vigilance : courant assigné inférieur au courant nominal du transformateur — à vérifier selon la protection amont (un disjoncteur de calibre inférieur ou une charge partielle peuvent le justifier).";
   else if (v.iAssigne !== null) t += " Cohérent : courant assigné ≥ courant nominal du transformateur.";
   if (v.ina !== null && v.ina !== undefined) t += v.inaInsuffisant ? ` ⚠ Courant assigné du tableau (InA, NF EN 61439) = ${v.ina} A, inférieur au courant nominal du transformateur — à vérifier.` : ` Courant assigné du tableau (InA, NF EN 61439) = ${v.ina} A : cohérent.`;
   return (v.inaInsuffisant && !t.startsWith("⚠") ? "⚠ " : "") + t + referencesNormes(REFERENCE_NORME_JEU_DE_BARRE, v);
@@ -17865,10 +17865,10 @@ function analyserAnomaliesEquipement(eq, contexte) {
     if (vf && vf.sousCalibre) {
       // Le constat « Fusibles … : dégradé. » sans autre détail vient de ce calibre : il est retiré au profit de l'explication.
       for (let k = constats.length - 1; k >= 0; k--) if (/^Fusibles (installés|de rechange) : (dégradé|défaillant)\.$/.test(constats[k].phrase)) constats.splice(k, 1);
-      constats.push({ phrase: `Le calibre des fusibles installés (${vf.inFusible} A) est inférieur au repère recommandé pour le ${libelleTransfo(vf)} : Ib = ${vf.ib} A (${vf.sn} kVA sous ${vf.u} kV), soit In ≥ 1,4 × Ib = ${vf.seuilMin} A (${vf.norme}), avec un risque de fusion intempestive à l'enclenchement.`, rang: 1, categorie: "fusible_calibre", sujet: "calibre des fusibles", seuilMin: vf.seuilMin });
+      constats.push({ phrase: `Point de vigilance (analyse indicative) : le calibre des fusibles installés (${vf.inFusible} A) est inférieur au repère usuel pour le ${libelleTransfo(vf)} (In ≥ 1,4 × Ib = ${vf.seuilMin} A, Ib = ${vf.ib} A pour ${vf.sn} kVA sous ${vf.u} kV), avec un risque de fusion intempestive à l'enclenchement.`, rang: 1, categorie: "fusible_calibre", sujet: "calibre des fusibles", seuilMin: vf.seuilMin });
     }
     if (vf && vf.ibTropEleve) {
-      constats.push({ phrase: `Le courant de base primaire du ${libelleTransfo(vf)} (Ib = ${vf.ib} A) dépasse 45 A : au-delà de ce seuil, la protection par fusible n'est normalement plus valable en NF C13-100 pour un poste à un seul transformateur.`, rang: 1, categorie: "fusible_ib", sujet: "protection par fusibles" });
+      constats.push({ phrase: `Point de vigilance (analyse indicative) : le courant de base primaire du ${libelleTransfo(vf)} (Ib = ${vf.ib} A) dépasse 45 A ; en NF C13-100, la protection par fusibles d'un poste à un seul transformateur est généralement limitée à ce courant.`, rang: 1, categorie: "fusible_ib", sujet: "protection par fusibles" });
     }
   }
   try { analyseModuleSVG(eq).filter((l) => l.constat).forEach((l) => ajouter(l.constat.phrase, l.constat.rang, l.constat.categorie, l.constat.sujet)); } catch (e) { /* facultatif */ }
@@ -17879,8 +17879,8 @@ function analyserAnomaliesEquipement(eq, contexte) {
   if (eq.type === "Disjoncteur BT" && contexte && contexte.allEquipements) {
     try {
       const vIr = calcVerificationIrTransfo(eq, contexte.allEquipements);
-      if (vIr && vIr.etat === "haut") ajouter(`Le réglage long retard du disjoncteur (Ir = ${vIr.ir} A) dépasse le courant nominal du transformateur${vIr.transfoRepere ? " « " + vIr.transfoRepere + " »" : ""} (In ≈ ${vIr.inTr} A) : le transformateur n'est pas protégé en surcharge.`, 1, "reglage_ir", "réglage long retard");
-      else if (vIr && vIr.etat === "bas") ajouter(`Le réglage long retard du disjoncteur (Ir = ${vIr.ir} A) est nettement inférieur au courant nominal du transformateur (In ≈ ${vIr.inTr} A) : risque de déclenchement intempestif à forte charge.`, 0, "reglage_ir", "réglage long retard");
+      if (vIr && vIr.etat === "haut") ajouter(`Point de vigilance (analyse indicative) : le réglage long retard du disjoncteur (Ir = ${vIr.ir} A) dépasse le courant nominal du transformateur${vIr.transfoRepere ? " « " + vIr.transfoRepere + " »" : ""} (In ≈ ${vIr.inTr} A) ; le transformateur pourrait ne pas être protégé en surcharge.`, 1, "reglage_ir", "réglage long retard");
+      else if (vIr && vIr.etat === "bas") ajouter(`Point de vigilance (analyse indicative) : le réglage long retard du disjoncteur (Ir = ${vIr.ir} A) est nettement inférieur au courant nominal du transformateur (In ≈ ${vIr.inTr} A) ; risque de déclenchement à forte charge.`, 0, "reglage_ir", "réglage long retard");
     } catch (e) { /* facultatif */ }
   }
   // Matériel de sécurité présent mais déclaré non conforme (usure, date de vérification dépassée, défaut d'isolement…).
@@ -17932,8 +17932,8 @@ const RECO_PAR_CATEGORIE = {
   serrure_demontee: (s) => `Remonter la serrure : ${s} — interverrouillage inopérant`,
   batterie_decharge_ponctuel: () => "Refaire l'essai de décharge et contrôler le serrage des connexions batterie : creux de tension ponctuel sous le seuil de fin de décharge.",
   batterie_decharge: () => "Contrôler la batterie sous décharge (mesure bloc par bloc, résistance interne, serrage des connexions) et prévoir son remplacement : la tension passe sous le seuil de fin de décharge pendant l'essai.",
-  fusible_calibre: (s, g) => { const n = g && g.seuilMin ? calibreFusibleNormalise(g.seuilMin) : null; return `Remplacer les fusibles (en service et de rechange) par un calibre adapté au transformateur${g && g.seuilMin ? (n ? ` : calibre normalisé ${n} A (au moins ${String(g.seuilMin).replace(".", ",")} A)` : ` (au moins ${g.seuilMin} A)`) : ""}, à confirmer d'après les préconisations du constructeur de la cellule.`; },
-  fusible_ib: () => "Étudier le remplacement de la protection par fusibles par un disjoncteur HTA (Ib > 45 A).",
+  fusible_calibre: () => "Faire vérifier le calibre des fusibles HTA d'après les tableaux de choix du constructeur de la cellule et des fusibles (repère usuel In ≥ 1,4 × Ib non respecté).",
+  fusible_ib: () => "Faire vérifier le mode de protection du transformateur au regard de la norme applicable au poste (Ib > 45 A).",
   fusible: (s) => `Remplacer les fusibles concernés par jeu complet de trois (${s}).`,
   serrage: (s) => `Resserrer les connexions au couple préconisé (${s}).`,
   contact: (s) => `Nettoyer les contacts et refaire la mesure ; remplacer si l'écart persiste (${s}).`,
@@ -17949,7 +17949,7 @@ const RECO_PAR_CATEGORIE = {
   temperature_batterie: () => "Abaisser la température du local batterie (ventilation, climatisation) et anticiper le remplacement des blocs.",
   batterie_branche: (s) => `Contrôler la ou les branches concernées (${s}) : mesure bloc par bloc, résistance interne et serrage des connexions.`,
   svg_sature: () => "Contrôler les gradins à condensateurs (contacteurs, fusibles, condensateurs) et le dimensionnement de la batterie : le SVG ne doit pas compenser en permanence à pleine puissance.",
-  reglage_ir: () => "Revoir le réglage long retard (Ir) pour l'adapter au courant nominal du transformateur, en accord avec l'exploitant.",
+  reglage_ir: () => "Faire vérifier le réglage long retard (Ir) avec l'exploitant au regard du courant nominal du transformateur et de la sélectivité.",
   isolement_continu: () => "Rechercher le défaut d'isolement sur le réseau continu (départs, batterie, équipements alimentés) avec le contrôleur ou un localisateur de défaut.",
   ondulation_batterie: () => "Faire contrôler les condensateurs de filtrage du redresseur / chargeur.",
   fusible_rechange: () => "Mettre à disposition des fusibles de rechange de mêmes caractéristiques que les fusibles installés (tension assignée et calibre ; le modèle peut différer).",
@@ -19592,7 +19592,7 @@ const EquipementCard = React.memo(function EquipementCard({ eq, update, remove, 
                     </div>
                   ) : estSecuriteEPI ? (
                     <div style={{ fontSize: 11.5, color: "#0A5DA8", background: "rgba(10,93,168,0.08)", padding: "8px 12px", borderRadius: 8, marginTop: 8 }}>
-                      <b>NF C18-510</b> — chaque équipement de protection individuelle/collective doit faire l'objet d'une vérification périodique (généralement annuelle). La seule présence de l'équipement ne suffit pas s'il est hors date de contrôle : renseignez la date de dernière vérification pour chaque élément.
+                      <b>NF C18-510</b> — chaque équipement de protection individuelle/collective doit faire l'objet d'une vérification périodique (périodicité fixée par le fabricant et l'employeur). La seule présence de l'équipement ne suffit pas s'il est hors date de contrôle : renseignez la date de dernière vérification pour chaque élément.
                     </div>
                   ) : null
                 }
@@ -22761,6 +22761,20 @@ function texteGlossaireSite(site, donnees) {
   (site.locaux || []).forEach((l) => { if (texteRegimesNeutre(l)) morceaux.push("régime de neutre"); });
   (donnees.blocs || []).forEach((b) => morceaux.push(...b.constats, ...b.preconisations, ...b.autres));
   return morceaux.join(" \n ");
+}
+// « Portée et limites du rapport » : en fin de rapport, renvoyée par le pied de page de chaque page.
+const TEXTE_PORTEE_RAPPORT = [
+  "Ce rapport rend compte d'une intervention de maintenance préventive réalisée par HT Maintenance aux dates indiquées. Il décrit l'état des équipements constaté à ces dates, sur la base des contrôles et mesures effectués, des informations portées sur les plaques signalétiques et des documents remis par le client.",
+  "Il ne constitue ni une vérification réglementaire des installations électriques par un organisme accrédité, ni une étude de dimensionnement, de courts-circuits ou de sélectivité, ni une note de calcul.",
+  "Les éléments repérés « Analyse indicative » ou « Point de vigilance » (courant de court-circuit, pouvoir de coupure, calibre et réglage des protections, seuils de qualité d'énergie, durées de vie…) reposent sur des calculs simplifiés et sur des données dont l'exactitude et l'exhaustivité n'ont pas pu être vérifiées. Ils sont fournis à titre d'information, pour signaler des points de vigilance, et doivent être confirmés par une étude ou par le constructeur avant toute décision de modification, de remplacement ou de réglage.",
+  "Les mesures ponctuelles réalisées lors de l'intervention (tensions, courants, taux d'harmoniques…) reflètent l'état de l'installation au moment de la mesure ; les seuils de qualité d'énergie (EN 50160, CEI 61000-3-6, IEEE 519) sont définis sur des enregistrements de longue durée et ne sont cités que comme repères.",
+  "Les références normatives sont citées comme repères ; seuls les textes officiels, dans leur édition applicable à l'installation, font foi.",
+];
+function docxPorteeLimites() {
+  return [
+    docxHeading("Portée et limites du rapport"),
+    ...TEXTE_PORTEE_RAPPORT.map((t) => new DOCX.Paragraph({ spacing: { before: 0, after: 100, line: 276 }, alignment: DOCX.AlignmentType.JUSTIFIED, children: [new DOCX.TextRun({ text: t, size: 17, color: DOCX_DARK })] })),
+  ];
 }
 function docxCommentLire(site, donnees) {
   const a = docxAucuneBordure();
@@ -26633,11 +26647,11 @@ function docxEquipementElements(eq, locaux, allSites, rapportDate = "") {
     if (noteNorme) {
       // note déjà placée avec le titre, dans le même bloc insécable
     } else if (["resistance_contact_chambres", "resistances_contacts", "resistance_jonctions"].some((k) => sec.items.some((it) => it.key === k))) {
-      elements.push(docxNormeNote("CEI 62271-100. Mesure fiable et comparable d'une visite à l'autre uniquement avec un courant d'essai DC suffisant (100 A minimum usuel)."));
+      elements.push(docxNormeNote("Repère CEI 62271-100 (pas de seuil normatif universel : comparaison à la valeur du constructeur ou aux visites précédentes). Mesure fiable et comparable d'une visite à l'autre uniquement avec un courant d'essai DC suffisant (100 A minimum usuel)."));
     } else if (sec.items.some((it) => it.key === "continuite_masses" || it.key === "continuite_masses_jdb")) {
       elements.push(docxNormeNote("NF C 15-100 / CEI 61557-4. Courant d'essai minimum recommandé : 200 mA."));
     } else if (sec.key === "materiel_securite") {
-      elements.push(docxNormeNote("NF C18-510. Chaque équipement de protection individuelle/collective doit faire l'objet d'une vérification périodique (généralement annuelle) — la seule présence de l'équipement ne suffit pas s'il est hors date de contrôle."));
+      elements.push(docxNormeNote("NF C18-510. Chaque équipement de protection individuelle/collective doit faire l'objet d'une vérification périodique (périodicité fixée par le fabricant et l'employeur) — la seule présence de l'équipement ne suffit pas s'il est hors date de contrôle."));
     }
     const rows = itemsAffiches.map((item) => {
       const value = eq.controles[sec.key][item.key] || { action: "", etat: "", fields: {} };
@@ -26776,7 +26790,7 @@ function mentionProprieteRapport(site) {
   const pour = site ? String(site.client || site.nom || "").trim() : "";
   return `Document établi par HT Maintenance${pour ? " pour " + pour : ""}. Toute reproduction ou diffusion, totale ou partielle, sans autorisation écrite de HT Maintenance est interdite.`;
 }
-function docxFooterPagination(mention = "") {
+function docxFooterPagination(mention = "", o = {}) {
   return new DOCX.Footer({
     children: [
       new DOCX.Paragraph({
@@ -26785,7 +26799,7 @@ function docxFooterPagination(mention = "") {
         spacing: { before: 40, after: 0 },
         children: [
           new DOCX.TextRun({ text: "HT MAINTENANCE", bold: true, color: DOCX_BLUE, size: 16, characterSpacing: 30 }),
-          new DOCX.TextRun({ text: "   ·   Maintenance électrique HTA / BT / Conversion d'énergie", color: "66717E", size: 14 }),
+          new DOCX.TextRun({ text: o.renvoiPortee ? "   ·   Analyses indicatives : voir « Portée et limites du rapport »" : "   ·   Maintenance électrique HTA / BT / Conversion d'énergie", color: "66717E", size: 14 }),
           new DOCX.TextRun({ text: "\tPage ", size: 15, color: "5A6573" }),
           new DOCX.TextRun({ children: [DOCX.PageNumber.CURRENT], size: 15, color: "5A6573", bold: true }),
           new DOCX.TextRun({ text: " / ", size: 15, color: "5A6573" }),
@@ -27931,6 +27945,7 @@ async function generateSiteDocx(site, allSites) {
     ...(evolution.length ? [{ id: "som_evolution", titre: "Évolution depuis la dernière visite", avant: true }] : []),
     ...(synoptique.length ? [{ id: "som_synoptique", titre: "Synoptique de l'installation", avant: true }] : []),
     { id: "som_lire", titre: "Comment lire ce rapport" },
+    { id: "som_portee", titre: "Portée et limites du rapport" },
   ]));
   await etapeRapport(38, "Synthèse et plan d'actions…");
   const ordreEqs = equipementsOrdreRapport(site.equipements);
@@ -27959,12 +27974,13 @@ async function generateSiteDocx(site, allSites) {
   }
   // « Comment lire ce rapport » (légende des états + glossaire des termes employés) : en fin de rapport.
   children.push(docxSpacer(240), docxAncre("som_lire"), ...docxCommentLire(site, donneesSynthese));
+  children.push(docxSpacer(240), docxAncre("som_portee"), ...docxPorteeLimites());
 
   children.push(docxSpacer(200));
   children.push(new DOCX.Paragraph({ border: { top: { color: DOCX_SILVER, space: 4, style: DOCX.BorderStyle.SINGLE, size: 4 } }, spacing: { before: 100 }, children: [new DOCX.TextRun({ text: "HT Maintenance — Maintenance électrique HTA / BT", size: 14, color: "666666", italics: true })] }));
 
   const doc = new DOCX.Document({ styles: DOCX_STYLES, features: { updateFields: true }, sections: [
-    { properties: { titlePage: true, page: PAGE_CORPS }, footers: { default: docxFooterPagination(mentionProprieteRapport(site)), first: new DOCX.Footer({ children: [new DOCX.Paragraph("")] }) }, children: [...couverture, ...children] },
+    { properties: { titlePage: true, page: PAGE_CORPS }, footers: { default: docxFooterPagination(mentionProprieteRapport(site), { renvoiPortee: true }), first: new DOCX.Footer({ children: [new DOCX.Paragraph("")] }) }, children: [...couverture, ...children] },
   ] });
   await etapeRapport(92, "Assemblage du document Word…");
   return DOCX.Packer.toBlob(doc);
